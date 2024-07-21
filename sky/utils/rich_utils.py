@@ -45,24 +45,28 @@ class EncodedStatus:
 
     def __init__(self, msg: str):
         self.msg = msg
-        print(common_utils.encode_payload(Control.INIT.encode(self.msg)))
+        print(common_utils.encode_payload(Control.INIT.encode(self.msg)),
+              flush=True)
 
     def __enter__(self):
-        print(common_utils.encode_payload(Control.START.encode(self.msg)))
+        print(common_utils.encode_payload(Control.START.encode(self.msg)),
+              flush=True)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        print(common_utils.encode_payload(Control.STOP.encode('')))
+        print(common_utils.encode_payload(Control.STOP.encode('')), flush=True)
 
     def update(self, msg: str):
-        print(common_utils.encode_payload(Control.UPDATE.encode(msg)))
+        print(common_utils.encode_payload(Control.UPDATE.encode(msg)),
+              flush=True)
         self.msg = msg
 
     def stop(self):
-        print(common_utils.encode_payload(Control.STOP.encode('')))
+        print(common_utils.encode_payload(Control.STOP.encode('')), flush=True)
 
     def start(self):
-        print(common_utils.encode_payload(Control.START.encode(self.msg)))
+        print(common_utils.encode_payload(Control.START.encode(self.msg)),
+              flush=True)
 
 
 class _NoOpConsoleStatus:
