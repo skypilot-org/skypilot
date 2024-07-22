@@ -185,6 +185,14 @@ Available fields and semantics:
     #         - "*": my-default-security-group
     security_group_name: my-security-group
 
+    # Encrypted boot disk (optional).
+    #
+    # Set to true to encrypt the boot disk of all AWS instances launched by
+    # SkyPilot. This is useful for compliance with data protection regulations.
+    #
+    # Default: false.
+    disk_encrypted: false
+
     # Identity to use for AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
