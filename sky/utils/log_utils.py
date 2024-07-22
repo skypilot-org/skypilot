@@ -70,7 +70,7 @@ class SkyLocalUpLineProcessor(LineProcessor):
 
     def __enter__(self):
         status = rich_utils.client_status('[bold cyan]Creating local cluster - '
-                                        'initializing Kubernetes')
+                                          'initializing Kubernetes')
         self.status_display = status
         self.status_display.start()
 

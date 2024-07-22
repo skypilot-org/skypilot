@@ -1,12 +1,13 @@
 """Rich status spinner utils."""
 import contextlib
 import enum
+import logging
 import threading
 from typing import Optional, Tuple, Union
 
 import rich.console as rich_console
 
-from sky.utils import common_utils
+from sky.utils import message_utils
 
 console = rich_console.Console()
 _status = None
@@ -45,27 +46,27 @@ class EncodedStatus:
 
     def __init__(self, msg: str):
         self.msg = msg
-        print(common_utils.encode_payload(Control.INIT.encode(self.msg)),
+        print(message_utils.encode_payload(Control.INIT.encode(self.msg)),
               flush=True)
 
     def __enter__(self):
-        print(common_utils.encode_payload(Control.START.encode(self.msg)),
+        print(message_utils.encode_payload(Control.START.encode(self.msg)),
               flush=True)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        print(common_utils.encode_payload(Control.STOP.encode('')), flush=True)
+        print(message_utils.encode_payload(Control.STOP.encode('')), flush=True)
 
     def update(self, msg: str):
-        print(common_utils.encode_payload(Control.UPDATE.encode(msg)),
+        print(message_utils.encode_payload(Control.UPDATE.encode(msg)),
               flush=True)
         self.msg = msg
 
     def stop(self):
-        print(common_utils.encode_payload(Control.STOP.encode('')), flush=True)
+        print(message_utils.encode_payload(Control.STOP.encode('')), flush=True)
 
     def start(self):
-        print(common_utils.encode_payload(Control.START.encode(self.msg)),
+        print(message_utils.encode_payload(Control.START.encode(self.msg)),
               flush=True)
 
 
@@ -113,13 +114,20 @@ def force_update_status(msg: str):
 def safe_logger():
     logged = False
     with _logging_lock:
-        if _status is not None and _status._live.is_started:  # pylint: disable=protected-access
-            _status.stop()
+        if _rich_status is not None and _rich_status._live.is_started:  # pylint: disable=protected-access
+            _rich_status.stop()
             yield
             logged = True
-            _status.start()
+            _rich_status.start()
     if not logged:
         yield
+
+
+class RichSafeStreamHandler(logging.StreamHandler):
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with safe_logger():
+            return super().emit(record)
 
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
@@ -137,8 +145,8 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
 def decode_rich_status(encoded_msg: str) -> Optional[str]:
     """Decode the rich status message."""
-    encoded_msg = common_utils.decode_payload(encoded_msg,
-                                              raise_for_mismatch=False)
+    encoded_msg = message_utils.decode_payload(encoded_msg,
+                                               raise_for_mismatch=False)
     control, encoded_status = Control.decode(encoded_msg)
     global _rich_status
     if control is None:

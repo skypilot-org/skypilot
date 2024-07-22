@@ -16,9 +16,9 @@ from sky import exceptions
 from sky import global_user_state
 from sky import jobs
 from sky import serve
-from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import db_utils
+from sky.utils import message_utils
 
 
 def test_job_nonexist_strategy():
@@ -151,12 +151,12 @@ class TestJobsOperations:
         def mock_get_job_table_no_job(cls, handle, code, require_outputs,
                                       stream_logs,
                                       separate_stderr) -> Tuple[int, str, str]:
-            return 0, common_utils.encode_payload([]), ''
+            return 0, message_utils.encode_payload([]), ''
 
         def mock_get_job_table_one_job(cls, handle, code, require_outputs,
                                        stream_logs,
                                        separate_stderr) -> Tuple[int, str, str]:
-            return 0, common_utils.encode_payload([{
+            return 0, message_utils.encode_payload([{
                 'job_id': '1',
                 'job_name': 'test_job',
                 'resources': 'test',
@@ -294,7 +294,7 @@ class TestServeOperations:
         def mock_get_services_no_service(
                 cls, handle, code, require_outputs, stream_logs,
                 separate_stderr) -> Tuple[int, str, str]:
-            return 0, common_utils.encode_payload([]), ''
+            return 0, message_utils.encode_payload([]), ''
 
         def mock_get_services_one_service(
                 cls, handle, code, require_outputs, stream_logs,
@@ -311,7 +311,7 @@ class TestServeOperations:
                 'requested_resources_str': '',
                 'replica_info': [],
             }
-            return 0, common_utils.encode_payload([{
+            return 0, message_utils.encode_payload([{
                 k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
                 for k, v in service.items()
             }]), ''

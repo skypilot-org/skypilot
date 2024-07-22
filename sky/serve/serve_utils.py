@@ -30,6 +30,7 @@ from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -306,7 +307,7 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         raise ValueError(f'Failed to update service: {resp.text}')
 
     service_msg = resp.json()['message']
-    return common_utils.encode_payload(service_msg)
+    return message_utils.encode_payload(service_msg)
 
 
 def _get_service_status(
@@ -346,11 +347,11 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return common_utils.encode_payload(service_statuses)
+    return message_utils.encode_payload(service_statuses)
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = common_utils.decode_payload(payload)
+    service_statuses_encoded = message_utils.decode_payload(payload)
     service_statuses = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
@@ -362,11 +363,11 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
 
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
-    return common_utils.encode_payload(new_version)
+    return message_utils.encode_payload(new_version)
 
 
 def load_version_string(payload: str) -> str:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def _terminate_failed_services(
@@ -495,7 +496,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         'be supported in the future).')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
-                return common_utils.encode_payload(lb_port)
+                return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
@@ -518,7 +519,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
 
 
 def load_service_initialization_result(payload: str) -> int:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:

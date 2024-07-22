@@ -22,6 +22,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 
 if typing.TYPE_CHECKING:
     from ray.dashboard.modules.job import pydantic_models as ray_pydantic
@@ -370,12 +371,12 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return common_utils.encode_payload(statuses)
+    return message_utils.encode_payload(statuses)
 
 
 def load_statuses_payload(
         statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
-    original_statuses = common_utils.decode_payload(statuses_payload)
+    original_statuses = message_utils.decode_payload(statuses_payload)
     statuses = dict()
     for job_id, status in original_statuses.items():
         # json.dumps will convert all keys to strings. Integers will
@@ -413,8 +414,8 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
-        return common_utils.encode_payload(timestamp)
-    return common_utils.encode_payload(None)
+        return message_utils.encode_payload(timestamp)
+    return message_utils.encode_payload(None)
 
 
 def get_ray_port():
@@ -706,7 +707,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-    return common_utils.encode_payload(jobs)
+    return message_utils.encode_payload(jobs)
 
 
 def load_job_queue(payload: str) -> List[Dict[str, Any]]:
@@ -715,7 +716,7 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     Args:
         payload: The encoded payload string to load.
     """
-    jobs = common_utils.decode_payload(payload)
+    jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
     return jobs
@@ -733,7 +734,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
 
     Returns:
         Encoded job IDs that are actually cancelled. Caller should use
-        common_utils.decode_payload() to parse.
+        message_utils.decode_payload() to parse.
     """
     if cancel_all:
         # Cancel all in-progress jobs.
@@ -776,7 +777,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
-    return common_utils.encode_payload(cancelled_ids)
+    return message_utils.encode_payload(cancelled_ids)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
@@ -805,7 +806,7 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
-    return common_utils.encode_payload(run_timestamps)
+    return message_utils.encode_payload(run_timestamps)
 
 
 class JobLibCodeGen:
