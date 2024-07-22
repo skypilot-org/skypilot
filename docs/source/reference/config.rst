@@ -191,7 +191,7 @@ Available fields and semantics:
     # SkyPilot. This is useful for compliance with data protection regulations.
     #
     # Default: false.
-    disk_encrypted: true
+    disk_encrypted: false
 
     # Identity to use for AWS instances (optional).
     #
