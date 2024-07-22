@@ -5049,7 +5049,7 @@ def local_up(gpus: bool):
     message_str = message_str.format((' with GPU support (this may take up '
                                       'to 15 minutes)') if gpus else '')
     path_to_package = os.path.dirname(os.path.dirname(__file__))
-    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+    up_script_path = os.path.join(path_to_package, 'utils/kubernetes',
                                   'create_cluster.sh')
 
     # Get directory of script and run it from there
@@ -5162,7 +5162,7 @@ def local_down():
     cluster_removed = False
 
     path_to_package = os.path.dirname(os.path.dirname(__file__))
-    down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+    down_script_path = os.path.join(path_to_package, 'utils/kubernetes',
                                     'delete_cluster.sh')
 
     cwd = os.path.dirname(os.path.abspath(down_script_path))
