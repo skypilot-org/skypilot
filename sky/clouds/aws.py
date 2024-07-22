@@ -399,6 +399,8 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
+        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
+                                                    False)
         user_security_group_config = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
         user_security_group = None
@@ -429,6 +431,7 @@ class AWS(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'disk_encrypted': disk_encrypted,
             'use_spot': r.use_spot,
             'region': region_name,
             'zones': ','.join(zone_names),

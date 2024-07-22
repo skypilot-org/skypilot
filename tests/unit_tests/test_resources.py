@@ -121,6 +121,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'use_spot': False,
         'region': 'fake-region',
         'image_id': 'fake-image',
+        'disk_encrypted': False,
         'disk_tier': 'gp3',
         'disk_throughput': 218,
         'disk_iops': 3500,
