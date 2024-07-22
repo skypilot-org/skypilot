@@ -928,7 +928,8 @@ def construct_ssh_jump_command(
         ssh_jump_port: Optional[int] = None,
         ssh_jump_user: str = 'sky',
         proxy_cmd_path: Optional[str] = None,
-        proxy_cmd_target_pod: Optional[str] = None) -> str:
+        proxy_cmd_target_pod: Optional[str] = None,
+        current_kube_context: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -941,7 +942,8 @@ def construct_ssh_jump_command(
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
-                                   f'{proxy_cmd_target_pod}\' ')
+                                   f'{proxy_cmd_target_pod} '
+                                   f'{current_kube_context}\'')
     return ssh_jump_proxy_command
 
 
@@ -1006,12 +1008,14 @@ def get_ssh_proxy_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
+        current_context = get_current_kube_config_context_name()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
             ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
             proxy_cmd_path=ssh_jump_proxy_command_path,
-            proxy_cmd_target_pod=k8s_ssh_target)
+            proxy_cmd_target_pod=k8s_ssh_target,
+            current_kube_context=current_context)
     return ssh_jump_proxy_command
 
 
