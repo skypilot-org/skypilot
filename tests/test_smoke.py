@@ -1317,6 +1317,24 @@ def test_scp_logs():
     run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_symlink_latest_logs():
+    test = Test(
+        'symlink_latest_logs', 
+        [
+            'sky local up || true',
+            'eval symlink_path="~/sky_logs/sky_latest"; [ -L "$symlink_path" ] || exit 1 ;'
+            'target_file=$(readlink -f "$symlink_path") || exit 1 ;'
+            'sky local down || true ;'
+            '[ -L "$symlink_path" ] || exit 1 ;'
+            'target_file2=$(readlink -f "$symlink_path") ;'
+            '[ "$target_file" != "$target_file2" ] || exit 1'
+        ], 
+        'sky local down',
+    )
+    run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus

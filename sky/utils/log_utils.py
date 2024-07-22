@@ -210,7 +210,7 @@ def create_and_symlink_log_dir(log_dir: str):
             os.remove(symlink_path)
         else:
             logger.warning((
-                'Failed to create symlink to latest logs at \'{symlink_path}\'.'
+                f'Failed to create symlink to latest logs at \'{symlink_path}\'.'
                 'Please remove the existing file/directory.'))
             return
     os.symlink(log_dir, symlink_path)
