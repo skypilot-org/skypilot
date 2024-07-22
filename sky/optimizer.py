@@ -1240,7 +1240,7 @@ def _fill_in_launchable_resources(
         for cloud in clouds_list:
             feasible_resources = cloud.get_feasible_launchable_resources(
                 resources, num_nodes=task.num_nodes)
-            if feasible_resources.hint:
+            if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
             if len(feasible_resources.resources_list) > 0:
                 # Assume feasible_resources is sorted by prices. Guaranteed by

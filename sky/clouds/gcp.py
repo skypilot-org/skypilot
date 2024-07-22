@@ -538,6 +538,8 @@ class GCP(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if host_vm_type is None:
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
                 return resources_utils.FeasibleResources([], [], None)
             else:
                 r = resources.copy(

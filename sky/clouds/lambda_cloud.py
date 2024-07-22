@@ -183,6 +183,8 @@ class Lambda(clouds.Cloud):
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud
             resources = resources.copy(accelerators=None)
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
             return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):

@@ -271,6 +271,8 @@ class IBM(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
             return resources_utils.FeasibleResources([resources],
                                                      fuzzy_candidate_list, None)
 

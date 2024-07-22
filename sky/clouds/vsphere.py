@@ -197,6 +197,8 @@ class Vsphere(clouds.Cloud):
     def _get_feasible_launchable_resources(
             self, resources: 'resources_lib.Resources'):
         if resources.use_spot:
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
             return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

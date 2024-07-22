@@ -452,6 +452,8 @@ class AWS(clouds.Cloud):
                 region=resources.region,
                 zone=resources.zone)
             if not regions:
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
                 return resources_utils.FeasibleResources([], [], None)
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)

@@ -384,6 +384,8 @@ class Azure(clouds.Cloud):
             ok, _ = Azure.check_disk_tier(resources.instance_type,
                                           resources.disk_tier)
             if not ok:
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
                 return resources_utils.FeasibleResources([], [], None)
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).

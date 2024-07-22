@@ -255,6 +255,8 @@ class SCP(clouds.Cloud):
         # Check if the host VM satisfies the min/max disk size limits.
         is_allowed = self._is_disk_size_allowed(resources)
         if not is_allowed:
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
             return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
