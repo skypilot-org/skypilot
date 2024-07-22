@@ -24,6 +24,7 @@ from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -511,7 +512,7 @@ def _post_provision_setup(
                 logger.debug('Ray cluster on head is not up. Restarting...')
             else:
                 logger.debug('Ray cluster on head is up.')
-                ray_port = common_utils.decode_payload(stdout)['ray_port']
+                ray_port = message_utils.decode_payload(stdout)['ray_port']
             full_ray_setup = bool(returncode)
 
         if full_ray_setup:

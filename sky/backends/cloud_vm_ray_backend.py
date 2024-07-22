@@ -57,6 +57,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -3530,7 +3531,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
-        cancelled_ids = common_utils.decode_payload(stdout)
+        cancelled_ids = message_utils.decode_payload(stdout)
         if cancelled_ids:
             logger.info(
                 f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
@@ -3557,7 +3558,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = common_utils.decode_payload(run_timestamps)
+        run_timestamps = message_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4135,7 +4136,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=stream_logs)
 
         if returncode == 0:
-            return common_utils.decode_payload(stdout)
+            return message_utils.decode_payload(stdout)
         logger.debug('Failed to check if cluster is autostopping with '
                      f'{returncode}: {stdout+stderr}\n'
                      f'Command: {code}')
