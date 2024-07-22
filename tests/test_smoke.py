@@ -1320,7 +1320,7 @@ def test_scp_logs():
 @pytest.mark.kubernetes
 def test_symlink_latest_logs():
     test = Test(
-        'symlink_latest_logs', 
+        'symlink_latest_logs',
         [
             'sky local up || true',
             'eval symlink_path="~/sky_logs/sky_latest"; [ -L "$symlink_path" ] || exit 1 ;'
@@ -1329,7 +1329,7 @@ def test_symlink_latest_logs():
             '[ -L "$symlink_path" ] || exit 1 ;'
             'target_file2=$(readlink -f "$symlink_path") ;'
             '[ "$target_file" != "$target_file2" ] || exit 1'
-        ], 
+        ],
         'sky local down',
     )
     run_one_test(test)
