@@ -29,6 +29,7 @@ class SkyServiceSpec:
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
+        auth_key: Optional[str] = None,
         # The following arguments are deprecated.
         # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
         # Deprecated: Always be True
@@ -91,6 +92,7 @@ class SkyServiceSpec:
             int] = base_ondemand_fallback_replicas
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
+        self._auth_key: Optional[str] = auth_key
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -178,6 +180,10 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
+        auth_key = config.get('auth_key', None)
+        if auth_key is not None:
+            service_config['auth_key'] = auth_key
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -233,9 +239,10 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        add_if_not_none('auth_key', None, self._auth_key, no_empty=True)
         return config
 
-    def probe_str(self):
+    def probe_str(self) -> str:
         if self.post_data is None:
             method = f'GET {self.readiness_path}'
         else:
@@ -244,7 +251,7 @@ class SkyServiceSpec:
                    ' with custom headers')
         return f'{method}{headers}'
 
-    def spot_policy_str(self):
+    def spot_policy_str(self) -> str:
         policy_strs = []
         if (self.dynamic_ondemand_fallback is not None and
                 self.dynamic_ondemand_fallback):
@@ -264,7 +271,7 @@ class SkyServiceSpec:
             return 'No spot fallback policy'
         return ' '.join(policy_strs)
 
-    def autoscaling_policy_str(self):
+    def autoscaling_policy_str(self) -> str:
         # TODO(MaoZiming): Update policy_str
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
@@ -277,6 +284,11 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
+    def authorization_str(self) -> str:
+        if self.auth_key is not None:
+            return common_utils.format_authorization_key(self.auth_key)
+        return 'No authorization on load balancer.'
+
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
@@ -284,6 +296,7 @@ class SkyServiceSpec:
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
             Spot Policy:                      {self.spot_policy_str()}
+            Authorization:                    {self.authorization_str()}
         """)
 
     @property
@@ -338,3 +351,7 @@ class SkyServiceSpec:
     @property
     def use_ondemand_fallback(self) -> bool:
         return self._use_ondemand_fallback
+
+    @property
+    def auth_key(self) -> Optional[str]:
+        return self._auth_key

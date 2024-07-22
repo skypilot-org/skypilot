@@ -375,6 +375,9 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'auth_key': {
+                'type': 'string',
+            },
         }
     }
 

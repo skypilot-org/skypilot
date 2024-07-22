@@ -678,3 +678,8 @@ def deprecated_function(
         return func(*args, **kwargs)
 
     return new_func
+
+
+def format_authorization_key(key: str) -> str:
+    """Format the authorization key used by the load balancer."""
+    return f'Bearer {key}'
