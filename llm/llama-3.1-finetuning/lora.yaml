@@ -1,0 +1,33 @@
+envs:
+  MODEL_SIZE: 8B
+  HF_TOKEN:
+  DATASET: yahma/alpaca-cleaned
+  # Use your own dataset with alpaca format
+  # DATASET: gbharti/finance-alpaca
+
+resources:
+  accelerators: A100:8
+  use_spot: true
+
+file_mounts:
+  /configs: ./configs
+
+setup: |
+  pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu121
+
+  # Install torch tune from source for the latest Llama-3.1 model
+  git clone https://github.com/pytorch/torchtune.git
+  cd torchtune
+  pip install -e .
+  # pip install torchtune
+  
+  tune download meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+    --hf-token $HF_TOKEN \
+    --output-dir /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+    --ignore-patterns "original/consolidated*"
+
+run: |
+  tune run --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
+    lora_finetune_distributed \
+    --config /configs/${MODEL_SIZE}-lora.yaml \
+    dataset.source="$DATASET"
