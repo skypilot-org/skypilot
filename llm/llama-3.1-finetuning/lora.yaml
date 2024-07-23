@@ -15,15 +15,9 @@ envs:
   # Use your own dataset with alpaca format
   # DATASET: gbharti/finance-alpaca
   # Change this to your own checkpoint bucket
-  CHECKPOINT_BUCKET_NAME: sky-llama-3.1-checkpoints
+  CHECKPOINT_BUCKET_NAME: sky-llama-31-checkpoints
   ADDITIONAL_ARGS: ""
 
-file_mounts:
-  ~/output:
-    name: $CHECKPOINT_BUCKET_NAME
-    # Optionally, specify the store to enforce to use one of the stores below:
-    #   r2/azure/gcs/s3/cos
-    # store: r2
 
 resources:
   accelerators: A100:8
@@ -32,14 +26,18 @@ resources:
 
 file_mounts:
   /configs: ./configs
+  /output:
+    name: $CHECKPOINT_BUCKET_NAME
+    mode: MOUNT
+    # Optionally, specify the store to enforce to use one of the stores below:
+    #   r2/azure/gcs/s3/cos
+    # store: r2
 
 setup: |
   pip install torch torchvision
 
   # Install torch tune from source for the latest Llama-3.1 model
-  git clone https://github.com/pytorch/torchtune.git || true
-  cd torchtune
-  pip install -e .
+  pip install git+https://github.com/pytorch/torchtune.git@58255001bd0b1e3a81a6302201024e472af05379
   # pip install torchtune
   
   tune download meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
@@ -54,4 +52,4 @@ run: |
 
   mkdir -p ~/output/$MODEL_SIZE-lora
   rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct ~/output/$MODEL_SIZE-lora
-  cp /tmp/lora_finetune_output ~/output/$MODEL_SIZE-lora/
+  cp -r /tmp/lora_finetune_output ~/output/$MODEL_SIZE-lora/
