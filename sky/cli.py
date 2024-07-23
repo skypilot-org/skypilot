@@ -5260,9 +5260,14 @@ def code(
     if not cluster:
         raise click.UsageError('Please specify a cluster with ---cluster/-c.')
 
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster {cluster!r} not found. '
+                                 'Use `sky launch` to provision first.')
+
     code_bin = shutil.which("code")
     if not code_bin:
-        raise RuntimeError(
+        raise click.UsageError(
             '"code" is not available in your path. Ensure VSCode in installed and the shell command is available on '
             'your path https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line'
         )
