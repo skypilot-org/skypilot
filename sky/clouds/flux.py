@@ -46,7 +46,7 @@ class Flux(Kubernetes):
             zones,
             dryrun)
         # Disabled until provision module is added
-        # deploy_vars['module'] = 'sky.provision.flux'
+        deploy_vars['module'] = 'sky.provision.flux'
         return deploy_vars
 
     def _get_feasible_launchable_resources(

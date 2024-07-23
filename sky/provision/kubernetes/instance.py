@@ -47,10 +47,134 @@ def _get_namespace(provider_config: Dict[str, Any]) -> str:
         'namespace',
         kubernetes_utils.get_current_kube_config_context_namespace())
 
+def wait_pods_running(config, provider_config,
+                       namespace: str, tags: List[str], ssh_jump_pod_name: str):
+    """Wait for all pods to schedule and run (including the ssh jump pod)
+    """
+    wait_pods_dict = filter_pods(namespace, tags, ['Pending'])
+    wait_pods = list(wait_pods_dict.values())
 
-def _filter_pods(namespace: str, tag_filters: Dict[str, str],
+    # How does the user want to connect (the networking mode)
+    # TODO(vsoch): consoldiate this logic between here and kubernetes
+    mode = config.provider_config.get('networking_mode')
+    networking_mode = network_utils.get_networking_mode(mode)
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        # Adding the jump pod to the new_nodes list as well so it can be
+        # checked if it's scheduled and running along with other pods.
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_pod_name, namespace)
+        wait_pods.append(jump_pod)
+    provision_timeout = provider_config['timeout']
+    wait_str = ('indefinitely'
+                if provision_timeout < 0 else f'for {provision_timeout}s')
+    logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
+                 f'run: {list(wait_pods_dict.keys())}')
+
+    # Wait until the pods are scheduled and surface cause for error
+    # if there is one
+    _wait_for_pods_to_schedule(namespace, wait_pods, provision_timeout)
+
+    # Wait until the pods and their containers are up and running, and
+    # fail early if there is an error
+    logger.debug(f'run_instances: waiting for pods to be running (pulling '
+                 f'images): {list(wait_pods_dict.keys())}')
+    _wait_for_pods_to_run(namespace, wait_pods)
+    logger.debug(f'run_instances: all pods are scheduled and running: '
+                 f'{list(wait_pods_dict.keys())}')
+    return wait_pods
+
+def wait_for_termination(namespace: str, tags: List[str]):
+    """Wait for termination of pods"""
+    # Wait for any terminating minicluster pods
+    terminating_pods = filter_pods(namespace, tags, ['Terminating'])
+    start_time = time.time()
+    while (len(terminating_pods) > 0 and
+           time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
+        logger.debug(f'run_instances: Found {len(terminating_pods)} '
+                     'terminating pods. Waiting them to finish: '
+                     f'{list(terminating_pods.keys())}')
+        time.sleep(POLL_INTERVAL)
+        terminating_pods = filter_pods(namespace, tags, ['Terminating'])
+
+    if len(terminating_pods) > 0:
+        # If there are still terminating pods, we force delete them.
+        logger.debug(f'run_instances: Found {len(terminating_pods)} '
+                     'terminating pods still in terminating state after '
+                     f'timeout {_TIMEOUT_FOR_POD_TERMINATION}s. '
+                     'Force deleting them.')
+        for pod_name in terminating_pods.keys():
+            # grace_period_seconds=0 means force delete the pod.
+            # https://github.com/kubernetes-client/python/issues/508#issuecomment-1695759777
+            kubernetes.core_api().delete_namespaced_pod(
+                pod_name,
+                namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT,
+                grace_period_seconds=0)
+
+def initialize_pods(namespace: str, tags: List[str]):
+    """For pods not tagged as initialized, run init steps"""
+
+    # Wait until pods are running, they can go from init->pod init->running
+    running_pods = {}
+    while not running_pods:
+        running_pods = filter_pods(namespace, tags, ['Running'])
+        if running_pods:
+            break
+        logger.warning('initialize_pods: pods not in running state yet.')
+        time.sleep(10)
+
+    initialized_pods = filter_pods(namespace, {
+        TAG_POD_INITIALIZED: 'true',
+        **tags
+    }, ['Running'])
+    uninitialized_pods = {
+        pod_name: pod
+        for pod_name, pod in running_pods.items()
+        if pod_name not in initialized_pods
+    }
+    if len(uninitialized_pods) > 0:
+        logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
+                     f'pods: {list(uninitialized_pods.keys())}')
+        uninitialized_pods_list = list(uninitialized_pods.values())
+
+        # Setup SSH and environment variables in pods.
+        # Make sure commands used in these methods are generic and work
+        # on most base images. E.g., do not use Python, since that may not
+        # be installed by default.
+        _check_user_privilege(namespace, uninitialized_pods_list)
+        _setup_ssh_in_pods(namespace, uninitialized_pods_list)
+        _set_env_vars_in_pods(namespace, uninitialized_pods_list)
+
+        for pod in uninitialized_pods.values():
+            _label_pod(namespace,
+                       pod.metadata.name,
+                       label={
+                           TAG_POD_INITIALIZED: 'true',
+                           **pod.metadata.labels
+                       })
+
+    return running_pods
+
+def nvidia_runtime_exists() -> bool:
+    """Determine if nvidia runtime exists"""
+    try:
+        runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
+    except kubernetes.kubernetes.client.ApiException as e:
+        runtime_exists = False
+        logger.warning('run_instances: Error occurred while checking for '
+                       f'nvidia RuntimeClass - '
+                       f'{common_utils.format_exception(e)}'
+                       'Continuing without using nvidia RuntimeClass.\n'
+                       'If you are on a K3s cluster, manually '
+                       'override runtimeClassName in ~/.sky/config.yaml. '
+                       'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
+    return runtime_exists
+
+def filter_pods(namespace: str, tag_filters: Dict[str, str],
                  status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
+    """Filters pods by tags and status.
+    Public function, as is shared by flux provisioner.
+    """
     non_included_pod_statuses = POD_STATUSES.copy()
 
     field_selector = ''
@@ -394,32 +518,10 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     pod_spec['metadata']['labels'].update(
         {TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
-    terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
-    start_time = time.time()
-    while (len(terminating_pods) > 0 and
-           time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
-        logger.debug(f'run_instances: Found {len(terminating_pods)} '
-                     'terminating pods. Waiting them to finish: '
-                     f'{list(terminating_pods.keys())}')
-        time.sleep(POLL_INTERVAL)
-        terminating_pods = _filter_pods(namespace, tags, ['Terminating'])
+    # Wait for pods to be terminated
+    wait_for_termination(namespace, tags)
 
-    if len(terminating_pods) > 0:
-        # If there are still terminating pods, we force delete them.
-        logger.debug(f'run_instances: Found {len(terminating_pods)} '
-                     'terminating pods still in terminating state after '
-                     f'timeout {_TIMEOUT_FOR_POD_TERMINATION}s. '
-                     'Force deleting them.')
-        for pod_name in terminating_pods.keys():
-            # grace_period_seconds=0 means force delete the pod.
-            # https://github.com/kubernetes-client/python/issues/508#issuecomment-1695759777
-            kubernetes.core_api().delete_namespaced_pod(
-                pod_name,
-                namespace,
-                _request_timeout=config_lib.DELETION_TIMEOUT,
-                grace_period_seconds=0)
-
-    running_pods = _filter_pods(namespace, tags, ['Pending', 'Running'])
+    running_pods = filter_pods(namespace, tags, ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{list(running_pods.keys())}')
@@ -435,19 +537,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             'Use "sky down" to terminate the cluster.')
 
     # Add nvidia runtime class if it exists
-    nvidia_runtime_exists = False
-    try:
-        nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class()
-    except kubernetes.kubernetes.client.ApiException as e:
-        logger.warning('run_instances: Error occurred while checking for '
-                       f'nvidia RuntimeClass - '
-                       f'{common_utils.format_exception(e)}'
-                       'Continuing without using nvidia RuntimeClass.\n'
-                       'If you are on a K3s cluster, manually '
-                       'override runtimeClassName in ~/.sky/config.yaml. '
-                       'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
-
-    if nvidia_runtime_exists:
+    if nvidia_runtime_exists():
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
     created_pods = {}
@@ -496,66 +586,12 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    wait_pods_dict = _filter_pods(namespace, tags, ['Pending'])
-    wait_pods = list(wait_pods_dict.values())
+    # Wait for pods to be scheduled, including the ssh jump pod
+    ssh_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
+    wait_pods_running(config, provider_config, namespace, tags, ssh_pod_name)
 
-    networking_mode = network_utils.get_networking_mode(
-        config.provider_config.get('networking_mode'))
-    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
-        # Adding the jump pod to the new_nodes list as well so it can be
-        # checked if it's scheduled and running along with other pods.
-        ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
-        jump_pod = kubernetes.core_api().read_namespaced_pod(
-            ssh_jump_pod_name, namespace)
-        wait_pods.append(jump_pod)
-    provision_timeout = provider_config['timeout']
-
-    wait_str = ('indefinitely'
-                if provision_timeout < 0 else f'for {provision_timeout}s')
-    logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
-                 f'run: {list(wait_pods_dict.keys())}')
-
-    # Wait until the pods are scheduled and surface cause for error
-    # if there is one
-    _wait_for_pods_to_schedule(namespace, wait_pods, provision_timeout)
-    # Wait until the pods and their containers are up and running, and
-    # fail early if there is an error
-    logger.debug(f'run_instances: waiting for pods to be running (pulling '
-                 f'images): {list(wait_pods_dict.keys())}')
-    _wait_for_pods_to_run(namespace, wait_pods)
-    logger.debug(f'run_instances: all pods are scheduled and running: '
-                 f'{list(wait_pods_dict.keys())}')
-
-    running_pods = _filter_pods(namespace, tags, ['Running'])
-    initialized_pods = _filter_pods(namespace, {
-        TAG_POD_INITIALIZED: 'true',
-        **tags
-    }, ['Running'])
-    uninitialized_pods = {
-        pod_name: pod
-        for pod_name, pod in running_pods.items()
-        if pod_name not in initialized_pods
-    }
-    if len(uninitialized_pods) > 0:
-        logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
-                     f'pods: {list(uninitialized_pods.keys())}')
-        uninitialized_pods_list = list(uninitialized_pods.values())
-
-        # Setup SSH and environment variables in pods.
-        # Make sure commands used in these methods are generic and work
-        # on most base images. E.g., do not use Python, since that may not
-        # be installed by default.
-        _check_user_privilege(namespace, uninitialized_pods_list)
-        _setup_ssh_in_pods(namespace, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, uninitialized_pods_list)
-
-        for pod in uninitialized_pods.values():
-            _label_pod(namespace,
-                       pod.metadata.name,
-                       label={
-                           TAG_POD_INITIALIZED: 'true',
-                           **pod.metadata.labels
-                       })
+    # Get list of pods to wait for readiness
+    created_pods = initialize_pods(namespace, tags)
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
@@ -633,7 +669,7 @@ def terminate_instances(
     tag_filters = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
-    pods = _filter_pods(namespace, tag_filters, None)
+    pods = filter_pods(namespace, tag_filters, None)
 
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
@@ -656,10 +692,24 @@ def get_cluster_info(
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
 
-    running_pods = _filter_pods(namespace, tag_filters, ['Running'])
+    running_pods = filter_pods(namespace, tag_filters, ['Running'])
+    return query_cluster_info(
+        running_pods,
+        namespace,
+        constants.TAG_RAY_NODE_KIND,
+        'head',
+        cluster_name_on_cloud,
+        provider_config,
+    )
+
+def query_cluster_info(running_pods, namespace: str,
+                       head_index_label: str, head_index: str,
+                       cluster_name_on_cloud: str,
+                       provider_config: Optional[Dict[str, Any]] = None,
+                       ) -> common.ClusterInfo:
+    """Get the head pod name and cpu_resources based on labels"""
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
-
     port_forward_mode = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD
     network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
                                                   port_forward_mode.value)
@@ -670,7 +720,6 @@ def get_cluster_info(
     if not provider_config.get('use_internal_ips', False):
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace)
-
     head_pod_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
@@ -685,7 +734,7 @@ def get_cluster_info(
                 tags=pod.metadata.labels,
             )
         ]
-        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
+        if pod.metadata.labels[head_index_label] == head_index:
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
@@ -720,7 +769,6 @@ def get_cluster_info(
         },
         provider_name='kubernetes',
         provider_config=provider_config)
-
 
 def query_instances(
     cluster_name_on_cloud: str,

@@ -1452,6 +1452,8 @@ def combine_pod_config_fields(
         kubernetes_config,
         yaml_obj['available_node_types']['ray_head_default']['node_config'])
 
+    # Hack for flux to add current running pods
+
     # Write the updated YAML back to the file
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
 

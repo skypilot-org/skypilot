@@ -86,8 +86,12 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.IBM: 160,
     clouds.OCI: 300,
     clouds.Kubernetes: 300,
+    clouds.Flux: 300,
     clouds.Vsphere: 240,
 }
+
+# Kubernetes type clouds
+_KUBERNETES_CLOUDS = (clouds.Kubernetes, clouds.Flux,)
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -1310,6 +1314,7 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
+
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -1351,6 +1356,7 @@ class RetryingVmProvisioner(object):
                 f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
             )
 
+        # STOPPED HERE TRY THIS OUT
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
                                        prev_cluster_ever_up):
@@ -1703,7 +1709,7 @@ class RetryingVmProvisioner(object):
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
         style = colorama.Style
-        if isinstance(to_provision_cloud, clouds.Kubernetes):
+        if isinstance(to_provision_cloud, _KUBERNETES_CLOUDS):
             logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
                         f'{style.RESET_ALL}')
         else:
@@ -1938,7 +1944,7 @@ class RetryingVmProvisioner(object):
 
                 requested_features = self._requested_features.copy()
                 # Skip stop feature for Kubernetes controllers.
-                if (isinstance(to_provision.cloud, clouds.Kubernetes) and
+                if (isinstance(to_provision.cloud, _KUBERNETES_CLOUDS) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
@@ -3760,6 +3766,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
+
+        # TODO: bug (error) if this file was manually removed
+        if not os.path.exists(handle.cluster_yaml):
+            logger.warning(
+                f'Cluster {handle.cluster_name!r} config file. '
+                'is missing. Skipped.')
+            return
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         cluster_name_on_cloud = handle.cluster_name_on_cloud
@@ -4086,7 +4099,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
             # Skip auto-stop for Kubernetes clusters.
-            if (isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
+            if (isinstance(handle.launched_resources.cloud, _KUBERNETES_CLOUDS)
                     and not down and idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
                 # Kubernetes clusters.

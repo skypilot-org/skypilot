@@ -67,7 +67,6 @@ def _bulk_provision(
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
 
     start = time.time()
-
     with rich_utils.safe_status('[bold cyan]Launching[/]') as status:
         try:
             # TODO(suquark): Should we cache the bootstrapped result?
@@ -94,6 +93,7 @@ def _bulk_provision(
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
+
         status.update('[bold cyan]Launching - Checking instance status[/]')
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
@@ -444,7 +444,10 @@ def _post_provision_setup(
 
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
-        wait_for_ssh(cluster_info, ssh_credentials)
+
+        # We don't need ssh for kubectl accessed clouds like flux
+        if provider_config['module'] != 'sky.provision.flux':
+            wait_for_ssh(cluster_info, ssh_credentials)
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
