@@ -446,9 +446,10 @@ def _post_provision_setup(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
 
         # We don't need ssh for kubectl accessed clouds like flux
-        if provider_config['module'] != 'sky.provision.flux':
+        if provider_config is not None and provider_config[
+                'module'] != 'sky.provision.flux':
             wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+        logger.debug(f'SSH Connection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                     f'or found existing instance{plural}.'

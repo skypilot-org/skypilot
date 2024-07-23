@@ -91,7 +91,10 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
 }
 
 # Kubernetes type clouds
-_KUBERNETES_CLOUDS = (clouds.Kubernetes, clouds.Flux,)
+_KUBERNETES_CLOUDS = (
+    clouds.Kubernetes,
+    clouds.Flux,
+)
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -3769,9 +3772,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # TODO: bug (error) if this file was manually removed
         if not os.path.exists(handle.cluster_yaml):
-            logger.warning(
-                f'Cluster {handle.cluster_name!r} config file. '
-                'is missing. Skipped.')
+            logger.warning(f'Cluster {handle.cluster_name!r} config file. '
+                           'is missing. Skipped.')
             return
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name

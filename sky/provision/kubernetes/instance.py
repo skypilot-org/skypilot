@@ -47,8 +47,9 @@ def _get_namespace(provider_config: Dict[str, Any]) -> str:
         'namespace',
         kubernetes_utils.get_current_kube_config_context_namespace())
 
-def wait_pods_running(config, provider_config,
-                       namespace: str, tags: List[str], ssh_jump_pod_name: str):
+
+def wait_pods_running(config, provider_config, namespace: str,
+                      tags: Dict[str, str], ssh_jump_pod_name: str):
     """Wait for all pods to schedule and run (including the ssh jump pod)
     """
     wait_pods_dict = filter_pods(namespace, tags, ['Pending'])
@@ -83,7 +84,8 @@ def wait_pods_running(config, provider_config,
                  f'{list(wait_pods_dict.keys())}')
     return wait_pods
 
-def wait_for_termination(namespace: str, tags: List[str]):
+
+def wait_for_termination(namespace: str, tags: Dict[str, str]):
     """Wait for termination of pods"""
     # Wait for any terminating minicluster pods
     terminating_pods = filter_pods(namespace, tags, ['Terminating'])
@@ -111,11 +113,12 @@ def wait_for_termination(namespace: str, tags: List[str]):
                 _request_timeout=config_lib.DELETION_TIMEOUT,
                 grace_period_seconds=0)
 
-def initialize_pods(namespace: str, tags: List[str]):
+
+def initialize_pods(namespace: str, tags: Dict[str, str]):
     """For pods not tagged as initialized, run init steps"""
 
     # Wait until pods are running, they can go from init->pod init->running
-    running_pods = {}
+    running_pods: Dict[str, Any] = {}
     while not running_pods:
         running_pods = filter_pods(namespace, tags, ['Running'])
         if running_pods:
@@ -155,6 +158,7 @@ def initialize_pods(namespace: str, tags: List[str]):
 
     return running_pods
 
+
 def nvidia_runtime_exists() -> bool:
     """Determine if nvidia runtime exists"""
     try:
@@ -170,8 +174,9 @@ def nvidia_runtime_exists() -> bool:
                        'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
     return runtime_exists
 
+
 def filter_pods(namespace: str, tag_filters: Dict[str, str],
-                 status_filters: Optional[List[str]]) -> Dict[str, Any]:
+                status_filters: Optional[List[str]]) -> Dict[str, Any]:
     """Filters pods by tags and status.
     Public function, as is shared by flux provisioner.
     """
@@ -702,11 +707,15 @@ def get_cluster_info(
         provider_config,
     )
 
-def query_cluster_info(running_pods, namespace: str,
-                       head_index_label: str, head_index: str,
-                       cluster_name_on_cloud: str,
-                       provider_config: Optional[Dict[str, Any]] = None,
-                       ) -> common.ClusterInfo:
+
+def query_cluster_info(
+    running_pods,
+    namespace: str,
+    head_index_label: str,
+    head_index: str,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> common.ClusterInfo:
     """Get the head pod name and cpu_resources based on labels"""
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
@@ -717,7 +726,7 @@ def query_cluster_info(running_pods, namespace: str,
         network_mode_str)
     external_ip = kubernetes_utils.get_external_ip(network_mode)
     port = 22
-    if not provider_config.get('use_internal_ips', False):
+    if provider_config and not provider_config.get('use_internal_ips', False):
         port = kubernetes_utils.get_head_ssh_port(cluster_name_on_cloud,
                                                   namespace)
     head_pod_name = None
@@ -769,6 +778,7 @@ def query_cluster_info(running_pods, namespace: str,
         },
         provider_name='kubernetes',
         provider_config=provider_config)
+
 
 def query_instances(
     cluster_name_on_cloud: str,

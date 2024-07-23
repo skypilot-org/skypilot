@@ -4,13 +4,14 @@ import time
 from typing import Any, Dict, Optional
 
 from kubernetes.client import ApiException
+
 from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
-from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import config as config_lib
+from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 import sky.provision.kubernetes.instance as instance_utils
 from sky.utils import common_utils
@@ -22,18 +23,16 @@ POLL_INTERVAL = 2
 
 # Flux Operator install
 # TODO(vsoch): could someone want arm support here?
-FLUX_OPERATOR_INSTALL = (
-    'https://raw.githubusercontent.com/' +
-    'flux-framework/flux-operator/' +
-    'main/examples/dist/flux-operator.yaml'
-)
+FLUX_OPERATOR_INSTALL = ('https://raw.githubusercontent.com/' +
+                         'flux-framework/flux-operator/' +
+                         'main/examples/dist/flux-operator.yaml')
 
 # Flux Operator Metadata
-_FLUX_OPERATOR_GROUP='flux-framework.org'
-_FLUX_OPERATOR_VERSION='v1alpha2'
-_MINICLUSTER_PLURAL='miniclusters'
-_MINICLUSTER_KIND='MiniCluster'
-_FLUX_OPERATOR_API_VERSION=f'{_FLUX_OPERATOR_GROUP}/{_FLUX_OPERATOR_VERSION}'
+_FLUX_OPERATOR_GROUP = 'flux-framework.org'
+_FLUX_OPERATOR_VERSION = 'v1alpha2'
+_MINICLUSTER_PLURAL = 'miniclusters'
+_MINICLUSTER_KIND = 'MiniCluster'
+_FLUX_OPERATOR_API_VERSION = f'{_FLUX_OPERATOR_GROUP}/{_FLUX_OPERATOR_VERSION}'
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -48,10 +47,12 @@ POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
 }
 
+
 def _run_kubectl(command: str, args: str):
     """Run a kubectl command, check return"""
     p = subprocess_utils.run(f'kubectl {command} {args}')
     assert p.returncode == 0
+
 
 def _get_namespace(provider_config: Dict[str, Any]) -> str:
     return provider_config.get(
@@ -114,8 +115,9 @@ def _raise_command_running_error(message: str, command: str, pod_name: str,
         f'code {rc}: {command!r}\nOutput: {stdout}.')
 
 
-def _create_minicluster(region: str, cluster_name_on_cloud: str,
-                 config: common.ProvisionConfig) -> common.ProvisionRecord:
+def _create_minicluster(
+        region: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
     namespace = _get_namespace(provider_config)
@@ -210,7 +212,6 @@ def _create_minicluster(region: str, cluster_name_on_cloud: str,
             'resources': container['resources'],
         })
 
-
     # Prepare labels for the podspec
     # Note that I'm not adding constants.HEAD_NODE_TAGS, and
     # constants.WORKER_NODE_TAGS - no quick way with indexed job.
@@ -245,11 +246,11 @@ def _create_minicluster(region: str, cluster_name_on_cloud: str,
 
     # Add nvidia runtime class if it exists
     if instance_utils.nvidia_runtime_exists():
-        spec['pod']['runtimeClassName'] = 'nvidia'
+        spec['pod']['runtimeClassName'] = 'nvidia'  # type: ignore
 
     # Wrap the spec in the MiniCluster
     minicluster = {
-        'kind':_MINICLUSTER_KIND,
+        'kind': _MINICLUSTER_KIND,
         'apiVersion': _FLUX_OPERATOR_API_VERSION,
         'metadata': {
             'name': cluster_name_on_cloud,
@@ -267,8 +268,8 @@ def _create_minicluster(region: str, cluster_name_on_cloud: str,
     # Get list of pods to wait for readiness.
     # If we eventually support ssh pod, should be -0 and not -head
     ssh_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
-    instance_utils.wait_pods_running(
-        config, provider_config, namespace, tags, ssh_name)
+    instance_utils.wait_pods_running(config, provider_config, namespace, tags,
+                                     ssh_name)
     created_pods = instance_utils.initialize_pods(namespace, tags)
 
     # Add created pod names to config - a hack to update ssh pod later
@@ -280,10 +281,11 @@ def _create_minicluster(region: str, cluster_name_on_cloud: str,
         region=region,
         zone=None,
         cluster_name=cluster_name_on_cloud,
-        head_instance_id=cluster_name_on_cloud+'-0',
+        head_instance_id=cluster_name_on_cloud + '-0',
         resumed_instance_ids=[],
         created_instance_ids=list(created_pods.keys()),
     )
+
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -295,12 +297,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         logger.warning(f'run_instances: Error occurred when creating pods: {e}')
         raise
 
+
 def stop_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
     raise NotImplementedError()
+
 
 def _terminate_node(namespace: str, pod_name: str) -> None:
     """Terminate a pod (node).
@@ -328,6 +332,7 @@ def _terminate_node(namespace: str, pod_name: str) -> None:
     instance_utils.wait_for_termination(namespace, tags)
     # TODO(vsoch): do we need to add back services deletion here?
 
+
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
@@ -340,7 +345,7 @@ def get_cluster_info(
     }
 
     # Wait until pods are running, they go from init->pod initializing->running
-    running_pods = {}
+    running_pods: Dict[str, Any] = {}
     while not running_pods:
         running_pods = instance_utils.filter_pods(namespace, tags, ['Running'])
         if running_pods:
@@ -356,6 +361,7 @@ def get_cluster_info(
         cluster_name_on_cloud,
         provider_config,
     )
+
 
 def query_instances(
     cluster_name_on_cloud: str,

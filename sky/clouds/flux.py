@@ -7,12 +7,11 @@ We do this because it is unlikely to have a cluster with Flux
 already running to provision to.
 """
 import typing
-from typing import List, Optional, Tuple, Dict
-
-from sky.clouds.kubernetes import Kubernetes
+from typing import Dict, List, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
+from sky.clouds.kubernetes import Kubernetes
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -20,6 +19,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
+
 
 @clouds.CLOUD_REGISTRY.register
 class Flux(Kubernetes):
@@ -40,11 +40,7 @@ class Flux(Kubernetes):
         Flux provisioner, tweaking from Kubernetes.
         """
         deploy_vars = super(Flux, self).make_deploy_resources_variables(
-            resources,
-            cluster_name,
-            region,
-            zones,
-            dryrun)
+            resources, cluster_name, region, zones, dryrun)
         # Disabled until provision module is added
         deploy_vars['module'] = 'sky.provision.flux'
         return deploy_vars
