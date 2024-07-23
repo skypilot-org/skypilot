@@ -1,3 +1,13 @@
+# LoRA finetuning Meta Llama-3.1 on any of your own infra.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --env HF_TOKEN
+#
+# To finetune a 70B model:  
+#
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --env HF_TOKEN --env MODEL_SIZE=70B
+
 envs:
   MODEL_SIZE: 8B
   HF_TOKEN:
@@ -11,9 +21,13 @@ envs:
 file_mounts:
   ~/output:
     name: $CHECKPOINT_BUCKET_NAME
+    # Optionally, specify the store to enforce to use one of the stores below:
+    #   r2/azure/gcs/s3/cos
+    # store: r2
 
 resources:
   accelerators: A100:8
+  disk_tier: best
   use_spot: true
 
 file_mounts:
