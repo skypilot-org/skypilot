@@ -47,12 +47,7 @@ resume_from_checkpoint: False
 
 # Dataset and Sampler
 dataset:
-  _component_: torchtune.datasets.instruct_dataset
-  source: yahma/alpaca_cleaned
-  template: torchtune.data.AlpacaInstructTemplate
-  max_seq_len: 2096
-  train_on_input: True
-  packed: True
+  _component_: torchtune.datasets.alpaca_cleaned_dataset
 seed: null
 shuffle: True
 batch_size: 2

@@ -1,9 +1,9 @@
 envs:
   MODEL_SIZE: 8B
   HF_TOKEN:
-  DATASET: yahma/alpaca-cleaned
+  # DATASET: yahma/alpaca-cleaned
   # Use your own dataset with alpaca format
-  # DATASET: gbharti/finance-alpaca
+  DATASET: gbharti/finance-alpaca
 
 resources:
   accelerators: A100:8
@@ -16,7 +16,7 @@ setup: |
   pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu121
 
   # Install torch tune from source for the latest Llama-3.1 model
-  git clone https://github.com/pytorch/torchtune.git
+  git clone https://github.com/pytorch/torchtune.git || true
   cd torchtune
   pip install -e .
   # pip install torchtune
