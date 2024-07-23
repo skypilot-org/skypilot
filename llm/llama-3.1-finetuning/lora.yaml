@@ -3,7 +3,14 @@ envs:
   HF_TOKEN:
   # DATASET: yahma/alpaca-cleaned
   # Use your own dataset with alpaca format
-  DATASET: gbharti/finance-alpaca
+  # DATASET: gbharti/finance-alpaca
+  # Change this to your own checkpoint bucket
+  CHECKPOINT_BUCKET_NAME: sky-llama-3.1-checkpoints
+  ADDITIONAL_ARGS: ""
+
+file_mounts:
+  /output:
+    name: $CHECKPOINT_BUCKET_NAME
 
 resources:
   accelerators: A100:8
@@ -30,4 +37,8 @@ run: |
   tune run --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
     lora_finetune_distributed \
     --config /configs/${MODEL_SIZE}-lora.yaml \
-    dataset.source="$DATASET"
+    dataset.source="$DATASET" $ADDITIONAL_ARGS
+
+  mkdir -p /output/$MODEL_SIZE-lora
+  rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct /output/$MODEL_SIZE-lora
+  cp /tmp/lora_finetune_output /output/$MODEL_SIZE-lora/
