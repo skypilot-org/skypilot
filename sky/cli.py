@@ -5265,21 +5265,22 @@ def code(
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
 
-    code_bin = shutil.which("code")
+    code_bin = shutil.which('code')
     if not code_bin:
         raise click.UsageError(
-            '"code" is not available in your path. Ensure VSCode in installed and the shell command is available on '
-            'your path https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line'
+            '"code" is not available in your path. Ensure VSCode in installed'
+            ' and the shell command is available on your path '
+            'https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line'
         )
 
     command = [
-        code_bin, "--disable-workspace-trust",
-        f"--folder-uri=vscode-remote://ssh-remote+{cluster}{workdir}"
+        code_bin, '--disable-workspace-trust',
+        f'--folder-uri=vscode-remote://ssh-remote+{cluster}{workdir}'
     ]
     if new_window:
-        command.append("--new-window")
+        command.append('--new-window')
     if profile:
-        command += ["--profile", profile]
+        command += ['--profile', profile]
 
     subprocess.check_call(command)
 
