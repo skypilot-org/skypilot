@@ -9,7 +9,7 @@ envs:
   ADDITIONAL_ARGS: ""
 
 file_mounts:
-  /output:
+  ~/output:
     name: $CHECKPOINT_BUCKET_NAME
 
 resources:
@@ -20,7 +20,7 @@ file_mounts:
   /configs: ./configs
 
 setup: |
-  pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu121
+  pip install torch torchvision
 
   # Install torch tune from source for the latest Llama-3.1 model
   git clone https://github.com/pytorch/torchtune.git || true
@@ -36,9 +36,8 @@ setup: |
 run: |
   tune run --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
     lora_finetune_distributed \
-    --config /configs/${MODEL_SIZE}-lora.yaml \
-    dataset.source="$DATASET" $ADDITIONAL_ARGS
+    --config /configs/${MODEL_SIZE}-lora.yaml $ADDITIONAL_ARGS
 
-  mkdir -p /output/$MODEL_SIZE-lora
-  rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct /output/$MODEL_SIZE-lora
-  cp /tmp/lora_finetune_output /output/$MODEL_SIZE-lora/
+  mkdir -p ~/output/$MODEL_SIZE-lora
+  rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct ~/output/$MODEL_SIZE-lora
+  cp /tmp/lora_finetune_output ~/output/$MODEL_SIZE-lora/
