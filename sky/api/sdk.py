@@ -183,19 +183,31 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+
+    def _full_path(src: str) -> str:
+        return os.path.abspath(os.path.expanduser(src))
+
     upload_list = []
     # if not _is_api_server_local():
     for task_ in dag.tasks:
+        file_mounts_mapping = {}
         if task_.workdir:
-            upload_list.append(task_.workdir)
+            workdir = task_.workdir
+            upload_list.append(_full_path(workdir))
+            file_mounts_mapping[workdir] = _full_path(workdir)
         for src in task_.file_mounts.values():
             if not data_utils.is_cloud_store_url(src):
-                upload_list.append(src)
+                upload_list.append(_full_path(src))
+                file_mounts_mapping[src] = _full_path(src)
         for storage in task_.storage_mounts.values():
             storage_source = storage.source
             if not data_utils.is_cloud_store_url(storage_source):
-                upload_list.append(storage_source)
+                upload_list.append(_full_path(storage_source))
+                file_mounts_mapping[storage_source] = _full_path(storage_source)
+        task_.file_mounts_mapping = file_mounts_mapping
+                
 
+    logger.info('Uploading files to API server...')
     with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
         common_utils.zip_files_and_folders(upload_list, f)
         f.seek(0)

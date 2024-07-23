@@ -185,6 +185,8 @@ class Task:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
+        # Internal use only.
+        file_mounts_mapping: Optional[Dict[str, str]] = None,
     ):
         """Initializes a Task.
 
@@ -248,8 +250,7 @@ class Task:
                                  storage_lib.StoreType] = {}
         self.setup = setup
         self._envs = envs or {}
-        self.workdir = os.path.expanduser(
-            workdir) if workdir is not None else None
+        self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.event_callback = event_callback
@@ -282,6 +283,9 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
+
+        # For internal use only.
+        self.file_mounts_mapping = file_mounts_mapping
 
         # Check if the task is legal.
         self._validate()
@@ -404,6 +408,7 @@ class Task:
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
             event_callback=config.pop('event_callback', None),
+            file_mounts_mapping=config.pop('file_mounts_mapping', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -748,8 +753,8 @@ class Task:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
-            if not data_utils.is_cloud_store_url(source):
-                file_mounts[target] = os.path.expanduser(source)
+            # if not data_utils.is_cloud_store_url(source):
+                # file_mounts[target] = os.path.expanduser(source)
                 # if (not os.path.exists(
                 #         os.path.abspath(os.path.expanduser(source))) and
                 #         not source.startswith('skypilot:')):
@@ -1129,6 +1134,8 @@ class Task:
                 mount_path: storage.to_yaml_config()
                 for mount_path, storage in self.storage_mounts.items()
             })
+        
+        add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
         return config
 
     def get_required_cloud_features(

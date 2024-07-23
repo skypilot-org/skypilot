@@ -512,8 +512,8 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
-            'api_server_task': {
-                'type': 'boolean',
+            'file_mounts_mapping': {
+                'type': 'object',
             },
             **_experimental_task_schema(),
         }

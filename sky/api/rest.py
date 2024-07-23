@@ -213,7 +213,7 @@ async def upload_zip_file(user_hash: str,
                 # Determine the new path
                 filename = os.path.basename(member)
                 original_path = os.path.normpath(member)
-                new_path = client_file_mounts_dir / original_path
+                new_path = client_file_mounts_dir / original_path.lstrip('/')
 
                 if not filename:  # This is for directories, skip
                     new_path.mkdir(parents=True, exist_ok=True)
@@ -274,27 +274,31 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
     client_file_mounts_dir = client_dir / 'file_mounts'
 
     task_configs = common_utils.read_yaml_all(str(client_task_path))
-
+    
     for task_config in task_configs:
         if task_config is None:
             continue
+        file_mounts_mapping = task_config.get('file_mounts_mapping', {})
+        if not file_mounts_mapping:
+            continue
         if 'workdir' in task_config:
             workdir = task_config['workdir']
-            task_config['workdir'] = str(client_file_mounts_dir / workdir)
+            task_config['workdir'] = str(client_file_mounts_dir / file_mounts_mapping[workdir].lstrip('/'))
         if 'file_mounts' in task_config:
             file_mounts = task_config['file_mounts']
             for dst, src in file_mounts.items():
                 if isinstance(src, str):
                     if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = str(client_file_mounts_dir / src)
+                        file_mounts[dst] = str(client_file_mounts_dir / file_mounts_mapping[src].lstrip('/'))
                 elif isinstance(src, dict):
                     if 'source' in src:
                         source = src['source']
                         if not data_utils.is_cloud_store_url(source):
-                            src['source'] = str(client_file_mounts_dir / source)
+                            src['source'] = str(client_file_mounts_dir / file_mounts_mapping[source].lstrip('/'))
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
 
+    print(task_configs)
     translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
     common_utils.dump_yaml(translated_client_task_path, task_configs)
 
