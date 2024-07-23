@@ -27,9 +27,10 @@ from sky import optimizer
 from sky import sky_logging
 from sky.api.requests import tasks
 from sky.backends import backend_utils
+from sky.data import data_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import controller_utils
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -45,27 +46,44 @@ DEFAULT_SERVER_URL = 'http://127.0.0.1:8000'
 API_SERVER_CMD = 'python -m sky.api.rest'
 
 
+@functools.lru_cache()
 def _get_server_url():
     return os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR,
                           DEFAULT_SERVER_URL)
 
 
-def _start_uvicorn_in_background():
+@functools.lru_cache()
+def _is_api_server_local():
+    return _get_server_url() == DEFAULT_SERVER_URL
+
+
+def _start_uvicorn_in_background(reload: bool = False):
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     # The command to run uvicorn. Adjust the app:app to your application's
     # location.
-    cmd = f'{API_SERVER_CMD} > {log_path} 2>&1'
+    api_server_cmd = API_SERVER_CMD
+    if reload:
+        api_server_cmd += ' --reload'
+    cmd = f'{api_server_cmd} > {log_path} 2>&1'
 
     # Start the uvicorn process in the background and don't wait for it.
     subprocess.Popen(cmd, shell=True)
     # Wait for the server to start.
+    retry_cnt = 0
     while True:
         try:
             # TODO: Should check the process is running as well.
             requests.get(f'{_get_server_url()}/health', timeout=1)
             break
         except requests.exceptions.ConnectionError:
+            if retry_cnt < 20:
+                retry_cnt += 1
+            else:
+                raise RuntimeError(
+                    f'Failed to connect to SkyPilot server at {_get_server_url()}. '
+                    'Please check the logs for more information: '
+                    f'tail -f {constants.API_SERVER_LOGS}')
             time.sleep(0.1)
 
 
@@ -81,7 +99,7 @@ def _get_request_id(response) -> str:
 def _check_health(func):
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args, api_server_reload: bool = False, **kwargs):
         server_url = _get_server_url()
 
         try:
@@ -93,7 +111,7 @@ def _check_health(func):
                 logger.info('Failed to connect to SkyPilot API server at '
                             f'{server_url}. Starting a local server.')
                 # Automatically start a SkyPilot server locally
-                _start_uvicorn_in_background()
+                _start_uvicorn_in_background(reload=api_server_reload)
                 logger.info(f'{colorama.Fore.GREEN}SkyPilot API server started.'
                             f'{colorama.Style.RESET_ALL}')
             else:
@@ -112,6 +130,7 @@ def _add_env_vars_to_body(body: Dict[str, Any]):
     for env_var in os.environ:
         if env_var.startswith('SKYPILOT_'):
             env_vars[env_var] = os.environ[env_var]
+    env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     body['env_vars'] = env_vars
 
 
@@ -164,11 +183,29 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
-    # TODO(zhwu): optimize the upload to share the same bucket for the same
-    # cluster.
+    upload_list = []
+    # if not _is_api_server_local():
     for task_ in dag.tasks:
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='api')
+        if task_.workdir:
+            upload_list.append(task_.workdir)
+        for src in task_.file_mounts.values():
+            if not data_utils.is_cloud_store_url(src):
+                upload_list.append(src)
+        for storage in task_.storage_mounts.values():
+            storage_source = storage.source
+            if not data_utils.is_cloud_store_url(storage_source):
+                upload_list.append(storage_source)
+
+    with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
+        common_utils.zip_files_and_folders(upload_list, f)
+        f.seek(0)
+        files = {'file': (f.name, f)}
+        # Send the POST request with the file
+        response = requests.post(
+            f'{_get_server_url()}/upload?user_hash={common_utils.get_user_hash()}',
+            files=files)
+        if response.status_code != 200:
+            raise RuntimeError(f'Failed to upload files: {response.content}')
 
     cluster_status = None
     request_id = status([cluster_name])
@@ -204,8 +241,6 @@ def launch(
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
-    # TODO(zhwu): For all the file_mounts, we need to handle them properly
-    # similarly to how we deal with it for spot_launch.
     body = {
         'task': dag_str,
         'cluster_name': cluster_name,
@@ -219,15 +254,48 @@ def launch(
         'detach_run': detach_run,
         'no_setup': no_setup,
         'clone_disk_from': clone_disk_from,
-        '_quiet_optimizer': need_confirmation,
-        '_is_launched_by_jobs_controller': _is_launched_by_jobs_controller,
-        '_is_launched_by_sky_serve_controller': _is_launched_by_sky_serve_controller,
-        '_disable_controller_check': _disable_controller_check,
+        # For internal use
+        'quiet_optimizer': need_confirmation,
+        'is_launched_by_jobs_controller': _is_launched_by_jobs_controller,
+        'is_launched_by_sky_serve_controller': _is_launched_by_sky_serve_controller,
+        'disable_controller_check': _disable_controller_check,
     }
     _add_env_vars_to_body(body)
     response = requests.post(
         f'{_get_server_url()}/launch',
         json=body,
+        timeout=5,
+    )
+    return response.headers['X-Request-ID']
+
+
+@usage_lib.entrypoint
+@_check_health
+def stop(cluster_name: str, purge: bool = False) -> None:
+    """Stop a cluster.
+
+    Data on attached disks is not lost when a cluster is stopped.  Billing for
+    the instances will stop, while the disks will still be charged.  Those
+    disks will be reattached when restarting the cluster.
+
+    Currently, spot instance clusters cannot be stopped (except for GCP, which
+    does allow disk contents to be preserved when stopping spot VMs).
+
+    Args:
+        cluster_name: name of the cluster to stop.
+        purge: (Advanced) Forcefully mark the cluster as stopped in SkyPilot's
+            cluster table, even if the actual cluster stop operation failed on
+            the cloud. WARNING: This flag should only be set sparingly in
+            certain manual troubleshooting scenarios; with it set, it is the
+            user's responsibility to ensure there are no leaked instances and
+            related resources.
+    """
+    response = requests.post(
+        f'{_get_server_url()}/stop',
+        json={
+            'cluster_name': cluster_name,
+            'purge': purge,
+        },
         timeout=5,
     )
     return response.headers['X-Request-ID']
@@ -335,6 +403,10 @@ def down(cluster_name: str, purge: bool = False) -> str:
 def api_start():
     """Start the API server."""
     logger.info(f'SkyPilot API server: {_get_server_url()}')
+    if _is_api_server_local():
+        logger.info(
+            f'Check API server logs: tail -f {constants.API_SERVER_LOGS}')
+        return
 
 
 @usage_lib.entrypoint
@@ -342,10 +414,11 @@ def api_stop():
     """Kill the API server."""
     # Kill the uvicorn process by name: uvicorn sky.api.rest:app
     server_url = _get_server_url()
-    if server_url != DEFAULT_SERVER_URL:
-        raise RuntimeError(
-            f'Cannot kill the API server at {server_url} because it is not '
-            f'the default SkyPilot API server started locally.')
+    if not _is_api_server_local():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Cannot kill the API server at {server_url} because it is not '
+                f'the default SkyPilot API server started locally.')
 
     found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):

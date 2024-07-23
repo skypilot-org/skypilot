@@ -248,7 +248,8 @@ class Task:
                                  storage_lib.StoreType] = {}
         self.setup = setup
         self._envs = envs or {}
-        self.workdir = workdir
+        self.workdir = os.path.expanduser(
+            workdir) if workdir is not None else None
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.event_callback = event_callback
@@ -281,6 +282,7 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
+
         # Check if the task is legal.
         self._validate()
 
@@ -334,15 +336,15 @@ class Task:
                                  f'a command generator ({CommandGen}). '
                                  f'Got {type(self.run)}')
 
-        # Workdir.
-        if self.workdir is not None:
-            full_workdir = os.path.abspath(os.path.expanduser(self.workdir))
-            if not os.path.isdir(full_workdir):
-                # Symlink to a dir is legal (isdir() follows symlinks).
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Workdir must exist and must be a directory (or '
-                        f'a symlink to a directory). {self.workdir} not found.')
+        # # Workdir.
+        # if self.workdir is not None:
+        #     full_workdir = os.path.expanduser(self.workdir)
+        #     if not os.path.isdir(full_workdir):
+        #         # Symlink to a dir is legal (isdir() follows symlinks).
+        #         with ux_utils.print_exception_no_traceback():
+        #             raise ValueError(
+        #                 'Workdir must exist and must be a directory (or '
+        #                 f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
     def from_yaml_config(
@@ -747,14 +749,15 @@ class Task:
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
             if not data_utils.is_cloud_store_url(source):
-                if (not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))) and
-                        not source.startswith('skypilot:')):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'File mount source {source!r} does not exist '
-                            'locally. To fix: check if it exists, and correct '
-                            'the path.')
+                file_mounts[target] = os.path.expanduser(source)
+                # if (not os.path.exists(
+                #         os.path.abspath(os.path.expanduser(source))) and
+                #         not source.startswith('skypilot:')):
+                #     with ux_utils.print_exception_no_traceback():
+                #         raise ValueError(
+                #             f'File mount source {source!r} does not exist '
+                #             'locally. To fix: check if it exists, and correct '
+                #             'the path.')
             # TODO(zhwu): /home/username/sky_workdir as the target path need
             # to be filtered out as well.
             if (target == constants.SKY_REMOTE_WORKDIR and

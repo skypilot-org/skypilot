@@ -5190,10 +5190,16 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
+@click.option('--reload',
+            type=bool,
+            is_flag=True,
+            default=False,
+            required=False,
+            help='Automatically reload the API server when code changes.')
 @usage_lib.entrypoint
-def api_start():
+def api_start(reload: bool):
     """Starts the API server locally."""
-    sdk.api_start()
+    sdk.api_start(api_server_reload=reload)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)

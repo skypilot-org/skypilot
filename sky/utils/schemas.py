@@ -512,6 +512,9 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            'api_server_task': {
+                'type': 'boolean',
+            },
             **_experimental_task_schema(),
         }
     }

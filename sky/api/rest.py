@@ -7,9 +7,11 @@ import os
 import pathlib
 import sys
 import tempfile
+import time
 import traceback
 from typing import Any, Callable, Dict, List, Optional
 import uuid
+import zipfile
 
 import colorama
 import fastapi
@@ -21,7 +23,10 @@ from sky import execution
 from sky import optimizer
 from sky import sky_logging
 from sky.api.requests import tasks
+from sky.data import data_utils
+from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
@@ -36,6 +41,8 @@ else:
 P = ParamSpec('P')
 
 logger = sky_logging.init_logger(__name__)
+
+CLIENT_DIR = pathlib.Path('~/.sky/clients')
 
 
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -179,12 +186,49 @@ async def optimize(optimize_body: OptimizeBody, request: fastapi.Request):
     _start_background_request(
         request_id,
         request_name='optimize',
-        request_body=json.loads(optimize_body.json()),
+        request_body=json.loads(optimize_body.model_dump_json()),
         ignore_return_value=True,
         func=optimizer.Optimizer.optimize,
         dag=dag,
         minimize=optimize_body.minimize,
     )
+
+
+@app.post('/upload')
+async def upload_zip_file(user_hash: str,
+                          file: fastapi.UploadFile = fastapi.File(...)):
+    client_file_mounts_dir = (CLIENT_DIR.expanduser().resolve() / user_hash /
+                              'file_mounts')
+    os.makedirs(client_file_mounts_dir, exist_ok=True)
+    timestamp = str(int(time.time()))
+    try:
+        # Save the uploaded zip file temporarily
+        zip_file_path = client_file_mounts_dir / f'{timestamp}.zip'
+        with open(zip_file_path, "wb") as f:
+            contents = await file.read()
+            f.write(contents)
+
+        with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+            for member in zipf.namelist():
+                # Determine the new path
+                filename = os.path.basename(member)
+                original_path = os.path.normpath(member)
+                new_path = client_file_mounts_dir / original_path
+
+                if not filename:  # This is for directories, skip
+                    new_path.mkdir(parents=True, exist_ok=True)
+                    continue
+                with zipf.open(member) as member_file:
+                    new_path = new_path
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    new_path.write_bytes(member_file.read())
+
+        # Cleanup the temporary file
+        zip_file_path.unlink()
+
+        return {"status": "files uploaded and extracted"}
+    except Exception as e:
+        return {"detail": str(e)}
 
 
 class LaunchBody(RequestBody):
@@ -203,10 +247,10 @@ class LaunchBody(RequestBody):
     clone_disk_from: Optional[str] = None
     # Internal only:
     # pylint: disable=invalid-name
-    _quiet_optimizer: bool = False
-    _is_launched_by_jobs_controller: bool = False
-    _is_launched_by_sky_serve_controller: bool = False
-    _disable_controller_check: bool = False
+    quiet_optimizer: bool = False
+    is_launched_by_jobs_controller: bool = False
+    is_launched_by_sky_serve_controller: bool = False
+    disable_controller_check: bool = False
 
 
 @app.post('/launch')
@@ -216,17 +260,52 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
     Args:
         task: The YAML string of the task to launch.
     """
-    with tempfile.NamedTemporaryFile(mode='w') as f:
-        f.write(launch_body.task)
-        f.flush()
-        dag = dag_utils.load_chain_dag_from_yaml(f.name)
+    user_hash = launch_body.env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
+
+    timestamp = str(int(time.time()))
+    client_dir = (CLIENT_DIR.expanduser().resolve() / user_hash)
+    client_task_dir = client_dir / 'tasks'
+    client_task_dir.mkdir(parents=True, exist_ok=True)
+    cluster_name = launch_body.cluster_name
+
+    client_task_path = client_task_dir / f'{cluster_name}-{timestamp}.yaml'
+    client_task_path.write_text(launch_body.task)
+
+    client_file_mounts_dir = client_dir / 'file_mounts'
+
+    task_configs = common_utils.read_yaml_all(str(client_task_path))
+
+    for task_config in task_configs:
+        if task_config is None:
+            continue
+        if 'workdir' in task_config:
+            workdir = task_config['workdir']
+            task_config['workdir'] = str(client_file_mounts_dir / workdir)
+        if 'file_mounts' in task_config:
+            file_mounts = task_config['file_mounts']
+            for dst, src in file_mounts.items():
+                if isinstance(src, str):
+                    if not data_utils.is_cloud_store_url(src):
+                        file_mounts[dst] = str(client_file_mounts_dir / src)
+                elif isinstance(src, dict):
+                    if 'source' in src:
+                        source = src['source']
+                        if not data_utils.is_cloud_store_url(source):
+                            src['source'] = str(client_file_mounts_dir / source)
+                else:
+                    raise ValueError(f'Unexpected file_mounts value: {src}')
+
+    translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
+    common_utils.dump_yaml(translated_client_task_path, task_configs)
+
+    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
 
     backend = registry.BACKEND_REGISTRY.from_str(launch_body.backend)
     request_id = request.state.request_id
     _start_background_request(
         request_id,
         request_name='launch',
-        request_body=json.loads(launch_body.json()),
+        request_body=json.loads(launch_body.model_dump_json()),
         func=execution.launch,
         task=dag,
         cluster_name=launch_body.cluster_name,
@@ -240,12 +319,29 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         detach_run=launch_body.detach_run,
         no_setup=launch_body.no_setup,
         clone_disk_from=launch_body.clone_disk_from,
-        _quiet_optimizer=launch_body._quiet_optimizer,
+        _quiet_optimizer=launch_body.quiet_optimizer,
         _is_launched_by_jobs_controller=launch_body.
-        _is_launched_by_jobs_controller,
+        is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=launch_body.
-        _is_launched_by_sky_serve_controller,
-        _disable_controller_check=launch_body._disable_controller_check,
+        is_launched_by_sky_serve_controller,
+        _disable_controller_check=launch_body.disable_controller_check,
+    )
+
+
+class StopBody(pydantic.BaseModel):
+    cluster_name: str
+    purge: bool = False
+
+
+@app.post('/stop')
+async def stop(request: fastapi.Request, stop_body: StopBody):
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='stop',
+        request_body=json.loads(stop_body.json()),
+        func=core.stop,
+        cluster_name=stop_body.cluster_name,
+        purge=stop_body.purge,
     )
 
 
