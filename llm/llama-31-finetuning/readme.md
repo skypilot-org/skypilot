@@ -1,6 +1,10 @@
 # Finetune Llama 3.1 on your infra
 
-![](https://i.imgur.com/JM61rh9.png)
+<figure>
+<center>
+<img src="https://i.imgur.com/Fr5Jq1f.png" width="90%">
+</figure>
+<!-- ![](https://i.imgur.com/Fr5Jq1f.png) -->
 <!-- ![](https://i.imgur.com/5Sosf3N.png) -->
 <!-- ![](https://i.imgur.com/TRPHSbc.png) -->
 
@@ -15,7 +19,11 @@ This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot)
 - Kubernetes cluster
 - Cloud accounts ([12 clouds supported](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html))
 
-![](https://i.imgur.com/hX1faTB.png)
+<figure>
+<center>
+<img src="https://i.imgur.com/VxMuKJn.png" width="90%">
+</figure>
+<!-- ![](https://i.imgur.com/VxMuKJn.png) -->
 <!-- ![](https://i.imgur.com/0mbAOkN.png) -->
 <!-- ![](https://i.imgur.com/bEBPMS1.png) -->
 
@@ -31,11 +39,11 @@ The finetuning job is packaged in a SkyPilot YAML. It can be launched on any of 
 
 <details>
     <summary>
-        SkyPilot YAML for finetuning Llama-3.1: <code>lora.yaml</code>
+        SkyPilot YAML for finetuning Llama 3.1: <code>lora.yaml</code>
     </summary>
     
 ```yaml
-# LoRA finetuning Meta Llama-3.1 on any of your own infra.
+# LoRA finetuning Meta Llama 3.1 on any of your own infra.
 #
 # Usage:
 #
@@ -70,7 +78,7 @@ file_mounts:
 setup: |
   pip install torch torchvision
 
-  # Install torch tune from source for the latest Llama-3.1 model
+  # Install torch tune from source for the latest Llama 3.1 model
   pip install git+https://github.com/pytorch/torchtune.git@58255001bd0b1e3a81a6302201024e472af05379
   # pip install torchtune
   
@@ -101,7 +109,7 @@ Run the following on your local machine:
 <!-- (does not need GPUs for launch): -->
 
 ```bash
-# Download the files for Llama-3.1 finetuning
+# Download the files for Llama 3.1 finetuning
 git clone https://github.com/skypilot-org/skypilot
 cd skypilot/llm/llama-3.1
 
@@ -125,7 +133,7 @@ sky launch -c llama31-70 lora.yaml \
 **Finetuning Llama 3.1 405B**: Work in progress! If you want to follow the work, join the [SkyPilot community Slack](https://slack.skypilot.co/) for discussions.
 
 ## Use your custom data
-The example above finetune Llama-3.1 on Alpaca dataset ([`yahma/alpaca-cleaned`](https://huggingface.co/datasets/yahma/alpaca-cleaned)), but for real use cases, you may want to finetune it on your own dataset. 
+The example above finetune Llama 3.1 on Alpaca dataset ([`yahma/alpaca-cleaned`](https://huggingface.co/datasets/yahma/alpaca-cleaned)), but for real use cases, you may want to finetune it on your own dataset. 
 
 You can do so by specifying the huggingface path to your own dataset as following (we use [`gbharti/finance-alpaca`](https://huggingface.co/datasets/gbharti/finance-alpaca) as an example below):
 ```bash
@@ -142,7 +150,7 @@ sky launch -c llama31 lora.yaml \
 <img src="https://imgur.com/B7Ib4Ii.png" width="60%" />
 
      
-<figcaption>Training Loss of LoRA finetuning Llama-3.1</figcaption>
+<figcaption>Training Loss of LoRA finetuning Llama 3.1</figcaption>
 </figure>
 
 ## Serve the fine tuned model
@@ -183,7 +191,7 @@ curl http://$ENDPOINT/v1/chat/completions \
     <summary>SkyPilot YAML <code>serve.yaml</code> for serving the finetuned model</summary>
     
 ```yaml
-# Serve a LoRA finetuned Meta Llama-3.1.
+# Serve a LoRA finetuned Meta Llama 3.1.
 #
 # Usage:
 #
@@ -221,7 +229,7 @@ run: |
 </details>
 
 ## Appendix: Preparation
-1. Request the access to [Llama-3.1 weights on huggingface](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) (Click on the blue box and follow the steps):
+1. Request the access to [Llama 3.1 weights on huggingface](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) (Click on the blue box and follow the steps):
 ![](https://imgur.com/snIQhr9.png)
 
 2. Get your [huggingface access token](https://huggingface.co/settings/tokens):
