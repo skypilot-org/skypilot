@@ -106,7 +106,6 @@ run: |
 </details>
 
 Run the following on your local machine:
-<!-- (does not need GPUs for launch): -->
 
 ```bash
 # Download the files for Llama 3.1 finetuning
