@@ -23,9 +23,6 @@ This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot)
 <center>
 <img src="https://i.imgur.com/VxMuKJn.png" width="90%">
 </figure>
-<!-- ![](https://i.imgur.com/VxMuKJn.png) -->
-<!-- ![](https://i.imgur.com/0mbAOkN.png) -->
-<!-- ![](https://i.imgur.com/bEBPMS1.png) -->
 
 
 <!-- [SkyPilot](https://github.com/skypilot-org/skypilot) will be used as the unified framework to launch finetuning on any (or multiple) infra you bring. -->
