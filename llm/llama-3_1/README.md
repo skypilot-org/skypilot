@@ -1,6 +1,9 @@
 # Serve Llama 3.1 on Your Own Infrastructure
 
-![](https://i.imgur.com/kQGzHI6.png)
+
+<p align="center">
+<img src="https://i.imgur.com/kQGzHI6.png" alt="Llama-3.1 on SkyPilot" style="width: 70%;">
+</p>
 
 On July 23, 2024, Meta AI released the [Llama 3.1 model family](https://ai.meta.com/blog/meta-llama-3-1/), including a 405B parameter model in both base model and instruction-tuned forms.
 
@@ -17,6 +20,18 @@ SkyPilot will be used as the unified framework to launch serving on any (or mult
 ## Serving Llama 3.1 on your infra
 
 We will first test the model on a GPU dev node, then package it for deployment using SkyPilot.
+
+### GPUs required for serving Llama 3.1
+
+Wondering what GPU you need for each model? Here is the compatibility matrix (applies to both pretrained and instruction tuned models):
+
+| **GPU**         	| **Meta-Llama-3.1-8B**        	| **Meta-Llama-3.1-70B** 	| **Meta-Llama-3.1-405B-FP8**  	|
+|-----------------	|------------------------------	|------------------------	|------------------------------	|
+| **L4:1**        	| ✅, with `--max-model-len 4096` 	| ❌                      	| ❌                            	|
+| **L4:8**        	| ✅                            	| ❌                      	| ❌                            	|
+| **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
+| **A100-80GB:8** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
+
 
 ### Step 0: Bring your infra
 
@@ -51,7 +66,7 @@ See [docs](https://skypilot.readthedocs.io/en/latest/getting-started/installatio
 
 ### Step 1: Get a GPU dev node (pod or VM)
 
-> **Tip:** Skip directly to Step 3 to get the SkyPilot YAML to deploy Llama 3.1 on your infra.
+> **Tip:** If you simply want the final deployment YAML, skip directly to [Step 3](#step-3-package-and-deploy-using-skypilot).
 
 One command to get a GPU dev pod/VM:
 ```bash
@@ -100,15 +115,6 @@ Tip: available model names can be found [here](https://huggingface.co/collection
 
 
 The full precision 405B model Meta-Llama-3.1-405B requires multi-node inference and is work in progress - join the [SkyPilot community Slack](https://slack.skypilot.co/) for discussions.
-
-If you are wondering what GPU you need for each model, here is the compatibility matrix (applies to both pretrained and instruction tuned models):
-
-| **GPU**         	| **Meta-Llama-3.1-8B**        	| **Meta-Llama-3.1-70B** 	| **Meta-Llama-3.1-405B-FP8**  	|
-|-----------------	|------------------------------	|------------------------	|------------------------------	|
-| **L4:1**        	| ✅, with `--max-model-len 4096` 	| ❌                      	| ❌                            	|
-| **L4:8**        	| ✅                            	| ❌                      	| ❌                            	|
-| **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
-| **A100-80GB:8** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
 
 Test that `curl` works from within the node:
 ```bash
