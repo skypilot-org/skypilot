@@ -229,12 +229,14 @@ def _wait_for_pods_to_run(namespace, new_nodes):
         # command failed or failed to pull image etc.
         for init_status in pod.status.init_container_statuses:
             init_terminated = init_status.state.terminated
-            if init_terminated and init_terminated.exit_code != 0:
-                msg = init_terminated.message if (
-                    init_terminated.message) else str(init_terminated)
-                raise config_lib.KubernetesError(
-                    f'Failed to run init container for pod {pod.metadata.name}.'
-                    f' Error details: {msg}.')
+            if init_terminated:
+                if init_terminated.exit_code != 0:
+                    msg = init_terminated.message if (
+                        init_terminated.message) else str(init_terminated)
+                    raise config_lib.KubernetesError(
+                        'Failed to run init container for pod '
+                        f'{pod.metadata.name}. Error details: {msg}.')
+                return
             init_waiting = init_status.state.waiting
             if (init_waiting is not None and init_waiting.reason
                     not in ['ContainerCreating', 'PodInitializing']):
@@ -268,11 +270,10 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                     # See list of possible reasons for waiting here:
                     # https://stackoverflow.com/a/57886025
                     waiting = container_status.state.waiting
-                    if (waiting is not None and
-                            waiting.reason != 'ContainerCreating'):
+                    if waiting is not None:
                         if waiting.reason == 'PodInitializing':
                             _check_init_containers(pod)
-                        else:
+                        elif waiting.reason != 'ContainerCreating':
                             msg = waiting.message if waiting.message else str(
                                 waiting)
                             raise config_lib.KubernetesError(
