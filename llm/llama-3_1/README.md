@@ -23,7 +23,7 @@ We will first test the model on a GPU dev node, then package it for deployment u
 
 ### GPUs required for serving Llama 3.1
 
-Wondering what GPU you need for each model? Here is the compatibility matrix (applies to both pretrained and instruction tuned models):
+Llama 3.1 comes in different sizes, and each size has different GPU requirements. Here is the model-GPU compatibility matrix (applies to both pretrained and instruction tuned models):
 
 | **GPU**         	| **Meta-Llama-3.1-8B**        	| **Meta-Llama-3.1-70B** 	| **Meta-Llama-3.1-405B-FP8**  	|
 |-----------------	|------------------------------	|------------------------	|------------------------------	|
