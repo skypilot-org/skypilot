@@ -1,0 +1,50 @@
+# Serve a LoRA finetuned Meta Llama-3.1.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch serve.yaml -c llama31-serve --env HF_TOKEN
+
+envs:
+  MODEL_SIZE: 8B
+  HF_TOKEN:
+  # Change this to your checkpoint bucket created in lora.yaml
+  CHECKPOINT_BUCKET_NAME: your-checkpoint-bucket
+  LORA_NAME: my-finance-lora
+
+resources:
+  accelerators: L4
+  ports: 8081
+  cpus: 32+
+
+file_mounts:
+  /checkpoints:
+    name: $CHECKPOINT_BUCKET_NAME
+    mode: MOUNT
+
+setup: |
+  pip install vllm==0.5.3post1
+  pip install vllm-flash-attn==2.5.9.post1
+  # Install Gradio for web UI.
+  pip install gradio openai
+
+run: |
+  vllm serve meta-llama/Meta-Llama-3.1-8B-Instruct \
+    --tensor-parallel-size 8 --enable-lora \
+    --lora-modules $LORA_NAME=/checkpoints \
+    --max-model-len=32764 --port 8081 \
+    2>&1 | tee api_server.log &
+
+  while ! `cat api_server.log | grep -q 'Uvicorn running on'`; do
+    echo 'Waiting for vllm api server to start...'
+    sleep 5
+  done
+
+  echo 'Starting gradio server...'
+  git clone https://github.com/vllm-project/vllm.git || true
+  python vllm/examples/gradio_openai_chatbot_webserver.py \
+    -m $MODEL_NAME \
+    --port 8811 \
+    --model-url http://localhost:8081/v1
+
+
+  

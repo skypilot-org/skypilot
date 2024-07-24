@@ -48,6 +48,11 @@ run: |
     --config /configs/${MODEL_SIZE}-lora.yaml \
     dataset.source=$DATASET
 
+  # Remove the checkpoint files to save space, LoRA serving only needs the
+  # adapter files.
+  rm /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/*.pt
+  rm /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/*.safetensors
+  
   mkdir -p /output/$MODEL_SIZE-lora
   rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct /output/$MODEL_SIZE-lora
   cp -r /tmp/lora_finetune_output /output/$MODEL_SIZE-lora/
