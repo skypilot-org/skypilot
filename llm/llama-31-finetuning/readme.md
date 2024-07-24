@@ -7,7 +7,6 @@
 
 On July 23, 2024, Meta released the [Llama 3.1 model family](https://ai.meta.com/blog/meta-llama-3-1/), including a 405B parameter model in both base model and instruction-tuned forms. Llama 3.1 405B became _the first open LLM that closely rivals top proprietary models_ like GPT-4o and Claude 3.5 Sonnet.
 
-<!-- This guide shows how to finetune Llama 3.1 on **your own data and infra** with everything packaged in a easily launchable SkyPilot YAML. Supported infra: -->
 This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) and [torchtune](https://pytorch.org/torchtune/stable/index.html) to **finetune Llama 3.1 on your own data and infra**. Everything is packaged in a simple [SkyPilot YAML](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
 - Local GPU workstation
 - Kubernetes cluster
