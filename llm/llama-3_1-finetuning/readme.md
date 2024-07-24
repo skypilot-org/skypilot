@@ -210,7 +210,7 @@ setup: |
 run: |
   vllm serve meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE --enable-lora \
-    --lora-modules $LORA_NAME=/checkpoints \
+    --lora-modules $LORA_NAME=/checkpoints/${MODEL_SIZE}-lora/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/ \
     --max-model-len=2048 --port 8081
 ```
     
