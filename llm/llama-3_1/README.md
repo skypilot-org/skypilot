@@ -19,7 +19,9 @@ SkyPilot will be used as the unified framework to launch serving on any (or mult
 
 ## Serving Llama 3.1 on your infra
 
-We will first test the model on a GPU dev node, then package it for deployment using SkyPilot.
+Below is a step-by-step guide to using SkyPilot for testing a new model on a GPU dev node, and then packaging it for one-click deployment across any infrastructure. 
+
+**For the complete packaged deployment YAML for Llama 3.1, see [Step 3: Package and deploy using SkyPilot](#Step-3-Package-and-deploy-using-SkyPilot).**
 
 ### GPUs required for serving Llama 3.1
 
