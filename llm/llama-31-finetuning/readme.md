@@ -4,12 +4,6 @@
 <center>
 <img src="https://i.imgur.com/Fr5Jq1f.png" width="90%">
 </figure>
-<!-- ![](https://i.imgur.com/Fr5Jq1f.png) -->
-<!-- ![](https://i.imgur.com/5Sosf3N.png) -->
-<!-- ![](https://i.imgur.com/TRPHSbc.png) -->
-
-<!-- ![](https://i.imgur.com/GPOQ9v4.png) -->
-<!-- ![](https://i.imgur.com/wFTZocF.png) -->
 
 On July 23, 2024, Meta released the [Llama 3.1 model family](https://ai.meta.com/blog/meta-llama-3-1/), including a 405B parameter model in both base model and instruction-tuned forms. Llama 3.1 405B became _the first open LLM that closely rivals top proprietary models_ like GPT-4o and Claude 3.5 Sonnet.
 
