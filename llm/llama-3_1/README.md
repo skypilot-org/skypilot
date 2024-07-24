@@ -132,7 +132,9 @@ curl http://$ENDPOINT/v1/chat/completions \
 
 🎉 Voila! You should be getting results like this:
 
-![](./llama3.1-curl-outputs.png)
+<p align="center">
+<img src="https://i.imgur.com/yY0h3lZ.png" alt="Llama-3.1 on SkyPilot" style="width: 50%;">
+</p>
 
 When you are done, terminate your cluster with:
 ```
@@ -295,4 +297,4 @@ sky serve down llama31
 ```
 
 ## Bonus: Finetuning Llama 3.1
-You can also finetune Llama 3.1 on your infra with SkyPilot. Check out our [blog](https://blog.skypilot.co/finetune-llama-31-on-your-own-data-and-infra/) for more details.
+You can also finetune Llama 3.1 on your infra with SkyPilot. Check out our [blog](https://blog.skypilot.co/finetune-llama-3_1-on-your-infra/) for more details.
