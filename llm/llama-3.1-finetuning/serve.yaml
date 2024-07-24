@@ -45,6 +45,4 @@ run: |
     -m $MODEL_NAME \
     --port 8811 \
     --model-url http://localhost:8081/v1
-
-
   
