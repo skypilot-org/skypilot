@@ -4,16 +4,9 @@
 <center>
 <img src="https://i.imgur.com/Fr5Jq1f.png" width="90%">
 </figure>
-<!-- ![](https://i.imgur.com/Fr5Jq1f.png) -->
-<!-- ![](https://i.imgur.com/5Sosf3N.png) -->
-<!-- ![](https://i.imgur.com/TRPHSbc.png) -->
-
-<!-- ![](https://i.imgur.com/GPOQ9v4.png) -->
-<!-- ![](https://i.imgur.com/wFTZocF.png) -->
 
 On July 23, 2024, Meta released the [Llama 3.1 model family](https://ai.meta.com/blog/meta-llama-3-1/), including a 405B parameter model in both base model and instruction-tuned forms. Llama 3.1 405B became _the first open LLM that closely rivals top proprietary models_ like GPT-4o and Claude 3.5 Sonnet.
 
-<!-- This guide shows how to finetune Llama 3.1 on **your own data and infra** with everything packaged in a easily launchable SkyPilot YAML. Supported infra: -->
 This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) and [torchtune](https://pytorch.org/torchtune/stable/index.html) to **finetune Llama 3.1 on your own data and infra**. Everything is packaged in a simple [SkyPilot YAML](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
 - Local GPU workstation
 - Kubernetes cluster
@@ -23,12 +16,8 @@ This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot)
 <center>
 <img src="https://i.imgur.com/VxMuKJn.png" width="90%">
 </figure>
-<!-- ![](https://i.imgur.com/VxMuKJn.png) -->
-<!-- ![](https://i.imgur.com/0mbAOkN.png) -->
-<!-- ![](https://i.imgur.com/bEBPMS1.png) -->
 
 
-<!-- [SkyPilot](https://github.com/skypilot-org/skypilot) will be used as the unified framework to launch finetuning on any (or multiple) infra you bring. -->
 
 ## Let's finetune Llama 3.1
 We will use [torchtune](https://pytorch.org/torchtune/stable/index.html) to finetune Llama 3.1. The example below uses the [`yahma/alpaca-cleaned`](https://huggingface.co/datasets/yahma/alpaca-cleaned) dataset, which you can replace with your own dataset later.
@@ -106,7 +95,6 @@ run: |
 </details>
 
 Run the following on your local machine:
-<!-- (does not need GPUs for launch): -->
 
 ```bash
 # Download the files for Llama 3.1 finetuning
