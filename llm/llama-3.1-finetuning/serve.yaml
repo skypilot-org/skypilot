@@ -28,8 +28,8 @@ setup: |
   pip install gradio openai
 
 run: |
-  vllm serve meta-llama/Meta-Llama-3.1-8B-Instruct \
-    --tensor-parallel-size 8 --enable-lora \
+  vllm serve meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE --enable-lora \
     --lora-modules $LORA_NAME=/checkpoints \
     --max-model-len=32764 --port 8081 \
     2>&1 | tee api_server.log &
@@ -45,4 +45,3 @@ run: |
     -m $MODEL_NAME \
     --port 8811 \
     --model-url http://localhost:8081/v1
-  
