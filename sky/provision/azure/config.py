@@ -159,11 +159,9 @@ def bootstrap_instances(
             parameters=parameters,
         ).result().properties.outputs
 
-    nsg_id = outputs['nsg']['value']
-
     # append output resource ids to be used with vm creation
     provider_config['msi'] = outputs['msi']['value']
-    provider_config['nsg'] = nsg_id
+    provider_config['nsg'] = outputs['nsg']['value']
     provider_config['subnet'] = outputs['subnet']['value']
 
     return config

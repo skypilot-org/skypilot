@@ -278,6 +278,11 @@ def _create_instances(
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         _TAG_SKYPILOT_VM_ID: vm_id
     }
+    # Seems like it's impossible to have the option set for publicIPAddress to be removed
+    # when VM is deleted unlike OsDisk and NetworkInterface(nci).
+    # Hence, this is a temporary solution for setting the deleteOption outside of the template.
+    # Reference: https://github.com/Azure/azure-sdk-for-java/issues/38806
+    #azure.get
     instances = _filter_instances(compute_client, resource_group, filters)
     assert len(instances) == count, (len(instances), count)
     return instances
@@ -601,6 +606,10 @@ def terminate_instances(
 
     use_external_resource_group = provider_config.get(
         'use_external_resource_group', False)
+    # This is temporary value set for testing VM removal for resource group specified scenario
+    # to see if attached resources are all removed correctly when only the VM is removed instead of
+    # resource group itself is removed.
+    use_external_resource_group = True
     # When the instance is provisioned at user provided resource group, we want
     # to only delete the VM and not the resource group itself.
     if use_external_resource_group:
