@@ -25,7 +25,6 @@ This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot)
 </figure>
 
 
-<!-- [SkyPilot](https://github.com/skypilot-org/skypilot) will be used as the unified framework to launch finetuning on any (or multiple) infra you bring. -->
 
 ## Let's finetune Llama 3.1
 We will use [torchtune](https://pytorch.org/torchtune/stable/index.html) to finetune Llama 3.1. The example below uses the [`yahma/alpaca-cleaned`](https://huggingface.co/datasets/yahma/alpaca-cleaned) dataset, which you can replace with your own dataset later.
