@@ -179,10 +179,10 @@ curl http://$ENDPOINT/v1/chat/completions \
       },
       {
         "role": "user",
-        "prompt": "For a car, what scams can be plotted with 0% financing vs rebate?",
+        "content": "For a car, what scams can be plotted with 0% financing vs rebate?"
       }
     ]
-  }'| jq .
+  }' | jq .
 ```
 
 :tada: **Congratulations!** You now have a finetuned Llama 3.1 8B model that is well versed in finance topics. To recap, all model checkpoints and replicas **stay in your own private infrastructure**.
