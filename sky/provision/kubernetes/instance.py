@@ -236,10 +236,12 @@ def _wait_for_pods_to_run(namespace, new_nodes):
                     raise config_lib.KubernetesError(
                         'Failed to run init container for pod '
                         f'{pod.metadata.name}. Error details: {msg}.')
-                return
+                continue
             init_waiting = init_status.state.waiting
             if (init_waiting is not None and init_waiting.reason
                     not in ['ContainerCreating', 'PodInitializing']):
+                # TODO(romilb): There may be more states to check for. Add
+                #  them as needed.
                 msg = init_waiting.message if (
                     init_waiting.message) else str(init_waiting)
                 raise config_lib.KubernetesError(
