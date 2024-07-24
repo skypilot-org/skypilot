@@ -1,6 +1,7 @@
 """Cudo Compute instance provisioning."""
 
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -17,16 +18,13 @@ logger = sky_logging.init_logger(__name__)
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
     instances = cudo_wrapper.list_instances()
-    possible_names = [
-        f'{cluster_name_on_cloud}-head', f'{cluster_name_on_cloud}-worker'
-    ]
 
     filtered_nodes = {}
     for instance_id, instance in instances.items():
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name') in possible_names:
+        if instance.get('name').startsWith(cluster_name_on_cloud):
             filtered_nodes[instance_id] = instance
     return filtered_nodes
 
@@ -90,10 +88,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         raise
     for _ in range(to_start_count):
 
-        node_type = 'head' if head_instance_id is None else 'worker'
+        if head_instance_id:
+            node_name = f'{cluster_name_on_cloud}-head'
+        else:
+            node_name = f'{cluster_name_on_cloud}-worker-{uuid.uuid4().hex[:4]}'
         try:
             instance_id = cudo_wrapper.launch(
-                name=f'{cluster_name_on_cloud}-{node_type}',
+                name=node_name,
                 ssh_key=public_key,
                 data_center_id=region,
                 machine_type=spec['machine_type'],
