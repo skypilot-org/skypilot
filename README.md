@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [Jul, 2024] Finetune **Llama 3.1** on your infra: [**example**](./llm/llama-3_1-finetuning/).
 - [Jun, 2024] Reproduce **GPT** with [llm.c](https://github.com/karpathy/llm.c/discussions/481) on any cloud: [**guide**](./llm/gpt-2/)
 - [Apr, 2024] Serve and finetune [**Llama 3**](https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html) on any cloud or Kubernetes: [**example**](./llm/llama-3/)
 - [Apr, 2024] Serve [**Qwen-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) on your infra: [**example**](./llm/qwen/)
