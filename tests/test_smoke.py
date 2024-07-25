@@ -1197,6 +1197,11 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
     if azure_mount_unsupported_ubuntu_version in image_id:
+        # The store for mount_private_mount is not specified in the template.
+        # If we're running on Azure, the private mount will be created on
+        # azure blob. That will not be supported on the ubuntu 18.04 image
+        # and thus fail. For other clouds, the private mount on other
+        # storage types (GCS/S3) should succeed.
         include_private_mount = False if generic_cloud == 'azure' else True
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
