@@ -20,6 +20,7 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
@@ -170,8 +171,12 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     # Select the bucket type.
     enabled_clouds = storage_lib.get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access=True)
-    # Already checked by raise_if_no_cloud_access=True.
-    assert enabled_clouds
+    # Sky Benchmark only supports GCS and S3 (see _download_remote_dir and
+    # _delete_remote_dir).
+    enabled_clouds = [cloud for cloud in enabled_clouds
+                      if cloud in [str(clouds.AWS()), str(clouds.GCP())]]
+    assert enabled_clouds, ('No enabled cloud storage found. Sky Benchmark '
+                            'requires GCP or AWS to store logs.')
     bucket_type = data.StoreType.from_cloud(enabled_clouds[0]).value
 
     # Create a benchmark bucket.
