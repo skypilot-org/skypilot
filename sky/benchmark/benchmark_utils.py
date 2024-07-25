@@ -173,8 +173,9 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
         raise_if_no_cloud_access=True)
     # Sky Benchmark only supports S3 (see _download_remote_dir and
     # _delete_remote_dir).
-    enabled_clouds = [cloud for cloud in enabled_clouds
-                      if cloud in [str(clouds.AWS())]]
+    enabled_clouds = [
+        cloud for cloud in enabled_clouds if cloud in [str(clouds.AWS())]
+    ]
     assert enabled_clouds, ('No enabled cloud storage found. Sky Benchmark '
                             'requires GCP or AWS to store logs.')
     bucket_type = data.StoreType.from_cloud(enabled_clouds[0]).value
