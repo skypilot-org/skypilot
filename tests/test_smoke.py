@@ -5268,6 +5268,7 @@ def test_multiple_resources():
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
+@pytest.mark.aws  # SkyBenchmark requires S3 access
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
