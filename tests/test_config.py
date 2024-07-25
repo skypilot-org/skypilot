@@ -10,6 +10,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 
+DISK_ENCRYPTED = True
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
 NODEPORT_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value
@@ -42,6 +43,7 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                 vpc_name: {VPC_NAME}
                 use_internal_ips: true
                 ssh_proxy_command: {PROXY_COMMAND}
+                disk_encrypted: {DISK_ENCRYPTED}
 
             gcp:
                 vpc_name: {VPC_NAME}
@@ -215,6 +217,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     # Check that the config is loaded with the expected values
     assert skypilot_config.loaded()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
+    assert skypilot_config.get_nested(('aws', 'disk_encrypted'), None)
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND

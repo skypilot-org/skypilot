@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [Jul, 2024] Finetune **Llama 3.1** on your infra: [**example**](./llm/llama-3_1-finetuning/).
 - [Jun, 2024] Reproduce **GPT** with [llm.c](https://github.com/karpathy/llm.c/discussions/481) on any cloud: [**guide**](./llm/gpt-2/)
 - [Apr, 2024] Serve and finetune [**Llama 3**](https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html) on any cloud or Kubernetes: [**example**](./llm/llama-3/)
 - [Apr, 2024] Serve [**Qwen-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) on your infra: [**example**](./llm/qwen/)
@@ -58,7 +59,7 @@ SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offer
 SkyPilot **abstracts away cloud infra burdens**:
 - Launch jobs & clusters on any cloud
 - Easy scale-out: queue and run many jobs, automatically managed
-- Easy access to object stores (S3, GCS, R2)
+- Easy access to object stores (S3, GCS, Azure, R2, IBM)
 
 SkyPilot **maximizes GPU availability for your jobs**:
 * Provision in all zones/regions/clouds you have access to ([the _Sky_](https://arxiv.org/abs/2205.07147)), with automatic failover
@@ -70,13 +71,13 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Install with pip (we recommend the nightly build for the latest features or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)):
-```bash
-pip install "skypilot-nightly[aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,kubernetes]"  # choose your clouds
-```
-To get the last release, use:
+Install with pip:
 ```bash
 pip install -U "skypilot[aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,kubernetes]"  # choose your clouds
+```
+To get the latest features and fixes, use the nightly build or [install from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
+```bash
+pip install "skypilot-nightly[aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,kubernetes]"  # choose your clouds
 ```
 
 Current supported providers (AWS, Azure, GCP, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo, IBM, Samsung, Cloudflare, any Kubernetes cluster):

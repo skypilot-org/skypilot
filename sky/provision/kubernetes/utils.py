@@ -426,11 +426,16 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         ]
         assert len(gpu_nodes) > 0, 'GPU nodes not found'
         candidate_nodes = gpu_nodes
-        not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
-                                 'enough CPU and/or memory. ')
+        not_fit_reason_prefix = (
+            f'GPU nodes with {acc_type} do not have '
+            f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
+            f'memory (> {k8s_instance_type.memory} G). ')
     else:
         candidate_nodes = nodes
-        not_fit_reason_prefix = 'No nodes found with enough CPU and/or memory. '
+        not_fit_reason_prefix = (f'No nodes found with enough '
+                                 f'CPU (> {k8s_instance_type.cpus} CPUs) '
+                                 'and/or memory '
+                                 f'(> {k8s_instance_type.memory} G). ')
     # Check if  CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
@@ -928,7 +933,8 @@ def construct_ssh_jump_command(
         ssh_jump_port: Optional[int] = None,
         ssh_jump_user: str = 'sky',
         proxy_cmd_path: Optional[str] = None,
-        proxy_cmd_target_pod: Optional[str] = None) -> str:
+        proxy_cmd_target_pod: Optional[str] = None,
+        current_kube_context: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -940,8 +946,11 @@ def construct_ssh_jump_command(
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
+        kube_context_flag = f' {current_kube_context}' if (current_kube_context
+                                                           is not None) else ''
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
-                                   f'{proxy_cmd_target_pod}\' ')
+                                   f'{proxy_cmd_target_pod}'
+                                   f'{kube_context_flag}\'')
     return ssh_jump_proxy_command
 
 
@@ -1006,12 +1015,14 @@ def get_ssh_proxy_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
+        current_context = get_current_kube_config_context_name()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
             ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
             proxy_cmd_path=ssh_jump_proxy_command_path,
-            proxy_cmd_target_pod=k8s_ssh_target)
+            proxy_cmd_target_pod=k8s_ssh_target,
+            current_kube_context=current_context)
     return ssh_jump_proxy_command
 
 

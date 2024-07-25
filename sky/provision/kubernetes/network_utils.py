@@ -75,6 +75,10 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
 
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    annotations = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'annotations'), {})
+    labels = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), {})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -82,6 +86,8 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
         ports=ports,
         selector_key=selector_key,
         selector_value=selector_value,
+        annotations=annotations,
+        labels=labels,
     )
     content = yaml.safe_load(cont)
     return content
@@ -98,6 +104,10 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
             f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
+    annotations = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'annotations'), {})
+    labels = skypilot_config.get_nested(
+        ('kubernetes', 'custom_metadata', 'labels'), {})
     j2_template = jinja2.Template(template)
     cont = j2_template.render(
         namespace=namespace,
@@ -109,6 +119,8 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
         ingress_name=ingress_name,
         selector_key=selector_key,
         selector_value=selector_value,
+        annotations=annotations,
+        labels=labels,
     )
     content = yaml.safe_load(cont)
 

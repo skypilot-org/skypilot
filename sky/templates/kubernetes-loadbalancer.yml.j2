@@ -5,6 +5,13 @@ service_spec:
     name: {{ service_name }}
     labels:
       parent: skypilot
+      {%- for label_key, label_value in labels.items() %}
+      {{ label_key }}: {{ label_value|tojson }}
+      {%- endfor %}
+    annotations:
+      {%- for key, value in annotations.items() %}
+      {{ key }}: {{ value|tojson }}
+      {%- endfor %}
   spec:
     type: LoadBalancer
     selector:

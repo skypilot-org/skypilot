@@ -349,10 +349,6 @@ class Optimizer:
                             for orig_resources in node.resources):
                         source_hint = 'kubernetes cluster'
 
-                # TODO(romilb): When `sky show-gpus` supports Kubernetes,
-                #  add a hint to run `sky show-gpus --kubernetes` to list
-                #  available accelerators on Kubernetes.
-
                 bold = colorama.Style.BRIGHT
                 cyan = colorama.Fore.CYAN
                 reset = colorama.Style.RESET_ALL
@@ -1240,21 +1236,25 @@ def _fill_in_launchable_resources(
             continue
         clouds_list = ([resources.cloud]
                        if resources.cloud is not None else enabled_clouds)
+        # If clouds provide hints, store them for later printing.
+        hints: Dict[clouds.Cloud, str] = {}
         for cloud in clouds_list:
-            (feasible_resources,
-             fuzzy_candidate_list) = cloud.get_feasible_launchable_resources(
-                 resources, num_nodes=task.num_nodes)
-            if len(feasible_resources) > 0:
+            feasible_resources = cloud.get_feasible_launchable_resources(
+                resources, num_nodes=task.num_nodes)
+            if feasible_resources.hint is not None:
+                hints[cloud] = feasible_resources.hint
+            if len(feasible_resources.resources_list) > 0:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
                 # the underlying service_catalog filtering
-                cheapest = feasible_resources[0]
+                cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
                     _make_launchables_for_valid_region_zones(cheapest))
-                cloud_candidates[cloud] = feasible_resources
+                cloud_candidates[cloud] = feasible_resources.resources_list
             else:
-                all_fuzzy_candidates.update(fuzzy_candidate_list)
+                all_fuzzy_candidates.update(
+                    feasible_resources.fuzzy_candidate_list)
         if len(launchable[resources]) == 0:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])
@@ -1270,6 +1270,8 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
+                for cloud, hint in hints.items():
+                    logger.info(f'{repr(cloud)}: {hint}')
             else:
                 if resources.cpus is not None:
                     logger.info('Try specifying a different CPU count, '
