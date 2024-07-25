@@ -46,8 +46,8 @@ import pytest
 import sky
 from sky import global_user_state
 from sky import jobs
-from sky import skypilot_config
 from sky import serve
+from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -1195,9 +1195,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     s3_command = f'aws s3 ls {storage_name}/hello.txt'
     gsutil_command = f'gsutil ls gs://{storage_name}/hello.txt'
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
-        storage_lib.StoreType.AZURE,
-        storage_name,
-        suffix='hello.txt')
+        storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
     if azure_mount_unsupported_ubuntu_version in image_id:
         include_private_mount = False if generic_cloud == 'azure' else True
         content = template.render(storage_name=storage_name,
@@ -4293,7 +4291,8 @@ class TestStorageWithCredentials:
             config_storage_account = skypilot_config.get_nested(
                 ('azure', 'storage_account'), None)
             storage_account_name = config_storage_account if (
-                config_storage_account is not None) else (
+                config_storage_account is not None
+            ) else (
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
                     user_hash=common_utils.get_user_hash()))
