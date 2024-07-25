@@ -33,9 +33,10 @@ API_TIMEOUT = 5
 def _decorate_methods(obj, decorator):
     for attr_name in dir(obj):
         attr = getattr(obj, attr_name)
-        if callable(attr) and not attr_name.startswith('__') and not getattr(attr, '_is_sky_decorated', False):
+        if callable(attr) and not attr_name.startswith('__') and not getattr(
+                attr, '_is_sky_decorated', False):
             decorated_attr = decorator(attr)
-            decorated_attr._is_sky_decorated = True
+            decorated_attr._is_sky_decorated = True  # pylint: disable=protected-access
             setattr(obj, attr_name, decorated_attr)
     return obj
 
