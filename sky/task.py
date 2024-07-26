@@ -431,7 +431,7 @@ class Task:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                region = config['resources']['region']
+                region = config['resources'].get('region', None)
                 storage_obj = storage_lib.Storage.from_yaml_config(
                     storage[1], region)
             except exceptions.StorageSourceError as e:
