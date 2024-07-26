@@ -392,7 +392,7 @@ class Task:
         if config.get('service') is not None:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
-
+        
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -411,6 +411,7 @@ class Task:
         if file_mounts is not None:
             copy_mounts = {}
             for dst_path, src in file_mounts.items():
+                
                 # Check if it is str path
                 if isinstance(src, str):
                     copy_mounts[dst_path] = src
@@ -430,7 +431,8 @@ class Task:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+                region = config['resources']['region']
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1], region)
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
@@ -765,7 +767,7 @@ class Task:
                         'by the workdir. If uploading a file/folder to the '
                         'workdir is needed, please specify the full path to '
                         'the file/folder.')
-
+        
         self.file_mounts = file_mounts
         return self
 
@@ -837,6 +839,7 @@ class Task:
         Raises:
           ValueError: if input paths are invalid.
         """
+
         if storage_mounts is None:
             self.storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
@@ -953,6 +956,7 @@ class Task:
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
+
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
             else:
