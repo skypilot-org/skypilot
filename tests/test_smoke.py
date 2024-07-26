@@ -1317,22 +1317,22 @@ def test_scp_logs():
     run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_symlink_latest_logs():
+def test_symlink_latest_logs(generic_cloud: str):
+    name = _get_cluster_name()
     test = Test(
         'symlink_latest_logs',
         [
-            'sky launch -c test1 --cloud kubernetes -- echo hi > log1.txt || true',
+            f'sky launch -y -c {name} --cloud {generic_cloud} -- echo hi > log1.txt || true',
             'eval symlink_path="~/sky_logs/sky_latest"; [ -L "$symlink_path" ] || exit 1 ;'
             'target_file=$(readlink -f "$symlink_path") || exit 1 ;'
             'grep -E "To view detailed progress: .+ $target_file" log1.txt || exit 1;'
-            'sky launch -c test1 --cloud kubernetes -- echo hi > log2.txt || true ;'
+            f'sky launch -y -c {name} --cloud {generic_cloud} -- echo hi > log2.txt || true ;'
             '[ -L "$symlink_path" ] || exit 1 ;'
             'target_file2=$(readlink -f "$symlink_path") || exit 1 ;'
             'grep -E "To view detailed progress: .+ $target_file2" log2.txt || exit 1;'
             '[ "$target_file" != "$target_file2" ] || exit 1'
         ],
-        'rm log1.txt log2.txt',
+        'rm log1.txt log2.txt 2> /dev/null || true',
     )
     run_one_test(test)
 
