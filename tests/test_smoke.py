@@ -1332,7 +1332,7 @@ def test_symlink_latest_logs():
             'grep -E "To view detailed progress: .+ $target_file2" log2.txt || exit 1;'
             '[ "$target_file" != "$target_file2" ] || exit 1'
         ],
-        'rm log1.txt log2.txt'
+        'rm log1.txt log2.txt',
     )
     run_one_test(test)
 
