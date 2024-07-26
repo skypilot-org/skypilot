@@ -212,7 +212,7 @@ def create_and_symlink_log_dir(log_dir: str):
                 os.remove(symlink_path)
             except OSError:
                 logger.warning('Failed to remove old symlink to latest logs'
-                               f'at {symlink_path!r}.')
+                               f' at {symlink_path!r}.')
                 return
         else:
             logger.warning(
