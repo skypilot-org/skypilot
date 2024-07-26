@@ -104,7 +104,7 @@
         "subnet": {
             "type": "string",
             "metadata": {
-                "descriptions": "Subnet resource id."
+                "description": "Subnet resource id."
             }
         },
         "osDiskTier": {
@@ -215,7 +215,7 @@
         },
         {
             "type": "Microsoft.Compute/virtualMachines",
-            "apiVersion": "2019-03-01",
+            "apiVersion": "2022-08-01",
             "name": "[concat(parameters('vmName'), copyIndex())]",
             "location": "[variables('location')]",
             "dependsOn": [
@@ -233,6 +233,7 @@
                 "storageProfile": {
                     "osDisk": {
                         "createOption": "fromImage",
+                        "deleteOption": "Delete",
                         "managedDisk": {
                             "storageAccountType": "[parameters('osDiskTier')]"
                         },
@@ -248,7 +249,10 @@
                 "networkProfile": {
                     "networkInterfaces": [
                         {
-                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfaceName'), copyIndex()))]"
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfaceName'), copyIndex()))]",
+                            "properties": {
+                                "deleteOption": "Delete"
+                              }
                         }
                     ]
                 },
@@ -296,6 +300,6 @@
                 "count": "[parameters('vmCount')]",
                 "input": "[reference(concat(variables('networkInterfaceName'), copyIndex())).ipConfigurations[0].properties.privateIPAddress]"
             }
-        }
+          }
     }
 }

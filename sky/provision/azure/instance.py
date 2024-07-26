@@ -36,6 +36,11 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
 _WAIT_CREATION_TIMEOUT_SECONDS = 600
+_RESOURCE_MANAGED_IDENTITY_TYPE = 'Microsoft.ManagedIdentity/userAssignedIdentities'
+_RESOURCE_NETWORK_SECURITY_GROUP_TYPE = 'Microsoft.Network/networkSecurityGroups'
+_RESOURCE_VIRTUAL_NETWORK_TYPE = 'Microsoft.Network/virtualNetworks'
+_RESOURCE_PUBLIC_IP_ADDRESS_TYPE = 'Microsoft.Network/publicIPAddresses'
+_RESOURCE_VIRTUAL_MACHINE_TYPE = 'Microsoft.Compute/virtualMachines'
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
@@ -606,22 +611,13 @@ def terminate_instances(
 
     use_external_resource_group = provider_config.get(
         'use_external_resource_group', False)
-    # This is temporary value set for testing VM removal for resource group specified scenario
-    # to see if attached resources are all removed correctly when only the VM is removed instead of
-    # resource group itself is removed.
-    use_external_resource_group = True
-    # When the instance is provisioned at user provided resource group, we want
-    # to only delete the VM and not the resource group itself.
+    
+    # When user specified resource group through config.yaml to create a VM, we
+    # cannot remove the entire resource group as it may contain other resources
+    # unrelated to this VM being removed.
     if use_external_resource_group:
-        compute_client = azure.get_client('compute', subscription_id)
-        delete_virtual_machine = _get_azure_sdk_function(
-            client=compute_client.virtual_machines, function_name='delete')
-        filters = {
-            constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-        }
-        nodes = _filter_instances(compute_client, resource_group, filters)
-        assert len(nodes) == 1
-        delete_virtual_machine(resource_group, nodes[0].name)
+        delete_vm_and_attached_resources(
+            subscription_id, resource_group, cluster_name_on_cloud)
     else:
         # For SkyPilot default resource groups, delete entire resource group.
         # This automatically terminates all resources within, including VMs
@@ -695,6 +691,81 @@ def _filter_instances(
     if included_instances:
         nodes = [node for node in nodes if node.name in included_instances]
     return nodes
+
+
+def delete_vm_and_attached_resources(
+    subscription_id: str,
+    resource_group: str,
+    cluster_name_on_cloud: str) -> None:
+    """Removes VM and attached resources.
+    
+    This function deletes a virtual machine and its associated resources
+    (public IP addresses, virtual networks, managed identities, and
+    network security groups) that match cluster_name_on_cloud. There are other
+    attached resources that are not removed within this method: OS disk and
+    network interface. Those are set to be removed with deleteOption from
+    sky/provision/azure/azure-vm-template.json when the VM is deleted.
+
+    Args:
+        subscription_id: The Azure subscription ID.
+        resource_group: The name of the resource group.
+        cluster_name_on_cloud: The name of the cluster to filter resources.
+    """
+    resource_client = azure.get_client('resource', subscription_id)
+    try:
+        list_resources = _get_azure_sdk_function(
+                    client=resource_client.resources,
+                    function_name='list_by_resource_group')
+        resources = list(list_resources(resource_group))
+    except azure.exceptions().ResourceNotFoundError as e:
+        if _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE in str(e):
+            return
+        raise
+    
+    filtered_resources = {
+        _RESOURCE_VIRTUAL_MACHINE_TYPE: [],
+        _RESOURCE_MANAGED_IDENTITY_TYPE: [],
+        _RESOURCE_NETWORK_SECURITY_GROUP_TYPE: [],
+        _RESOURCE_VIRTUAL_NETWORK_TYPE: [],
+        _RESOURCE_PUBLIC_IP_ADDRESS_TYPE: []
+    }
+
+    for resource in resources:
+        if (resource.type in filtered_resources and
+            cluster_name_on_cloud in resource.name):
+            filtered_resources[resource.type].append(resource.name)
+
+    network_client = azure.get_client('network', subscription_id)
+    msi_client = azure.get_client('msi', subscription_id)
+    compute_client = azure.get_client('compute', subscription_id)
+    
+    delete_virtual_machine = _get_azure_sdk_function(
+        client=compute_client.virtual_machines, function_name='delete')
+    delete_public_ip_addresses = _get_azure_sdk_function(
+        client=network_client.public_ip_addresses,
+        function_name='begin_delete')
+    delete_virtual_networks = _get_azure_sdk_function(
+        client=network_client.virtual_networks, function_name='begin_delete')
+    delete_managed_identity = _get_azure_sdk_function(
+        client=msi_client.user_assigned_identities, function_name='delete')
+    delete_network_security_group = _get_azure_sdk_function(
+        client=network_client.network_security_groups,
+        function_name='begin_delete')
+    
+    for vm_name in filtered_resources[_RESOURCE_VIRTUAL_MACHINE_TYPE]:
+        delete_virtual_machine(resource_group, vm_name).result()
+
+    for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
+        delete_public_ip_addresses(resource_group, public_ip_name).result()
+    
+    for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
+        delete_virtual_networks(resource_group, vnet_name)
+    
+    for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
+        delete_managed_identity(resource_group, msi_name)
+    
+    for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
+        delete_network_security_group(resource_group, nsg_name)
 
 
 @common_utils.retry
