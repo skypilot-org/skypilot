@@ -1322,15 +1322,17 @@ def test_symlink_latest_logs():
     test = Test(
         'symlink_latest_logs',
         [
-            'sky launch -c test2 --cloud kubernetes -- echo hi || true',
+            'sky launch -c test1 --cloud kubernetes -- echo hi > log1.txt || true',
             'eval symlink_path="~/sky_logs/sky_latest"; [ -L "$symlink_path" ] || exit 1 ;'
             'target_file=$(readlink -f "$symlink_path") || exit 1 ;'
-            'sky local down || true ;'
+            'grep -E "To view detailed progress: .+ $target_file" log1.txt || exit 1;'
+            'sky launch -c test1 --cloud kubernetes -- echo hi > log2.txt || true ;'
             '[ -L "$symlink_path" ] || exit 1 ;'
-            'target_file2=$(readlink -f "$symlink_path") ;'
+            'target_file2=$(readlink -f "$symlink_path") || exit 1 ;'
+            'grep -E "To view detailed progress: .+ $target_file2" log2.txt || exit 1;'
             '[ "$target_file" != "$target_file2" ] || exit 1'
         ],
-        'sky local down',
+        'rm log1.txt log2.txt'
     )
     run_one_test(test)
 

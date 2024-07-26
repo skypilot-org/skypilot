@@ -203,12 +203,7 @@ def create_and_symlink_log_dir(log_dir: str):
     Args:
         log_dir (str): Expanded log directory path.
     """
-    try:
-        os.makedirs(log_dir, exist_ok=True)
-    except OSError:
-        logger.warning(f'Failed to create log directory at {log_dir!r}.'
-                       'Check if there is a file with the same name.')
-        return
+    os.makedirs(log_dir, exist_ok=True)
     symlink_path = os.path.join(os.path.dirname(os.path.abspath(log_dir)),
                                 constants.SKY_LATEST_LINK)
     if os.path.exists(symlink_path):
