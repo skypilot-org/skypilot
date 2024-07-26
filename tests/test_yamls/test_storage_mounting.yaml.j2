@@ -1,13 +1,20 @@
 file_mounts:
-  # Mounting public buckets
+  # Mounting public buckets for AWS
   /mount_public_s3:
     source: s3://digitalcorpora
     mode: MOUNT
 
-  # Mounting public buckets
+  # Mounting public buckets for GCP
   /mount_public_gcp:
     source: gs://gcp-public-data-sentinel-2
     mode: MOUNT
+
+  {% if include_azure_mount | default(True) %}
+  # Mounting public buckets for Azure
+  /mount_public_azure:
+    source: https://azureopendatastorage.blob.core.windows.net/nyctlc
+    mode: MOUNT
+  {% endif %}
 
   # Mounting private buckets in COPY mode with a source dir
   /mount_private_copy:
@@ -21,11 +28,13 @@ file_mounts:
     source: ['~/tmp-workdir/tmp file', '~/tmp-workdir/tmp file2']
     mode: COPY
 
+  {% if include_private_mount | default(True) %}
   # Mounting private buckets in MOUNT mode
   /mount_private_mount:
     name: {{storage_name}}
     source: ~/tmp-workdir
     mode: MOUNT
+  {% endif %}
 
 run: |
   set -ex
@@ -33,18 +42,25 @@ run: |
   # Check public bucket contents
   ls -ltr /mount_public_s3/corpora
   ls -ltr /mount_public_gcp/tiles
-  
+  {% if include_azure_mount | default(True) %}
+  ls -ltr /mount_public_azure/green
+  {% endif %}
+
   # Check private bucket contents
   ls -ltr /mount_private_copy/foo
   ls -ltr /mount_private_copy/tmp\ file
   ls -ltr /mount_private_copy_lof/tmp\ file
   ls -ltr /mount_private_copy_lof/tmp\ file2
+  {% if include_private_mount | default(True) %}
   ls -ltr /mount_private_mount/foo
   ls -ltr /mount_private_mount/tmp\ file
+  {% endif %}
   
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
+  {% if include_private_mount | default(True) %}
   ! ls /mount_private_mount/circle-link
   
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
+  {% endif %}
