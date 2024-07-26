@@ -4,7 +4,7 @@
 
 import logging
 import os
-from typing import Any, Callable
+from typing import Any, Callable, Set
 
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
@@ -37,11 +37,12 @@ def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
         # Skip methods starting with '__' since they are invoked through one
         # of the main methods, which are already decorated.
         if callable(attr) and not attr_name.startswith('__'):
-            decorated_types = getattr(attr, '_sky_decorator_types', set())
+            decorated_types: Set[str] = getattr(attr, '_sky_decorator_types',
+                                                set())
             if decoration_type not in decorated_types:
                 decorated_attr = decorator(attr)
-                decorated_attr._sky_decorator_types = (decorated_types |
-                                                       {decoration_type})
+                decorated_attr._sky_decorator_types = (  # pylint: disable=protected-access
+                    decorated_types | {decoration_type})
                 setattr(obj, attr_name, decorated_attr)
     return obj
 
