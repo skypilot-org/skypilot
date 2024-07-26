@@ -1322,7 +1322,7 @@ def test_symlink_latest_logs():
     test = Test(
         'symlink_latest_logs',
         [
-            'sky local up || true',
+            'sky launch -c test2 --cloud kubernetes -- echo hi || true',
             'eval symlink_path="~/sky_logs/sky_latest"; [ -L "$symlink_path" ] || exit 1 ;'
             'target_file=$(readlink -f "$symlink_path") || exit 1 ;'
             'sky local down || true ;'

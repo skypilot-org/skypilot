@@ -196,21 +196,33 @@ def readable_time_duration(start: Optional[float],
 
 
 def create_and_symlink_log_dir(log_dir: str):
-    """Creates a new log directory and symlinks to it from parent directory.
+    """Create a log directory and symlink to it from parent directory.
+
+    If file operations fail, will log a warning and return without error.
 
     Args:
         log_dir (str): Expanded log directory path.
     """
-    if log_dir == os.devnull:
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except OSError:
+        logger.warning(f'Failed to create log directory at {log_dir!r}.'
+                       'Check if there is a file with the same name.')
         return
-    os.makedirs(log_dir, exist_ok=True)
-    symlink_path = os.path.join(log_dir, os.pardir, constants.SKY_LATEST_LINK)
+    symlink_path = os.path.join(os.path.dirname(os.path.abspath(log_dir)),
+                                constants.SKY_LATEST_LINK)
     if os.path.exists(symlink_path):
         if os.path.islink(symlink_path):
-            os.remove(symlink_path)
+            try:
+                os.remove(symlink_path)
+            except OSError:
+                return
         else:
             logger.warning(
-                (f'Failed to symlink to latest logs at \'{symlink_path}\'.'
+                (f'Failed to symlink to latest logs at {symlink_path!r}.'
                  'Please remove the existing file/directory.'))
             return
-    os.symlink(log_dir, symlink_path)
+    try:
+        os.symlink(log_dir, symlink_path)
+    except OSError:
+        return
