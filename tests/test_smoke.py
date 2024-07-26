@@ -2104,7 +2104,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
     pod_logs = (
-        f'kubectl get pods -l skypilot-cluster-name={name}'
+        f'kubectl get pods -l skypilot-cluster-name={name} '
         '-o jsonpath="{.items[*].metadata.name}"| grep head | xargs -I {} kubectl logs {}'
     )
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -3227,6 +3227,7 @@ def test_kubernetes_custom_image(image_id):
     run_one_test(test)
 
 
+@pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
     test = Test(
