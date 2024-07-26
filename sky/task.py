@@ -392,7 +392,7 @@ class Task:
         if config.get('service') is not None:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
-        
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -411,7 +411,7 @@ class Task:
         if file_mounts is not None:
             copy_mounts = {}
             for dst_path, src in file_mounts.items():
-                
+
                 # Check if it is str path
                 if isinstance(src, str):
                     copy_mounts[dst_path] = src
@@ -432,7 +432,8 @@ class Task:
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
                 region = config['resources']['region']
-                storage_obj = storage_lib.Storage.from_yaml_config(storage[1], region)
+                storage_obj = storage_lib.Storage.from_yaml_config(
+                    storage[1], region)
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
@@ -767,7 +768,7 @@ class Task:
                         'by the workdir. If uploading a file/folder to the '
                         'workdir is needed, please specify the full path to '
                         'the file/folder.')
-        
+
         self.file_mounts = file_mounts
         return self
 

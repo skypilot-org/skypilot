@@ -127,8 +127,7 @@ class StoreType(enum.Enum):
             return StoreType.AZURE
         elif cloud.lower() == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Lambda Cloud does not provide cloud storage.')
+                raise ValueError('Lambda Cloud does not provide cloud storage.')
         elif cloud.lower() == str(clouds.SCP()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('SCP does not provide cloud storage.')
@@ -527,12 +526,14 @@ class Storage(object):
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
             self.handle = handle
-            self.handle.sky_stores = {s_type: AbstractStore.StoreMetadata(
-                name=s_metadata.name,
-                source=s_metadata.source,
-                region=self.region,
-                is_sky_managed=s_metadata.is_sky_managed
-            ) for s_type, s_metadata in self.handle.sky_stores.items()}
+            self.handle.sky_stores = {
+                s_type: AbstractStore.StoreMetadata(
+                    name=s_metadata.name,
+                    source=s_metadata.source,
+                    region=self.region,
+                    is_sky_managed=s_metadata.is_sky_managed)
+                for s_type, s_metadata in self.handle.sky_stores.items()
+            }
 
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
@@ -981,8 +982,7 @@ class Storage(object):
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
-                    global_user_state.set_storage_handle(
-                        self.name, self.handle)
+                    global_user_state.set_storage_handle(self.name, self.handle)
             elif self.force_delete:
                 store.delete()
             # Remove store from bookkeeping
@@ -1029,11 +1029,12 @@ class Storage(object):
 
         # Upload succeeded - update state
         if store.is_sky_managed:
-            global_user_state.set_storage_status(
-                self.name, StorageStatus.READY)
+            global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
-    def from_yaml_config(cls, config: Dict[str, Any], region: Optional[str] = None) -> 'Storage':
+    def from_yaml_config(cls,
+                         config: Dict[str, Any],
+                         region: Optional[str] = None) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
 
