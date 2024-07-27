@@ -222,4 +222,7 @@ def create_and_symlink_log_dir(log_dir: str):
     try:
         os.symlink(log_dir, symlink_path)
     except OSError:
+        # No warning if logging to /dev/null
+        if log_dir != os.path.dirname(os.devnull):
+            logger.warning(f'Failed to symlink to latest logs at {symlink_path!r}.')
         return
