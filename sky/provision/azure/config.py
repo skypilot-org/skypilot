@@ -137,7 +137,6 @@ def bootstrap_instances(
     get_deployment = get_azure_sdk_function(client=resource_client.deployments,
                                             function_name='get')
     deployment_exists = False
-    
     if use_external_resource_group:
         deployment_name = (
             constants.EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME.format(
