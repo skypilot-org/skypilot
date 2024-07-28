@@ -119,7 +119,8 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
     def lack_resource_msg(resource, pod, extra_msg=None, details=None) -> str:
         resource_requirements = _formatted_resource_requirements(pod)
         node_selectors = _formatted_node_selector(pod)
-        node_selector_str = f' and labels ({node_selectors})' if node_selectors else ''
+        node_selector_str = f' and labels ({node_selectors})' if (
+            node_selectors) else ''
         msg = (
             f'Insufficient {resource} capacity on the cluster. '
             f'Required resources({resource_requirements}){node_selector_str} '
@@ -176,7 +177,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                     raise config_lib.KubernetesError(
                         'Something went wrong with FUSE device daemonset.'
                         ' Try restarting your FUSE pods by running '
-                        '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'
+                        '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
                         f' Full error: {event_message}')
                 gpu_lf_keys = [
                     lf.get_label_key()
