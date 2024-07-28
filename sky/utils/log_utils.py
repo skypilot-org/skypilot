@@ -4,6 +4,7 @@ import os
 from typing import List, Optional
 
 import colorama
+import filelock
 import pendulum
 import prettytable
 
@@ -12,6 +13,11 @@ from sky.skylet import constants
 from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Filelock for updating log directory symlink.
+_SYMLINK_LOCK_PATH = os.path.expanduser(
+    os.path.join(constants.SKY_LOGS_DIRECTORY, '.symlink_latest.lock'))
+_SYMLINK_LOCK_TIMEOUT_SECONDS = 10
 
 
 class LineProcessor(object):
@@ -203,27 +209,41 @@ def create_and_symlink_log_dir(log_dir: str):
     Args:
         log_dir (str): Expanded log directory path.
     """
+    # Fast path for logging to /dev/null
+    if log_dir == os.path.dirname(os.devnull):
+        return
     os.makedirs(log_dir, exist_ok=True)
     symlink_path = os.path.join(os.path.dirname(os.path.abspath(log_dir)),
                                 constants.SKY_LATEST_LINK)
-    if os.path.exists(symlink_path):
-        if os.path.islink(symlink_path):
-            try:
-                os.remove(symlink_path)
-            except OSError:
-                logger.warning('Failed to remove old symlink to latest logs'
-                               f' at {symlink_path!r}.')
-                return
-        else:
-            logger.warning(
-                f'Failed to symlink to latest logs at {symlink_path!r}.'
-                'Please remove the existing file/directory.')
-            return
     try:
-        os.symlink(log_dir, symlink_path)
-    except OSError:
-        # No warning if logging to /dev/null
-        if log_dir != os.path.dirname(os.devnull):
-            logger.warning(
-                f'Failed to symlink to latest logs at {symlink_path!r}.')
+        with filelock.FileLock(_SYMLINK_LOCK_PATH,
+                               _SYMLINK_LOCK_TIMEOUT_SECONDS):
+            if os.path.exists(symlink_path):
+                if os.path.islink(symlink_path):
+                    try:
+                        os.remove(symlink_path)
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        logger.warning(
+                            'Failed to remove old symlink to latest logs '
+                            f'at {symlink_path!r}.')
+                        return
+                else:
+                    logger.warning(
+                        f'Failed to symlink to latest logs at {symlink_path!r}.'
+                        'Please remove the existing file/directory.')
+                    return
+            try:
+                os.symlink(log_dir, symlink_path)
+            except OSError:
+                logger.warning(f'Failed to symlink to latest logs from '
+                               f'{symlink_path!r} to {log_dir!r}.')
+                return
+    except filelock.Timeout:
+        logger.warning(
+            f'Failed to symlink to latest logs at {symlink_path!r} '
+            'due to a timeout when trying to access the log directory lock. '
+            'Please try again or manually remove the lock '
+            f'at {_SYMLINK_LOCK_PATH!r}.')
         return
