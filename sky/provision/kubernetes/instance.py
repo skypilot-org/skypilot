@@ -109,9 +109,11 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
         return ', '.join(f'{resource}={value}'
                          for resource, value in resource_requirements.items())
 
-    def _formatted_node_selector(pod):
+    def _formatted_node_selector(pod) -> Optional[str]:
         # Returns a formatted string of node selectors for a pod.
         node_selectors = []
+        if pod.spec.node_selector is None:
+            return
         for label_key, label_value in pod.spec.node_selector.items():
             node_selectors.append(f'{label_key}={label_value}')
         return ', '.join(node_selectors)
@@ -123,7 +125,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
             node_selectors) else ''
         msg = (
             f'Insufficient {resource} capacity on the cluster. '
-            f'Required resources({resource_requirements}){node_selector_str} '
+            f'Required resources ({resource_requirements}){node_selector_str} '
             'were not found in a single node. Other SkyPilot tasks or pods may '
             'be using resources. Check resource usage by running '
             '`kubectl describe nodes`.')
