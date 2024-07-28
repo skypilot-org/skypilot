@@ -148,7 +148,7 @@ def test_invalid_empty_envs(tmp_path):
     assert 'Environment variable \'env_key2\' is None.' in e.value.args[0]
 
 
-def test_replace_envs_in_path(tmpdir, tmp_path):
+def test_replace_envs_in_workdir(tmpdir, tmp_path):
     config_path = _create_config_file(
         textwrap.dedent(f"""\
             envs:
