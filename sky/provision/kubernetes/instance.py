@@ -92,6 +92,46 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
+
+    def _formatted_resource_requirements(pod):
+        # Returns a formatted string of resource requirements for a pod.
+        resource_requirements = {}
+        for container in pod.spec.containers:
+            for resource, value in container.resources.requests.items():
+                if resource not in resource_requirements:
+                    resource_requirements[resource] = 0
+                if resource == 'memory':
+                    int_value = kubernetes_utils.parse_memory_resource(value)
+                else:
+                    int_value = kubernetes_utils.parse_cpu_or_gpu_resource(
+                        value)
+                resource_requirements[resource] += int_value
+        return ', '.join(f'{resource}={value}'
+                         for resource, value in resource_requirements.items())
+
+    def _formatted_node_selector(pod):
+        # Returns a formatted string of node selectors for a pod.
+        node_selectors = []
+        for label_key, label_value in pod.spec.node_selector.items():
+            node_selectors.append(f'{label_key}={label_value}')
+        return ', '.join(node_selectors)
+
+    def lack_resource_msg(resource, pod, extra_msg=None, details=None) -> str:
+        resource_requirements = _formatted_resource_requirements(pod)
+        node_selectors = _formatted_node_selector(pod)
+        node_selector_str = f' and labels ({node_selectors})' if node_selectors else ''
+        msg = (
+            f'Insufficient {resource} capacity on the cluster. '
+            f'Required resources({resource_requirements}){node_selector_str} '
+            'were not found in a single node. Other SkyPilot tasks or pods may '
+            'be using resources. Check resource usage by running '
+            '`kubectl describe nodes`.')
+        if extra_msg:
+            msg += f' {extra_msg}'
+        if details:
+            msg += f'\nFull error: {event_message}'
+        return msg
+
     for new_node in new_nodes:
         pod = kubernetes.core_api().read_namespaced_pod(new_node.metadata.name,
                                                         namespace)
@@ -123,18 +163,21 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
         timeout_err_msg = ('Timed out while waiting for nodes to start. '
                            'Cluster may be out of resources or '
                            'may be too slow to autoscale.')
-        lack_resource_msg = (
-            'Insufficient {resource} capacity on the cluster. '
-            'Other SkyPilot tasks or pods may be using resources. '
-            'Check resource usage by running `kubectl describe nodes`.')
         if event_message is not None:
             if pod_status == 'Pending':
+                logger.info(event_message)
                 if 'Insufficient cpu' in event_message:
                     raise config_lib.KubernetesError(
-                        lack_resource_msg.format(resource='CPU'))
+                        lack_resource_msg('CPU', pod, details=event_message))
                 if 'Insufficient memory' in event_message:
                     raise config_lib.KubernetesError(
-                        lack_resource_msg.format(resource='memory'))
+                        lack_resource_msg('memory', pod, details=event_message))
+                if 'Insufficient smarter-devices/fuse' in event_message:
+                    raise config_lib.KubernetesError(
+                        'Something went wrong with FUSE device daemonset.'
+                        ' Try restarting your FUSE pods by running '
+                        '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'
+                        f' Full error: {event_message}')
                 gpu_lf_keys = [
                     lf.get_label_key()
                     for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
@@ -149,11 +192,13 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                                  in event_message) or
                                 ('didn\'t match Pod\'s node affinity/selector'
                                  in event_message)):
-                                msg = lack_resource_msg.format(resource='GPU')
-                                raise config_lib.KubernetesError(
-                                    f'{msg} Verify if '
+                                extra_msg = (
+                                    f'Verify if '
                                     f'{pod.spec.node_selector[label_key]}'
                                     ' is available in the cluster.')
+                                raise config_lib.KubernetesError(
+                                    lack_resource_msg('GPU', pod, extra_msg,
+                                                      event_message))
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
                                              f'Details: \'{event_message}\' ')
