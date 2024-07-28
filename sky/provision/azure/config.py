@@ -128,6 +128,10 @@ def bootstrap_instances(
                     # name.
                     'value': cluster_name_on_cloud
                 },
+                'roleAssignmentName': {
+                    'value': constants.ROLE_ASSIGNMENT_NAME.format(
+                        cluster_name_on_cloud=cluster_name_on_cloud)
+                }
             },
         }
     }

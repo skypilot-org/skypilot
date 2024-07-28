@@ -36,12 +36,14 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
 _WAIT_CREATION_TIMEOUT_SECONDS = 600
+
 _RESOURCE_MANAGED_IDENTITY_TYPE = 'Microsoft.ManagedIdentity/userAssignedIdentities'
 _RESOURCE_NETWORK_SECURITY_GROUP_TYPE = 'Microsoft.Network/networkSecurityGroups'
 _RESOURCE_VIRTUAL_NETWORK_TYPE = 'Microsoft.Network/virtualNetworks'
 _RESOURCE_PUBLIC_IP_ADDRESS_TYPE = 'Microsoft.Network/publicIPAddresses'
 _RESOURCE_VIRTUAL_MACHINE_TYPE = 'Microsoft.Compute/virtualMachines'
 _RESOURCE_NETWORK_INTERFACE_TYPE = 'Microsoft.Network/networkInterfaces'
+_RESOURCE_ROLE_ASSIGNMENT_TYPE = 'Microsoft.Authorization/roleAssignments'
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
@@ -296,10 +298,6 @@ def _create_instances(
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         _TAG_SKYPILOT_VM_ID: vm_id
     }
-    # Seems like it's impossible to have the option set for publicIPAddress to be removed
-    # when VM is deleted unlike OsDisk and NetworkInterface(nci).
-    # Hence, this is a temporary solution for setting the deleteOption outside of the template.
-    # Reference: https://github.com/Azure/azure-sdk-for-java/issues/38806
     instances = _filter_instances(compute_client, resource_group, filters)
     assert len(instances) == count, (len(instances), count)
     return instances
@@ -709,13 +707,13 @@ def delete_vm_and_attached_resources(
     subscription_id: str,
     resource_group: str,
     cluster_name_on_cloud: str) -> None:
-    """Removes VM and attached resources.
+    """Removes VM with attached resources and Deployments.
     
     This function deletes a virtual machine and its associated resources
-    (public IP addresses, virtual networks, managed identities, and
-    network security groups) that match cluster_name_on_cloud. There are other
-    attached resources that are not removed within this method: OS disk and
-    network interface. Those are set to be removed with deleteOption from
+    (public IP addresses, virtual networks, managed identities, network
+    interface and network security groups) that match cluster_name_on_cloud.
+    There is one attached resources that are is not removed within this
+    method: OS disk. It is set to be removed with deleteOption from
     sky/provision/azure/azure-vm-template.json when the VM is deleted.
 
     Args:
@@ -751,6 +749,7 @@ def delete_vm_and_attached_resources(
     network_client = azure.get_client('network', subscription_id)
     msi_client = azure.get_client('msi', subscription_id)
     compute_client = azure.get_client('compute', subscription_id)
+    auth_client = azure.get_client('authorization', subscription_id)
     
     delete_virtual_machine = _get_azure_sdk_function(
         client=compute_client.virtual_machines, function_name='delete')
@@ -767,32 +766,48 @@ def delete_vm_and_attached_resources(
     delete_network_interfaces = _get_azure_sdk_function(
         client=network_client.network_interfaces,
         function_name='begin_delete')
-
+    delete_role_assignment = _get_azure_sdk_function(
+        client=auth_client.role_assignments,
+        function_name='delete')
 
     for vm_name in filtered_resources[_RESOURCE_VIRTUAL_MACHINE_TYPE]:
         # Before removing Network Interface, we need to wait for the VM to be 
         # completely removed with .result() so the dependency of VM on
         # Network Interface is disassociated. This takes abour ~30s.
-        delete_virtual_machine(resource_group, vm_name).result()
-        
+        delete_virtual_machine(resource_group_name=resource_group,
+                               vm_name=vm_name).result()
+
     for nic_name in filtered_resources[_RESOURCE_NETWORK_INTERFACE_TYPE]:
         # Before removing Public IP Address, we need to wait for the
         # Network Interface to be completely removed with .result() so the
         # dependency of Network Interface on Public IP Address is
         # disassociated. This takes about ~1s.
-        delete_network_interfaces(resource_group, nic_name).result()
+        delete_network_interfaces(resource_group_name=resource_group,
+                                  network_interface_name=nic_name).result()
 
     for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
-        delete_public_ip_addresses(resource_group, public_ip_name)
+        delete_public_ip_addresses(resource_group_name=resource_group,
+                                   public_ip_address_name=public_ip_name)
     
     for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
-        delete_virtual_networks(resource_group, vnet_name)
+        delete_virtual_networks(resource_group_name=resource_group,
+                                virtual_network_name=vnet_name)
     
     for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
-        delete_managed_identity(resource_group, msi_name)
+        user_assgined_identity_id = (f'/subscriptions/{subscription_id}'
+                                     f'/resourcegroups/{resource_group}'
+                                     '/providers/Microsoft.ManagedIdentity'
+                                     f'/userAssignedIdentities/{msi_name}')
+        role_assignment_name = constants.ROLE_ASSIGNMENT_NAME.format(
+            cluster_name_on_cloud=cluster_name_on_cloud)
+        delete_role_assignment(scope=user_assgined_identity_id,
+                               role_assignment_name=role_assignment_name)
+        delete_managed_identity(resource_group_name=resource_group,
+                                identity_name=msi_name)
     
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
-        delete_network_security_group(resource_group, nsg_name)
+        delete_network_security_group(resource_group_name=resource_group,
+                                      network_security_group_name=nsg_name)
 
     delete_deployment = _get_azure_sdk_function(
         client=resource_client.deployments, function_name='begin_delete')
@@ -804,7 +819,7 @@ def delete_vm_and_attached_resources(
     ]
     for deployment_name in deployment_names:
         delete_deployment(resource_group_name=resource_group,
-                                deployment_name=deployment_name)  
+                          deployment_name=deployment_name)  
 
 
 @common_utils.retry

@@ -16,6 +16,7 @@ from sky import skypilot_config
 from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.provision import constants as provision_constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -383,6 +384,9 @@ class Azure(clouds.Cloud):
             'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': resource_group_name,
             'use_external_resource_group': use_external_resource_group,
+            'role_assignment_name': (
+                provision_constants.ROLE_ASSIGNMENT_NAME.format(
+                    cluster_name_on_cloud=cluster_name.name_on_cloud))
         }
 
     def _get_feasible_launchable_resources(
