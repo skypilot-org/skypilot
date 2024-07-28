@@ -43,7 +43,6 @@ _RESOURCE_VIRTUAL_NETWORK_TYPE = 'Microsoft.Network/virtualNetworks'
 _RESOURCE_PUBLIC_IP_ADDRESS_TYPE = 'Microsoft.Network/publicIPAddresses'
 _RESOURCE_VIRTUAL_MACHINE_TYPE = 'Microsoft.Compute/virtualMachines'
 _RESOURCE_NETWORK_INTERFACE_TYPE = 'Microsoft.Network/networkInterfaces'
-_RESOURCE_ROLE_ASSIGNMENT_TYPE = 'Microsoft.Authorization/roleAssignments'
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
