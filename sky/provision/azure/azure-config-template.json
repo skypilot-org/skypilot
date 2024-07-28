@@ -13,6 +13,12 @@
             "metadata": {
                 "description": "Subnet parameters."
             }
+        },
+        "roleAssignmentName": {
+            "type": "string",
+            "metadata": {
+                "description": "Raw name of the Role Assignment created before it is passed to guid."
+            }
         }
     },
     "variables": {
