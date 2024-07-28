@@ -147,6 +147,7 @@ def test_invalid_empty_envs(tmp_path):
         Task.from_yaml(config_path)
     assert 'Environment variable \'env_key2\' is None.' in e.value.args[0]
 
+
 def test_replace_envs_in_path(tmpdir, tmp_path):
     config_path = _create_config_file(
         textwrap.dedent(f"""\
