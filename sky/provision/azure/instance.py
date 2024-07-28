@@ -41,6 +41,7 @@ _RESOURCE_NETWORK_SECURITY_GROUP_TYPE = 'Microsoft.Network/networkSecurityGroups
 _RESOURCE_VIRTUAL_NETWORK_TYPE = 'Microsoft.Network/virtualNetworks'
 _RESOURCE_PUBLIC_IP_ADDRESS_TYPE = 'Microsoft.Network/publicIPAddresses'
 _RESOURCE_VIRTUAL_MACHINE_TYPE = 'Microsoft.Compute/virtualMachines'
+_RESOURCE_NETWORK_INTERFACE_TYPE = 'Microsoft.Network/networkInterfaces'
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
@@ -272,11 +273,23 @@ def _create_instances(
         }
     }
 
+    assert ('use_external_resource_group'
+            in provider_config), ('Provider config must include '
+                                  'use_external_resource_group field')
+    use_external_resource_group = provider_config['use_external_resource_group']
+    
+    if use_external_resource_group:
+        deployment_name = (
+            constants.EXTERNAL_RG_VM_DEPLOYMENT_NAME.format(
+                cluster_name_on_cloud=cluster_name_on_cloud))
+    else:
+        deployment_name = vm_name
+
     create_or_update = _get_azure_sdk_function(
         client=resource_client.deployments, function_name='create_or_update')
     create_or_update(
         resource_group_name=resource_group,
-        deployment_name=vm_name,
+        deployment_name=deployment_name,
         parameters=parameters,
     ).wait()
     filters = {
@@ -287,7 +300,6 @@ def _create_instances(
     # when VM is deleted unlike OsDisk and NetworkInterface(nci).
     # Hence, this is a temporary solution for setting the deleteOption outside of the template.
     # Reference: https://github.com/Azure/azure-sdk-for-java/issues/38806
-    #azure.get
     instances = _filter_instances(compute_client, resource_group, filters)
     assert len(instances) == count, (len(instances), count)
     return instances
@@ -727,7 +739,8 @@ def delete_vm_and_attached_resources(
         _RESOURCE_MANAGED_IDENTITY_TYPE: [],
         _RESOURCE_NETWORK_SECURITY_GROUP_TYPE: [],
         _RESOURCE_VIRTUAL_NETWORK_TYPE: [],
-        _RESOURCE_PUBLIC_IP_ADDRESS_TYPE: []
+        _RESOURCE_PUBLIC_IP_ADDRESS_TYPE: [],
+        _RESOURCE_NETWORK_INTERFACE_TYPE: []
     }
 
     for resource in resources:
@@ -751,12 +764,26 @@ def delete_vm_and_attached_resources(
     delete_network_security_group = _get_azure_sdk_function(
         client=network_client.network_security_groups,
         function_name='begin_delete')
-    
+    delete_network_interfaces = _get_azure_sdk_function(
+        client=network_client.network_interfaces,
+        function_name='begin_delete')
+
+
     for vm_name in filtered_resources[_RESOURCE_VIRTUAL_MACHINE_TYPE]:
+        # Before removing Network Interface, we need to wait for the VM to be 
+        # completely removed with .result() so the dependency of VM on
+        # Network Interface is disassociated. This takes abour ~30s.
         delete_virtual_machine(resource_group, vm_name).result()
+        
+    for nic_name in filtered_resources[_RESOURCE_NETWORK_INTERFACE_TYPE]:
+        # Before removing Public IP Address, we need to wait for the
+        # Network Interface to be completely removed with .result() so the
+        # dependency of Network Interface on Public IP Address is
+        # disassociated. This takes about ~1s.
+        delete_network_interfaces(resource_group, nic_name).result()
 
     for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
-        delete_public_ip_addresses(resource_group, public_ip_name).result()
+        delete_public_ip_addresses(resource_group, public_ip_name)
     
     for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
         delete_virtual_networks(resource_group, vnet_name)
@@ -766,6 +793,18 @@ def delete_vm_and_attached_resources(
     
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
         delete_network_security_group(resource_group, nsg_name)
+
+    delete_deployment = _get_azure_sdk_function(
+        client=resource_client.deployments, function_name='begin_delete')
+    deployment_names = [
+        constants.EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME.format(
+            cluster_name_on_cloud=cluster_name_on_cloud),
+        constants.EXTERNAL_RG_VM_DEPLOYMENT_NAME.format(
+            cluster_name_on_cloud=cluster_name_on_cloud)
+    ]
+    for deployment_name in deployment_names:
+        delete_deployment(resource_group_name=resource_group,
+                                deployment_name=deployment_name)  
 
 
 @common_utils.retry

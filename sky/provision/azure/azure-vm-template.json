@@ -249,10 +249,7 @@
                 "networkProfile": {
                     "networkInterfaces": [
                         {
-                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfaceName'), copyIndex()))]",
-                            "properties": {
-                                "deleteOption": "Delete"
-                              }
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfaceName'), copyIndex()))]"
                         }
                     ]
                 },
