@@ -4911,7 +4911,7 @@ class TestStorageWithCredentials:
         if store_type == 'https':
             # Azure blob uses a different error string since container may
             # not exist even though the bucket name is ok.
-            match_str = 'Attempted to fetch a non-existent container'
+            match_str = 'Attempted to fetch a non-existent public container'
         with pytest.raises(sky.exceptions.StorageBucketGetError,
                            match=match_str):
             storage_obj = storage_lib.Storage(source=private_bucket)
