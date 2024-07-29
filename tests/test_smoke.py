@@ -2049,16 +2049,12 @@ def test_task_labels_kubernetes():
 def test_container_logs_multinode_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    head_logs = (
-        'kubectl get pods '
-        f' | grep {name} |  grep head | '
-        " awk '{print $1}' | xargs -I {} kubectl logs {}"
-    )
-    worker_logs = (
-        'kubectl get pods '
-        f' | grep {name} |  grep worker |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}"
-    )
+    head_logs = ('kubectl get pods '
+                 f' | grep {name} |  grep head | '
+                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    worker_logs = ('kubectl get pods '
+                   f' | grep {name} |  grep worker |'
+                   " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = Test(
             'container_logs_multinode_kubernetes',
@@ -2076,11 +2072,9 @@ def test_container_logs_multinode_kubernetes():
 def test_container_logs_two_jobs_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    pod_logs = (
-        'kubectl get pods '
-        f' | grep {name} |  grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}"
-    )
+    pod_logs = ('kubectl get pods '
+                f' | grep {name} |  grep head |'
+                " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = Test(
             'test_container_logs_two_jobs_kubernetes',
@@ -2108,11 +2102,9 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
-    pod_logs = (
-        'kubectl get pods '
-        f' | grep {name} |  grep head |'
-        " awk '{print $1}' | xargs -I {} kubectl logs {}"
-    )
+    pod_logs = ('kubectl get pods '
+                f' | grep {name} |  grep head |'
+                " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
