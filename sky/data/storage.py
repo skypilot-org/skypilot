@@ -1942,8 +1942,12 @@ class AzureBlobStore(AbstractStore):
     """Represents the backend for Azure Blob Storage Container."""
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
-    DEFAULT_STORAGE_ACCOUNT_NAME = 'sky{region}{user_hash}{subscription_hash}'
     DEFAULT_RESOURCE_GROUP_NAME = 'sky{user_hash}'
+    # Unlike resource group names, which only need to be unique within the
+    # subscription, storage account names must be globally unique across all of
+    # Azure users. Hence, the storage account name includes the subscription
+    # hash as well to ensure its uniqueness.
+    DEFAULT_STORAGE_ACCOUNT_NAME = 'sky{region}{user_hash}{subscription_hash}'
 
     class AzureBlobStoreMetadata(AbstractStore.StoreMetadata):
         """A pickle-able representation of Azure Blob Store.
