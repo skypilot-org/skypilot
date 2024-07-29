@@ -4,6 +4,7 @@
 import asyncio
 import datetime
 import functools
+import hashlib
 import logging
 import threading
 import time
@@ -28,6 +29,7 @@ _LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
 _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
+_SUBSCRIPTION_HASH_LENGTH = 4
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -459,3 +461,11 @@ def deployment_mode():
     """Azure deployment mode."""
     from azure.mgmt.resource.resources.models import DeploymentMode
     return DeploymentMode
+
+
+def get_subscription_hash() -> str:
+    """Returns user's subsciprion ID specific hash."""
+    subscription_id = get_subscription_id()
+    hash_obj = hashlib.md5(subscription_id.encode('utf-8'))
+    subscription_hash = hash_obj.hexdigest()[:_SUBSCRIPTION_HASH_LENGTH]
+    return subscription_hash

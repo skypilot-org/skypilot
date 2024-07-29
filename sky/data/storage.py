@@ -1942,7 +1942,7 @@ class AzureBlobStore(AbstractStore):
     """Represents the backend for Azure Blob Storage Container."""
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
-    DEFAULT_STORAGE_ACCOUNT_NAME = 'sky{region}{user_hash}'
+    DEFAULT_STORAGE_ACCOUNT_NAME = 'sky{region}{user_hash}{subscription_hash}'
     DEFAULT_RESOURCE_GROUP_NAME = 'sky{user_hash}'
 
     class AzureBlobStoreMetadata(AbstractStore.StoreMetadata):
@@ -2239,10 +2239,15 @@ class AzureBlobStore(AbstractStore):
             else:
                 # If storage account name is not provided from config, then
                 # use default resource group and storage account names.
+                # To ensure uniqueness, we must take the subscription ID into
+                # account. This is necessary because the user may switch
+                # between different subscription IDs while using the same
+                # machine.
                 storage_account_name = (
                     self.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                         region=self.region,
-                        user_hash=common_utils.get_user_hash()))
+                        user_hash=common_utils.get_user_hash(),
+                        subscription_hash=azure.get_subscription_hash()))
                 resource_group_name = (self.DEFAULT_RESOURCE_GROUP_NAME.format(
                     user_hash=common_utils.get_user_hash()))
                 try:
