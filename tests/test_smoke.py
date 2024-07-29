@@ -2049,19 +2049,23 @@ def test_task_labels_kubernetes():
 def test_container_logs_multinode_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    pod_logs = (
-        f'kubectl get pods -l skypilot-cluster-name={name} '
-        '-o jsonpath="{.items[*].metadata.name}"| grep head | xargs -I {} kubectl logs {}'
+    head_logs = (
+        'kubectl get pods '
+        f' | grep {name} |  grep head | '
+        " awk '{print $1}' | xargs -I {} kubectl logs {}"
+    )
+    worker_logs = (
+        'kubectl get pods '
+        f' | grep {name} |  grep worker |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}"
     )
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = Test(
             'container_logs_multinode_kubernetes',
             [
                 f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
-                f'{pod_logs} | tr " " "\n" | grep worker'
-                '| xargs -I {} kubectl logs {} | wc -l | grep 9',
-                f'{pod_logs} | tr " " "\n" | grep head'
-                '| xargs -I {} kubectl logs {} | wc -l | grep 9',
+                f'{head_logs} | wc -l | grep 9',
+                f'{worker_logs} | wc -l | grep 9',
             ],
             f'sky down -y {name}',
         )
@@ -2073,8 +2077,9 @@ def test_container_logs_two_jobs_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
     pod_logs = (
-        f'kubectl get pods -l skypilot-cluster-name={name} '
-        '-o jsonpath="{.items[*].metadata.name}"| grep head | xargs -I {} kubectl logs {}'
+        'kubectl get pods '
+        f' | grep {name} |  grep head |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}"
     )
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = Test(
@@ -2104,8 +2109,9 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = _get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
     pod_logs = (
-        f'kubectl get pods -l skypilot-cluster-name={name} '
-        '-o jsonpath="{.items[*].metadata.name}"| grep head | xargs -I {} kubectl logs {}'
+        'kubectl get pods '
+        f' | grep {name} |  grep head |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}"
     )
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = Test(
