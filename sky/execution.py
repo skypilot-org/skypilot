@@ -471,8 +471,7 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
-        _is_launched_by_sky_serve_controller=
-        _is_launched_by_sky_serve_controller,
+        _is_launched_by_sky_serve_controller=_is_launched_by_sky_serve_controller,
     )
 
 

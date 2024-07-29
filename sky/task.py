@@ -393,6 +393,11 @@ class Task:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
 
+        # Fill in any Task.envs into workdir
+        if config.get('workdir') is not None:
+            config['workdir'] = _fill_in_env_vars(config['workdir'],
+                                                  config.get('envs', {}))
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -411,7 +416,6 @@ class Task:
         if file_mounts is not None:
             copy_mounts = {}
             for dst_path, src in file_mounts.items():
-
                 # Check if it is str path
                 if isinstance(src, str):
                     copy_mounts[dst_path] = src
@@ -431,10 +435,7 @@ class Task:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                resources = config.get('resources', None)
-                region = resources.get('region', None) if resources else None
-                storage_obj = storage_lib.Storage.from_yaml_config(
-                    storage[1], region)
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
@@ -841,7 +842,6 @@ class Task:
         Raises:
           ValueError: if input paths are invalid.
         """
-
         if storage_mounts is None:
             self.storage_mounts = {}
             # Clear the requires_fuse flag if no storage mounts are set.
@@ -958,7 +958,6 @@ class Task:
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
-
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
             else:
@@ -1146,7 +1145,8 @@ class Task:
 
         # Multi-node
         if self.num_nodes > 1:
-            required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
+            required_features.add(
+                clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():

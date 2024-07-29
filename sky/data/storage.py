@@ -127,7 +127,8 @@ class StoreType(enum.Enum):
             return StoreType.AZURE
         elif cloud.lower() == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Lambda Cloud does not provide cloud storage.')
+                raise ValueError(
+                    'Lambda Cloud does not provide cloud storage.')
         elif cloud.lower() == str(clouds.SCP()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('SCP does not provide cloud storage.')
@@ -417,7 +418,6 @@ class Storage(object):
         - (required) Source
         - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
-        - (optional) Region of the bucket.
         """
 
         def __init__(
@@ -427,14 +427,11 @@ class Storage(object):
             source: Optional[SourceType],
             mode: Optional[StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
-                                      AbstractStore.StoreMetadata]] = None,
-            region: Optional[str] = None,
-        ):
+                                      AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
             self.mode = mode
-            self.region = region
             # Only stores managed by sky are stored here in the
             # global_user_state
             self.sky_stores = {} if sky_stores is None else sky_stores
@@ -444,8 +441,7 @@ class Storage(object):
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
                     f'\n\tmode={self.mode},'
-                    f'\n\tstores={self.sky_stores})'
-                    f'\n\tregion={self.region})')
+                    f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
             storetype = StoreType.from_store(store)
@@ -462,7 +458,6 @@ class Storage(object):
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
-                 region: Optional[str] = None,
                  sync_on_reconstruction: bool = True) -> None:
         """Initializes a Storage object.
 
@@ -506,7 +501,6 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
-        self.region = region
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
@@ -526,20 +520,9 @@ class Storage(object):
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
             self.handle = handle
-            self.handle.sky_stores = {
-                s_type: AbstractStore.StoreMetadata(
-                    name=s_metadata.name,
-                    source=s_metadata.source,
-                    region=self.region,
-                    is_sky_managed=s_metadata.is_sky_managed)
-                for s_type, s_metadata in self.handle.sky_stores.items()
-            }
-
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
-            self._add_store_from_metadata(self.handle.sky_stores)
-
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
             if self.sync_on_reconstruction:
@@ -561,7 +544,6 @@ class Storage(object):
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
                                                mode=self.mode,
-                                               region=self.region,
                                                sky_stores=sky_managed_stores)
 
             if self.source is not None:
@@ -842,7 +824,6 @@ class Storage(object):
         Used when reconstructing Storage object and AbstractStore objects from
         global_user_state.
         """
-
         # Name should not be specified if the source is a cloud store URL.
         source = override_args.get('source', metadata.source)
         name = override_args.get('name', metadata.storage_name)
@@ -982,7 +963,8 @@ class Storage(object):
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
-                    global_user_state.set_storage_handle(self.name, self.handle)
+                    global_user_state.set_storage_handle(
+                        self.name, self.handle)
             elif self.force_delete:
                 store.delete()
             # Remove store from bookkeeping
@@ -1029,12 +1011,11 @@ class Storage(object):
 
         # Upload succeeded - update state
         if store.is_sky_managed:
-            global_user_state.set_storage_status(self.name, StorageStatus.READY)
+            global_user_state.set_storage_status(
+                self.name, StorageStatus.READY)
 
     @classmethod
-    def from_yaml_config(cls,
-                         config: Dict[str, Any],
-                         region: Optional[str] = None) -> 'Storage':
+    def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
 
@@ -1043,7 +1024,6 @@ class Storage(object):
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
-
         if force_delete is None:
             force_delete = False
 
@@ -1063,15 +1043,10 @@ class Storage(object):
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
-                          mode=mode,
-                          region=region)
-
-        if store is not None:
-            storage_obj.add_store(StoreType(store.upper()))
+                          mode=mode)
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
-
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
@@ -1280,7 +1255,7 @@ class S3Store(AbstractStore):
             msg_str = f'Deleted S3 bucket {self.name}.'
         else:
             msg_str = f'S3 bucket {self.name} may have been deleted ' \
-                f'externally. Removing from local state.'
+                      f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -1696,7 +1671,7 @@ class GcsStore(AbstractStore):
             msg_str = f'Deleted GCS bucket {self.name}.'
         else:
             msg_str = f'GCS bucket {self.name} may have been deleted ' \
-                f'externally. Removing from local state.'
+                      f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -2561,7 +2536,7 @@ class AzureBlobStore(AbstractStore):
             if 'Name or service not known' in error_message:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        'Attempted to fetch the container from non-existant '
+                        'Attempted to fetch the container from non-existent '
                         'storage account '
                         f'name: {self.storage_account_name}. Please check '
                         'if the name is correct.')
@@ -2807,7 +2782,7 @@ class R2Store(AbstractStore):
             msg_str = f'Deleted R2 bucket {self.name}.'
         else:
             msg_str = f'R2 bucket {self.name} may have been deleted ' \
-                f'externally. Removing from local state.'
+                      f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
