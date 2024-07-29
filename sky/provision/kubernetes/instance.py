@@ -113,7 +113,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
         # Returns a formatted string of node selectors for a pod.
         node_selectors = []
         if pod.spec.node_selector is None:
-            return
+            return None
         for label_key, label_value in pod.spec.node_selector.items():
             node_selectors.append(f'{label_key}={label_value}')
         return ', '.join(node_selectors)
