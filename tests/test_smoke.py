@@ -839,6 +839,7 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
@@ -963,7 +964,6 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
-@pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
@@ -1170,7 +1170,6 @@ def test_kubernetes_storage_mounts():
         run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -2420,7 +2419,6 @@ def test_stop_gcp_spot():
 
 
 # ---------- Testing managed job ----------
-@pytest.mark.no_fluidstack
 @pytest.mark.managed_jobs
 def test_managed_jobs(generic_cloud: str):
     """Test the managed jobs yaml."""
@@ -3044,7 +3042,6 @@ def test_managed_jobs_tpu():
 
 
 # ---------- Testing env for managed jobs ----------
-@pytest.mark.no_fluidstack
 @pytest.mark.managed_jobs
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
@@ -3146,7 +3143,6 @@ def test_kubernetes_custom_image(image_id):
         timeout=30 * 60,
     )
     run_one_test(test)
-
 
 
 @pytest.mark.azure
@@ -3606,7 +3602,8 @@ def test_skyserve_dynamic_ondemand_fallback():
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not cloud storage
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -3640,7 +3637,6 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
 def test_skyserve_load_balancer(generic_cloud: str):
@@ -3707,7 +3703,6 @@ def test_skyserve_auto_restart():
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
 @pytest.mark.serve
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
@@ -3733,7 +3728,6 @@ def test_skyserve_cancel(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
 @pytest.mark.serve
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
@@ -3753,7 +3747,6 @@ def test_skyserve_streaming(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
@@ -3777,7 +3770,6 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
 @pytest.mark.serve
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
@@ -3796,7 +3788,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -3825,7 +3818,10 @@ def test_skyserve_update(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+pytest.mark.no_fluidstack
+
+
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -3862,6 +3858,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -3903,7 +3900,6 @@ def test_skyserve_fast_update(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack  # FluidStack does not support cloud storage
 @pytest.mark.serve
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
@@ -3940,7 +3936,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack
+@pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
@@ -4004,6 +4000,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
@@ -5070,7 +5067,6 @@ class TestStorageWithCredentials:
         assert '4' in cnt_output.decode('utf-8'), \
                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
-    @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
