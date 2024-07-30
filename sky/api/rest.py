@@ -70,9 +70,7 @@ def refresh_cluster_status_event():
 
 
 # Register the events to run in the background.
-events = {
-    'status': refresh_cluster_status_event
-}
+events = {'status': refresh_cluster_status_event}
 
 
 class RequestBody(pydantic.BaseModel):
@@ -123,7 +121,7 @@ def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
                 stacktrace = traceback.format_exc()
-            e.stacktrace = stacktrace
+            setattr(e, 'stacktrace', stacktrace)
             usage_lib.store_exception(e)
             with tasks.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
@@ -169,11 +167,10 @@ def _start_background_request(request_id: str,
 @app.on_event('startup')
 async def startup():
     for event_id, (event_name, event) in enumerate(events.items()):
-        _start_background_request(
-            request_id=str(event_id),
-            request_name=event_name,
-            request_body={},
-            func=event)
+        _start_background_request(request_id=str(event_id),
+                                  request_name=event_name,
+                                  request_body={},
+                                  func=event)
 
 
 class OptimizeBody(pydantic.BaseModel):
@@ -360,7 +357,6 @@ async def stop(request: fastapi.Request, stop_body: StopBody):
     )
 
 
-
 class StatusBody(pydantic.BaseModel):
     cluster_names: Optional[List[str]] = None
     refresh: bool = False
@@ -406,6 +402,7 @@ async def down(down_body: DownBody, request: fastapi.Request):
         purge=down_body.purge,
     )
 
+
 class StartBody(pydantic.BaseModel):
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
@@ -449,10 +446,12 @@ async def autostop(request: fastapi.Request, autostop_body: AutostopBody):
         down=autostop_body.down,
     )
 
+
 class QueueBody(pydantic.BaseModel):
     cluster_name: str
     skip_finished: bool = False
     all_users: bool = False
+
 
 @app.get('/queue')
 async def queue(request: fastapi.Request, queue_body: QueueBody):
@@ -495,7 +494,7 @@ class ClusterJobBody(pydantic.BaseModel):
 
 @app.get('/logs')
 async def logs(request: fastapi.Request,
-                    cluster_job_body: ClusterJobBody) -> None:
+               cluster_job_body: ClusterJobBody) -> None:
     _start_background_request(
         request_id=request.state.request_id,
         request_name='logs',

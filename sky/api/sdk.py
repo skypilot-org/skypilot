@@ -194,15 +194,17 @@ def launch(
             workdir = task_.workdir
             upload_list.append(_full_path(workdir))
             file_mounts_mapping[workdir] = _full_path(workdir)
-        for src in task_.file_mounts.values():
-            if not data_utils.is_cloud_store_url(src):
-                upload_list.append(_full_path(src))
-                file_mounts_mapping[src] = _full_path(src)
-        for storage in task_.storage_mounts.values():
-            storage_source = storage.source
-            if not data_utils.is_cloud_store_url(storage_source):
-                upload_list.append(_full_path(storage_source))
-                file_mounts_mapping[storage_source] = _full_path(storage_source)
+        if task_.file_mounts is not None:
+            for src in task_.file_mounts.values():
+                if not data_utils.is_cloud_store_url(src):
+                    upload_list.append(_full_path(src))
+                    file_mounts_mapping[src] = _full_path(src)
+        if task_.storage_mounts is not None:
+            for storage in task_.storage_mounts.values():
+                storage_source = storage.source
+                if not data_utils.is_cloud_store_url(storage_source):
+                    upload_list.append(_full_path(storage_source))
+                    file_mounts_mapping[storage_source] = _full_path(storage_source)
         task_.file_mounts_mapping = file_mounts_mapping
 
     logger.info('Uploading files to API server...')
@@ -279,9 +281,14 @@ def launch(
     return response.headers['X-Request-ID']
 
 
+# @usage_lib.entrypoint
+# @_check_health
+# def exec(task)
+
+
 @usage_lib.entrypoint
 @_check_health
-def stop(cluster_name: str, purge: bool = False) -> None:
+def stop(cluster_name: str, purge: bool = False) -> str:
     """Stop a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
