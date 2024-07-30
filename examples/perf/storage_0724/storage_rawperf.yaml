@@ -1,0 +1,59 @@
+# SkyPilot Storage benchmarks using fio.
+#
+# Uses FIO to run benchmarks on SkyPilot Storage. We use Azure's recommended
+# parameters for fio to measure storage performance.
+# See https://docs.microsoft.com/en-us/azure/virtual-machines/disks-benchmarks
+#
+# Also measures S3->EBS bandwidth using aws s3 cp, which is used in COPY mode.
+#
+# Note that random writes are not supported by SkyPilot Storage, and thus
+# not benchmarked.
+#
+# Usage:
+#   sky launch -y -c bench storage_rawperf.yaml
+#   sky down bench
+#   SkyPilot Storage delete <storage_name>
+
+name: storage-demo
+
+resources:
+  cloud: kubernetes
+  cpus: 4+
+  memory: 8+
+
+file_mounts:
+  /skystorage-mount:
+    source: gs://sky-data-benchmark
+    mode: MOUNT
+
+setup: |
+  sudo apt update 
+  sudo apt install -y fio
+
+run: |
+  purge_io () { echo "Purging I/O caches..."; sync && echo 3 | sudo tee /proc/sys/vm/drop_caches; }
+  purge_io
+  echo "Running sequential read benchmark..."
+  fio --name=64kseqreads --rw=read --direct=1 --ioengine=libaio --bs=1M --numjobs=4 --max-jobs=10 --iodepth=128 --size=1G --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_read.json
+  purge_io
+  echo "Running sequential write benchmark..."
+  fio --name=64kseqwrites --rw=write --direct=1 --ioengine=libaio --bs=1M --numjobs=4 --max-jobs=10 --iodepth=128 --size=1G --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_write.json
+  
+  echo "Running small files read benchmark..."
+  purge_io
+  fio --name=1mbfilesread --rw=read --direct=1 --ioengine=libaio --bs=1M --iodepth=128 --size=1M --filesize=1M --numjobs=100  --max-jobs=10 --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_read_small.json
+  
+  echo "Running small files write benchmark..."
+  purge_io
+  fio --name=1mbfileswrite --rw=write --direct=1 --ioengine=libaio --bs=1M --iodepth=128 --size=1M --filesize=1M --numjobs=100 --max-jobs=10 --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_write_small.json
+  
+  echo -e '\n===== Benchmark Results ====='
+  echo 'All results are reported as (bandwidth, IOPS)'
+  echo -e '\n##### Sequential Read Results #####'
+  cat /skystorage-mount/perf_read.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['read']['bw_bytes']/(1000*1000), data['read']['iops']))"
+  echo -e '\n##### Sequential Write Results #####'
+  cat /skystorage-mount/perf_write.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['write']['bw_bytes']/(1000*1000), data['write']['iops']))"
+  echo -e '\n##### Small Files Read Results #####'
+  cat /skystorage-mount/perf_read_small.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['read']['bw_bytes']/(1000*1000), data['read']['iops']))"
+  echo -e '\n##### Small Files Write Results #####'
+  cat /skystorage-mount/perf_write_small.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['write']['bw_bytes']/(1000*1000), data['write']['iops']))"
