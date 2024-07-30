@@ -1018,7 +1018,7 @@ class Storage(object):
 
         name = config.pop('name', None)
         source = config.pop('source', None)
-        store = config.pop('store', None)
+        config.pop('store', None) # Store not used in this function
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         if force_delete is None:
