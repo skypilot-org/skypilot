@@ -64,9 +64,9 @@ def _bulk_provision(
     elif isinstance(cloud, clouds.Azure):
         # Specify launched resource group for Azure.
         resource_group = bootstrap_config.provider_config.get('resource_group')
-        logger.info(f'{style.BRIGHT}Launching on {cloud} {region_name!r} at '
-                    f'resource group {resource_group!r}{style.RESET_ALL} '
-                    f'({zone_str})')
+        logger.info(f'{style.BRIGHT}Launching in {cloud} {region_name!r} '
+                    f'within resource group {resource_group!r}'
+                    f'{style.RESET_ALL} ({zone_str})')
     else:
         logger.info(f'{style.BRIGHT}Launching on {cloud} '
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
