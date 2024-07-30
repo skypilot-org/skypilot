@@ -354,8 +354,8 @@ def stop(cluster_name: str, purge: bool = False) -> str:
 
 @usage_lib.entrypoint
 @_check_health
-def tail_logs(cluster_name: str, job_id: int, follow: bool) -> str:
-    response = requests.get(f'{_get_server_url()}/tail_logs',
+def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
+    response = requests.get(f'{_get_server_url()}/logs',
                             json={
                                 'cluster_name': cluster_name,
                                 'job_id': job_id,

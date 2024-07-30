@@ -534,7 +534,7 @@ async def cancel(request: fastapi.Request, cancel_body: QueueBody):
 
 class ClusterJobBody(pydantic.BaseModel):
     cluster_name: str
-    job_id: int
+    job_id: Optional[int]
     follow: bool = True
 
 
