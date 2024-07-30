@@ -45,8 +45,11 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
    <div class="row">
        <div class="col-md-6 mb-3">
             <h3> SkyPilot </h3>
-           <pre style="padding: 0.5rem 0.5rem 0.5rem 0.5rem;">
-   <code class="yaml">envs:
+
+.. code-block:: yaml
+   :linenos:
+
+   envs:
      MODEL_NAME: google/gemma-2b-it
      HF_TOKEN: myhftoken
 
@@ -63,77 +66,86 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
      conda deactivate
      echo 'Starting vllm openai api server...'
      python -m vllm.entrypoints.openai.api_server \
-     --model $MODEL_NAME \
-     --tokenizer hf-internal-testing/llama-tokenizer \
-     --host 0.0.0.0</code></pre>
+     --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
+     --host 0.0.0.0
+
+.. raw:: html
+
        </div>
        <div class="col-md-6 mb-3">
             <h3> Kubernetes </h3>
-           <pre style="padding: 0.5rem 0.5rem 0.5rem 0.5rem;">
-   <code class="yaml">apiVersion: apps/v1
+
+.. code-block:: yaml
+   :linenos:
+
+   apiVersion: apps/v1
    kind: Deployment
    metadata:
-   name: vllm-gemma-deployment
+     name: vllm-gemma-deployment
    spec:
-   replicas: 1
-   selector:
-     matchLabels:
-       app: gemma-server
-   template:
-     metadata:
-       labels:
+     replicas: 1
+     selector:
+       matchLabels:
          app: gemma-server
-         ai.gke.io/model: gemma-1.1-2b-it
-         ai.gke.io/inference-server: vllm
-         examples.ai.gke.io/source: user-guide
-     spec:
-       containers:
-       - name: inference-server
-         image: us-docker.pkg.dev/vertex-ai/ vertex-vision-model-garden-dockers/pytorch-vllm-serve:20240527_0916_RC00
-         resources:
-           requests:
-             cpu: "2"
-             memory: "10Gi"
-             ephemeral-storage: "10Gi"
-             nvidia.com/gpu: 1
-           limits:
-             cpu: "2"
-             memory: "10Gi"
-             ephemeral-storage: "10Gi"
-             nvidia.com/gpu: 1
-         args:
-         - --model=$(MODEL_ID)
-         - --tensor-parallel-size=1
-         env:
-         - name: MODEL_ID
-           value: google/gemma-1.1-2b-it
-         - name: HUGGING_FACE_HUB_TOKEN
-           valueFrom:
-             secretKeyRef:
-               name: hf-secret
-               key: hf_api_token
-         volumeMounts:
-         - mountPath: /dev/shm
-           name: dshm
-       volumes:
-       - name: dshm
-         emptyDir:
+     template:
+       metadata:
+         labels:
+           app: gemma-server
+           ai.gke.io/model: gemma-1.1-2b-it
+           ai.gke.io/inference-server: vllm
+           examples.ai.gke.io/source: user-guide
+       spec:
+         containers:
+         - name: inference-server
+           image: us-docker.pkg.dev/vertex-ai/ vertex-vision-model-garden-dockers/pytorch-vllm-serve:20240527_0916_RC00
+           resources:
+             requests:
+               cpu: "2"
+               memory: "10Gi"
+               ephemeral-storage: "10Gi"
+               nvidia.com/gpu: 1
+             limits:
+               cpu: "2"
+               memory: "10Gi"
+               ephemeral-storage: "10Gi"
+               nvidia.com/gpu: 1
+           command: ["python3", "-m", "vllm.entrypoints.api_server"]
+           args:
+           - --model=$(MODEL_ID)
+           - --tensor-parallel-size=1
+           env:
+           - name: MODEL_ID
+             value: google/gemma-1.1-2b-it
+           - name: HUGGING_FACE_HUB_TOKEN
+             valueFrom:
+               secretKeyRef:
+                 name: hf-secret
+                 key: hf_api_token
+           volumeMounts:
+           - mountPath: /dev/shm
+             name: dshm
+         volumes:
+         - name: dshm
+           emptyDir:
              medium: Memory
-       nodeSelector:
-         cloud.google.com/gke-accelerator: nvidia-l4
+         nodeSelector:
+           cloud.google.com/gke-accelerator: nvidia-l4
    ---
    apiVersion: v1
    kind: Service
    metadata:
-   name: llm-service
+     name: llm-service
    spec:
-   selector:
-     app: gemma-server
-   type: ClusterIP
-   ports:
-     - protocol: TCP
-       port: 8000
-       targetPort: 8000</code></pre>
+     selector:
+       app: gemma-server
+     type: ClusterIP
+     ports:
+       - protocol: TCP
+         port: 8000
+         targetPort: 8000
+
+.. raw:: html
+
        </div>
    </div>
 
