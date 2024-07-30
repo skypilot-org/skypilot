@@ -3,7 +3,7 @@
 Comparing SkyPilot with other systems
 =====================================
 
-We are often asked "How does SkyPilot compare against XYZ?". Providing an unbiased and up-to date answer for such questions is not easy, especially when the differences may be qualitative.
+We are often asked "How does SkyPilot compare with XYZ?". Providing an unbiased and up-to date answer for such questions is not easy, especially when the differences may be qualitative.
 
 This page tries to provide a comparison of SkyPilot with other systems, focusing on the unique features of SkyPilot. We welcome feedback and contributions to this page.
 
@@ -11,23 +11,23 @@ This page tries to provide a comparison of SkyPilot with other systems, focusing
 SkyPilot vs Vanilla Kubernetes
 ------------------------------
 
-Kubernetes is a powerful system for managing containerized applications. SkyPilot builds on top of Kubernetes to provide a more powerful and easier-to-use framework for running AI workloads.
+Kubernetes is a powerful system for managing containerized applications. :ref:`Using SkyPilot to access your Kubernetes cluster <kubernetes-overview>` boosts developer productivity and allows you to scale your infra beyond a single Kubernetes cluster.
 
-Faster iteration with interactive development
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Faster iteration speed
+^^^^^^^^^^^^^^^^^^^^^^
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/k8s_vs_skypilot_iterative_v2.png
     :align: center
-    :width: 80%
+    :width: 95%
     :alt: Iterative Development with Kubernetes vs SkyPilot
 
-    Iterative Development with Kubernetes requires tedious updates to docker images and multiple steps to update the training run. With SkyPilot, all you need is sky launch.
+    Iterative Development with Kubernetes requires tedious updates to Docker images and multiple steps to update the training run. With SkyPilot, all you need is one CLI (``sky launch``).
 
-Interactive workflows benefit from faster iteration with SkyPilot. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters by observing the training runs.
+SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters by observing the training runs.
 
 * **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
 
-* **With SkyPilot, a single sky launch takes care of everything.** Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs and provides SSH and VSCode access to debug.
+* **With SkyPilot, a single command (``sky launch``) takes care of everything.** Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs and provides SSH and VSCode access to debug.
 
 
 Simpler YAMLs
@@ -45,9 +45,8 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
    <div class="row">
        <div class="col-md-6 mb-3">
             <h3> SkyPilot </h3>
-           <pre>
-           <code class="yaml">
-   envs:
+           <pre style="padding: 0.5rem 0.5rem 0.5rem 1rem;">
+   <code class="yaml">envs:
      MODEL_NAME: google/gemma-2b-it
      HF_TOKEN: myhftoken
 
@@ -66,15 +65,12 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
      python -m vllm.entrypoints.openai.api_server \
      --model $MODEL_NAME \
      --tokenizer hf-internal-testing/llama-tokenizer \
-     --host 0.0.0.0
-           </code>
-           </pre>
+     --host 0.0.0.0</code></pre>
        </div>
        <div class="col-md-6 mb-3">
             <h3> Kubernetes </h3>
-           <pre>
-           <code class="yaml">
-   apiVersion: apps/v1
+           <pre style="padding: 0.5rem 0.5rem 0.5rem 0.5rem;">
+   <code class="yaml">apiVersion: apps/v1
    kind: Deployment
    metadata:
    name: vllm-gemma-deployment
@@ -137,9 +133,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
    ports:
      - protocol: TCP
        port: 8000
-       targetPort: 8000
-           </code>
-           </pre>
+       targetPort: 8000</code></pre>
        </div>
    </div>
 
@@ -149,23 +143,23 @@ Scale beyond single region/cluster
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/failover.png
     :align: center
-    :width: 80%
+    :width: 95%
     :alt: Scaling beyond a single region Kubernetes cluster with SkyPilot
 
     If the Kubernetes cluster is full, SkyPilot can get GPUs from other regions and clouds to run your tasks at the lowest cost.
 
-Kubernetes deployments are typically contained to a single region in a single cluster.
-This is because longer latencies across regions causes etcd, the store for Kubernetes state, to timeout and fail [1]_ [2]_ [3]_.
+A Kubernetes cluster is typically constrained to a single region in a single cloud.
+This is because etcd, the control store for Kubernetes state, can timeout and fail when it faces highers latencies across regions [1]_ [2]_ [3]_.
 
 Being restricted to a single region/cloud with Vanilla Kubernetes has two drawbacks:
 
-1. `Availability is reduced by up to 29% <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ because you cannot utilize
+1. `GPU availability gets reduced <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ because you cannot utilize
 available capacity elsewhere.
 
-2. `Costs increase by 2.4x <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ as you are unable to
+2. `Costs increase <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ as you are unable to
 take advantage of cheaper resources in other regions.
 
-SkyPilot was designed to scale across clouds and regions - it allows you to run your tasks on your Kubernetes cluster, and burst to more regions and clouds if needed. In doing so, SkyPilot ensures that your tasks are always running in the most cost-effective region, while maintaining high availability.
+SkyPilot is designed to scale across clouds and regions: it allows you to run your tasks on your Kubernetes cluster, and burst to more regions and clouds if needed. In doing so, SkyPilot ensures that your tasks are always running in the most cost-effective region, while maintaining high availability.
 
 .. [1] `etcd FAQ <https://etcd.io/docs/v3.3/faq/#does-etcd-work-in-cross-region-or-cross-data-center-deployments>`_
 .. [2] `"Multi-region etcd cluster performance issue" on GitHub <https://github.com/etcd-io/etcd/issues/12232>`_
