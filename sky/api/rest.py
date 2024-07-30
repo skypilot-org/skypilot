@@ -60,18 +60,19 @@ app = fastapi.FastAPI(prefix='/api/v1', debug=True)
 app.add_middleware(RequestIDMiddleware)
 
 
-async def refresh_cluster_status_event():
+def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
-    background_tasks = fastapi.BackgroundTasks()
     while True:
-        background_tasks.add_task(core.status, refresh=True)
-        await asyncio.sleep(30)
+        print('Refreshing cluster status...')
+        core.status(refresh=True)
+        print('Refreshed cluster status...')
+        time.sleep(20)
 
 
 # Register the events to run in the background.
-events = [
-    refresh_cluster_status_event,
-]
+events = {
+    'status': refresh_cluster_status_event
+}
 
 
 class RequestBody(pydantic.BaseModel):
@@ -167,8 +168,12 @@ def _start_background_request(request_id: str,
 
 @app.on_event('startup')
 async def startup():
-    for event in events:
-        asyncio.create_task(event())
+    for event_id, (event_name, event) in enumerate(events.items()):
+        _start_background_request(
+            request_id=str(event_id),
+            request_name=event_name,
+            request_body={},
+            func=event)
 
 
 class OptimizeBody(pydantic.BaseModel):
@@ -348,31 +353,12 @@ async def stop(request: fastapi.Request, stop_body: StopBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='stop',
-        request_body=json.loads(stop_body.json()),
+        request_body=json.loads(stop_body.model_dump_json()),
         func=core.stop,
         cluster_name=stop_body.cluster_name,
         purge=stop_body.purge,
     )
 
-
-class ClusterJobBody(pydantic.BaseModel):
-    cluster_name: str
-    job_id: int
-    follow: bool = True
-
-
-@app.get('/tail_logs')
-async def tail_logs(request: fastapi.Request,
-                    cluster_job_body: ClusterJobBody) -> None:
-    _start_background_request(
-        request_id=request.state.request_id,
-        request_name='logs',
-        request_body=json.loads(cluster_job_body.json()),
-        func=core.tail_logs,
-        cluster_name=cluster_job_body.cluster_name,
-        job_id=cluster_job_body.job_id,
-        follow=cluster_job_body.follow,
-    )
 
 
 class StatusBody(pydantic.BaseModel):
@@ -397,7 +383,7 @@ async def status(
     _start_background_request(
         request_id=request.state.request_id,
         request_name='status',
-        request_body=json.loads(status_body.json()),
+        request_body=json.loads(status_body.model_dump_json()),
         func=core.status,
         cluster_names=status_body.cluster_names,
         refresh=status_body.refresh,
@@ -414,7 +400,7 @@ async def down(down_body: DownBody, request: fastapi.Request):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='down',
-        request_body=json.loads(down_body.json()),
+        request_body=json.loads(down_body.model_dump_json()),
         func=core.down,
         cluster_name=down_body.cluster_name,
         purge=down_body.purge,
