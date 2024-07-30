@@ -215,6 +215,12 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep azure-cli > /dev/null 2>&1 || '
                 'pip install "azure-cli>=2.31.0" azure-core '
                 '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
+            # Have to separate this installation of az blob storage from above
+            # because this is newly-introduced and not part of azure-cli. We
+            # need a separate installed check for this.
+            commands.append(
+                'pip list | grep azure-storage-blob > /dev/null 2>&1 || '
+                'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
         elif isinstance(cloud, clouds.GCP):
             commands.append(
                 f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
@@ -238,7 +244,8 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y; '
+                'then apt update && apt install curl socat netcat -y '
+                '&> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '
@@ -352,6 +359,7 @@ def shared_controller_vars_to_fill(
         # cloud SDKs are installed in SkyPilot runtime environment and can be
         # accessed.
         'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+        'sky_python_cmd': constants.SKY_PYTHON_CMD,
     }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
@@ -718,10 +726,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     if copy_mounts_with_file_in_src:
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
-        storage = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage.stores.keys())[0]
-        store_prefix = store_type.store_prefix()
-        bucket_url = store_prefix + file_bucket_name
+        storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
+        store_type = list(storage_obj.stores.keys())[0]
+        store_object = storage_obj.stores[store_type]
+        bucket_url = storage_lib.StoreType.get_endpoint_url(
+            store_object, file_bucket_name)
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -739,8 +748,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
-            store_prefix = store_type.store_prefix()
-            storage_obj.source = f'{store_prefix}{storage_obj.name}'
+            store_object = storage_obj.stores[store_type]
+            storage_obj.source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
             storage_obj.force_delete = True
 
     # Step 7: Convert all `MOUNT` mode storages which don't specify a source
@@ -752,8 +762,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 not storage_obj.source):
             # Construct source URL with first store type and storage name
             # E.g., s3://my-storage-name
-            source = list(
-                storage_obj.stores.keys())[0].store_prefix() + storage_obj.name
+            store_types = list(storage_obj.stores.keys())
+            assert len(store_types) == 1, (
+                'We only support one store type for now.', storage_obj.stores)
+            store_type = store_types[0]
+            store_object = storage_obj.stores[store_type]
+            source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,

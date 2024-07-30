@@ -706,6 +706,9 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'disk_encrypted': {
+                    'type': 'boolean',
+                },
                 'security_group_name':
                     (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 **_LABELS_SCHEMA,
@@ -747,6 +750,16 @@ def get_config_schema():
                 **_NETWORK_CONFIG_SCHEMA,
             },
             **_check_not_both_fields_present('instance_tags', 'labels')
+        },
+        'azure': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'storage_account': {
+                    'type': 'string',
+                },
+            }
         },
         'kubernetes': {
             'type': 'object',

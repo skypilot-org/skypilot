@@ -12,9 +12,6 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
-DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
-                                'the Docker daemon socket')
-
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
@@ -25,6 +22,13 @@ SETUP_ENV_VARS_CMD = (
     '~/container_env_var.sh && '
     '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh'
 )
+
+# Docker daemon may not be ready when the machine is firstly started. The error
+# message starts with the following string. We should wait for a while and retry
+# the command.
+DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
+                                'the Docker daemon socket')
+_DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
 @dataclasses.dataclass
@@ -140,7 +144,8 @@ class DockerInitializer:
              cmd,
              run_env='host',
              wait_for_docker_daemon: bool = False,
-             separate_stderr: bool = False) -> str:
+             separate_stderr: bool = False,
+             log_err_when_fail: bool = True) -> str:
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -153,8 +158,7 @@ class DockerInitializer:
                    f' {shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
-        cnt = 0
-        retry = 3
+        start = time.time()
         while True:
             rc, stdout, stderr = self.runner.run(
                 cmd,
@@ -162,24 +166,30 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (not wait_for_docker_daemon or
-                    DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
-                break
-
-            cnt += 1
-            if cnt > retry:
-                break
-            logger.info(
-                'Failed to run docker command, retrying in 10 seconds... '
-                f'({cnt}/{retry})')
-            time.sleep(10)
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
+                    wait_for_docker_daemon):
+                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                    if rc == 0:
+                        # Set returncode to 1 if failed to connect to docker
+                        # daemon after timeout.
+                        rc = 1
+                    break
+                # Close the cached connection to make the permission update of
+                # ssh user take effect, e.g. usermod -aG docker $USER, called
+                # by cloud-init of Azure.
+                self.runner.close_cached_connection()
+                logger.info('Failed to connect to docker daemon. It might be '
+                            'initializing, retrying in 5 seconds...')
+                time.sleep(5)
+                continue
+            break
         subprocess_utils.handle_returncode(
             rc,
             cmd,
             error_msg='Failed to run docker setup commands.',
             stderr=stdout + stderr,
             # Print out the error message if the command failed.
-            stream_logs=True)
+            stream_logs=log_err_when_fail)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -370,7 +380,7 @@ class DockerInitializer:
                                     'info -f "{{.Runtimes}}"'))
         if 'nvidia-container-runtime' in runtime_output:
             try:
-                self._run('nvidia-smi')
+                self._run('nvidia-smi', log_err_when_fail=False)
                 return run_options + ['--runtime=nvidia']
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(

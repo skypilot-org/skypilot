@@ -4,6 +4,7 @@
 
 import logging
 import os
+from typing import Any, Callable, Set
 
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
@@ -30,11 +31,19 @@ _api_client = None
 API_TIMEOUT = 5
 
 
-def _decorate_methods(obj, decorator):
+def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
     for attr_name in dir(obj):
         attr = getattr(obj, attr_name)
+        # Skip methods starting with '__' since they are invoked through one
+        # of the main methods, which are already decorated.
         if callable(attr) and not attr_name.startswith('__'):
-            setattr(obj, attr_name, decorator(attr))
+            decorated_types: Set[str] = getattr(attr, '_sky_decorator_types',
+                                                set())
+            if decoration_type not in decorated_types:
+                decorated_attr = decorator(attr)
+                decorated_attr._sky_decorator_types = (  # pylint: disable=protected-access
+                    decorated_types | {decoration_type})
+                setattr(obj, attr_name, decorated_attr)
     return obj
 
 
@@ -49,7 +58,7 @@ def _api_logging_decorator(logger: str, level: int):
 
         def wrapped(*args, **kwargs):
             obj = api(*args, **kwargs)
-            _decorate_methods(obj, set_logging_level(logger, level))
+            _decorate_methods(obj, set_logging_level(logger, level), 'api_log')
             return obj
 
         return wrapped

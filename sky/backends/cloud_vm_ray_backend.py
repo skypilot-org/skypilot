@@ -18,7 +18,8 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import colorama
 import filelock
@@ -701,56 +702,38 @@ class FailoverCloudErrorHandlerV1:
     """
 
     @staticmethod
-    def _azure_handler(blocked_resources: Set['resources_lib.Resources'],
-                       launchable_resources: 'resources_lib.Resources',
-                       region: 'clouds.Region',
-                       zones: Optional[List['clouds.Zone']], stdout: str,
-                       stderr: str):
-        del zones  # Unused.
-        # The underlying ray autoscaler will try all zones of a region at once.
-        style = colorama.Style
+    def _handle_errors(stdout: str, stderr: str,
+                       is_error_str_known: Callable[[str], bool]) -> List[str]:
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if ('Exception Details:' in s.strip() or 'InvalidTemplateDeployment'
-                in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
+            if is_error_str_known(s.strip())
         ]
-        if not errors:
-            if 'Head node fetch timed out' in stderr:
-                # Example: click.exceptions.ClickException: Head node fetch
-                # timed out. Failed to create head node.
-                # This is a transient error, but we have retried in need_ray_up
-                # and failed.  So we skip this region.
-                logger.info('Got \'Head node fetch timed out\' in '
-                            f'{region.name}.')
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(region=region.name))
-            elif 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
+        if errors:
+            return errors
+        if 'rsync: command not found' in stderr:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
-            _add_to_blocked_resources(
-                blocked_resources,
-                resources_lib.Resources(cloud=clouds.Azure()))
-        else:
-            _add_to_blocked_resources(blocked_resources,
-                                      launchable_resources.copy(zone=None))
+                e = RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
+                setattr(e, 'detailed_reason',
+                        f'stdout: {stdout}\nstderr: {stderr}')
+                raise e
+        detailed_reason = textwrap.dedent(f"""\
+        ====== stdout ======
+        {stdout}
+        ====== stderr ======
+        {stderr}
+        """)
+        logger.info('====== stdout ======')
+        print(stdout)
+        logger.info('====== stderr ======')
+        print(stderr)
+        with ux_utils.print_exception_no_traceback():
+            e = RuntimeError('Errors occurred during provision; '
+                             'check logs above.')
+            setattr(e, 'detailed_reason', detailed_reason)
+            raise e
 
     @staticmethod
     def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -759,30 +742,13 @@ class FailoverCloudErrorHandlerV1:
                         zones: Optional[List['clouds.Zone']], stdout: str,
                         stderr: str):
         del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'LambdaCloudError:' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
-
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
+            stdout,
+            stderr,
+            is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         _add_to_blocked_resources(blocked_resources,
                                   launchable_resources.copy(zone=None))
@@ -797,64 +763,20 @@ class FailoverCloudErrorHandlerV1:
                             launchable_resources.copy(region=r.name, zone=None))
 
     @staticmethod
-    def _kubernetes_handler(blocked_resources: Set['resources_lib.Resources'],
-                            launchable_resources: 'resources_lib.Resources',
-                            region, zones, stdout, stderr):
-        del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'KubernetesError:' in s.strip()
-        ]
-        if not errors:
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provisioning; '
-                                   'check logs above.')
-
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-    @staticmethod
     def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources', region,
-                     zones, stdout, stderr):
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']], stdout: str,
+                     stderr: str):
         del zones  # Unused.
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'SCPError:' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
+            stdout,
+            stderr,
+            is_error_str_known=lambda x: 'SCPError:' in x.strip())
 
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         _add_to_blocked_resources(blocked_resources,
                                   launchable_resources.copy(zone=None))
@@ -875,29 +797,13 @@ class FailoverCloudErrorHandlerV1:
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
 
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'ERR' in s.strip() or 'PANIC' in s.strip()
-        ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
+            stdout, stderr,
+            lambda x: 'ERR' in x.strip() or 'PANIC' in x.strip())
+
         logger.warning(f'Got error(s) on IBM cluster, in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
 
         for zone in zones:  # type: ignore[union-attr]
@@ -911,35 +817,17 @@ class FailoverCloudErrorHandlerV1:
                      region: 'clouds.Region',
                      zones: Optional[List['clouds.Zone']], stdout: str,
                      stderr: str):
-
-        style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if ('VcnSubnetNotFound' in s.strip()) or
-            ('oci.exceptions.ServiceError' in s.strip() and
-             ('NotAuthorizedOrNotFound' in s.strip() or 'CannotParseRequest' in
-              s.strip() or 'InternalError' in s.strip() or
-              'LimitExceeded' in s.strip() or 'NotAuthenticated' in s.strip()))
+        known_service_errors = [
+            'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
+            'LimitExceeded', 'NotAuthenticated'
         ]
-        if not errors:
-            if 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
-
+        errors = FailoverCloudErrorHandlerV1._handle_errors(
+            stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
+            ('oci.exceptions.ServiceError' in x.strip() and any(
+                known_err in x.strip() for known_err in known_service_errors)))
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
+        style = colorama.Style
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
 
         if zones is not None:
@@ -1020,6 +908,25 @@ class FailoverCloudErrorHandlerV2:
     the errors raised by the cloud's API using the exception, instead of the
     stdout and stderr.
     """
+
+    @staticmethod
+    def _azure_handler(blocked_resources: Set['resources_lib.Resources'],
+                       launchable_resources: 'resources_lib.Resources',
+                       region: 'clouds.Region', zones: List['clouds.Zone'],
+                       err: Exception):
+        del region, zones  # Unused.
+        if '(ReadOnlyDisabledSubscription)' in str(err):
+            logger.info(
+                f'{colorama.Style.DIM}Azure subscription is read-only. '
+                'Skip provisioning on Azure. Please check the subscription set '
+                'with az account set -s <subscription_id>.'
+                f'{colorama.Style.RESET_ALL}')
+            _add_to_blocked_resources(
+                blocked_resources,
+                resources_lib.Resources(cloud=clouds.Azure()))
+        else:
+            _add_to_blocked_resources(blocked_resources,
+                                      launchable_resources.copy(zone=None))
 
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -1830,19 +1737,6 @@ class RetryingVmProvisioner(object):
             if returncode == 0:
                 return False
 
-            if isinstance(to_provision_cloud, clouds.Azure):
-                if 'Failed to invoke the Azure CLI' in stderr:
-                    logger.info(
-                        'Retrying head node provisioning due to Azure CLI '
-                        'issues.')
-                    return True
-                if ('Head node fetch timed out. Failed to create head node.'
-                        in stderr):
-                    logger.info(
-                        'Retrying head node provisioning due to head fetching '
-                        'timeout.')
-                    return True
-
             if isinstance(to_provision_cloud, clouds.Lambda):
                 if 'Your API requests are being rate limited.' in stderr:
                     logger.info(
@@ -2451,8 +2345,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+        updated_to_skypilot_provisioner_after_provisioned = (
+            self.launched_resources.cloud.PROVISIONER_VERSION >=
+            clouds.ProvisionerVersion.SKYPILOT and
+            self.cached_external_ips is not None and
+            self.cached_cluster_info is None)
+        if updated_to_skypilot_provisioner_after_provisioned:
+            logger.debug(
+                f'{self.launched_resources.cloud} has been updated to the new '
+                f'provisioner after cluster {self.cluster_name} was '
+                f'provisioned. Cached IPs are used for connecting to the '
+                'cluster.')
         if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                self.launched_resources.cloud.PROVISIONER_VERSION):
+                self.launched_resources.cloud.PROVISIONER_VERSION or
+                updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
             if ip_list is None:
@@ -2465,7 +2371,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
         if self.cached_cluster_info is None:
-            assert not force_cached, 'cached_cluster_info is None.'
+            # We have `or self.cached_external_ips is None` here, because
+            # when a cluster's cloud is just upgraded to the new provsioner,
+            # although it has the cached_external_ips, the cached_cluster_info
+            # can be None. We need to update it here, even when force_cached is
+            # set to True.
+            # TODO: We can remove `self.cached_external_ips is None` after
+            # version 0.8.0.
+            assert not force_cached or self.cached_external_ips is not None, (
+                force_cached, self.cached_external_ips)
             self._update_cluster_info()
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
@@ -3299,8 +3213,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
             # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} 2> /dev/null"'
-        )
+            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} '
+            '2> /dev/null"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -4531,13 +4445,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             storage = cloud_stores.get_storage_from_path(src)
             if storage.is_directory(src):
-                sync = storage.make_sync_dir_command(source=src,
-                                                     destination=wrapped_dst)
+                sync_cmd = (storage.make_sync_dir_command(
+                    source=src, destination=wrapped_dst))
                 # It is a directory so make sure it exists.
                 mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
             else:
-                sync = storage.make_sync_file_command(source=src,
-                                                      destination=wrapped_dst)
+                sync_cmd = (storage.make_sync_file_command(
+                    source=src, destination=wrapped_dst))
                 # It is a file so make sure *its parent dir* exists.
                 mkdir_for_wrapped_dst = (
                     f'mkdir -p {os.path.dirname(wrapped_dst)}')
@@ -4546,7 +4460,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
                 mkdir_for_wrapped_dst,
                 # Both the wrapped and the symlink dir exist; sync.
-                sync,
+                sync_cmd,
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.

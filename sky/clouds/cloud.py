@@ -361,11 +361,10 @@ class Cloud:
         return True, None
 
     def get_feasible_launchable_resources(
-        self,
-        resources: 'resources_lib.Resources',
-        num_nodes: int = 1
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
-        """Returns ([feasible and launchable resources], [fuzzy candidates]).
+            self,
+            resources: 'resources_lib.Resources',
+            num_nodes: int = 1) -> 'resources_utils.FeasibleResources':
+        """Returns FeasibleResources for the given resources.
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the
@@ -373,10 +372,15 @@ class Cloud:
 
         Launchable resources require a cloud and an instance type be assigned.
 
-        Fuzzy candidates example: when the requested GPU is A100:1 but is not
-        available in a cloud/region, the fuzzy candidates are results of a fuzzy
-        search in the catalog that are offered in the location. E.g.,
-          ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
+        The returned dataclass object FeasibleResources contains three fields:
+
+        - resources_list: a list of resources that are feasible to launch
+        - fuzzy_candidate_list: a list of resources that loosely match requested
+            resources. E.g., when A100:1 GPU is requested but is not available
+            in a cloud/region, the fuzzy candidates are results of a fuzzy
+            search in the catalog that are offered in the location. E.g.,
+            ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
+        - hint: an optional string hint if no feasible resources are found.
         """
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
@@ -392,13 +396,18 @@ class Cloud:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
             # are not considered.
-            return ([], [])
+            return resources_utils.FeasibleResources(resources_list=[],
+                                                     fuzzy_candidate_list=[],
+                                                     hint=None)
         return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         """See get_feasible_launchable_resources()."""
+        # TODO: Currently only the Kubernetes implementation of this method
+        #  returns hints when no feasible resources are found. This should be
+        #  implemented for all clouds.
         raise NotImplementedError
 
     def get_reservations_available_resources(

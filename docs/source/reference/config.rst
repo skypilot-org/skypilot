@@ -185,6 +185,14 @@ Available fields and semantics:
     #         - "*": my-default-security-group
     security_group_name: my-security-group
 
+    # Encrypted boot disk (optional).
+    #
+    # Set to true to encrypt the boot disk of all AWS instances launched by
+    # SkyPilot. This is useful for compliance with data protection regulations.
+    #
+    # Default: false.
+    disk_encrypted: false
+
     # Identity to use for AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
@@ -367,6 +375,18 @@ Available fields and semantics:
     #
     # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
+
+  # Advanced Azure configurations (optional).
+  # Apply to all new instances but not existing ones.
+  azure:
+    # Specify an existing Azure storage account for SkyPilot-managed containers.
+    # If not set, SkyPilot will use its default naming convention to create and
+    # use the storage account unless container endpoint URI is used as source.
+    # Note: SkyPilot cannot create new storage accounts with custom names; it
+    # can only use existing ones or create accounts with its default naming
+    # scheme.
+    # Reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview
+    storage_account: user-storage-account-name
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
