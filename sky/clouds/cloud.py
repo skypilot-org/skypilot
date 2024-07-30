@@ -108,7 +108,7 @@ class OpenPortsVersion(enum.Enum):
     UPDATABLE = 2
 
     def __le__(self, other):
-        return self.value <= other.value
+        return OpenPortsVersion.index(self) <= OpenPortsVersion.index(other)
 
 
 class Cloud:
