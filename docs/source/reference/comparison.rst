@@ -45,7 +45,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
    <div class="row">
        <div class="col-md-6 mb-3">
             <h3> SkyPilot </h3>
-           <pre style="padding: 0.5rem 0.5rem 0.5rem 1rem;">
+           <pre style="padding: 0.5rem 0.5rem 0.5rem 0.5rem;">
    <code class="yaml">envs:
      MODEL_NAME: google/gemma-2b-it
      HF_TOKEN: myhftoken
