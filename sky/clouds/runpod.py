@@ -46,7 +46,7 @@ class RunPod(clouds.Cloud):
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
-    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY
+    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
 
     @classmethod
     def _unsupported_features_for_resources(

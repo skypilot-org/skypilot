@@ -1564,7 +1564,7 @@ class RetryingVmProvisioner(object):
                 ports_to_open_on_launch = (
                     list(resources_utils.port_ranges_to_set(to_provision.ports))
                     if to_provision.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY else None)
+                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
@@ -3070,7 +3070,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if open_new_ports:
             cloud = handle.launched_resources.cloud
             if not (cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY):
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         '[bold cyan]Launching - Opening new ports'):
                     self._open_ports(handle)
@@ -4379,7 +4379,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                            requested_ports_set)
             to_provision = handle.launched_resources
             if (to_provision.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.OPEN_ON_LAUNCH_ONLY):
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
                     current_cloud = to_provision.cloud
                     with ux_utils.print_exception_no_traceback():

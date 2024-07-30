@@ -104,11 +104,12 @@ class OpenPortsVersion(enum.Enum):
     of the cloud providers which allow opening ports using an programmable API
     and won't affect the running VMs.
     """
-    OPEN_ON_LAUNCH_ONLY = 1
-    UPDATABLE = 2
+    LAUNCH_ONLY = 'LAUNCH ONLY'
+    UPDATABLE = 'UPDATABLE'
 
     def __le__(self, other):
-        return OpenPortsVersion.index(self) <= OpenPortsVersion.index(other)
+        versions = list(OpenPortsVersion)
+        return versions.index(self) <= versions.index(other)
 
 
 class Cloud:
