@@ -183,7 +183,6 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
-
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))
 
@@ -205,7 +204,6 @@ def launch(
                 upload_list.append(_full_path(storage_source))
                 file_mounts_mapping[storage_source] = _full_path(storage_source)
         task_.file_mounts_mapping = file_mounts_mapping
-                
 
     logger.info('Uploading files to API server...')
     with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:

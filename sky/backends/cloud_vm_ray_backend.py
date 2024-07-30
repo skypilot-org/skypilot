@@ -4366,7 +4366,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
-                assert os.path.exists(full_src), f'{full_src} does not exist. {file_mounts}'
+                assert os.path.exists(
+                    full_src), f'{full_src} does not exist. {file_mounts}'
                 src_size = backend_utils.path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
