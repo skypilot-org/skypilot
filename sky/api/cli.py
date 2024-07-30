@@ -1095,7 +1095,7 @@ def launch(
     if not async_call:
         sdk.stream_and_get(request_id)
     else:
-        click.secho(f'Submitted Launch request: {request_id}', color='green')
+        click.secho(f'Submitted Launch request: {request_id}', fg='green')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1258,6 +1258,8 @@ def exec(
     request_id = sdk.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
     if not async_call:
         sdk.stream_and_get(request_id)
+    else:
+        click.secho(f'Submitted Exec request: {request_id}', fg='green')
 
 
 def _get_managed_jobs(

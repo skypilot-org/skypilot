@@ -39,6 +39,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -84,7 +85,7 @@ def _start_uvicorn_in_background(reload: bool = False):
                     f'Failed to connect to SkyPilot server at {_get_server_url()}. '
                     'Please check the logs for more information: '
                     f'tail -f {constants.API_SERVER_LOGS}')
-            time.sleep(0.1)
+            time.sleep(0.5)
 
 
 def _get_request_id(response) -> str:
@@ -149,6 +150,50 @@ def optimize(dag: 'sky.Dag') -> str:
     return response.headers['X-Request-ID']
 
 
+def _upload_mounts_to_api_server(
+        task: Union['sky.Task', 'sky.Dag']) -> 'dag_lib.Dag':
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+
+    def _full_path(src: str) -> str:
+        return os.path.abspath(os.path.expanduser(src))
+
+    upload_list = []
+    # if not _is_api_server_local():
+    for task_ in dag.tasks:
+        file_mounts_mapping = {}
+        if task_.workdir:
+            workdir = task_.workdir
+            upload_list.append(_full_path(workdir))
+            file_mounts_mapping[workdir] = _full_path(workdir)
+        if task_.file_mounts is not None:
+            for src in task_.file_mounts.values():
+                if not data_utils.is_cloud_store_url(src):
+                    upload_list.append(_full_path(src))
+                    file_mounts_mapping[src] = _full_path(src)
+        if task_.storage_mounts is not None:
+            for storage in task_.storage_mounts.values():
+                storage_source = storage.source
+                if not data_utils.is_cloud_store_url(storage_source):
+                    upload_list.append(_full_path(storage_source))
+                    file_mounts_mapping[storage_source] = _full_path(
+                        storage_source)
+        task_.file_mounts_mapping = file_mounts_mapping
+
+    logger.info('Uploading files to API server...')
+    with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
+        common_utils.zip_files_and_folders(upload_list, f)
+        f.seek(0)
+        files = {'file': (f.name, f)}
+        # Send the POST request with the file
+        response = requests.post(
+            f'{_get_server_url()}/upload?user_hash={common_utils.get_user_hash()}',
+            files=files)
+        if response.status_code != 200:
+            raise RuntimeError(f'Failed to upload files: {response.content}')
+
+    return dag
+
+
 @usage_lib.entrypoint
 @_check_health
 def launch(
@@ -181,43 +226,7 @@ def launch(
     #     task, _ = backend_utils.check_can_clone_disk_and_override_task(
     #         clone_disk_from, cluster_name, task)
 
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-
-    def _full_path(src: str) -> str:
-        return os.path.abspath(os.path.expanduser(src))
-
-    upload_list = []
-    # if not _is_api_server_local():
-    for task_ in dag.tasks:
-        file_mounts_mapping = {}
-        if task_.workdir:
-            workdir = task_.workdir
-            upload_list.append(_full_path(workdir))
-            file_mounts_mapping[workdir] = _full_path(workdir)
-        if task_.file_mounts is not None:
-            for src in task_.file_mounts.values():
-                if not data_utils.is_cloud_store_url(src):
-                    upload_list.append(_full_path(src))
-                    file_mounts_mapping[src] = _full_path(src)
-        if task_.storage_mounts is not None:
-            for storage in task_.storage_mounts.values():
-                storage_source = storage.source
-                if not data_utils.is_cloud_store_url(storage_source):
-                    upload_list.append(_full_path(storage_source))
-                    file_mounts_mapping[storage_source] = _full_path(storage_source)
-        task_.file_mounts_mapping = file_mounts_mapping
-
-    logger.info('Uploading files to API server...')
-    with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-        common_utils.zip_files_and_folders(upload_list, f)
-        f.seek(0)
-        files = {'file': (f.name, f)}
-        # Send the POST request with the file
-        response = requests.post(
-            f'{_get_server_url()}/upload?user_hash={common_utils.get_user_hash()}',
-            files=files)
-        if response.status_code != 200:
-            raise RuntimeError(f'Failed to upload files: {response.content}')
+    dag = _upload_mounts_to_api_server(task)
 
     cluster_status = None
     request_id = status([cluster_name])
@@ -281,9 +290,34 @@ def launch(
     return response.headers['X-Request-ID']
 
 
-# @usage_lib.entrypoint
-# @_check_health
-# def exec(task)
+@usage_lib.entrypoint
+@_check_health
+def exec(
+    task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: Optional[str] = None,
+    dryrun: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    backend: Optional[backends.Backend] = None,
+    detach_run: bool = False,
+) -> str:
+    """Execute a task."""
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+    with tempfile.NamedTemporaryFile(mode='r') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_str = f.read()
+    body = {
+        'task': dag_str,
+        'cluster_name': cluster_name,
+        'dryrun': dryrun,
+        'down': down,
+        'detach_run': detach_run,
+    }
+    response = requests.post(
+        f'{_get_server_url()}/exec',
+        json=body,
+        timeout=5,
+    )
+    return response.headers['X-Request-ID']
 
 
 @usage_lib.entrypoint

@@ -12,11 +12,12 @@ def _decode_and_unpickle(obj: str) -> Any:
     return pickle.loads(base64.b64decode(obj.encode('utf-8')))
 
 
-def register_handler(name: str):
+def register_handler(*names: str):
     """Decorator to register a handler."""
 
     def decorator(func):
-        handlers[name] = func
+        for name in names:
+            handlers[name] = func
         return func
 
     return decorator
@@ -43,7 +44,7 @@ def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return clusters
 
 
-@register_handler('launch')
+@register_handler('launch', 'exec')
 def decode_launch(return_value: Dict[str, Any]) -> Dict[str, Any]:
     return {
         'job_id': return_value['job_id'],

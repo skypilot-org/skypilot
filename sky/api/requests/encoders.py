@@ -14,11 +14,12 @@ def _pickle_and_encode(obj: Any) -> str:
     return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
 
 
-def register_handler(name: str):
+def register_handler(*names: str):
     """Decorator to register a handler."""
 
     def decorator(func):
-        handlers[name] = func
+        for name in names:
+            handlers[name] = func
         return func
 
     return decorator
@@ -45,7 +46,7 @@ def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return clusters
 
 
-@register_handler('launch')
+@register_handler('launch', 'exec')
 def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:

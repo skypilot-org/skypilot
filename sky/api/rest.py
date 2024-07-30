@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import traceback
+import typing
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 import zipfile
@@ -31,6 +32,9 @@ from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import dag as dag_lib
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -233,6 +237,60 @@ async def upload_zip_file(user_hash: str,
         return {"detail": str(e)}
 
 
+def _process_mounts_in_task(task: str, env_vars: Dict[str,
+                                                      str], cluster_name: str,
+                            workdir_only: bool) -> 'dag_lib.Dag':
+    user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
+
+    timestamp = str(int(time.time()))
+    client_dir = (CLIENT_DIR.expanduser().resolve() / user_hash)
+    client_task_dir = client_dir / 'tasks'
+    client_task_dir.mkdir(parents=True, exist_ok=True)
+
+    client_task_path = client_task_dir / f'{cluster_name}-{timestamp}.yaml'
+    client_task_path.write_text(task)
+
+    client_file_mounts_dir = client_dir / 'file_mounts'
+
+    task_configs = common_utils.read_yaml_all(str(client_task_path))
+    for task_config in task_configs:
+        if task_config is None:
+            continue
+        file_mounts_mapping = task_config.get('file_mounts_mapping', {})
+        if not file_mounts_mapping:
+            continue
+        if 'workdir' in task_config:
+            workdir = task_config['workdir']
+            task_config['workdir'] = str(
+                client_file_mounts_dir /
+                file_mounts_mapping[workdir].lstrip('/'))
+        if workdir_only:
+            continue
+        if 'file_mounts' in task_config:
+            file_mounts = task_config['file_mounts']
+            for dst, src in file_mounts.items():
+                if isinstance(src, str):
+                    if not data_utils.is_cloud_store_url(src):
+                        file_mounts[dst] = str(
+                            client_file_mounts_dir /
+                            file_mounts_mapping[src].lstrip('/'))
+                elif isinstance(src, dict):
+                    if 'source' in src:
+                        source = src['source']
+                        if not data_utils.is_cloud_store_url(source):
+                            src['source'] = str(
+                                client_file_mounts_dir /
+                                file_mounts_mapping[source].lstrip('/'))
+                else:
+                    raise ValueError(f'Unexpected file_mounts value: {src}')
+
+    translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
+    common_utils.dump_yaml(translated_client_task_path, task_configs)
+
+    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
+    return dag
+
+
 class LaunchBody(RequestBody):
     """The request body for the launch endpoint."""
     task: str
@@ -262,55 +320,10 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
     Args:
         task: The YAML string of the task to launch.
     """
-    user_hash = launch_body.env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
-
-    timestamp = str(int(time.time()))
-    client_dir = (CLIENT_DIR.expanduser().resolve() / user_hash)
-    client_task_dir = client_dir / 'tasks'
-    client_task_dir.mkdir(parents=True, exist_ok=True)
-    cluster_name = launch_body.cluster_name
-
-    client_task_path = client_task_dir / f'{cluster_name}-{timestamp}.yaml'
-    client_task_path.write_text(launch_body.task)
-
-    client_file_mounts_dir = client_dir / 'file_mounts'
-
-    task_configs = common_utils.read_yaml_all(str(client_task_path))
-
-    for task_config in task_configs:
-        if task_config is None:
-            continue
-        file_mounts_mapping = task_config.get('file_mounts_mapping', {})
-        if not file_mounts_mapping:
-            continue
-        if 'workdir' in task_config:
-            workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
-        if 'file_mounts' in task_config:
-            file_mounts = task_config['file_mounts']
-            for dst, src in file_mounts.items():
-                if isinstance(src, str):
-                    if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = str(
-                            client_file_mounts_dir /
-                            file_mounts_mapping[src].lstrip('/'))
-                elif isinstance(src, dict):
-                    if 'source' in src:
-                        source = src['source']
-                        if not data_utils.is_cloud_store_url(source):
-                            src['source'] = str(
-                                client_file_mounts_dir /
-                                file_mounts_mapping[source].lstrip('/'))
-                else:
-                    raise ValueError(f'Unexpected file_mounts value: {src}')
-
-    print(task_configs)
-    translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
-    common_utils.dump_yaml(translated_client_task_path, task_configs)
-
-    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
+    dag = _process_mounts_in_task(launch_body.task,
+                                  launch_body.env_vars,
+                                  launch_body.cluster_name,
+                                  workdir_only=False)
 
     backend = registry.BACKEND_REGISTRY.from_str(launch_body.backend)
     request_id = request.state.request_id
@@ -337,6 +350,39 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         _is_launched_by_sky_serve_controller=launch_body.
         is_launched_by_sky_serve_controller,
         _disable_controller_check=launch_body.disable_controller_check,
+    )
+
+
+class ExecBody(RequestBody):
+    task: str
+    cluster_name: Optional[str] = None
+    dryrun: bool = False
+    down: bool = False
+    detach_run: bool = False
+
+
+@app.post('/exec')
+async def exec(exec_body: ExecBody, request: fastapi.Request):
+    dag = _process_mounts_in_task(exec_body.task,
+                                  exec_body.env_vars,
+                                  exec_body.cluster_name,
+                                  workdir_only=True)
+    if len(dag.tasks) != 1:
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='The DAG for exec must have exactly one task.')
+    task = dag.tasks[0]
+
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='exec',
+        request_body=exec_body.model_dump(),
+        func=execution.exec,
+        task=task,
+        cluster_name=exec_body.cluster_name,
+        dryrun=exec_body.dryrun,
+        down=exec_body.down,
+        detach_run=exec_body.detach_run,
     )
 
 
