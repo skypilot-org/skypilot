@@ -14,7 +14,7 @@ SkyPilot vs Vanilla Kubernetes
 Kubernetes is a powerful system for managing containerized applications. :ref:`Using SkyPilot to access your Kubernetes cluster <kubernetes-overview>` boosts developer productivity and allows you to scale your infra beyond a single Kubernetes cluster.
 
 Faster developer velocity
-^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/k8s_vs_skypilot_iterative_v2.png
     :align: center
@@ -23,11 +23,12 @@ Faster developer velocity
 
     Iterative Development with Kubernetes requires tedious updates to Docker images and multiple steps to update the training run. With SkyPilot, all you need is one CLI (``sky launch``).
 
-SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters by observing the training runs.
+SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters while observing the training runs.
 
 * **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
 
-* **With SkyPilot, a single command (``sky launch``) takes care of everything.** Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs and provides SSH and VSCode access to debug.
+* :strong:`With SkyPilot, a single command (`:literal:`sky launch`:strong:`) takes care of everything.` Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs, and provides SSH and VSCode access to debug.
+ Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs and provides SSH and VSCode access to debug.
 
 
 Simpler YAMLs
@@ -44,7 +45,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
 
    <div class="row">
        <div class="col-md-6 mb-3">
-            <h3> SkyPilot </h3>
+            <h3> SkyPilot (19 lines) </h3>
 
 .. code-block:: yaml
    :linenos:
@@ -73,7 +74,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
 
        </div>
        <div class="col-md-6 mb-3">
-            <h3> Kubernetes </h3>
+            <h3> Kubernetes (65 lines) </h3>
 
 .. code-block:: yaml
    :linenos:
@@ -165,7 +166,7 @@ This is because etcd, the control store for Kubernetes state, can timeout and fa
 
 Being restricted to a single region/cloud with Vanilla Kubernetes has two drawbacks:
 
-1. `GPU availability gets reduced <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ because you cannot utilize
+1. `GPU availability is reduced <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ because you cannot utilize
 available capacity elsewhere.
 
 2. `Costs increase <https://blog.skypilot.co/introducing-sky-serve/#why-skyserve>`_ as you are unable to
