@@ -13,7 +13,7 @@ SkyPilot vs Vanilla Kubernetes
 
 Kubernetes is a powerful system for managing containerized applications. :ref:`Using SkyPilot to access your Kubernetes cluster <kubernetes-overview>` boosts developer productivity and allows you to scale your infra beyond a single Kubernetes cluster.
 
-Faster iteration speed
+Faster developer velocity
 ^^^^^^^^^^^^^^^^^^^^^^
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/k8s_vs_skypilot_iterative_v2.png
