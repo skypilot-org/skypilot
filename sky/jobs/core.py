@@ -276,7 +276,6 @@ def cancel(name: Optional[str] = None,
             raise RuntimeError(
                 'Please specify the job ID instead of the job name.')
 
-
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool) -> None:

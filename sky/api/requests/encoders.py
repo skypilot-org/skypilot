@@ -40,6 +40,8 @@ def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for cluster in clusters:
         cluster['status'] = cluster['status'].value
         cluster['handle'] = _pickle_and_encode(cluster['handle'])
+        cluster['storage_mounts_metadata'] = _pickle_and_encode(
+            cluster['storage_mounts_metadata'])
     return clusters
 
 

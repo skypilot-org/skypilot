@@ -117,16 +117,24 @@ class RequestTask:
 
     def encode(self) -> RequestTaskPayload:
         """Serialize the request task."""
-        return RequestTaskPayload(
-            request_id=self.request_id,
-            name=self.name,
-            entrypoint=self.entrypoint,
-            request_body=json.dumps(self.request_body),
-            status=self.status.value,
-            return_value=json.dumps(self.return_value),
-            error=json.dumps(self.error),
-            pid=self.pid,
-        )
+        try:
+            return RequestTaskPayload(
+                request_id=self.request_id,
+                name=self.name,
+                entrypoint=self.entrypoint,
+                request_body=json.dumps(self.request_body),
+                status=self.status.value,
+                return_value=json.dumps(self.return_value),
+                error=json.dumps(self.error),
+                pid=self.pid,
+            )
+        except TypeError as e:
+            print('Error encoding.\n'
+                    f'{self.request_id}\n'
+                    f'{self.name}\n'
+                        f'{self.request_body}\n'
+                        f'{self.return_value}\n')
+            raise
 
     @classmethod
     def decode(cls, payload: RequestTaskPayload) -> 'RequestTask':
