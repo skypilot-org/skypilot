@@ -47,6 +47,7 @@ import sky
 from sky import global_user_state
 from sky import jobs
 from sky import serve
+from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -1191,9 +1192,22 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     template = jinja2.Template(template_str)
     # ubuntu 18.04 does not support fuse3, and blobfuse2 depends on fuse3.
     azure_mount_unsupported_ubuntu_version = '18.04'
+    # Commands to verify bucket upload. We need to check all three
+    # storage types because the optimizer may pick any of them.
+    s3_command = f'aws s3 ls {storage_name}/hello.txt'
+    gsutil_command = f'gsutil ls gs://{storage_name}/hello.txt'
+    azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
     if azure_mount_unsupported_ubuntu_version in image_id:
+        # The store for mount_private_mount is not specified in the template.
+        # If we're running on Azure, the private mount will be created on
+        # azure blob. That will not be supported on the ubuntu 18.04 image
+        # and thus fail. For other clouds, the private mount on other
+        # storage types (GCS/S3) should succeed.
+        include_private_mount = False if generic_cloud == 'azure' else True
         content = template.render(storage_name=storage_name,
-                                  include_azure_mount=False)
+                                  include_azure_mount=False,
+                                  include_private_mount=include_private_mount)
     else:
         content = template.render(storage_name=storage_name,)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -1204,8 +1218,10 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
             *STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt || '
-            f'gsutil ls gs://{storage_name}/hello.txt',
+            # Check AWS, GCP, or Azure storage mount.
+            f'{s3_command} || '
+            f'{gsutil_command} || '
+            f'{azure_blob_command}',
         ]
         test = Test(
             'docker_storage_mounts',
@@ -3132,7 +3148,8 @@ def test_kubernetes_custom_image(image_id):
     run_one_test(test)
 
 
-@pytest.mark.no_fluidstack
+
+@pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
     test = Test(
@@ -4299,7 +4316,11 @@ class TestStorageWithCredentials:
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
-            storage_account_name = (
+            config_storage_account = skypilot_config.get_nested(
+                ('azure', 'storage_account'), None)
+            storage_account_name = config_storage_account if (
+                config_storage_account is not None
+            ) else (
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
                     user_hash=common_utils.get_user_hash()))
@@ -4897,10 +4918,14 @@ class TestStorageWithCredentials:
                 private_bucket).path.strip('/')
         else:
             private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
-        with pytest.raises(
-                sky.exceptions.StorageBucketGetError,
-                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                    name=private_bucket_name)):
+        match_str = storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+            name=private_bucket_name)
+        if store_type == 'https':
+            # Azure blob uses a different error string since container may
+            # not exist even though the bucket name is ok.
+            match_str = 'Attempted to fetch a non-existent public container'
+        with pytest.raises(sky.exceptions.StorageBucketGetError,
+                           match=match_str):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @pytest.mark.no_fluidstack
@@ -5291,6 +5316,7 @@ def test_multiple_resources():
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
+@pytest.mark.aws  # SkyBenchmark requires S3 access
 def test_sky_bench(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
