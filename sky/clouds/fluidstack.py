@@ -261,6 +261,18 @@ class Fluidstack(clouds.Cloud):
         try:
             assert os.path.exists(
                 os.path.expanduser(fluidstack_utils.FLUIDSTACK_API_KEY_PATH))
+
+            with open(os.path.expanduser(
+                    fluidstack_utils.FLUIDSTACK_API_KEY_PATH),
+                      encoding='UTF-8') as f:
+                api_key = f.read().strip()
+                if not api_key.startswith('api_key'):
+                    return False, ('Invalid FluidStack API key format. '
+                                   'To configure credentials, go to:\n    '
+                                   '  https://dashboard.fluidstack.io \n    '
+                                   'to obtain an API key, '
+                                   'then add save the contents '
+                                   'to ~/.fluidstack/api_key \n')
         except AssertionError:
             return False, ('Failed to access FluidStack Cloud'
                            ' with credentials. '
