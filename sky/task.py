@@ -1145,8 +1145,7 @@ class Task:
 
         # Multi-node
         if self.num_nodes > 1:
-            required_features.add(
-                clouds.CloudImplementationFeatures.MULTI_NODE)
+            required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():

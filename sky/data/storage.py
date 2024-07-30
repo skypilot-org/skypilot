@@ -127,8 +127,7 @@ class StoreType(enum.Enum):
             return StoreType.AZURE
         elif cloud.lower() == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Lambda Cloud does not provide cloud storage.')
+                raise ValueError('Lambda Cloud does not provide cloud storage.')
         elif cloud.lower() == str(clouds.SCP()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('SCP does not provide cloud storage.')
@@ -963,8 +962,7 @@ class Storage(object):
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
-                    global_user_state.set_storage_handle(
-                        self.name, self.handle)
+                    global_user_state.set_storage_handle(self.name, self.handle)
             elif self.force_delete:
                 store.delete()
             # Remove store from bookkeeping
@@ -1011,8 +1009,7 @@ class Storage(object):
 
         # Upload succeeded - update state
         if store.is_sky_managed:
-            global_user_state.set_storage_status(
-                self.name, StorageStatus.READY)
+            global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
