@@ -406,6 +406,131 @@ async def down(down_body: DownBody, request: fastapi.Request):
         purge=down_body.purge,
     )
 
+class StartBody(pydantic.BaseModel):
+    cluster_name: str
+    idle_minutes_to_autostop: Optional[int] = None
+    retry_until_up: bool = False
+    down: bool = False
+    force: bool = False
+
+
+@app.post('/start')
+async def start(request: fastapi.Request, start_body: StartBody):
+    """Restart a cluster."""
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='start',
+        request_body=json.loads(start_body.model_dump_json()),
+        func=core.start,
+        cluster_name=start_body.cluster_name,
+        idle_minutes_to_autostop=start_body.idle_minutes_to_autostop,
+        retry_until_up=start_body.retry_until_up,
+        down=start_body.down,
+        force=start_body.force,
+    )
+
+
+class AutostopBody(pydantic.BaseModel):
+    cluster_name: str
+    idle_minutes_to_autostop: int
+    down: bool = False
+
+
+@app.post('/autostop')
+async def autostop(request: fastapi.Request, autostop_body: AutostopBody):
+    """Set the autostop time for a cluster."""
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='autostop',
+        request_body=json.loads(autostop_body.model_dump_json()),
+        func=core.autostop,
+        cluster_name=autostop_body.cluster_name,
+        idle_minutes_to_autostop=autostop_body.idle_minutes_to_autostop,
+        down=autostop_body.down,
+    )
+
+class QueueBody(pydantic.BaseModel):
+    cluster_name: str
+    skip_finished: bool = False
+    all_users: bool = False
+
+@app.get('/queue')
+async def queue(request: fastapi.Request, queue_body: QueueBody):
+    """Get the queue of tasks for a cluster."""
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='queue',
+        request_body=json.loads(queue_body.model_dump_json()),
+        func=core.queue,
+        cluster_name=queue_body.cluster_name,
+        skip_finished=queue_body.skip_finished,
+        all_users=queue_body.all_users,
+    )
+
+
+class CancelBody(pydantic.BaseModel):
+    cluster_name: str
+    job_ids: List[int]
+    all: bool = False
+
+
+@app.post('/cancel')
+async def cancel(request: fastapi.Request, cancel_body: QueueBody):
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='cancel',
+        request_body=json.loads(cancel_body.model_dump_json()),
+        func=core.cancel,
+        cluster_name=cancel_body.cluster_name,
+        job_ids=cancel_body.job_ids,
+        all=cancel_body.all,
+    )
+
+
+class ClusterJobBody(pydantic.BaseModel):
+    cluster_name: str
+    job_id: int
+    follow: bool = True
+
+
+@app.get('/logs')
+async def logs(request: fastapi.Request,
+                    cluster_job_body: ClusterJobBody) -> None:
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='logs',
+        request_body=json.loads(cluster_job_body.model_dump_json()),
+        func=core.tail_logs,
+        cluster_name=cluster_job_body.cluster_name,
+        job_id=cluster_job_body.job_id,
+        follow=cluster_job_body.follow,
+    )
+
+
+@app.get('/storage/ls')
+async def storage_ls(request: fastapi.Request):
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='storage_ls',
+        request_body={},
+        func=core.storage_ls,
+    )
+
+
+class StorageBody(pydantic.BaseModel):
+    name: str
+
+
+@app.get('/storage/delete')
+async def storage_delete(request: fastapi.Request, storage_body: StorageBody):
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='storage_delete',
+        request_body=json.loads(storage_body.model_dump_json()),
+        func=core.storage_delete,
+        name=storage_body.name,
+    )
+
 
 class RequestIdBody(pydantic.BaseModel):
     request_id: str
