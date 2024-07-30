@@ -793,16 +793,22 @@ def delete_vm_and_attached_resources(
                                 virtual_network_name=vnet_name)
     
     for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
-        user_assgined_identity_id = (f'/subscriptions/{subscription_id}'
-                                     f'/resourcegroups/{resource_group}'
-                                     '/providers/Microsoft.ManagedIdentity'
-                                     f'/userAssignedIdentities/{msi_name}')
-        role_assignment_name = constants.ROLE_ASSIGNMENT_NAME.format(
-            cluster_name_on_cloud=cluster_name_on_cloud)
-        delete_role_assignment(scope=user_assgined_identity_id,
-                               role_assignment_name=role_assignment_name)
+        user_assigned_identities = (
+            msi_client.user_assigned_identities.list_by_resource_group(
+                resource_group_name=resource_group))
+        for identity in user_assigned_identities:
+            if msi_name == identity.name:
+                target_principal_id = identity.principal_id
+                scope = f'/subscriptions/{subscription_id}/resourceGroups/{resource_group}'
+                # List role assignments for the specified scope
+                role_assignments = auth_client.role_assignments.list_for_scope(scope)
+                for assignment in role_assignments:
+                    if target_principal_id == assignment.principal_id:
+                        guid_role_assignment_name = assignment.name
+                        delete_role_assignment(
+                            scope=scope, role_assignment_name=guid_role_assignment_name)
         delete_managed_identity(resource_group_name=resource_group,
-                                identity_name=msi_name)
+                                resource_name=msi_name)
     
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
         delete_network_security_group(resource_group_name=resource_group,
