@@ -28,7 +28,6 @@ SkyPilot provides faster iteration for interactive development. For example, a c
 * **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
 
 * :strong:`With SkyPilot, a single command (`:literal:`sky launch`:strong:`) takes care of everything.` Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs, and provides SSH and VSCode access to debug.
- Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs and provides SSH and VSCode access to debug.
 
 
 Simpler YAMLs
