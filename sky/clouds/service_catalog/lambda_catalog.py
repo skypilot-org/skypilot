@@ -17,7 +17,8 @@ if typing.TYPE_CHECKING:
 # skypilot-catalog/.github/workflows/update-lambda-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
 
-_df = common.read_catalog('lambda/vms.csv', pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_df = common.read_catalog('lambda/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 # Number of vCPUS for gpu_1x_a10
 _DEFAULT_NUM_VCPUS = 30

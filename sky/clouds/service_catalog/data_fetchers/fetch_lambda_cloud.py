@@ -11,7 +11,7 @@ import argparse
 import csv
 import json
 import os
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -74,18 +74,20 @@ def create_catalog(api_key: str, output_path: str) -> None:
         # gpu_1x_a100 in the catalog (gpu_1x_a100_sxm4 has more availability).
         for vm in reversed(list(info.keys())):
             gpu_and_cnt = name_to_gpu_and_cnt(vm)
+            gpu: Optional[str]
+            gpu_cnt: Optional[float]
             if gpu_and_cnt is None:
                 gpu, gpu_cnt = None, None
             else:
-                gpu, gpu_cnt = gpu_and_cnt
-                gpu_cnt = float(gpu_cnt)
+                gpu = gpu_and_cnt[0]
+                gpu_cnt = float(gpu_and_cnt[1])
             vcpus = float(info[vm]['instance_type']['specs']['vcpus'])
             mem = float(info[vm]['instance_type']['specs']['memory_gib'])
             price = (float(info[vm]['instance_type']['price_cents_per_hour']) /
                      100)
-            gpuinfo = None
+            gpuinfo: Optional[str] = None
             if gpu is not None:
-                gpuinfo = {
+                gpuinfo_dict = {
                     'Gpus': [{
                         'Name': gpu,
                         'Manufacturer': 'NVIDIA',
@@ -96,7 +98,7 @@ def create_catalog(api_key: str, output_path: str) -> None:
                     }],
                     'TotalGpuMemoryInMiB': GPU_TO_MEMORY[gpu]
                 }
-                gpuinfo = json.dumps(gpuinfo).replace('"', "'")  # pylint: disable=invalid-string-quote
+                gpuinfo = json.dumps(gpuinfo_dict).replace('"', "'")  # pylint: disable=invalid-string-quote
             for r in REGIONS:
                 writer.writerow(
                     [vm, gpu, gpu_cnt, vcpus, mem, price, r, gpuinfo, ''])
