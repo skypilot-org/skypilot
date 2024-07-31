@@ -2537,7 +2537,7 @@ class AzureBlobStore(AbstractStore):
             if 'Name or service not known' in error_message:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        'Attempted to fetch the container from non-existant '
+                        'Attempted to fetch the container from non-existent '
                         'storage account '
                         f'name: {self.storage_account_name}. Please check '
                         'if the name is correct.')
