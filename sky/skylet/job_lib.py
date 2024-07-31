@@ -860,9 +860,11 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
+        # TODO(zhwu): get_job_queue should be combined with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
-            f'{username!r}, {all_jobs})', 'print(job_queue, flush=True)'
+            f'{username!r}, {all_jobs})',
+            'print(job_queue, flush=True)',
         ]
         return cls._build(code)
 

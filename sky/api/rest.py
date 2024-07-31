@@ -448,8 +448,23 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     )
 
 
+@app.get('/job_status')
+async def job_status(request: fastapi.Request,
+                     job_status_body: payloads.JobStatusBody):
+    """Get the status of a job."""
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='job_status',
+        request_body=job_status_body.model_dump(),
+        func=core.job_status,
+        cluster_name=job_status_body.cluster_name,
+        job_ids=job_status_body.job_ids,
+    )
+
+
 @app.post('/cancel')
-async def cancel(request: fastapi.Request, cancel_body: payloads.QueueBody):
+async def cancel(request: fastapi.Request,
+                 cancel_body: payloads.QueueBody) -> None:
     _start_background_request(
         request_id=request.state.request_id,
         request_name='cancel',
@@ -475,6 +490,18 @@ async def logs(request: fastapi.Request,
     )
 
 
+# TODO(zhwu): expose download_logs
+# @app.get('/download_logs')
+# async def download_logs(request: fastapi.Request,
+#                         cluster_jobs_body: payloads.ClusterJobsBody) -> Dict[str, str]:
+#     """Download logs to API server and returns the job id to log dir mapping."""
+#     # Call the function directly to download the logs to the API server first.
+#     log_dirs = core.download_logs(cluster_name=cluster_jobs_body.cluster_name,
+#                        job_ids=cluster_jobs_body.job_ids)
+
+#     return log_dirs
+
+
 @app.get('/cost-report')
 async def cost_report(request: fastapi.Request,
                       cost_report_body: payloads.CostReportBody) -> None:
@@ -485,6 +512,7 @@ async def cost_report(request: fastapi.Request,
         func=core.cost_report,
         all=cost_report_body.all,
     )
+
 
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request):

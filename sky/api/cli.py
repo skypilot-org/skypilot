@@ -1968,8 +1968,9 @@ def logs(
     job_ids = None if not job_ids else job_ids
 
     if sync_down:
-        sdk.download_logs(cluster, job_ids)
-        return
+        raise NotImplementedError('Downloading logs is not supported yet.')
+        # sdk.download_logs(cluster, job_ids)
+        # return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id: int

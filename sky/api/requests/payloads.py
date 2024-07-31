@@ -88,6 +88,11 @@ class ClusterJobBody(pydantic.BaseModel):
     follow: bool = True
 
 
+class ClusterJobsBody(pydantic.BaseModel):
+    cluster_name: str
+    job_ids: Optional[List[int]]
+
+
 class StorageBody(pydantic.BaseModel):
     name: str
 
@@ -101,5 +106,10 @@ class EndpointBody(pydantic.BaseModel):
     port: Optional[Union[int, str]] = None
 
 
-class costReportBody(pydantic.BaseModel):
+class CostReportBody(pydantic.BaseModel):
     all: bool
+
+
+class JobStatusBody(pydantic.BaseModel):
+    cluster_name: str
+    job_ids: Optional[List[int]]

@@ -45,7 +45,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_SERVER_URL = 'http://127.0.0.1:8000'
+DEFAULT_SERVER_URL = 'http://0.0.0.0:8000'
 API_SERVER_CMD = 'python -m sky.api.rest'
 
 
@@ -338,6 +338,18 @@ def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
 
 @usage_lib.entrypoint
 @_check_health
+def download_logs(cluster_name: str, job_ids: Optional[int]) -> str:
+    body = payloads.ClusterJobsBody(
+        cluster_name=cluster_name,
+        job_ids=job_ids,
+    )
+    response = requests.get(f'{_get_server_url()}/download_logs',
+                            json=body.model_dump())
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
@@ -459,6 +471,18 @@ def queue(cluster_name: str,
 
 @usage_lib.entrypoint
 @_check_health
+def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
+    body = payloads.JobStatusBody(
+        cluster_name=cluster_name,
+        job_ids=job_ids,
+    )
+    response = requests.get(f'{_get_server_url()}/job_status',
+                            json=body.model_dump())
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
 def cancel(cluster_name: str,
            all: bool = False,
            job_ids: Optional[List[int]] = None,
@@ -500,6 +524,7 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
                             json=body.model_dump())
     return _get_request_id(response)
 
+
 @usage_lib.entrypoint
 @_check_health
 def cost_report(all: bool) -> str:
@@ -507,7 +532,6 @@ def cost_report(all: bool) -> str:
     response = requests.get(f'{_get_server_url()}/cost_report',
                             json=body.model_dump())
     return _get_request_id(response)
-
 
 
 # === Storage APIs ===
@@ -528,6 +552,7 @@ def storage_delete(name: str) -> str:
 
 
 # === API request API ===
+
 
 @usage_lib.entrypoint
 @_check_health
