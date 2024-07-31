@@ -34,6 +34,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import types
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -54,7 +55,7 @@ from sky import jobs as managed_jobs
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.api import sdk
+from sky.api import sdk as sdk_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -104,11 +105,13 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
-
+sdk: types.ModuleType
 if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
     from sky import core
     setattr(core, 'get', lambda args: args)
     sdk = core
+else:
+    sdk = sdk_lib
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""

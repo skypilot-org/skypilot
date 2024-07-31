@@ -2778,8 +2778,9 @@ def get_endpoints(cluster_name: str,
             launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
     except exceptions.NotSupportedError:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Querying endpoints is not supported '
-                             f'for cluster {cluster_name!r} on {cloud}.') from None
+            raise ValueError(
+                'Querying endpoints is not supported '
+                f'for cluster {cluster_name!r} on {cloud}.') from None
 
     config = common_utils.read_yaml(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
