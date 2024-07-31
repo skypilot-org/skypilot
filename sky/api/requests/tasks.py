@@ -17,7 +17,7 @@ from sky.api.requests import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
 
-TASK_LOG_PATH_PREFIX = '~/sky_logs/requests'
+TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 
 class RequestStatus(enum.Enum):

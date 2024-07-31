@@ -68,7 +68,10 @@ def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
     while True:
         print('Refreshing cluster status...')
-        core.status(refresh=True)
+        # TODO(zhwu): Periodically refresh will cause the cluster being locked
+        # and other operations, such as down, may fail due to not being able to
+        # acquire the lock.
+        # core.status(refresh=True)
         print('Refreshed cluster status...')
         time.sleep(20)
 
@@ -184,7 +187,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     _start_background_request(
         request_id,
         request_name='optimize',
-        request_body=json.loads(optimize_body.model_dump_json()),
+        request_body=optimize_body.model_dump(),
         ignore_return_value=True,
         func=optimizer.Optimizer.optimize,
         dag=dag,
@@ -300,7 +303,7 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     _start_background_request(
         request_id,
         request_name='launch',
-        request_body=json.loads(launch_body.model_dump_json()),
+        request_body=launch_body.model_dump(),
         func=execution.launch,
         task=dag,
         cluster_name=launch_body.cluster_name,
@@ -353,7 +356,7 @@ async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='stop',
-        request_body=json.loads(stop_body.model_dump_json()),
+        request_body=stop_body.model_dump(),
         func=core.stop,
         cluster_name=stop_body.cluster_name,
         purge=stop_body.purge,
@@ -368,10 +371,23 @@ async def status(
     _start_background_request(
         request_id=request.state.request_id,
         request_name='status',
-        request_body=json.loads(status_body.model_dump_json()),
+        request_body=status_body.model_dump(),
         func=core.status,
         cluster_names=status_body.cluster_names,
         refresh=status_body.refresh,
+    )
+
+
+@app.get('/endpoints')
+async def endpoints(request: fastapi.Request,
+                    endpoint_body: payloads.EndpointBody) -> None:
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='endpoints',
+        request_body=endpoint_body.model_dump(),
+        func=core.endpoints,
+        cluster_name=endpoint_body.cluster_name,
+        port=endpoint_body.port,
     )
 
 
@@ -380,7 +396,7 @@ async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='down',
-        request_body=json.loads(down_body.model_dump_json()),
+        request_body=down_body.model_dump(),
         func=core.down,
         cluster_name=down_body.cluster_name,
         purge=down_body.purge,
@@ -393,7 +409,7 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='start',
-        request_body=json.loads(start_body.model_dump_json()),
+        request_body=start_body.model_dump(),
         func=core.start,
         cluster_name=start_body.cluster_name,
         idle_minutes_to_autostop=start_body.idle_minutes_to_autostop,
@@ -410,7 +426,7 @@ async def autostop(request: fastapi.Request,
     _start_background_request(
         request_id=request.state.request_id,
         request_name='autostop',
-        request_body=json.loads(autostop_body.model_dump_json()),
+        request_body=autostop_body.model_dump(),
         func=core.autostop,
         cluster_name=autostop_body.cluster_name,
         idle_minutes_to_autostop=autostop_body.idle_minutes_to_autostop,
@@ -424,7 +440,7 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='queue',
-        request_body=json.loads(queue_body.model_dump_json()),
+        request_body=queue_body.model_dump(),
         func=core.queue,
         cluster_name=queue_body.cluster_name,
         skip_finished=queue_body.skip_finished,
@@ -437,7 +453,7 @@ async def cancel(request: fastapi.Request, cancel_body: payloads.QueueBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='cancel',
-        request_body=json.loads(cancel_body.model_dump_json()),
+        request_body=cancel_body.model_dump(),
         func=core.cancel,
         cluster_name=cancel_body.cluster_name,
         job_ids=cancel_body.job_ids,
@@ -451,7 +467,7 @@ async def logs(request: fastapi.Request,
     _start_background_request(
         request_id=request.state.request_id,
         request_name='logs',
-        request_body=json.loads(cluster_job_body.model_dump_json()),
+        request_body=cluster_job_body.model_dump(),
         func=core.tail_logs,
         cluster_name=cluster_job_body.cluster_name,
         job_id=cluster_job_body.job_id,
@@ -475,7 +491,7 @@ async def storage_delete(request: fastapi.Request,
     _start_background_request(
         request_id=request.state.request_id,
         request_name='storage_delete',
-        request_body=json.loads(storage_body.model_dump_json()),
+        request_body=storage_body.model_dump(),
         func=core.storage_delete,
         name=storage_body.name,
     )

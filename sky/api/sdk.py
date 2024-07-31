@@ -9,8 +9,8 @@ method. For example:
     statuses = sky.get(request_id)
 
 """
-import json
 import functools
+import json
 import os
 import subprocess
 import tempfile
@@ -326,39 +326,6 @@ def exec(
 
 @usage_lib.entrypoint
 @_check_health
-def stop(cluster_name: str, purge: bool = False) -> str:
-    """Stop a cluster.
-
-    Data on attached disks is not lost when a cluster is stopped.  Billing for
-    the instances will stop, while the disks will still be charged.  Those
-    disks will be reattached when restarting the cluster.
-
-    Currently, spot instance clusters cannot be stopped (except for GCP, which
-    does allow disk contents to be preserved when stopping spot VMs).
-
-    Args:
-        cluster_name: name of the cluster to stop.
-        purge: (Advanced) Forcefully mark the cluster as stopped in SkyPilot's
-            cluster table, even if the actual cluster stop operation failed on
-            the cloud. WARNING: This flag should only be set sparingly in
-            certain manual troubleshooting scenarios; with it set, it is the
-            user's responsibility to ensure there are no leaked instances and
-            related resources.
-    """
-    body = payloads.StopOrDownBody(
-        cluster_name=cluster_name,
-        purge=purge,
-    )
-    response = requests.post(
-        f'{_get_server_url()}/stop',
-        json=body.model_dump(),
-        timeout=5,
-    )
-    return response.headers['X-Request-ID']
-
-
-@usage_lib.entrypoint
-@_check_health
 def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
     body = payloads.ClusterJobBody(
         cluster_name=cluster_name,
@@ -428,6 +395,87 @@ def down(cluster_name: str, purge: bool = False) -> str:
 
 @usage_lib.entrypoint
 @_check_health
+def stop(cluster_name: str, purge: bool = False) -> str:
+    """Stop a cluster.
+
+    Data on attached disks is not lost when a cluster is stopped.  Billing for
+    the instances will stop, while the disks will still be charged.  Those
+    disks will be reattached when restarting the cluster.
+
+    Currently, spot instance clusters cannot be stopped (except for GCP, which
+    does allow disk contents to be preserved when stopping spot VMs).
+
+    Args:
+        cluster_name: name of the cluster to stop.
+        purge: (Advanced) Forcefully mark the cluster as stopped in SkyPilot's
+            cluster table, even if the actual cluster stop operation failed on
+            the cloud. WARNING: This flag should only be set sparingly in
+            certain manual troubleshooting scenarios; with it set, it is the
+            user's responsibility to ensure there are no leaked instances and
+            related resources.
+    """
+    body = payloads.StopOrDownBody(
+        cluster_name=cluster_name,
+        purge=purge,
+    )
+    response = requests.post(
+        f'{_get_server_url()}/stop',
+        json=body.model_dump(),
+        timeout=5,
+    )
+    return response.headers['X-Request-ID']
+
+
+@usage_lib.entrypoint
+@_check_health
+def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:
+    body = payloads.AutostopBody(
+        cluster_name=cluster_name,
+        idle_minutes=idle_minutes,
+        down=down,
+    )
+    response = requests.post(
+        f'{_get_server_url()}/autostop',
+        json=body.model_dump(),
+        timeout=5,
+    )
+    return response.headers['X-Request-ID']
+
+
+@usage_lib.entrypoint
+@_check_health
+def queue(cluster_name: str,
+          skip_finished: bool = False,
+          all_users: bool = False) -> str:
+    body = payloads.QueueBody(
+        cluster_name=cluster_name,
+        skip_finished=skip_finished,
+        all_users=all_users,
+    )
+    response = requests.get(f'{_get_server_url()}/queue',
+                            json=body.model_dump())
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
+def cancel(cluster_name: str,
+           all: bool = False,
+           job_ids: Optional[List[int]] = None,
+           _try_cancel_if_cluster_is_init: bool = False) -> str:
+    body = payloads.CancelBody(
+        cluster_name=cluster_name,
+        all=all,
+        job_ids=job_ids,
+        try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
+    )
+    response = requests.post(f'{_get_server_url()}/cancel',
+                             json=body.model_dump())
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
 def status(cluster_names: Optional[List[str]] = None,
            refresh: bool = False) -> str:
     # TODO(zhwu): this does not stream the logs output by logger back to the
@@ -443,11 +491,23 @@ def status(cluster_names: Optional[List[str]] = None,
 
 @usage_lib.entrypoint
 @_check_health
+def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
+    body = payloads.EndpointBody(
+        cluster_name=cluster_name,
+        port=port,
+    )
+    response = requests.get(f'{_get_server_url()}/endpoints',
+                            json=body.model_dump())
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
 def get(request_id: str) -> Any:
     body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(f'{_get_server_url()}/get',
                             json=body.model_dump(),
-                            timeout=300)
+                            timeout=(5, None))
     request_task = tasks.RequestTask.decode(
         tasks.RequestTaskPayload(**response.json()))
     error = request_task.get_error()

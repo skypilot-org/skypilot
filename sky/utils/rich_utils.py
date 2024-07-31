@@ -89,6 +89,7 @@ class _NoOpConsoleStatus:
         pass
 
 
+# TODO(zhwu): we need a wrapper for the rich.progress in our code as well.
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel

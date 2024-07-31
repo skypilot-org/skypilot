@@ -1,5 +1,4 @@
-
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import pydantic
 
@@ -37,7 +36,6 @@ class LaunchBody(RequestBody):
     disable_controller_check: bool = False
 
 
-
 class ExecBody(RequestBody):
     task: str
     cluster_name: str
@@ -50,6 +48,7 @@ class StopOrDownBody(pydantic.BaseModel):
     cluster_name: str
     purge: bool = False
 
+
 class StatusBody(pydantic.BaseModel):
     cluster_names: Optional[List[str]] = None
     refresh: bool = False
@@ -61,6 +60,7 @@ class StartBody(RequestBody):
     retry_until_up: bool = False
     down: bool = False
     force: bool = False
+
 
 class AutostopBody(pydantic.BaseModel):
     cluster_name: str
@@ -78,6 +78,8 @@ class CancelBody(pydantic.BaseModel):
     cluster_name: str
     job_ids: List[int]
     all: bool = False
+    # Internal only:
+    try_cancel_if_cluster_is_init: bool = False
 
 
 class ClusterJobBody(pydantic.BaseModel):
@@ -89,5 +91,11 @@ class ClusterJobBody(pydantic.BaseModel):
 class StorageBody(pydantic.BaseModel):
     name: str
 
+
 class RequestIdBody(pydantic.BaseModel):
     request_id: str
+
+
+class EndpointBody(pydantic.BaseModel):
+    cluster_name: str
+    port: Optional[Union[int, str]] = None

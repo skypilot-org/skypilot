@@ -1971,7 +1971,7 @@ def logs(
         return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
-    job_id = None
+    job_id: Optional[int] = None
     job_ids_to_query: Optional[List[int]] = None
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
