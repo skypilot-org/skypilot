@@ -123,7 +123,7 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       cluster_names=cluster_names)
 
 
-def endpoints(cluster: str,
+def endpoints(cluster_name: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
@@ -141,8 +141,8 @@ def endpoints(cluster: str,
             are exposed yet.
     """
     with rich_utils.safe_status('[bold cyan]Fetching endpoints for cluster '
-                                f'{cluster}...[/]'):
-        return backend_utils.get_endpoints(cluster=cluster, port=port)
+                                f'{cluster_name}...[/]'):
+        return backend_utils.get_endpoints(cluster_name=cluster_name, port=port)
 
 
 @usage_lib.entrypoint

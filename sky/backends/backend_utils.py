@@ -2720,7 +2720,7 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'\n--- Details ---\n{stderr.strip()}\n')
 
 
-def get_endpoints(cluster: str,
+def get_endpoints(cluster_name: str,
                   port: Optional[Union[int, str]] = None,
                   skip_status_check: bool = False) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
@@ -2756,7 +2756,7 @@ def get_endpoints(cluster: str,
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(include_controller=True,
                                    refresh=False,
-                                   cluster_names=[cluster])
+                                   cluster_names=[cluster_name])
     cluster_record = cluster_records[0]
     if (not skip_status_check and
             cluster_record['status'] != status_lib.ClusterStatus.UP):
@@ -2768,7 +2768,7 @@ def get_endpoints(cluster: str,
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Querying IP address is not supported '
-                             f'for cluster {cluster!r} with backend '
+                             f'for cluster {cluster_name!r} with backend '
                              f'{get_backend_from_handle(handle).NAME}.')
 
     launched_resources = handle.launched_resources
@@ -2779,7 +2779,7 @@ def get_endpoints(cluster: str,
     except exceptions.NotSupportedError:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Querying endpoints is not supported '
-                             f'for cluster {cluster!r} on {cloud}.') from None
+                             f'for cluster {cluster_name!r} on {cloud}.') from None
 
     config = common_utils.read_yaml(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
@@ -2795,7 +2795,7 @@ def get_endpoints(cluster: str,
             handle.launched_resources.ports)
         if port not in port_set:
             logger.warning(f'Port {port} is not exposed on '
-                           f'cluster {cluster!r}.')
+                           f'cluster {cluster_name!r}.')
             return {}
         # If the user requested a specific port endpoint, check if it is exposed
         if port not in port_details:
@@ -2812,7 +2812,7 @@ def get_endpoints(cluster: str,
         if not port_details:
             # If cluster had no ports to be exposed
             if handle.launched_resources.ports is None:
-                logger.warning(f'Cluster {cluster!r} does not have any '
+                logger.warning(f'Cluster {cluster_name!r} does not have any '
                                'ports to be exposed.')
                 return {}
             # Else ports have not been exposed even though they exist.
