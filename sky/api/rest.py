@@ -16,13 +16,13 @@ import zipfile
 
 import colorama
 import fastapi
-import pydantic
 import starlette.middleware.base
 
 from sky import core
 from sky import execution
 from sky import optimizer
 from sky import sky_logging
+from sky.api.requests import payloads
 from sky.api.requests import tasks
 from sky.data import data_utils
 from sky.skylet import constants
@@ -75,10 +75,6 @@ def refresh_cluster_status_event():
 
 # Register the events to run in the background.
 events = {'status': refresh_cluster_status_event}
-
-
-class RequestBody(pydantic.BaseModel):
-    env_vars: Dict[str, str] = {}
 
 
 def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
@@ -177,13 +173,9 @@ async def startup():
                                   func=event)
 
 
-class OptimizeBody(pydantic.BaseModel):
-    dag: str
-    minimize: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST
-
-
 @app.get('/optimize')
-async def optimize(optimize_body: OptimizeBody, request: fastapi.Request):
+async def optimize(optimize_body: payloads.OptimizeBody,
+                   request: fastapi.Request):
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(optimize_body.dag)
         f.flush()
@@ -291,30 +283,8 @@ def _process_mounts_in_task(task: str, env_vars: Dict[str,
     return dag
 
 
-class LaunchBody(RequestBody):
-    """The request body for the launch endpoint."""
-    task: str
-    cluster_name: Optional[str] = None
-    retry_until_up: bool = False
-    idle_minutes_to_autostop: Optional[int] = None
-    dryrun: bool = False
-    down: bool = False
-    backend: Optional[str] = None
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST
-    detach_setup: bool = False
-    detach_run: bool = False
-    no_setup: bool = False
-    clone_disk_from: Optional[str] = None
-    # Internal only:
-    # pylint: disable=invalid-name
-    quiet_optimizer: bool = False
-    is_launched_by_jobs_controller: bool = False
-    is_launched_by_sky_serve_controller: bool = False
-    disable_controller_check: bool = False
-
-
 @app.post('/launch')
-async def launch(launch_body: LaunchBody, request: fastapi.Request):
+async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     """Launch a task.
 
     Args:
@@ -353,16 +323,8 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
     )
 
 
-class ExecBody(RequestBody):
-    task: str
-    cluster_name: Optional[str] = None
-    dryrun: bool = False
-    down: bool = False
-    detach_run: bool = False
-
-
 @app.post('/exec')
-async def exec(exec_body: ExecBody, request: fastapi.Request):
+async def exec(exec_body: payloads.ExecBody, request: fastapi.Request):
     dag = _process_mounts_in_task(exec_body.task,
                                   exec_body.env_vars,
                                   exec_body.cluster_name,
@@ -386,13 +348,8 @@ async def exec(exec_body: ExecBody, request: fastapi.Request):
     )
 
 
-class StopBody(pydantic.BaseModel):
-    cluster_name: str
-    purge: bool = False
-
-
 @app.post('/stop')
-async def stop(request: fastapi.Request, stop_body: StopBody):
+async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='stop',
@@ -403,25 +360,11 @@ async def stop(request: fastapi.Request, stop_body: StopBody):
     )
 
 
-class StatusBody(pydantic.BaseModel):
-    cluster_names: Optional[List[str]] = None
-    refresh: bool = False
-
-
-# class StatusReturn(pydantic.BaseModel):
-#     name: str
-#     launched_at: Optional[int] = None
-#     last_use: Optional[str] = None
-#     status: Optional[sky.ClusterStatus] = None
-#     handle: Optional[dict] = None
-#     autostop: int
-#     to_down: bool
-#     metadata: Dict[str, Any]
-
-
 @app.get('/status')
 async def status(
-    request: fastapi.Request, status_body: StatusBody = StatusBody()) -> None:
+    request: fastapi.Request,
+    status_body: payloads.StatusBody = payloads.StatusBody()
+) -> None:
     _start_background_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -432,13 +375,8 @@ async def status(
     )
 
 
-class DownBody(pydantic.BaseModel):
-    cluster_name: str
-    purge: bool = False
-
-
 @app.post('/down')
-async def down(down_body: DownBody, request: fastapi.Request):
+async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='down',
@@ -449,16 +387,8 @@ async def down(down_body: DownBody, request: fastapi.Request):
     )
 
 
-class StartBody(pydantic.BaseModel):
-    cluster_name: str
-    idle_minutes_to_autostop: Optional[int] = None
-    retry_until_up: bool = False
-    down: bool = False
-    force: bool = False
-
-
 @app.post('/start')
-async def start(request: fastapi.Request, start_body: StartBody):
+async def start(request: fastapi.Request, start_body: payloads.StartBody):
     """Restart a cluster."""
     _start_background_request(
         request_id=request.state.request_id,
@@ -473,14 +403,9 @@ async def start(request: fastapi.Request, start_body: StartBody):
     )
 
 
-class AutostopBody(pydantic.BaseModel):
-    cluster_name: str
-    idle_minutes_to_autostop: int
-    down: bool = False
-
-
 @app.post('/autostop')
-async def autostop(request: fastapi.Request, autostop_body: AutostopBody):
+async def autostop(request: fastapi.Request,
+                   autostop_body: payloads.AutostopBody):
     """Set the autostop time for a cluster."""
     _start_background_request(
         request_id=request.state.request_id,
@@ -493,14 +418,8 @@ async def autostop(request: fastapi.Request, autostop_body: AutostopBody):
     )
 
 
-class QueueBody(pydantic.BaseModel):
-    cluster_name: str
-    skip_finished: bool = False
-    all_users: bool = False
-
-
 @app.get('/queue')
-async def queue(request: fastapi.Request, queue_body: QueueBody):
+async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     """Get the queue of tasks for a cluster."""
     _start_background_request(
         request_id=request.state.request_id,
@@ -513,14 +432,8 @@ async def queue(request: fastapi.Request, queue_body: QueueBody):
     )
 
 
-class CancelBody(pydantic.BaseModel):
-    cluster_name: str
-    job_ids: List[int]
-    all: bool = False
-
-
 @app.post('/cancel')
-async def cancel(request: fastapi.Request, cancel_body: QueueBody):
+async def cancel(request: fastapi.Request, cancel_body: payloads.QueueBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='cancel',
@@ -532,15 +445,9 @@ async def cancel(request: fastapi.Request, cancel_body: QueueBody):
     )
 
 
-class ClusterJobBody(pydantic.BaseModel):
-    cluster_name: str
-    job_id: Optional[int]
-    follow: bool = True
-
-
 @app.get('/logs')
 async def logs(request: fastapi.Request,
-               cluster_job_body: ClusterJobBody) -> None:
+               cluster_job_body: payloads.ClusterJobBody) -> None:
     _start_background_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -562,12 +469,9 @@ async def storage_ls(request: fastapi.Request):
     )
 
 
-class StorageBody(pydantic.BaseModel):
-    name: str
-
-
 @app.get('/storage/delete')
-async def storage_delete(request: fastapi.Request, storage_body: StorageBody):
+async def storage_delete(request: fastapi.Request,
+                         storage_body: payloads.StorageBody):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='storage_delete',
@@ -577,12 +481,8 @@ async def storage_delete(request: fastapi.Request, storage_body: StorageBody):
     )
 
 
-class RequestIdBody(pydantic.BaseModel):
-    request_id: str
-
-
 @app.get('/get')
-async def get(get_body: RequestIdBody) -> tasks.RequestTaskPayload:
+async def get(get_body: payloads.RequestIdBody) -> tasks.RequestTaskPayload:
     while True:
         request_task = tasks.get_request(get_body.request_id)
         if request_task is None:
@@ -610,7 +510,8 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
 
 @app.get('/stream')
 async def stream(
-        stream_body: RequestIdBody) -> fastapi.responses.StreamingResponse:
+        stream_body: payloads.RequestIdBody
+) -> fastapi.responses.StreamingResponse:
     request_id = stream_body.request_id
     request_task = tasks.get_request(request_id)
     if request_task is None:
@@ -624,7 +525,7 @@ async def stream(
 
 
 @app.post('/abort')
-async def abort(abort_body: RequestIdBody):
+async def abort(abort_body: payloads.RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
     with tasks.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:

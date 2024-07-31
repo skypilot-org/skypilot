@@ -9,6 +9,7 @@ method. For example:
     statuses = sky.get(request_id)
 
 """
+import json
 import functools
 import os
 import subprocess
@@ -25,6 +26,7 @@ import requests
 from sky import backends
 from sky import optimizer
 from sky import sky_logging
+from sky.api.requests import payloads
 from sky.api.requests import tasks
 from sky.backends import backend_utils
 from sky.data import data_utils
@@ -126,13 +128,13 @@ def _check_health(func):
     return wrapper
 
 
-def _add_env_vars_to_body(body: Dict[str, Any]):
+def _add_env_vars_to_body(body: payloads.RequestBody):
     env_vars = {}
     for env_var in os.environ:
         if env_var.startswith('SKYPILOT_'):
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    body['env_vars'] = env_vars
+    body.env_vars = env_vars
 
 
 @usage_lib.entrypoint
@@ -142,11 +144,10 @@ def optimize(dag: 'sky.Dag') -> str:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
-    body = {
-        'dag': dag_str,
-    }
+    body = payloads.OptimizeBody(dag=dag_str,)
     _add_env_vars_to_body(body)
-    response = requests.get(f'{_get_server_url()}/optimize', json=body)
+    response = requests.get(f'{_get_server_url()}/optimize',
+                            json=body.model_dump())
     return response.headers['X-Request-ID']
 
 
@@ -189,7 +190,8 @@ def _upload_mounts_to_api_server(
             f'{_get_server_url()}/upload?user_hash={common_utils.get_user_hash()}',
             files=files)
         if response.status_code != 200:
-            raise RuntimeError(f'Failed to upload files: {response.content}')
+            err_msg = response.content.decode('utf-8')
+            raise RuntimeError(f'Failed to upload files: {err_msg}')
 
     return dag
 
@@ -262,29 +264,30 @@ def launch(
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
-    body = {
-        'task': dag_str,
-        'cluster_name': cluster_name,
-        'retry_until_up': retry_until_up,
-        'idle_minutes_to_autostop': idle_minutes_to_autostop,
-        'dryrun': dryrun,
-        'down': down,
-        'backend': backend.NAME if backend else None,
-        'optimize_target': optimize_target.value,
-        'detach_setup': detach_setup,
-        'detach_run': detach_run,
-        'no_setup': no_setup,
-        'clone_disk_from': clone_disk_from,
+    body = payloads.LaunchBody(
+        task=dag_str,
+        cluster_name=cluster_name,
+        retry_until_up=retry_until_up,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        dryrun=dryrun,
+        down=down,
+        backend=backend.NAME if backend else None,
+        optimize_target=optimize_target,
+        detach_setup=detach_setup,
+        detach_run=detach_run,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
         # For internal use
-        'quiet_optimizer': need_confirmation,
-        'is_launched_by_jobs_controller': _is_launched_by_jobs_controller,
-        'is_launched_by_sky_serve_controller': _is_launched_by_sky_serve_controller,
-        'disable_controller_check': _disable_controller_check,
-    }
+        quiet_optimizer=need_confirmation,
+        is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+        is_launched_by_sky_serve_controller=_is_launched_by_sky_serve_controller,
+        disable_controller_check=_disable_controller_check,
+    )
+
     _add_env_vars_to_body(body)
     response = requests.post(
         f'{_get_server_url()}/launch',
-        json=body,
+        json=body.model_dump(),
         timeout=5,
     )
     return response.headers['X-Request-ID']
@@ -305,16 +308,17 @@ def exec(
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
-    body = {
-        'task': dag_str,
-        'cluster_name': cluster_name,
-        'dryrun': dryrun,
-        'down': down,
-        'detach_run': detach_run,
-    }
+    body = payloads.ExecBody(
+        task=dag_str,
+        cluster_name=cluster_name,
+        dryrun=dryrun,
+        down=down,
+        detach_run=detach_run,
+    )
+
     response = requests.post(
         f'{_get_server_url()}/exec',
-        json=body,
+        json=body.model_dump(),
         timeout=5,
     )
     return response.headers['X-Request-ID']
@@ -341,12 +345,13 @@ def stop(cluster_name: str, purge: bool = False) -> str:
             user's responsibility to ensure there are no leaked instances and
             related resources.
     """
+    body = payloads.StopOrDownBody(
+        cluster_name=cluster_name,
+        purge=purge,
+    )
     response = requests.post(
         f'{_get_server_url()}/stop',
-        json={
-            'cluster_name': cluster_name,
-            'purge': purge,
-        },
+        json=body.model_dump(),
         timeout=5,
     )
     return response.headers['X-Request-ID']
@@ -355,66 +360,38 @@ def stop(cluster_name: str, purge: bool = False) -> str:
 @usage_lib.entrypoint
 @_check_health
 def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
-    response = requests.get(f'{_get_server_url()}/logs',
-                            json={
-                                'cluster_name': cluster_name,
-                                'job_id': job_id,
-                                'follow': follow
-                            })
+    body = payloads.ClusterJobBody(
+        cluster_name=cluster_name,
+        job_id=job_id,
+        follow=follow,
+    )
+    response = requests.get(f'{_get_server_url()}/logs', json=body.model_dump())
     return _get_request_id(response)
 
 
 @usage_lib.entrypoint
 @_check_health
-def status(cluster_names: Optional[List[str]] = None,
-           refresh: bool = False) -> str:
-    # TODO(zhwu): this does not stream the logs output by logger back to the
-    # user
-    response = requests.get(f'{_get_server_url()}/status',
-                            json={
-                                'cluster_names': cluster_names,
-                                'refresh': refresh,
-                            })
+def start(
+    cluster_name: str,
+    idle_minutes_to_autostop: Optional[int] = None,
+    retry_until_up: bool = False,
+    down: bool = False,
+    force: bool = False,
+) -> str:
+    """Start a stopped cluster."""
+    body = payloads.StartBody(
+        cluster_name=cluster_name,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        retry_until_up=retry_until_up,
+        down=down,
+        force=force,
+    )
+    response = requests.post(
+        f'{_get_server_url()}/start',
+        json=body.model_dump(),
+        timeout=5,
+    )
     return _get_request_id(response)
-
-
-@usage_lib.entrypoint
-@_check_health
-def get(request_id: str) -> Any:
-    response = requests.get(f'{_get_server_url()}/get',
-                            json={'request_id': request_id},
-                            timeout=300)
-    request_task = tasks.RequestTask.decode(
-        tasks.RequestTaskPayload(**response.json()))
-    error = request_task.get_error()
-    if error is not None:
-        error_obj = error['object']
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            logger.error(
-                f'=== Traceback on SkyPilot API Server ===\n{error_obj.stacktrace}'
-            )
-        with ux_utils.print_exception_no_traceback():
-            raise error_obj
-    return request_task.get_return_value()
-
-
-@usage_lib.entrypoint
-@_check_health
-def stream_and_get(request_id: str) -> Any:
-    response = requests.get(f'{_get_server_url()}/stream',
-                            json={'request_id': request_id},
-                            timeout=300,
-                            stream=True)
-
-    if response.status_code != 200:
-        return get(request_id)
-    for line in response.iter_lines():
-        if line:
-            msg = line.decode('utf-8')
-            msg = rich_utils.decode_rich_status(msg)
-            if msg is not None:
-                print(msg)
-    return get(request_id)
 
 
 @usage_lib.entrypoint
@@ -437,15 +414,74 @@ def down(cluster_name: str, purge: bool = False) -> str:
     Returns:
         A dictionary mapping cluster names to request IDs.
     """
+    body = payloads.StopOrDownBody(
+        cluster_name=cluster_name,
+        purge=purge,
+    )
     response = requests.post(
         f'{_get_server_url()}/down',
-        json={
-            'cluster_name': cluster_name,
-            'purge': purge,
-        },
+        json=body.model_dump(),
         timeout=5,
     )
     return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
+def status(cluster_names: Optional[List[str]] = None,
+           refresh: bool = False) -> str:
+    # TODO(zhwu): this does not stream the logs output by logger back to the
+    # user
+    body = payloads.StatusBody(
+        cluster_names=cluster_names,
+        refresh=refresh,
+    )
+    response = requests.get(f'{_get_server_url()}/status',
+                            json=body.model_dump())
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
+def get(request_id: str) -> Any:
+    body = payloads.RequestIdBody(request_id=request_id)
+    response = requests.get(f'{_get_server_url()}/get',
+                            json=body.model_dump(),
+                            timeout=300)
+    request_task = tasks.RequestTask.decode(
+        tasks.RequestTaskPayload(**response.json()))
+    error = request_task.get_error()
+    if error is not None:
+        error_obj = error['object']
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            logger.error(
+                f'=== Traceback on SkyPilot API Server ===\n{error_obj.stacktrace}'
+            )
+        with ux_utils.print_exception_no_traceback():
+            raise error_obj
+    return request_task.get_return_value()
+
+
+@usage_lib.entrypoint
+@_check_health
+def stream_and_get(request_id: str) -> Any:
+    body = payloads.RequestIdBody(request_id=request_id)
+    response = requests.get(
+        f'{_get_server_url()}/stream',
+        json=body.model_dump(),
+        # 5 seconds to connect, no read timeout
+        timeout=(5, None),
+        stream=True)
+
+    if response.status_code != 200:
+        return get(request_id)
+    for line in response.iter_lines():
+        if line:
+            msg = line.decode('utf-8')
+            msg = rich_utils.decode_rich_status(msg)
+            if msg is not None:
+                print(msg)
+    return get(request_id)
 
 
 # === API server management ===

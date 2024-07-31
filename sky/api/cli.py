@@ -79,6 +79,10 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
+if typing.TYPE_CHECKING:
+    import types
+
+
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
 
@@ -105,7 +109,6 @@ if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
     from sky import core
     setattr(core, 'get', lambda args: args)
     sdk = core
-
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""

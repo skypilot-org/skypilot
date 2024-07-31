@@ -14,12 +14,12 @@ from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
