@@ -227,6 +227,7 @@ def _create_instances(
     template_params['msi'] = provider_config['msi']
     template_params['nsg'] = provider_config['nsg']
     template_params['subnet'] = provider_config['subnet']
+    template_params['location'] = provider_config['location']
     # In Azure, cloud-init script must be encoded in base64. For more
     # information, see:
     # https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data

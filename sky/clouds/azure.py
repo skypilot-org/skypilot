@@ -322,7 +322,7 @@ class Azure(clouds.Cloud):
 
         # Determine resource group for deploying the instance.
         resource_group_name = skypilot_config.get_nested(
-            ('azure', 'resource_group'), None)
+            ('azure', 'resource_group_vm'), None)
         use_external_resource_group = resource_group_name is not None
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'

@@ -123,10 +123,16 @@
             "metadata": {
                 "description": "Base64 encoded cloud-init setup commands."
             }
+        },
+        "location": {
+            "type": "string",
+            "metadata": {
+                "description": "Location of where the resources are allocated." 
+            }
         }
     },
     "variables": {
-        "location": "[resourceGroup().location]",
+        "location": "[parameters('location')]",
         "networkInterfaceNamePrivate": "[concat(parameters('vmName'), '-nic')]",
         "networkInterfaceNamePublic": "[concat(parameters('vmName'), '-nic-public')]",
         "networkInterfaceName": "[if(parameters('provisionPublicIp'), variables('networkInterfaceNamePublic'), variables('networkInterfaceNamePrivate'))]",

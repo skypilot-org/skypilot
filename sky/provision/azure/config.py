@@ -70,34 +70,38 @@ def bootstrap_instances(
     if 'tags' in provider_config:
         params['tags'] = provider_config['tags']
 
-    logger.info(f'Creating/Updating resource group: {resource_group}')
-    rg_create_or_update = get_azure_sdk_function(
-        client=resource_client.resource_groups,
-        function_name='create_or_update')
-    rg_creation_start = time.time()
-    retry = 0
-    while (time.time() - rg_creation_start <
-           _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT):
-        try:
-            rg_create_or_update(resource_group_name=resource_group,
-                                parameters=params)
-            break
-        except azure.exceptions().ResourceExistsError as e:
-            if 'ResourceGroupBeingDeleted' in str(e):
-                if retry % 5 == 0:
-                    logger.info(
-                        f'Azure resource group {resource_group} of a recent '
-                        f'terminated cluster {cluster_name_on_cloud} is being '
-                        'deleted. It can only be provisioned after it is fully'
-                        'deleted. Waiting...')
-                time.sleep(1)
-                retry += 1
-                continue
-            raise
-    else:
-        raise TimeoutError(
-            f'Timed out waiting for resource group {resource_group} to be '
-            'deleted.')
+    # When resource group is user specified, it already exists in certain
+    # region.
+    if not use_external_resource_group:
+        logger.info(f'Creating/Updating resource group: {resource_group}')
+        rg_create_or_update = get_azure_sdk_function(
+            client=resource_client.resource_groups,
+            function_name='create_or_update')
+        rg_creation_start = time.time()
+        retry = 0
+        while (time.time() - rg_creation_start <
+            _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT):
+            try:
+                rg_create_or_update(resource_group_name=resource_group,
+                                    parameters=params)
+                break
+            except azure.exceptions().ResourceExistsError as e:
+                if 'ResourceGroupBeingDeleted' in str(e):
+                    if retry % 5 == 0:
+                        logger.info(
+                            f'Azure resource group {resource_group} of a '
+                            'recent terminated cluster '
+                            f'{cluster_name_on_cloud} is being deleted. It can'
+                            ' only be provisioned after it is fully deleted. '
+                            'Waiting...')
+                    time.sleep(1)
+                    retry += 1
+                    continue
+                raise
+        else:
+            raise TimeoutError(
+                f'Timed out waiting for resource group {resource_group} to be '
+                'deleted.')
 
     # load the template file
     current_path = Path(__file__).parent
@@ -127,6 +131,9 @@ def bootstrap_instances(
                     # as we have already appended the user hash to the cluster
                     # name.
                     'value': cluster_name_on_cloud
+                },
+                'location': {
+                    'value': params['location']
                 }
             },
         }
