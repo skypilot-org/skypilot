@@ -44,7 +44,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
 
    <div class="row">
        <div class="col-md-6 mb-3">
-            <h3> SkyPilot (19 lines) </h3>
+            <h4> SkyPilot (19 lines) </h4>
 
 .. code-block:: yaml
    :linenos:
@@ -73,7 +73,7 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
 
        </div>
        <div class="col-md-6 mb-3">
-            <h3> Kubernetes (65 lines) </h3>
+            <h4> Kubernetes (65 lines) </h4>
 
 .. code-block:: yaml
    :linenos:
