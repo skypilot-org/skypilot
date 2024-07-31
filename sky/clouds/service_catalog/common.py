@@ -196,7 +196,8 @@ def read_catalog(filename: str,
                 url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
                 update_frequency_str = ''
                 if pull_frequency_hours is not None:
-                    update_frequency_str = f' (every {pull_frequency_hours} hours)'
+                    update_frequency_str = (
+                        f' (every {pull_frequency_hours} hours)')
                 with rich_utils.safe_status((f'Updating {cloud} catalog: '
                                              f'{filename}'
                                              f'{update_frequency_str}')):
@@ -213,8 +214,8 @@ def read_catalog(filename: str,
                             os.utime(catalog_path, None)  # Sets to current time
                         else:
                             logger.error(
-                                f'{error_str}Please check your internet connection.'
-                            )
+                                f'{error_str}Please check your internet '
+                                'connection.')
                             with ux_utils.print_exception_no_traceback():
                                 raise e
                     else:
