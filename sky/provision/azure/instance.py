@@ -620,7 +620,6 @@ def terminate_instances(
 
     use_external_resource_group = provider_config.get(
         'use_external_resource_group', False)
-    
     # When user specified resource group through config.yaml to create a VM, we
     # cannot remove the entire resource group as it may contain other resources
     # unrelated to this VM being removed.
@@ -798,15 +797,23 @@ def delete_vm_and_attached_resources(
                 resource_group_name=resource_group))
         for identity in user_assigned_identities:
             if msi_name == identity.name:
+                # We use the principal_id to find the correct guid converted
+                # role assignment name because each managed identity has a
+                # unique principal_id, and role assignments are associated
+                # with security principals (like managed identities) via this
+                # principal_id.
                 target_principal_id = identity.principal_id
-                scope = f'/subscriptions/{subscription_id}/resourceGroups/{resource_group}'
-                # List role assignments for the specified scope
-                role_assignments = auth_client.role_assignments.list_for_scope(scope)
+                scope = (f'/subscriptions/{subscription_id}'
+                         f'/resourceGroups/{resource_group}')
+                role_assignments = auth_client.role_assignments.list_for_scope(
+                    scope)
                 for assignment in role_assignments:
                     if target_principal_id == assignment.principal_id:
                         guid_role_assignment_name = assignment.name
                         delete_role_assignment(
-                            scope=scope, role_assignment_name=guid_role_assignment_name)
+                            scope=scope,
+                            role_assignment_name=guid_role_assignment_name)
+                        break
         delete_managed_identity(resource_group_name=resource_group,
                                 resource_name=msi_name)
     

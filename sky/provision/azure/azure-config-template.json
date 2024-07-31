@@ -13,19 +13,13 @@
             "metadata": {
                 "description": "Subnet parameters."
             }
-        },
-        "roleAssignmentName": {
-            "type": "string",
-            "metadata": {
-                "description": "Raw name of the Role Assignment created before it is passed to guid."
-            }
         }
     },
     "variables": {
         "contributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
         "location": "[resourceGroup().location]",
         "msiName": "[concat('sky-', parameters('clusterId'), '-msi')]",
-        "roleAssignmentName": "[parameters('roleAssignmentName')]",
+        "roleAssignmentName": "[concat('sky-', parameters('clusterId'), '-ra')]",
         "nsgName": "[concat('sky-', parameters('clusterId'), '-nsg')]",
         "nsg": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]",
         "vnetName": "[concat('sky-', parameters('clusterId'), '-vnet')]",

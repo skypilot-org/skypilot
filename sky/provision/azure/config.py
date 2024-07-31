@@ -127,10 +127,6 @@ def bootstrap_instances(
                     # as we have already appended the user hash to the cluster
                     # name.
                     'value': cluster_name_on_cloud
-                },
-                'roleAssignmentName': {
-                    'value': constants.ROLE_ASSIGNMENT_NAME.format(
-                        cluster_name_on_cloud=cluster_name_on_cloud)
                 }
             },
         }
