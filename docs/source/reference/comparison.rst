@@ -13,8 +13,38 @@ SkyPilot vs Vanilla Kubernetes
 
 Kubernetes is a powerful system for managing containerized applications. :ref:`Using SkyPilot to access your Kubernetes cluster <kubernetes-overview>` boosts developer productivity and allows you to scale your infra beyond a single Kubernetes cluster.
 
+..
+   Figure sources
+   Light: https://docs.google.com/drawings/d/1REe_W49SPJ44N-o4NRCKcIRhCkXG9o03ZXHh1mfLUzk/edit?usp=sharing
+   Dark: https://docs.google.com/drawings/d/1MefAOXRNHj05B9raO3dCPhAyMJN3oWYM6nvUNgo8aoA/edit?usp=sharing
+
+.. figure:: ../images/k8s-skypilot-architecture-dark.png
+   :width: 55%
+   :align: center
+   :alt: SkyPilot on Kubernetes
+   :class: no-scaled-link, only-dark
+
+   SkyPilot layers on top of your Kubernetes cluster to deliver a better developer experience.
+
+.. figure:: ../images/k8s-skypilot-architecture-light.png
+   :width: 55%
+   :align: center
+   :alt: SkyPilot on Kubernetes
+   :class: no-scaled-link, only-light
+
+   SkyPilot layers on top of your Kubernetes cluster to deliver a better developer experience.
+
+
+
 Faster developer velocity
 ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters while observing the training runs.
+
+* **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
+
+* :strong:`With SkyPilot, a single command (`:literal:`sky launch`:strong:`) takes care of everything.` Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs, and provides SSH and VSCode access to debug.
+
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/k8s_vs_skypilot_iterative_v2.png
     :align: center
@@ -22,12 +52,6 @@ Faster developer velocity
     :alt: Iterative Development with Kubernetes vs SkyPilot
 
     Iterative Development with Kubernetes requires tedious updates to Docker images and multiple steps to update the training run. With SkyPilot, all you need is one CLI (``sky launch``).
-
-SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters while observing the training runs.
-
-* **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
-
-* :strong:`With SkyPilot, a single command (`:literal:`sky launch`:strong:`) takes care of everything.` Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs, and provides SSH and VSCode access to debug.
 
 
 Simpler YAMLs
