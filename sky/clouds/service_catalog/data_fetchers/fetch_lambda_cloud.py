@@ -11,7 +11,7 @@ import argparse
 import csv
 import json
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import requests
 
