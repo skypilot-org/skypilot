@@ -2,7 +2,6 @@
 import copy
 import time
 from typing import Any, Dict, List, Optional
-import uuid
 
 from sky import exceptions
 from sky import sky_logging
@@ -482,7 +481,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
-    for _ in range(to_start_count):
+    for pod_id in range(config.count):
         if head_pod_name is None:
             pod_spec['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
             head_selector = head_service_selector(cluster_name_on_cloud)
@@ -490,9 +489,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
             pod_spec['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
-            pod_uuid = str(uuid.uuid4())[:4]
-            pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
-            pod_spec['metadata']['name'] = f'{pod_name}-worker'
+            pod_name = f'{cluster_name_on_cloud}-worker{pod_id}'
+            if pod_name in running_pods:
+                continue
+            pod_spec['metadata']['name'] = pod_name
+            pod_spec['metadata']['labels']['hostname'] = pod_name
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
             # This is not set as a hard constraint because if different nodes
@@ -519,7 +520,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                     }]
                 }
             }
-
         pod = kubernetes.core_api().create_namespaced_pod(namespace, pod_spec)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:

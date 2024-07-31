@@ -242,6 +242,21 @@ provider:
                   protocol: TCP
                   port: 8265
                   targetPort: 8265
+      # Service maps to rest of the worker nodes
+      {% for worker_id in range(1, num_nodes) %}
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          labels:
+            parent: skypilot
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-user: {{ user }}
+          name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
+        spec:
+          selector:
+            hostname: {{cluster_name_on_cloud}}-worker{{ worker_id }}
+          clusterIP: None
+      {% endfor %}
 
 # Specify the pod type for the ray head node (as configured below).
 head_node_type: ray_head_default
@@ -254,7 +269,7 @@ available_node_types:
       metadata:
         # name will be filled in the provisioner
         # head node name will be {{cluster_name_on_cloud}}-head, which will match the head node service selector above if a head node
-        # service is required.
+        # service is required. Remaining nodes are named {{cluster_name_on_cloud}}-worker{{ node_id }}
         labels:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a 
