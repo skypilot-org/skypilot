@@ -490,7 +490,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         else:
             pod_spec['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
             pod_name = f'{cluster_name_on_cloud}-worker{pod_id}'
-            if pod_name in running_pods:
+            if pod_id == 0 or pod_name in running_pods:
                 continue
             pod_spec['metadata']['name'] = pod_name
             pod_spec['metadata']['labels']['hostname'] = pod_name
