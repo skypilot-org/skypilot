@@ -3,9 +3,9 @@
 Comparing SkyPilot with other systems
 =====================================
 
-We are often asked "How does SkyPilot compare with XYZ?". Providing an unbiased and up-to date answer for such questions is not easy, especially when the differences may be qualitative.
+SkyPilot provides a framework for running AI and batch workloads on any infrastructure. Due to it's flexible design, its capabilities overlap with other systems and it can be used in conjunction with them to provide additional benefits.
 
-This page tries to provide a comparison of SkyPilot with other systems, focusing on the unique features of SkyPilot. We welcome feedback and contributions to this page.
+This page provides a comparison of SkyPilot with other systems, focusing on the unique benefits provided by SkyPilot. We welcome feedback and contributions to this page.
 
 
 SkyPilot vs Vanilla Kubernetes
