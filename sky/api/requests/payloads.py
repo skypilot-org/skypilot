@@ -99,3 +99,7 @@ class RequestIdBody(pydantic.BaseModel):
 class EndpointBody(pydantic.BaseModel):
     cluster_name: str
     port: Optional[Union[int, str]] = None
+
+
+class costReportBody(pydantic.BaseModel):
+    all: bool

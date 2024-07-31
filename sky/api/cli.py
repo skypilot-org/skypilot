@@ -1613,7 +1613,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if clusters:
             query_clusters = _get_glob_clusters(clusters, silent=ip)
         request = sdk.status(cluster_names=query_clusters, refresh=refresh)
-        cluster_records = sdk.get(request)
+        cluster_records = sdk.stream_and_get(request)
+        # TOOD(zhwu): setup the ssh config for status
         if ip or show_endpoints:
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
@@ -1807,7 +1808,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = sdk.cost_report()
+    cluster_records = sdk.get(sdk.cost_report())
 
     normal_cluster_records = []
     controllers = dict()
@@ -1971,16 +1972,16 @@ def logs(
         return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
-    job_id: Optional[int] = None
+    job_id: int
     job_ids_to_query: Optional[List[int]] = None
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
         # in sdk.tail_logs.
-        job_id = job_ids[0]
-        if not job_id.isdigit():
-            raise click.UsageError(f'Invalid job ID {job_id}. '
+        cur_job_id = job_ids[0]
+        if not cur_job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {cur_job_id}. '
                                    'Job ID must be integers.')
-        job_id = int(job_ids[0])
+        job_id = int(cur_job_id)
         job_ids_to_query = [int(job_ids[0])]
     else:
         # job_ids is either None or empty list, so it is safe to cast it here.
@@ -3328,7 +3329,7 @@ def storage():
 # pylint: disable=redefined-builtin
 def storage_ls(all: bool):
     """List storage objects managed by SkyPilot."""
-    storages = sky.storage_ls()
+    storages = sdk.storage_ls()
     storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
@@ -3371,7 +3372,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        storages = sky.storage_ls()
+        storages = sdk.get(sdk.storage_ls())
         if not storages:
             click.echo('No storage(s) to delete.')
             return
@@ -3389,7 +3390,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    subprocess_utils.run_in_parallel(sky.storage_delete, names)
+    subprocess_utils.run_in_parallel(sdk.storage_delete, names)
 
 
 @cli.group(cls=_NaturalOrderGroup)

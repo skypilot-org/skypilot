@@ -475,6 +475,17 @@ async def logs(request: fastapi.Request,
     )
 
 
+@app.get('/cost-report')
+async def cost_report(request: fastapi.Request,
+                      cost_report_body: payloads.CostReportBody) -> None:
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='cost_report',
+        request_body=cost_report_body.model_dump(),
+        func=core.cost_report,
+        all=cost_report_body.all,
+    )
+
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request):
     _start_background_request(

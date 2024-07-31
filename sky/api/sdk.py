@@ -500,6 +500,34 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
                             json=body.model_dump())
     return _get_request_id(response)
 
+@usage_lib.entrypoint
+@_check_health
+def cost_report(all: bool) -> str:
+    body = payloads.CostReportBody(all=all)
+    response = requests.get(f'{_get_server_url()}/cost_report',
+                            json=body.model_dump())
+    return _get_request_id(response)
+
+
+
+# === Storage APIs ===
+@usage_lib.entrypoint
+@_check_health
+def storage_ls() -> str:
+    response = requests.get(f'{_get_server_url()}/storage/ls')
+    return _get_request_id(response)
+
+
+@usage_lib.entrypoint
+@_check_health
+def storage_delete(name: str) -> str:
+    body = payloads.StorageBody(name=name)
+    response = requests.post(f'{_get_server_url()}/storage/delete',
+                             json=body.model_dump())
+    return _get_request_id(response)
+
+
+# === API request API ===
 
 @usage_lib.entrypoint
 @_check_health
