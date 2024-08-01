@@ -20,7 +20,7 @@ def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-) -> None:
+) -> List[str]:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
@@ -158,6 +158,7 @@ def check(
                 [''] + sorted(all_enabled_clouds))
             rich.print('\n[green]:tada: Enabled clouds :tada:'
                        f'{enabled_clouds_str}[/green]')
+    return enabled_clouds
 
 
 def get_cached_enabled_clouds_or_refresh(

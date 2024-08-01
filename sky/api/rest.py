@@ -18,6 +18,7 @@ import colorama
 import fastapi
 import starlette.middleware.base
 
+from sky import check as sky_check
 from sky import core
 from sky import execution
 from sky import optimizer
@@ -176,6 +177,19 @@ async def startup():
                                   request_name=event_name,
                                   request_body={},
                                   func=event)
+
+
+@app.get('/check')
+async def check(request: fastapi.Request, check_body: payloads.CheckBody):
+    """Check enabled clouds."""
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='check',
+        request_body=json.loads(check_body.model_dump_json()),
+        func=sky_check.check,
+        clouds=check_body.clouds,
+        verbose=check_body.verbose,
+    )
 
 
 @app.get('/optimize')

@@ -527,7 +527,7 @@ def autostop(
 
 
 @usage_lib.entrypoint
-def queue(cluster_name: str,
+def queue(cluster_name: List[str],
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.

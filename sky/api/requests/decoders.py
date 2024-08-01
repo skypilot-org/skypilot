@@ -4,6 +4,7 @@ import pickle
 from typing import Any, Dict, List
 
 from sky.utils import status_lib
+from sky.skylet import job_lib
 
 handlers: Dict[str, Any] = {}
 
@@ -50,3 +51,12 @@ def decode_launch(return_value: Dict[str, Any]) -> Dict[str, Any]:
         'job_id': return_value['job_id'],
         'handle': decode_and_unpickle(return_value['handle']),
     }
+
+@register_handler('queue')
+def decode_queue(
+    return_value: List[dict],
+) -> Dict[str, Any]:
+    jobs = return_value
+    for job in jobs:
+        job['status'] = job_lib.JobStatus(job['status'])
+    return jobs

@@ -115,13 +115,10 @@ else:
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
-    glob_clusters = []
-    for cluster in clusters:
-        glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-        if len(glob_cluster) == 0 and not silent:
-            click.echo(f'Cluster {cluster} not found.')
-        glob_clusters.extend(glob_cluster)
-    return list(set(glob_clusters))
+    request_id = sdk.status(clusters)
+    cluster_records = sdk.get(request_id)
+    clusters = [record['name'] for record in cluster_records]
+    return clusters
 
 
 def _get_glob_storages(storages: List[str]) -> List[str]:
@@ -1601,9 +1598,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
-        query_clusters: Optional[List[str]] = None
-        if clusters:
-            query_clusters = _get_glob_clusters(clusters, silent=ip)
+        query_clusters: Optional[List[str]] = None if not clusters else clusters
         request = sdk.status(cluster_names=query_clusters, refresh=refresh)
         cluster_records = sdk.stream_and_get(request)
         # TOOD(zhwu): setup the ssh config for status
@@ -1868,16 +1863,16 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
-    if clusters:
-        clusters = _get_glob_clusters(clusters)
-    else:
-        cluster_infos = global_user_state.get_clusters()
-        clusters = [c['name'] for c in cluster_infos]
+    if not clusters:
+        clusters = ['*']
+    clusters = _get_glob_clusters(clusters)
 
     unsupported_clusters = []
-    for cluster in clusters:
+    logger.info(f'Fetching job queue for {clusters}')
+    job_tables = {}
+    def _get_job_queue(cluster):
         try:
-            job_table = sdk.queue(cluster, skip_finished, all_users)
+            job_table = sdk.stream_and_get(sdk.queue(cluster, skip_finished, all_users))
         except (RuntimeError, exceptions.CommandError, ValueError,
                 exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                 exceptions.CloudUserIdentityError,
@@ -1887,8 +1882,11 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
             click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
                        f'  {common_utils.format_exception(e)}')
-            continue
-        job_table = job_lib.format_job_queue(job_table)
+            return
+        job_tables[cluster] = job_lib.format_job_queue(job_table)
+
+    subprocess_utils.run_in_parallel(_get_job_queue, clusters)
+    for cluster, job_table in job_tables.items():
         click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
 
     if unsupported_clusters:
@@ -2890,7 +2888,8 @@ def check(clouds: Tuple[str], verbose: bool):
       sky check aws gcp
     """
     clouds_arg = clouds if len(clouds) > 0 else None
-    sky_check.check(verbose=verbose, clouds=clouds_arg)
+    request_id = sdk.check(clouds=clouds_arg, verbose=verbose)
+    sdk.stream_and_get(request_id)
 
 
 @cli.command()

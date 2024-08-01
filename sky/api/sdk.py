@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -136,6 +136,15 @@ def _add_env_vars_to_body(body: payloads.RequestBody):
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     body.env_vars = env_vars
+
+
+@usage_lib.entrypoint
+@_check_health
+def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
+    body = payloads.CheckBody(clouds=clouds, verbose=verbose)
+    response = requests.get(f'{_get_server_url()}/check',
+                            json=json.loads(body.model_dump_json()))
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -462,7 +471,7 @@ def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  
 
 @usage_lib.entrypoint
 @_check_health
-def queue(cluster_name: str,
+def queue(cluster_name: List[str],
           skip_finished: bool = False,
           all_users: bool = False) -> str:
     body = payloads.QueueBody(
@@ -511,8 +520,16 @@ def cancel(
 @_check_health
 def status(cluster_names: Optional[List[str]] = None,
            refresh: bool = False) -> str:
+    """Get the status of clusters.
+    
+    Args:
+        cluster_names: names of clusters to get status for. If None, get status
+            for all clusters. The cluster names specified can be in glob pattern
+            (e.g., 'my-cluster-*').
+        refresh: whether to refresh the status of the clusters.
+    """
     # TODO(zhwu): this does not stream the logs output by logger back to the
-    # user
+    # user, due to the rich progress implementation.
     body = payloads.StatusBody(
         cluster_names=cluster_names,
         refresh=refresh,

@@ -1,5 +1,5 @@
 """Payloads for the Sky API requests."""
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import pydantic
 
@@ -8,6 +8,11 @@ from sky import optimizer
 
 class RequestBody(pydantic.BaseModel):
     env_vars: Dict[str, str] = {}
+
+
+class CheckBody(RequestBody):
+    clouds: Optional[Tuple[str]]
+    verbose: bool
 
 
 class OptimizeBody(pydantic.BaseModel):

@@ -1,4 +1,7 @@
 """Handlers for the REST API return values."""
+# TODO(zhwu): we should evaluate that if we can move our return values to
+# pydantic models, so we can take advantage of model_dump_json of pydantic,
+# instead of implementing our own handlers.
 import base64
 import pickle
 import typing
@@ -55,3 +58,12 @@ def encode_launch(
         'job_id': job_id,
         'handle': pickle_and_encode(handle),
     }
+
+
+@register_handler('queue')
+def encode_queue(
+    jobs: List[dict],
+) -> Dict[str, Any]:
+    for job in jobs:
+        job['status'] = job['status'].value
+    return jobs
