@@ -1,7 +1,6 @@
 """REST API for SkyPilot."""
 import argparse
 import asyncio
-import json
 import multiprocessing
 import os
 import pathlib
@@ -205,7 +204,7 @@ async def upload_zip_file(user_hash: str,
     try:
         # Save the uploaded zip file temporarily
         zip_file_path = client_file_mounts_dir / f'{timestamp}.zip'
-        with open(zip_file_path, "wb") as f:
+        with open(zip_file_path, 'wb') as f:
             contents = await file.read()
             f.write(contents)
 
@@ -220,7 +219,6 @@ async def upload_zip_file(user_hash: str,
                     new_path.mkdir(parents=True, exist_ok=True)
                     continue
                 with zipf.open(member) as member_file:
-                    new_path = new_path
                     new_path.parent.mkdir(parents=True, exist_ok=True)
                     new_path.write_bytes(member_file.read())
 
@@ -228,7 +226,7 @@ async def upload_zip_file(user_hash: str,
         zip_file_path.unlink()
 
         return {'status': 'files uploaded and extracted'}
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         return {'detail': str(e)}
 
 
@@ -327,7 +325,8 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
 
 
 @app.post('/exec')
-async def exec(exec_body: payloads.ExecBody, request: fastapi.Request):
+# pylint: disable=redefined-builtin
+async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
     dag = _process_mounts_in_task(exec_body.task,
                                   exec_body.env_vars,
                                   exec_body.cluster_name,
@@ -337,6 +336,7 @@ async def exec(exec_body: payloads.ExecBody, request: fastapi.Request):
             status_code=400,
             detail='The DAG for exec must have exactly one task.')
     task = dag.tasks[0]
+    backend = registry.BACKEND_REGISTRY.from_str(exec_body.backend)
 
     _start_background_request(
         request_id=request.state.request_id,
@@ -345,6 +345,7 @@ async def exec(exec_body: payloads.ExecBody, request: fastapi.Request):
         func=execution.exec,
         task=task,
         cluster_name=exec_body.cluster_name,
+        backend=backend,
         dryrun=exec_body.dryrun,
         down=exec_body.down,
         detach_run=exec_body.detach_run,

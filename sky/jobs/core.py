@@ -1,12 +1,12 @@
 """SDK functions for managed jobs."""
 import os
 import tempfile
+import typing
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
 
-import sky
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
@@ -26,14 +26,17 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import sky
+
 
 @usage_lib.entrypoint
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
-    stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
+    stream_logs: bool = True,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
@@ -125,14 +128,15 @@ def launch(
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
         sky_logging.print('Launching jobs controller...')
-        sky.launch(task=controller_task,
-                   stream_logs=stream_logs,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   _disable_controller_check=True)
+        request_id = sdk.launch(task=controller_task,
+                                cluster_name=controller_name,
+                                detach_run=detach_run,
+                                idle_minutes_to_autostop=skylet_constants.
+                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                retry_until_up=True,
+                                _disable_controller_check=True)
+        if stream_logs:
+            sdk.stream_and_get(request_id)
 
 
 @usage_lib.entrypoint

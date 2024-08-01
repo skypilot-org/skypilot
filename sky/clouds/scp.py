@@ -14,12 +14,12 @@ from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.clouds.utils import scp_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.utils import resources_utils
 
 _CREDENTIAL_FILES = [
     'scp_credential',

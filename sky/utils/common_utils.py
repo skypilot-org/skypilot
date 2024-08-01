@@ -646,7 +646,7 @@ def zip_files_and_folders(items: List[str], output_file):
             if os.path.isfile(item):
                 zipf.write(item)
             elif os.path.isdir(item):
-                for root, dirs, files in os.walk(item):
+                for root, _, files in os.walk(item):
                     for file in files:
                         zipf.write(os.path.join(root, file))
             else:

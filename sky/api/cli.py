@@ -82,7 +82,6 @@ from sky.utils.cli_utils import status_utils
 if typing.TYPE_CHECKING:
     import types
 
-
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
 
@@ -111,6 +110,7 @@ if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
     sdk = core
 else:
     sdk = sdk_lib
+
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -159,15 +159,14 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
         env_dict[key] = value
     return list(env_dict.items())
 
+
 _COMMON_OPTIONS = [
-    click.option(
-        '--async/--no-async',
-        'async_call',
-        required=False,
-        is_flag=True,
-        default=False,
-        help=('Run the command asynchronously.')
-    )
+    click.option('--async/--no-async',
+                 'async_call',
+                 required=False,
+                 is_flag=True,
+                 default=False,
+                 help=('Run the command asynchronously.'))
 ]
 
 _TASK_OPTIONS = [
@@ -936,8 +935,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS_WITH_NAME +
-                    _EXTRA_RESOURCES_OPTIONS +
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
                     _COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
@@ -1000,37 +998,36 @@ def cli():
           'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: Tuple[str, ...],
-    cluster: Optional[str],
-    dryrun: bool,
-    detach_setup: bool,
-    detach_run: bool,
-    backend_name: Optional[str],
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    gpus: Optional[str],
-    cpus: Optional[str],
-    memory: Optional[str],
-    instance_type: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    ports: Tuple[str],
-    idle_minutes_to_autostop: Optional[int],
-    down: bool,  # pylint: disable=redefined-outer-name
-    retry_until_up: bool,
-    yes: bool,
-    no_setup: bool,
-    clone_disk_from: Optional[str],
-    async_call: bool
-):
+        entrypoint: Tuple[str, ...],
+        cluster: Optional[str],
+        dryrun: bool,
+        detach_setup: bool,
+        detach_run: bool,
+        backend_name: Optional[str],
+        name: Optional[str],
+        workdir: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        zone: Optional[str],
+        gpus: Optional[str],
+        cpus: Optional[str],
+        memory: Optional[str],
+        instance_type: Optional[str],
+        num_nodes: Optional[int],
+        use_spot: Optional[bool],
+        image_id: Optional[str],
+        env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]],
+        disk_size: Optional[int],
+        disk_tier: Optional[str],
+        ports: Tuple[str],
+        idle_minutes_to_autostop: Optional[int],
+        down: bool,  # pylint: disable=redefined-outer-name
+        retry_until_up: bool,
+        yes: bool,
+        no_setup: bool,
+        clone_disk_from: Optional[str],
+        async_call: bool):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1087,18 +1084,19 @@ def launch(
             f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
             f'{colorama.Style.RESET_ALL}')
 
-    request_id = _launch_with_confirm(task,
-                         backend,
-                         cluster,
-                         dryrun=dryrun,
-                         detach_setup=detach_setup,
-                         detach_run=detach_run,
-                         no_confirm=yes,
-                         idle_minutes_to_autostop=idle_minutes_to_autostop,
-                         down=down,
-                         retry_until_up=retry_until_up,
-                         no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+    request_id = _launch_with_confirm(
+        task,
+        backend,
+        cluster,
+        dryrun=dryrun,
+        detach_setup=detach_setup,
+        detach_run=detach_run,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from)
     if not async_call:
         sdk.stream_and_get(request_id)
     else:
@@ -1130,33 +1128,19 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
+                    _COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(
-    cluster: Optional[str],
-    cluster_option: Optional[str],
-    entrypoint: Tuple[str, ...],
-    detach_run: bool,
-    name: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    workdir: Optional[str],
-    gpus: Optional[str],
-    ports: Tuple[str],
-    instance_type: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    async_call: bool
-):
+def exec(cluster: Optional[str], cluster_option: Optional[str],
+         entrypoint: Tuple[str, ...], detach_run: bool, name: Optional[str],
+         cloud: Optional[str], region: Optional[str], zone: Optional[str],
+         workdir: Optional[str], gpus: Optional[str], ports: Tuple[str],
+         instance_type: Optional[str], num_nodes: Optional[int],
+         use_spot: Optional[bool], image_id: Optional[str],
+         env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
+         disk_tier: Optional[str], async_call: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1262,7 +1246,10 @@ def exec(
     task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    request_id = sdk.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    request_id = sdk.exec(task,
+                          backend=backend,
+                          cluster_name=cluster,
+                          detach_run=detach_run)
     if not async_call:
         sdk.stream_and_get(request_id)
     else:
@@ -3418,7 +3405,8 @@ def jobs():
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
+                    _COMMON_OPTIONS)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -4064,29 +4052,16 @@ def serve_up(
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def serve_update(
-    service_name: str,
-    service_yaml: Tuple[str, ...],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    gpus: Optional[str],
-    instance_type: Optional[str],
-    ports: Tuple[str],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    mode: str,
-    yes: bool,
-    async_call: bool
-):
+def serve_update(service_name: str, service_yaml: Tuple[str, ...],
+                 workdir: Optional[str], cloud: Optional[str],
+                 region: Optional[str], zone: Optional[str],
+                 num_nodes: Optional[int], use_spot: Optional[bool],
+                 image_id: Optional[str], env_file: Optional[Dict[str, str]],
+                 env: List[Tuple[str, str]], gpus: Optional[str],
+                 instance_type: Optional[str], ports: Tuple[str],
+                 cpus: Optional[str], memory: Optional[str],
+                 disk_size: Optional[int], disk_tier: Optional[str], mode: str,
+                 yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -5225,11 +5200,11 @@ def api():
 
 @api.command('start', cls=_DocumentedCodeCommand)
 @click.option('--reload',
-            type=bool,
-            is_flag=True,
-            default=False,
-            required=False,
-            help='Automatically reload the API server when code changes.')
+              type=bool,
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Automatically reload the API server when code changes.')
 @usage_lib.entrypoint
 def api_start(reload: bool):
     """Starts the API server locally."""
@@ -5252,9 +5227,6 @@ def api_stream(request_id: Optional[str]):
         # TODO(zhwu): get the latest request ID.
         raise click.BadParameter('Please provide the request ID.')
     sdk.stream_and_get(request_id)
-
-
-
 
 
 @api.command('logs', cls=_DocumentedCodeCommand)

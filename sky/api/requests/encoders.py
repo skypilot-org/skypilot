@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
 handlers: Dict[str, Any] = {}
 
 
-def _pickle_and_encode(obj: Any) -> str:
+def pickle_and_encode(obj: Any) -> str:
     return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
 
 
@@ -40,8 +40,8 @@ def default_handler(return_value: Any) -> Any:
 def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for cluster in clusters:
         cluster['status'] = cluster['status'].value
-        cluster['handle'] = _pickle_and_encode(cluster['handle'])
-        cluster['storage_mounts_metadata'] = _pickle_and_encode(
+        cluster['handle'] = pickle_and_encode(cluster['handle'])
+        cluster['storage_mounts_metadata'] = pickle_and_encode(
             cluster['storage_mounts_metadata'])
     return clusters
 
@@ -53,5 +53,5 @@ def encode_launch(
     job_id, handle = job_id_handle
     return {
         'job_id': job_id,
-        'handle': _pickle_and_encode(handle),
+        'handle': pickle_and_encode(handle),
     }

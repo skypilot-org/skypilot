@@ -109,7 +109,6 @@ def kill_children_processes(parent_pids: Optional[List[Optional[int]]] = None,
           of cleaning up and suppress flaky errors.
         force: bool, send SIGKILL if force, otherwise, use SIGTERM for
           gracefully kill the process.
-        
     """
     if isinstance(parent_pids, int):
         parent_pids = [parent_pids]

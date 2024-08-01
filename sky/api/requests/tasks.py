@@ -7,8 +7,7 @@ import json
 import os
 import pathlib
 import sqlite3
-import traceback
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
@@ -83,7 +82,7 @@ class RequestTask:
         """Set the error."""
 
         self.error = {
-            'object': encoders._pickle_and_encode(error),
+            'object': encoders.pickle_and_encode(error),
             'type': type(error).__name__,
             'message': str(error),
         }
@@ -93,7 +92,7 @@ class RequestTask:
         if self.error is None:
             return None
         return {
-            'object': decoders._decode_and_unpickle(self.error['object']),
+            'object': decoders.decode_and_unpickle(self.error['object']),
             'type': self.error['type'],
             'message': self.error['message'],
         }

@@ -21,7 +21,6 @@ from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 

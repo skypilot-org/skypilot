@@ -82,21 +82,21 @@ _set_http_proxy_env_vars()
 from sky import backends
 from sky import benchmark
 from sky import clouds
-# from sky.api.sdk import queue
-# from sky.api.sdk import start
-# from sky.api.sdk import exec  # pylint: disable=redefined-builtin
-# from sky.api.sdk import job_status
-# from sky.api.sdk import autostop
-# from sky.api.sdk import cancel
-# from sky.api.sdk import cost_report
 # from sky.api.sdk import download_logs
+from sky.api.sdk import autostop
+from sky.api.sdk import cancel
+from sky.api.sdk import cost_report
 from sky.api.sdk import down
+from sky.api.sdk import exec  # pylint: disable=redefined-builtin
+from sky.api.sdk import job_status
 from sky.api.sdk import launch
+from sky.api.sdk import queue
+from sky.api.sdk import start
 from sky.api.sdk import status
-# from sky.api.sdk import stop
-# from sky.api.sdk import storage_delete
-# from sky.api.sdk import storage_ls
-# from sky.api.sdk import tail_logs
+from sky.api.sdk import stop
+from sky.api.sdk import storage_delete
+from sky.api.sdk import storage_ls
+from sky.api.sdk import tail_logs
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
 from sky.data import Storage
@@ -176,7 +176,7 @@ __all__ = [
     'cancel',
     'tail_logs',
     'spot_tail_logs',
-    'download_logs',
+    # 'download_logs',
     'job_status',
     # core APIs Spot Job Management
     'spot_queue',

@@ -1,3 +1,4 @@
+"""Utilities for encoding and decoding messages."""
 import json
 import re
 from typing import Any

@@ -10,13 +10,12 @@ method. For example:
 
 """
 import functools
-import json
 import os
 import subprocess
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Union
 
 import click
 import colorama
@@ -72,21 +71,22 @@ def _start_uvicorn_in_background(reload: bool = False):
 
     # Start the uvicorn process in the background and don't wait for it.
     subprocess.Popen(cmd, shell=True)
+    server_url = _get_server_url()
     # Wait for the server to start.
     retry_cnt = 0
     while True:
         try:
             # TODO: Should check the process is running as well.
-            requests.get(f'{_get_server_url()}/health', timeout=1)
+            requests.get(f'{server_url}/health', timeout=1)
             break
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as e:
             if retry_cnt < 20:
                 retry_cnt += 1
             else:
                 raise RuntimeError(
-                    f'Failed to connect to SkyPilot server at {_get_server_url()}. '
+                    f'Failed to connect to SkyPilot server at {server_url}. '
                     'Please check the logs for more information: '
-                    f'tail -f {constants.API_SERVER_LOGS}')
+                    f'tail -f {constants.API_SERVER_LOGS}') from e
             time.sleep(0.5)
 
 
@@ -180,6 +180,7 @@ def _upload_mounts_to_api_server(
                         storage_source)
         task_.file_mounts_mapping = file_mounts_mapping
 
+    server_url = _get_server_url()
     logger.info('Uploading files to API server...')
     with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
         common_utils.zip_files_and_folders(upload_list, f)
@@ -187,7 +188,7 @@ def _upload_mounts_to_api_server(
         files = {'file': (f.name, f)}
         # Send the POST request with the file
         response = requests.post(
-            f'{_get_server_url()}/upload?user_hash={common_utils.get_user_hash()}',
+            f'{server_url}/upload?user_hash={common_utils.get_user_hash()}',
             files=files)
         if response.status_code != 200:
             err_msg = response.content.decode('utf-8')
@@ -252,7 +253,8 @@ def launch(
                 # '{clone_source_str}. '
                 'Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster_name!r}. Proceed?'
+            prompt = (f'Restarting the stopped cluster {cluster_name!r}. '
+                      'Proceed?')
         if prompt is not None:
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
@@ -295,7 +297,7 @@ def launch(
 
 @usage_lib.entrypoint
 @_check_health
-def exec(
+def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     dryrun: bool = False,
@@ -313,6 +315,7 @@ def exec(
         cluster_name=cluster_name,
         dryrun=dryrun,
         down=down,
+        backend=backend.NAME if backend else None,
         detach_run=detach_run,
     )
 
@@ -354,7 +357,7 @@ def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
     retry_until_up: bool = False,
-    down: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
 ) -> str:
     """Start a stopped cluster."""
@@ -440,7 +443,7 @@ def stop(cluster_name: str, purge: bool = False) -> str:
 
 @usage_lib.entrypoint
 @_check_health
-def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:
+def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  # pylint: disable=redefined-outer-name
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
         idle_minutes=idle_minutes,
@@ -483,10 +486,13 @@ def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
 
 @usage_lib.entrypoint
 @_check_health
-def cancel(cluster_name: str,
-           all: bool = False,
-           job_ids: Optional[List[int]] = None,
-           _try_cancel_if_cluster_is_init: bool = False) -> str:
+def cancel(
+    cluster_name: str,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    job_ids: Optional[List[int]] = None,
+    # pylint: disable=invalid-name
+    _try_cancel_if_cluster_is_init: bool = False
+) -> str:
     body = payloads.CancelBody(
         cluster_name=cluster_name,
         all=all,
@@ -527,7 +533,7 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
 
 @usage_lib.entrypoint
 @_check_health
-def cost_report(all: bool) -> str:
+def cost_report(all: bool) -> str:  # pylint: disable=redefined-builtin
     body = payloads.CostReportBody(all=all)
     response = requests.get(f'{_get_server_url()}/cost_report',
                             json=body.model_dump())
@@ -567,9 +573,8 @@ def get(request_id: str) -> Any:
     if error is not None:
         error_obj = error['object']
         if env_options.Options.SHOW_DEBUG_INFO.get():
-            logger.error(
-                f'=== Traceback on SkyPilot API Server ===\n{error_obj.stacktrace}'
-            )
+            logger.error('=== Traceback on SkyPilot API Server ===\n'
+                         f'{error_obj.stacktrace}')
         with ux_utils.print_exception_no_traceback():
             raise error_obj
     return request_task.get_return_value()

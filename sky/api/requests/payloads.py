@@ -1,3 +1,4 @@
+"""Payloads for the Sky API requests."""
 from typing import Dict, List, Optional, Union
 
 import pydantic
@@ -41,6 +42,7 @@ class ExecBody(RequestBody):
     cluster_name: str
     dryrun: bool = False
     down: bool = False
+    backend: Optional[str] = None
     detach_run: bool = False
 
 

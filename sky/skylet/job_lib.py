@@ -19,7 +19,6 @@ import psutil
 
 from sky import sky_logging
 from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils

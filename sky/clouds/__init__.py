@@ -41,7 +41,6 @@ __all__ = [
     'CloudImplementationFeatures',
     'Region',
     'Zone',
-    'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
     'Fluidstack',
