@@ -189,7 +189,7 @@ remote = [
     'protobuf >= 3.15.3, != 3.19.5',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py: https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
-    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3,>2',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the

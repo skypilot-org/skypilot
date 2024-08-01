@@ -1,0 +1,17 @@
+resources:
+  cpus: 4+
+
+
+setup: |
+  git clone https://github.com/skypilot-org/skypilot.git || true
+  cd skypilot
+  git checkout restapi
+  pip install -e .[all]
+
+
+run: |
+  sky api start
+
+
+envs:
+  SKYPILOT_DEV: 1

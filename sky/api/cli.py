@@ -1641,16 +1641,18 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             head_ip = handle.external_ips()[0]
             if show_endpoints:
                 if endpoint:
-                    cluster_endpoint = sdk.endpoints(cluster_record['name'],
-                                                     endpoint).get(
-                                                         endpoint, None)
+                    request_id = sdk.endpoints(cluster_record['name'],
+                                                     endpoint)
+                    cluster_endpoints = sdk.stream_and_get(request_id)
+                    cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
                     if not cluster_endpoint:
                         raise click.Abort(
                             f'Endpoint {endpoint} not found for cluster '
                             f'{cluster_record["name"]!r}.')
                     click.echo(cluster_endpoint)
                 else:
-                    cluster_endpoints = sdk.endpoints(cluster_record['name'])
+                    request_id = sdk.endpoints(cluster_record['name'])
+                    cluster_endpoints = sdk.stream_and_get(request_id)
                     assert isinstance(cluster_endpoints, dict)
                     if not cluster_endpoints:
                         raise click.Abort(f'No endpoint found for cluster '
