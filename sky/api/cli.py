@@ -107,6 +107,7 @@ sdk: 'types.ModuleType'
 if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
     from sky import core
     setattr(core, 'get', lambda args: args)
+    setattr(core, 'stream_and_get', lambda args: args)
     sdk = core
 else:
     sdk = sdk_lib
