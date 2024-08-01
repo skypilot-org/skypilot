@@ -4956,7 +4956,8 @@ class TestStorageWithCredentials:
         storage_name = tmp_copy_mnt_existing_storage_obj.name
 
         # Check `sky storage status` to ensure storage object exists
-        out = subprocess.check_output(['sky', 'storage', 'status']).decode('utf-8')
+        out = subprocess.check_output(['sky', 'storage',
+                                       'status']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage status.'
 
     @pytest.mark.no_fluidstack

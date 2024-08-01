@@ -3364,7 +3364,7 @@ def storage_status(all: bool, bucket_name: Optional[str] = None):
 
 
 # TODO(aseriesof-tubes) Add command storage_ls that shows contents of bucket
-# like gsutil ls 
+# like gsutil ls
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
