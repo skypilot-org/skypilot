@@ -10,7 +10,6 @@ from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import task as task_lib
-from sky.api import sdk
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
@@ -193,7 +192,7 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-        request_id = sdk.launch(
+        request_id = sky.launch(
             task=controller_task,
             cluster_name=controller_name,
             detach_run=True,
@@ -201,7 +200,7 @@ def up(
             retry_until_up=True,
             _disable_controller_check=True,
         )
-        controller_job_id, controller_handle = sdk.get(request_id)
+        controller_job_id, controller_handle = sky.get(request_id)
 
         style = colorama.Style
         fore = colorama.Fore

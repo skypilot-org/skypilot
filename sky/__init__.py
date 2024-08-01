@@ -88,6 +88,7 @@ from sky.api.sdk import cancel
 from sky.api.sdk import cost_report
 from sky.api.sdk import down
 from sky.api.sdk import exec  # pylint: disable=redefined-builtin
+from sky.api.sdk import get
 from sky.api.sdk import job_status
 from sky.api.sdk import launch
 from sky.api.sdk import queue
@@ -96,6 +97,7 @@ from sky.api.sdk import status
 from sky.api.sdk import stop
 from sky.api.sdk import storage_delete
 from sky.api.sdk import storage_ls
+from sky.api.sdk import stream_and_get
 from sky.api.sdk import tail_logs
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
@@ -185,4 +187,7 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # Request APIs
+    'get',
+    'stream_and_get',
 ]

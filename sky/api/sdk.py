@@ -10,6 +10,7 @@ method. For example:
 
 """
 import functools
+import json
 import os
 import subprocess
 import tempfile
@@ -144,11 +145,11 @@ def optimize(dag: 'sky.Dag') -> str:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
-    body = payloads.OptimizeBody(dag=dag_str,)
-    _add_env_vars_to_body(body)
+    body = payloads.OptimizeBody(dag=dag_str)
+    # _add_env_vars_to_body(body)
     response = requests.get(f'{_get_server_url()}/optimize',
-                            json=body.model_dump())
-    return response.headers['X-Request-ID']
+                            json=json.loads(body.model_dump_json()))
+    return _get_request_id(response)
 
 
 def _upload_mounts_to_api_server(
@@ -181,18 +182,19 @@ def _upload_mounts_to_api_server(
         task_.file_mounts_mapping = file_mounts_mapping
 
     server_url = _get_server_url()
-    logger.info('Uploading files to API server...')
-    with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-        common_utils.zip_files_and_folders(upload_list, f)
-        f.seek(0)
-        files = {'file': (f.name, f)}
-        # Send the POST request with the file
-        response = requests.post(
-            f'{server_url}/upload?user_hash={common_utils.get_user_hash()}',
-            files=files)
-        if response.status_code != 200:
-            err_msg = response.content.decode('utf-8')
-            raise RuntimeError(f'Failed to upload files: {err_msg}')
+    if upload_list:
+        logger.info('Uploading files to API server...')
+        with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
+            common_utils.zip_files_and_folders(upload_list, f)
+            f.seek(0)
+            files = {'file': (f.name, f)}
+            # Send the POST request with the file
+            response = requests.post(
+                f'{server_url}/upload?user_hash={common_utils.get_user_hash()}',
+                files=files)
+            if response.status_code != 200:
+                err_msg = response.content.decode('utf-8')
+                raise RuntimeError(f'Failed to upload files: {err_msg}')
 
     return dag
 
@@ -289,10 +291,10 @@ def launch(
     _add_env_vars_to_body(body)
     response = requests.post(
         f'{_get_server_url()}/launch',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return response.headers['X-Request-ID']
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -321,10 +323,10 @@ def exec(  # pylint: disable=redefined-builtin
 
     response = requests.post(
         f'{_get_server_url()}/exec',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return response.headers['X-Request-ID']
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -335,7 +337,8 @@ def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
         job_id=job_id,
         follow=follow,
     )
-    response = requests.get(f'{_get_server_url()}/logs', json=body.model_dump())
+    response = requests.get(f'{_get_server_url()}/logs',
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -347,7 +350,7 @@ def download_logs(cluster_name: str, job_ids: Optional[int]) -> str:
         job_ids=job_ids,
     )
     response = requests.get(f'{_get_server_url()}/download_logs',
-                            json=body.model_dump())
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -370,7 +373,7 @@ def start(
     )
     response = requests.post(
         f'{_get_server_url()}/start',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         timeout=5,
     )
     return _get_request_id(response)
@@ -402,7 +405,7 @@ def down(cluster_name: str, purge: bool = False) -> str:
     )
     response = requests.post(
         f'{_get_server_url()}/down',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         timeout=5,
     )
     return _get_request_id(response)
@@ -435,10 +438,10 @@ def stop(cluster_name: str, purge: bool = False) -> str:
     )
     response = requests.post(
         f'{_get_server_url()}/stop',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return response.headers['X-Request-ID']
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -451,10 +454,10 @@ def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  
     )
     response = requests.post(
         f'{_get_server_url()}/autostop',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return response.headers['X-Request-ID']
+    return _get_request_id(response)
 
 
 @usage_lib.entrypoint
@@ -468,7 +471,7 @@ def queue(cluster_name: str,
         all_users=all_users,
     )
     response = requests.get(f'{_get_server_url()}/queue',
-                            json=body.model_dump())
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -480,7 +483,7 @@ def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
         job_ids=job_ids,
     )
     response = requests.get(f'{_get_server_url()}/job_status',
-                            json=body.model_dump())
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -500,7 +503,7 @@ def cancel(
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )
     response = requests.post(f'{_get_server_url()}/cancel',
-                             json=body.model_dump())
+                             json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -515,7 +518,7 @@ def status(cluster_names: Optional[List[str]] = None,
         refresh=refresh,
     )
     response = requests.get(f'{_get_server_url()}/status',
-                            json=body.model_dump())
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -527,7 +530,7 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
         port=port,
     )
     response = requests.get(f'{_get_server_url()}/endpoints',
-                            json=body.model_dump())
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -536,7 +539,7 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
 def cost_report(all: bool) -> str:  # pylint: disable=redefined-builtin
     body = payloads.CostReportBody(all=all)
     response = requests.get(f'{_get_server_url()}/cost_report',
-                            json=body.model_dump())
+                            json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -553,7 +556,7 @@ def storage_ls() -> str:
 def storage_delete(name: str) -> str:
     body = payloads.StorageBody(name=name)
     response = requests.post(f'{_get_server_url()}/storage/delete',
-                             json=body.model_dump())
+                             json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
 
@@ -565,7 +568,7 @@ def storage_delete(name: str) -> str:
 def get(request_id: str) -> Any:
     body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(f'{_get_server_url()}/get',
-                            json=body.model_dump(),
+                            json=json.loads(body.model_dump_json()),
                             timeout=(5, None))
     request_task = tasks.RequestTask.decode(
         tasks.RequestTaskPayload(**response.json()))
@@ -586,7 +589,7 @@ def stream_and_get(request_id: str) -> Any:
     body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(
         f'{_get_server_url()}/stream',
-        json=body.model_dump(),
+        json=json.loads(body.model_dump_json()),
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)
