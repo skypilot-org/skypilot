@@ -2377,15 +2377,15 @@ def start(
             for cluster in all_clusters
             if controller_utils.Controllers.from_name(cluster['name']) is None
         ]
+    if cluster_records is None:
+        # Get GLOB cluster names
+        cluster_records = _get_cluster_records(clusters, refresh=api_common.StatusRefreshMode.AUTO)
 
-    if not clusters:
+    if not cluster_records:
         click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
                    'mean to use `sky launch` to provision a new cluster?')
         return
     else:
-        if cluster_records is None:
-            # Get GLOB cluster names
-            cluster_records = _get_cluster_records(clusters, refresh=api_common.StatusRefreshMode.AUTO)
         for cluster in cluster_records:
             name = cluster['name']
             cluster_status = cluster['status']
@@ -2770,6 +2770,7 @@ def _down_or_stop_clusters(
 
     if apply_to_all:
         all_clusters = _get_cluster_records(['*'])
+        logger.info(f'restarting all clusters {all_clusters}')
         if len(names) > 0:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
