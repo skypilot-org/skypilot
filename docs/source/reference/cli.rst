@@ -107,9 +107,9 @@ SkyServe CLI
 Storage CLI
 ------------
 
-.. _sky-storage-ls:
-.. click:: sky.cli:storage_ls
-   :prog: sky storage ls
+.. _sky-storage-status:
+.. click:: sky.cli:storage_status
+   :prog: sky storage status
    :nested: full
 
 .. _sky-storage-delete:

@@ -155,5 +155,5 @@ run: |
   pwd
   ls -la /
 
-# Remember to run `sky storage ls` and `sky storage delete` to delete the
+# Remember to run `sky storage status` and `sky storage delete` to delete the
 # created storage objects!

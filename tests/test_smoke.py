@@ -4642,7 +4642,7 @@ class TestStorageWithCredentials:
         # and deletes it.
         tmp_local_storage_obj.add_store(store_type)
 
-        # Run sky storage ls to check if storage object exists in the output
+        # Run sky storage status to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name in out.decode('utf-8')
 
@@ -4650,7 +4650,7 @@ class TestStorageWithCredentials:
         subprocess.check_output(
             ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes'])
 
-        # Run sky storage ls to check if storage object is deleted
+        # Run sky storage status to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
@@ -4671,7 +4671,7 @@ class TestStorageWithCredentials:
             store_obj.add_store(store_type)
             storage_obj_name.append(store_obj.name)
 
-        # Run sky storage ls to check if all storage objects exists in the
+        # Run sky storage status to check if all storage objects exists in the
         # output filtered by store type
         out_all = subprocess.check_output(['sky', 'storage', 'ls'])
         out = [
@@ -4686,7 +4686,7 @@ class TestStorageWithCredentials:
         delete_cmd += storage_obj_name
         subprocess.check_output(delete_cmd)
 
-        # Run sky storage ls to check if all storage objects filtered by store
+        # Run sky storage status to check if all storage objects filtered by store
         # type are deleted
         out_all = subprocess.check_output(['sky', 'storage', 'ls'])
         out = [
@@ -4712,7 +4712,7 @@ class TestStorageWithCredentials:
             storage_obj.add_store(store_type)
             storage_obj_names.append(storage_obj.name)
 
-        # Run sky storage ls to check if all storage objects exists in the
+        # Run sky storage status to check if all storage objects exists in the
         # output filtered by store type
         out_all = subprocess.check_output(['sky', 'storage', 'ls'])
         out = [
@@ -4735,7 +4735,7 @@ class TestStorageWithCredentials:
         # and then tries to delete it using sky storage delete.
         tmp_scratch_storage_obj.add_store(store_type)
 
-        # Run sky storage ls to check if storage object exists in the output
+        # Run sky storage status to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name in out.decode('utf-8')
 
@@ -4749,7 +4749,7 @@ class TestStorageWithCredentials:
         # Make sure bucket was not created during deletion (see issue #1322)
         assert 'created' not in out.decode('utf-8').lower()
 
-        # Run sky storage ls to check if storage object is deleted
+        # Run sky storage status to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
 
@@ -4788,7 +4788,7 @@ class TestStorageWithCredentials:
         # added to global_user_state.
         tmp_public_storage_obj.add_store(store_type)
 
-        # Run sky storage ls to check if storage object exists in the output
+        # Run sky storage status to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
@@ -4942,7 +4942,7 @@ class TestStorageWithCredentials:
             'Symlink found in bucket - ls output was : {}'.format(
                 out.decode('utf-8')))
 
-        # Run sky storage ls to check if storage object exists in the output.
+        # Run sky storage status to check if storage object exists in the output.
         # It should not exist because the bucket was created externally.
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
@@ -4955,9 +4955,9 @@ class TestStorageWithCredentials:
         tmp_copy_mnt_existing_storage_obj.add_store(storage_lib.StoreType.S3)
         storage_name = tmp_copy_mnt_existing_storage_obj.name
 
-        # Check `sky storage ls` to ensure storage object exists
+        # Check `sky storage status` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
-        assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
+        assert storage_name in out, f'Storage {storage_name} not found in sky storage status.'
 
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [

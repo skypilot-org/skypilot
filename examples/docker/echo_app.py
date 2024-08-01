@@ -48,6 +48,6 @@ with sky.Dag() as dag:
 sky.launch(dag)
 
 print('Remember to clean up resources after this script is done!\n'
-      'Run sky status and sky storage ls to list current resources.\n'
+      'Run sky status and sky storage status to list current resources.\n'
       'Run sky down <cluster_name> and sky storage delete <storage_name> to '
       'delete resources.')

@@ -3339,21 +3339,30 @@ def storage():
     pass
 
 
-@storage.command('ls', cls=_DocumentedCodeCommand)
+@storage.command('status', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.argument('bucket_name', required=False)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def storage_ls(all: bool):
+def storage_status(all: bool, bucket_name: Optional[str] = None):
     """List storage objects managed by SkyPilot."""
-    storages = sky.storage_ls()
+    storages = sky.storage_status()
+
+    if bucket_name:
+        storages = [s for s in storages if s['name'] == bucket_name]
+        if not storages:
+            click.echo(f'No storage object found with name: {bucket_name}')
+            return
+        
     storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
+# TODO(aseriesof-tubes) Add command storage_ls that shows contents of specified bucket, like gsutil ls.
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
 @click.argument('names',
@@ -3393,7 +3402,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        storages = sky.storage_ls()
+        storages = sky.storage_status()
         if not storages:
             click.echo('No storage(s) to delete.')
             return
