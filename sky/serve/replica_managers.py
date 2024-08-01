@@ -579,8 +579,6 @@ class ReplicaManager:
         self.latest_version: int = serve_constants.INITIAL_VERSION
         # Oldest version among the currently provisioned and launched replicas
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
-        serve_state.add_or_update_version(self._service_name,
-                                          self.latest_version, spec)
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:

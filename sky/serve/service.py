@@ -156,6 +156,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name} already exists.')
 
+    # Add initial version information to the service state.
+    serve_state.add_or_update_version(service_name, constants.INITIAL_VERSION,
+                                      service_spec)
+
     # Create the service working directory.
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
@@ -234,6 +238,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         else:
             shutil.rmtree(service_dir)
             serve_state.remove_service(service_name)
+            serve_state.delete_all_versions(service_name)
             logger.info(f'Service {service_name} terminated successfully.')
 
 
