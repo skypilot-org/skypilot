@@ -28,6 +28,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky.api.requests import payloads
 from sky.api.requests import tasks
+from sky.api.requests import constants as requests_constants
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.skylet import constants
@@ -603,6 +604,11 @@ def get(request_id: str) -> Any:
 @usage_lib.entrypoint
 @_check_health
 def stream_and_get(request_id: str) -> Any:
+    """Stream the logs of a request and get the final result.
+    
+    This will block until the request is finished. The request id can be a
+    prefix of the full request id.
+    """
     body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(
         f'{_get_server_url()}/stream',
@@ -660,6 +666,15 @@ def api_stop():
                 process.kill()
             found = True
 
+    # Remove the database for requests including any files starting with
+    # constants.API_SERVER_REQUEST_DB_PATH
+    db_path = os.path.expanduser(requests_constants.API_SERVER_REQUEST_DB_PATH)
+    for extension in ['', '-shm', '-wal']:
+        try:
+            os.remove(f'{db_path}{extension}')
+        except FileNotFoundError as e:
+            logger.info(f'Database file {db_path}{extension} not found.')
+
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
                     f'{colorama.Style.RESET_ALL}')
@@ -669,7 +684,7 @@ def api_stop():
 
 # Use the same args as `docker logs`
 @usage_lib.entrypoint
-def api_logs(follow: bool = True, tail: str = 'all'):
+def api_server_logs(follow: bool = True, tail: str = 'all'):
     """Stream the API server logs."""
     server_url = _get_server_url()
     if server_url != DEFAULT_SERVER_URL:

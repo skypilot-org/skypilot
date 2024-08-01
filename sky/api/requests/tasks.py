@@ -13,6 +13,7 @@ import filelock
 
 from sky.api.requests import decoders
 from sky.api.requests import encoders
+from sky.api.requests import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -150,7 +151,7 @@ class RequestTask:
         )
 
 
-_DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')
+_DB_PATH = os.path.expanduser(constants.API_SERVER_REQUEST_DB_PATH)
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
@@ -225,8 +226,8 @@ def _get_rest_task_no_lock(request_id: str) -> Optional[RequestTask]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM rest_tasks WHERE request_id=?',
-                       (request_id,))
+        cursor.execute('SELECT * FROM rest_tasks WHERE request_id LIKE ?',
+                       (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
             return None

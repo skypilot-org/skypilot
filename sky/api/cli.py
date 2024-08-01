@@ -1211,11 +1211,6 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster {cluster!r} not found. '
-                                 'Use `sky launch` to provision first.')
-    backend = backend_utils.get_backend_from_handle(handle)
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -1245,7 +1240,6 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     request_id = sdk.exec(task,
-                          backend=backend,
                           cluster_name=cluster,
                           detach_run=detach_run)
     if not async_call:
@@ -1965,7 +1959,7 @@ def logs(
         # return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
-    job_id: int
+    job_id: Optional[int] = None
     job_ids_to_query: Optional[List[int]] = None
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
@@ -5220,10 +5214,10 @@ def api_stop():
     sdk.api_stop()
 
 
-@api.command('stream', cls=_DocumentedCodeCommand)
+@api.command('get', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
 @usage_lib.entrypoint
-def api_stream(request_id: Optional[str]):
+def api_get(request_id: Optional[str]):
     """Stream the logs of a request running on API server."""
     if request_id is None:
         # TODO(zhwu): get the latest request ID.
@@ -5231,7 +5225,7 @@ def api_stream(request_id: Optional[str]):
     sdk.stream_and_get(request_id)
 
 
-@api.command('logs', cls=_DocumentedCodeCommand)
+@api.command('server_logs', cls=_DocumentedCodeCommand)
 @click.option('--follow',
               '-f',
               is_flag=True,
@@ -5245,7 +5239,7 @@ def api_stream(request_id: Optional[str]):
                     '(default "all")'))
 # Follow the arguments of `docker logs` command.
 @usage_lib.entrypoint
-def api_logs(follow: bool, tail: str):
+def api_server_logs(follow: bool, tail: str):
     """Shows the API server logs."""
     sdk.api_logs(follow, tail)
 
