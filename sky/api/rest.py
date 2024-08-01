@@ -482,7 +482,7 @@ async def job_status(request: fastapi.Request,
 
 @app.post('/cancel')
 async def cancel(request: fastapi.Request,
-                 cancel_body: payloads.QueueBody) -> None:
+                 cancel_body: payloads.CancelBody) -> None:
     _start_background_request(
         request_id=request.state.request_id,
         request_name='cancel',

@@ -258,7 +258,7 @@ API_SERVER_LOGS = '~/.sky/api_server/server.log'
 
 # The name for the environment variable that stores the URL of the SkyPilot
 # API server.
-SKY_API_SERVER_URL_ENV_VAR = 'SKYPILOT_API_SERVER_URL'
+SKY_API_SERVER_URL_ENV_VAR = 'SKYPILOT_API_SERVER_ENDPOINT'
 
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'

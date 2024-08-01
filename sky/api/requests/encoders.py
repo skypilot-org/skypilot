@@ -60,6 +60,11 @@ def encode_launch(
     }
 
 
+@register_handler('start')
+def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> bytes:
+    return pickle_and_encode(resource_handle)
+
+
 @register_handler('queue')
 def encode_queue(
     jobs: List[dict],

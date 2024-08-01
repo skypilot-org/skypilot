@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import pydantic
 
 from sky import optimizer
+from sky.api import common
 
 
 class RequestBody(pydantic.BaseModel):
@@ -58,7 +59,7 @@ class StopOrDownBody(pydantic.BaseModel):
 
 class StatusBody(pydantic.BaseModel):
     cluster_names: Optional[List[str]] = None
-    refresh: bool = False
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
 
 
 class StartBody(RequestBody):
@@ -83,7 +84,7 @@ class QueueBody(pydantic.BaseModel):
 
 class CancelBody(pydantic.BaseModel):
     cluster_name: str
-    job_ids: List[int]
+    job_ids: Optional[List[int]]
     all: bool = False
     # Internal only:
     try_cancel_if_cluster_is_init: bool = False

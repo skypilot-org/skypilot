@@ -52,6 +52,10 @@ def decode_launch(return_value: Dict[str, Any]) -> Dict[str, Any]:
         'handle': decode_and_unpickle(return_value['handle']),
     }
 
+@register_handler('start')
+def decode_start(return_value: bytes) -> 'backends.CloudVmRayResourceHandle':
+    return decode_and_unpickle(return_value)
+
 @register_handler('queue')
 def decode_queue(
     return_value: List[dict],

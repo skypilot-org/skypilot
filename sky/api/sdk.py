@@ -28,6 +28,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky.api.requests import payloads
 from sky.api.requests import tasks
+from sky.api import common
 from sky.api.requests import constants as requests_constants
 from sky.backends import backend_utils
 from sky.data import data_utils
@@ -38,6 +39,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky import skypilot_config
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -53,7 +55,8 @@ API_SERVER_CMD = 'python -m sky.api.rest'
 @functools.lru_cache()
 def _get_server_url():
     return os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR,
-                          DEFAULT_SERVER_URL)
+                          skypilot_config.get_nested(('api_server', 'endpoint'),
+                                                     DEFAULT_SERVER_URL))
 
 
 @functools.lru_cache()
@@ -129,14 +132,14 @@ def _check_health(func):
 
     return wrapper
 
-
-def _add_env_vars_to_body(body: payloads.RequestBody):
+@functools.lru_cache()
+def _request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
         if env_var.startswith('SKYPILOT_'):
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    body.env_vars = env_vars
+    return env_vars
 
 
 @usage_lib.entrypoint
@@ -156,7 +159,6 @@ def optimize(dag: 'sky.Dag') -> str:
         dag_str = f.read()
 
     body = payloads.OptimizeBody(dag=dag_str)
-    # _add_env_vars_to_body(body)
     response = requests.get(f'{_get_server_url()}/optimize',
                             json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
@@ -296,9 +298,8 @@ def launch(
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         is_launched_by_sky_serve_controller=_is_launched_by_sky_serve_controller,
         disable_controller_check=_disable_controller_check,
+        env_vars=_request_body_env_vars(),
     )
-
-    _add_env_vars_to_body(body)
     response = requests.post(
         f'{_get_server_url()}/launch',
         json=json.loads(body.model_dump_json()),
@@ -329,6 +330,7 @@ def exec(  # pylint: disable=redefined-builtin
         down=down,
         backend=backend.NAME if backend else None,
         detach_run=detach_run,
+        env_vars=_request_body_env_vars(),
     )
 
     response = requests.post(
@@ -380,6 +382,7 @@ def start(
         retry_until_up=retry_until_up,
         down=down,
         force=force,
+        env_vars=_request_body_env_vars(),
     )
     response = requests.post(
         f'{_get_server_url()}/start',
@@ -516,11 +519,10 @@ def cancel(
                              json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
-
 @usage_lib.entrypoint
 @_check_health
 def status(cluster_names: Optional[List[str]] = None,
-           refresh: bool = False) -> str:
+           refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE) -> str:
     """Get the status of clusters.
     
     Args:
