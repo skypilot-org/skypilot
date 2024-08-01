@@ -221,27 +221,19 @@ provider:
       - apiVersion: v1
         kind: Service
         metadata:
-            labels:
-              parent: skypilot
-              skypilot-cluster: {{cluster_name_on_cloud}}
-              skypilot-user: {{ user }}
-            # NOTE: If you're running multiple Ray clusters with services
-            # on one Kubernetes cluster, they must have unique service
-            # names.
-            name: {{cluster_name_on_cloud}}-head
+          labels:
+            parent: skypilot
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-user: {{ user }}
+          # NOTE: If you're running multiple Ray clusters with services
+          # on one Kubernetes cluster, they must have unique service
+          # names.
+          name: {{cluster_name_on_cloud}}-head
         spec:
             # This selector must match the head node pod's selector below.
             selector:
                 component: {{cluster_name_on_cloud}}-head
-            ports:
-                - name: client
-                  protocol: TCP
-                  port: 10001
-                  targetPort: 10001
-                - name: dashboard
-                  protocol: TCP
-                  port: 8265
-                  targetPort: 8265
+            clusterIP: None
       # Service maps to rest of the worker nodes
       {% for worker_id in range(1, num_nodes) %}
       - apiVersion: v1
@@ -254,7 +246,7 @@ provider:
           name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
         spec:
           selector:
-            hostname: {{cluster_name_on_cloud}}-worker{{ worker_id }}
+              component: {{cluster_name_on_cloud}}-worker{{ worker_id }}
           clusterIP: None
       {% endfor %}
 
