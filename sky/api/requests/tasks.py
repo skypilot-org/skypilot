@@ -129,7 +129,7 @@ class RequestTask:
                 pid=self.pid,
             )
         except TypeError as e:
-            print('Error encoding.\n'
+            print(f'Error encoding: {e}\n'
                   f'{self.request_id}\n'
                   f'{self.name}\n'
                   f'{self.request_body}\n'

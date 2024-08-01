@@ -340,15 +340,18 @@ class Task:
                                  f'a command generator ({CommandGen}). '
                                  f'Got {type(self.run)}')
 
-        # # Workdir.
-        # if self.workdir is not None:
-        #     full_workdir = os.path.expanduser(self.workdir)
-        #     if not os.path.isdir(full_workdir):
-        #         # Symlink to a dir is legal (isdir() follows symlinks).
-        #         with ux_utils.print_exception_no_traceback():
-        #             raise ValueError(
-        #                 'Workdir must exist and must be a directory (or '
-        #                 f'a symlink to a directory). {self.workdir} not found.')
+        # Workdir.
+        if self.workdir is not None:
+            workdir = self.workdir
+            if self.file_mounts_mapping is not None:
+                workdir = self.file_mounts_mapping.get(workdir, workdir)
+            full_workdir = os.path.expanduser(workdir)
+            if not os.path.isdir(full_workdir):
+                # Symlink to a dir is legal (isdir() follows symlinks).
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Workdir must exist and must be a directory (or '
+                        f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
     def from_yaml_config(

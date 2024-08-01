@@ -227,9 +227,9 @@ async def upload_zip_file(user_hash: str,
         # Cleanup the temporary file
         zip_file_path.unlink()
 
-        return {"status": "files uploaded and extracted"}
+        return {'status': 'files uploaded and extracted'}
     except Exception as e:
-        return {"detail": str(e)}
+        return {'detail': str(e)}
 
 
 def _process_mounts_in_task(task: str, env_vars: Dict[str,

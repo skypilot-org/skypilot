@@ -34,7 +34,6 @@ import subprocess
 import sys
 import textwrap
 import time
-import types
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -105,7 +104,7 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
-sdk: types.ModuleType
+sdk: 'types.ModuleType'
 if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
     from sky import core
     setattr(core, 'get', lambda args: args)
@@ -937,7 +936,9 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME +
+                    _EXTRA_RESOURCES_OPTIONS +
+                    _COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -2875,6 +2876,7 @@ def _down_or_stop_clusters(
               default=False,
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
+# pylint: disable=redefined-outer-name
 def check(clouds: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 

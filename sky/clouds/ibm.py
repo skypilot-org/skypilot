@@ -14,11 +14,11 @@ from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
-    from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 

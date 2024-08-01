@@ -9,12 +9,12 @@ from sky import clouds
 from sky.clouds import service_catalog
 from sky.clouds.utils import lambda_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-    from sky.utils import resources_utils
 
 # Minimum set of files under ~/.lambda_cloud that grant Lambda Cloud access.
 _CREDENTIAL_FILES = [
