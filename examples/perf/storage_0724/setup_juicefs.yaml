@@ -1,0 +1,42 @@
+# Follow readme.md to setup the metadata postgres and gcs bucket
+envs:
+  MOUNT_PATH: /juicefs
+  CLOUDSQL_CONN_STR: skypilot-375900:me-west1:juicefs-exp-meta
+  POSTGRES_PASSWORD: qweasdzxc
+
+run: |
+  # Kill any existing juicefs processes
+  pkill -f -9 juicefs
+  pkill -f -9 cloud-sql-proxy
+  
+  # Check ./cloud-sql-proxy exists
+  if [ ! -f ./cloud-sql-proxy ]; then
+      echo "cloud-sql-proxy not found. Downloading cloud-sql-proxy..."
+      curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.12.0/cloud-sql-proxy.linux.amd64
+      chmod +x cloud-sql-proxy
+  else
+      echo "cloud-sql-proxy exists"
+  fi
+  
+  # In a background process, start the cloud-sql-proxy
+  nohup ./cloud-sql-proxy ${CLOUDSQL_CONN_STR} --address 0.0.0.0 --port 5432 &
+  
+  sleep 15
+  
+  # Install juicefs if it doesn't exist
+  if ! command -v juicefs &> /dev/null
+  then
+      echo "juicefs not found. Installing juicefs..."
+      curl -sSL https://d.juicefs.com/install | sh -
+  else
+      echo "juicefs exists"
+  fi
+  
+  sudo mkdir -p ${MOUNT_PATH}
+  sudo chown $USER:$USER ${MOUNT_PATH}
+  
+  # We assume volume is already created with juicefs format. Launch juicefs mount in daemon mode
+  juicefs mount postgres://postgres:${POSTGRES_PASSWORD}@localhost:5432/juicefs?sslmode=disable ${MOUNT_PATH} -d -o allow_other
+  
+  
+  
