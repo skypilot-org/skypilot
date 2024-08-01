@@ -3358,11 +3358,14 @@ def storage_status(all: bool, bucket_name: Optional[str] = None):
         if not storages:
             click.echo(f'No storage object found with name: {bucket_name}')
             return
-        
+
     storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
-# TODO(aseriesof-tubes) Add command storage_ls that shows contents of specified bucket, like gsutil ls.
+
+# TODO(aseriesof-tubes) Add command storage_ls that shows contents of bucket
+# like gsutil ls 
+
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
 @click.argument('names',
