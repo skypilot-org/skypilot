@@ -27,6 +27,7 @@ from sky import backends
 from sky import optimizer
 from sky import sky_logging
 from sky import skypilot_config
+from sky.api import common as api_common
 from sky.api.requests import payloads
 from sky.api.requests import tasks
 from sky.backends import backend_utils
@@ -674,7 +675,7 @@ def api_stop():
 
     # Remove the database for requests including any files starting with
     # common.API_SERVER_REQUEST_DB_PATH
-    db_path = os.path.expanduser(common.API_SERVER_REQUEST_DB_PATH)
+    db_path = os.path.expanduser(api_common.API_SERVER_REQUEST_DB_PATH)
     for extension in ['', '-shm', '-wal']:
         try:
             os.remove(f'{db_path}{extension}')

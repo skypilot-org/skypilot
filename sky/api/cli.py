@@ -3361,7 +3361,8 @@ def storage():
 # pylint: disable=redefined-builtin
 def storage_ls(all: bool):
     """List storage objects managed by SkyPilot."""
-    storages = sdk.storage_ls()
+    request_id = sdk.storage_ls()
+    storages = sdk.stream_and_get(request_id)
     storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
@@ -3384,8 +3385,9 @@ def storage_ls(all: bool):
               is_flag=True,
               required=False,
               help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3422,7 +3424,10 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    subprocess_utils.run_in_parallel(sdk.storage_delete, names)
+    request_ids = subprocess_utils.run_in_parallel(sdk.storage_delete, names)
+    for request_id in request_ids:
+        _async_call_or_wait(request_id, async_call, 'storage')
+
 
 
 @cli.group(cls=_NaturalOrderGroup)

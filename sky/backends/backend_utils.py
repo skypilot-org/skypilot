@@ -37,7 +37,6 @@ from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky.clouds import cloud_registry
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -48,6 +47,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
@@ -1435,7 +1435,7 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     # Use the new provisioner for AWS.
     provider_name = cluster_yaml_utils.get_provider_name(ray_config)
-    cloud = cloud_registry.CLOUD_REGISTRY.from_str(provider_name)
+    cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
     assert cloud is not None, provider_name
 
     if cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT:
@@ -2493,6 +2493,7 @@ def get_clusters(
         force_refresh_statuses = set(status_lib.ClusterStatus)
     else:
         force_refresh_statuses = None
+    logger.info(f'zhwu debug: force refresh statuses {force_refresh_statuses}')
 
     def _refresh_cluster(cluster_name):
         try:

@@ -4,8 +4,8 @@ from typing import List, Optional
 import pandas as pd
 import pytest
 
-from sky import clouds
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import registry
 
 
 def enable_all_clouds_in_monkeypatch(
@@ -20,7 +20,7 @@ def enable_all_clouds_in_monkeypatch(
     # when the optimizer tries calling it to update enabled_clouds, it does not
     # raise exceptions.
     if enabled_clouds is None:
-        enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
+        enabled_clouds = list(registry.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
         'sky.check.get_cached_enabled_clouds_or_refresh',
         lambda *_args, **_kwargs: enabled_clouds,
