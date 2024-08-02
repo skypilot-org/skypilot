@@ -55,7 +55,6 @@ from sky import serve as serve_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.api import sdk as sdk_lib
-from sky.api import common as api_common
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -66,6 +65,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -114,8 +114,10 @@ else:
     sdk = sdk_lib
 
 
-
-def _get_cluster_records(clusters: List[str], refresh: api_common.StatusRefreshMode = api_common.StatusRefreshMode.NONE) -> List[dict]:
+def _get_cluster_records(
+    clusters: List[str],
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+) -> List[dict]:
     """Returns a list of clusters that match the glob pattern."""
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     request_id = sdk.status(clusters, refresh=refresh)
@@ -149,11 +151,14 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
             'or KEY.')
     return ret[0], ret[1]
 
-def _async_call_or_wait(request_id: str, async_call: bool, request_name: str) -> None:
+
+def _async_call_or_wait(request_id: str, async_call: bool,
+                        request_name: str) -> None:
     if not async_call:
         sdk.stream_and_get(request_id)
     else:
-        click.secho(f'Submitted {request_name} request: {request_id}', fg='green')
+        click.secho(f'Submitted {request_name} request: {request_id}',
+                    fg='green')
 
 
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
@@ -1595,9 +1600,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None if not clusters else clusters
-        refresh_mode = api_common.StatusRefreshMode.NONE
+        refresh_mode = common.StatusRefreshMode.NONE
         if refresh:
-            refresh_mode = api_common.StatusRefreshMode.FORCE
+            refresh_mode = common.StatusRefreshMode.FORCE
         request = sdk.status(cluster_names=query_clusters, refresh=refresh_mode)
         cluster_records = sdk.stream_and_get(request)
         # TOOD(zhwu): setup the ssh config for status
@@ -1635,10 +1640,10 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             head_ip = handle.external_ips()[0]
             if show_endpoints:
                 if endpoint:
-                    request_id = sdk.endpoints(cluster_record['name'],
-                                                     endpoint)
+                    request_id = sdk.endpoints(cluster_record['name'], endpoint)
                     cluster_endpoints = sdk.stream_and_get(request_id)
-                    cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+                    cluster_endpoint = cluster_endpoints.get(
+                        str(endpoint), None)
                     if not cluster_endpoint:
                         raise click.Abort(
                             f'Endpoint {endpoint} not found for cluster '
@@ -1870,9 +1875,11 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     logger.info(f'Fetching job queue for {clusters}')
     job_tables = {}
+
     def _get_job_queue(cluster):
         try:
-            job_table = sdk.stream_and_get(sdk.queue(cluster, skip_finished, all_users))
+            job_table = sdk.stream_and_get(
+                sdk.queue(cluster, skip_finished, all_users))
         except (RuntimeError, exceptions.CommandError, ValueError,
                 exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                 exceptions.CloudUserIdentityError,
@@ -2022,7 +2029,8 @@ def logs(
 @_add_click_options(_COMMON_OPTIONS)
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int], yes: bool, async_call: bool):  # pylint: disable=redefined-builtin, redefined-outer-name
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool,
+           async_call: bool):  # pylint: disable=redefined-builtin, redefined-outer-name
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s).
 
@@ -2311,14 +2319,15 @@ def autostop(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
-        clusters: List[str],
-        all: bool,
-        yes: bool,
-        idle_minutes_to_autostop: Optional[int],
-        down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool,
-        force: bool,
-        async_call: bool,):
+    clusters: List[str],
+    all: bool,
+    yes: bool,
+    idle_minutes_to_autostop: Optional[int],
+    down: bool,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool,
+    force: bool,
+    async_call: bool,
+):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
@@ -2356,7 +2365,8 @@ def start(
     if not clusters and not all:
         # UX: frequently users may have only 1 cluster. In this case, be smart
         # and default to that unique choice.
-        all_clusters = _get_cluster_records(['*'], refresh=api_common.StatusRefreshMode.AUTO)
+        all_clusters = _get_cluster_records(
+            ['*'], refresh=common.StatusRefreshMode.AUTO)
         if len(all_clusters) <= 1:
             cluster_records = all_clusters
         else:
@@ -2369,17 +2379,18 @@ def start(
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
-        all_clusters = _get_cluster_records(['*'], refresh=api_common.StatusRefreshMode.AUTO)
+        all_clusters = _get_cluster_records(
+            ['*'], refresh=common.StatusRefreshMode.AUTO)
 
         # Get all clusters that are not controllers.
         cluster_records = [
-            cluster
-            for cluster in all_clusters
+            cluster for cluster in all_clusters
             if controller_utils.Controllers.from_name(cluster['name']) is None
         ]
     if cluster_records is None:
         # Get GLOB cluster names
-        cluster_records = _get_cluster_records(clusters, refresh=api_common.StatusRefreshMode.AUTO)
+        cluster_records = _get_cluster_records(
+            clusters, refresh=common.StatusRefreshMode.AUTO)
 
     if not cluster_records:
         click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
@@ -2470,12 +2481,10 @@ def start(
 
     request_ids = subprocess_utils.run_in_parallel(
         lambda name: sdk.start(name,
-                      idle_minutes_to_autostop,
-                      retry_until_up,
-                      down=down,
-                      force=force),
-        to_start
-    )
+                               idle_minutes_to_autostop,
+                               retry_until_up,
+                               down=down,
+                               force=force), to_start)
 
     for name, request_id in zip(to_start, request_ids):
         try:
@@ -2516,12 +2525,14 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
+    async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
@@ -2555,7 +2566,8 @@ def down(
                            apply_to_all=all,
                            down=True,
                            no_confirm=yes,
-                           purge=purge)
+                           purge=purge,
+                           async_call=async_call)
 
 
 def _hint_or_raise_for_down_jobs_controller(controller_name: str):
@@ -2669,7 +2681,7 @@ def _down_or_stop_clusters(
         no_confirm: bool,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None,
-        async_call: bool=False) -> None:
+        async_call: bool = False) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
     Controllers (jobs controller and sky serve controller) can only be
@@ -2710,7 +2722,8 @@ def _down_or_stop_clusters(
         ]
         controllers_str = ', '.join(map(repr, controllers))
         names = [
-            cluster['name'] for cluster in _get_cluster_records(names)
+            cluster['name']
+            for cluster in _get_cluster_records(names)
             if controller_utils.Controllers.from_name(cluster['name']) is None
         ]
 
@@ -2770,7 +2783,6 @@ def _down_or_stop_clusters(
 
     if apply_to_all:
         all_clusters = _get_cluster_records(['*'])
-        logger.info(f'restarting all clusters {all_clusters}')
         if len(names) > 0:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
@@ -2809,13 +2821,15 @@ def _down_or_stop_clusters(
         total=len(clusters))
 
     request_ids = []
+
     def _down_or_stop(name: str):
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
                 request_id = sdk.autostop(name, idle_minutes_to_autostop, down)
                 request_ids.append(request_id)
-                _async_call_or_wait(request_id, async_call, operation.capitalize())
+                _async_call_or_wait(request_id, async_call,
+                                    operation.capitalize())
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -2842,7 +2856,8 @@ def _down_or_stop_clusters(
                 else:
                     request_id = sdk.stop(name, purge=purge)
                 request_ids.append(request_id)
-                _async_call_or_wait(request_id, async_call, operation.capitalize())
+                _async_call_or_wait(request_id, async_call,
+                                    operation.capitalize())
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -2874,9 +2889,9 @@ def _down_or_stop_clusters(
         progress.refresh()
 
     if async_call:
-        click.secho(f'--async is passed, and {operation} requests are sent, '
-                    'but some may fail at the background. Check the requests '
-                    'with their IP')
+        click.secho(f'{operation} requests are sent. Check the requests\' '
+                    'status with `sky request get <request_id>`.')
+
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clouds', required=False, type=str, nargs=-1)

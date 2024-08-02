@@ -11,9 +11,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
+from sky.api import common
 from sky.api.requests import decoders
 from sky.api.requests import encoders
-from sky.api.requests import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -151,7 +151,7 @@ class RequestTask:
         )
 
 
-_DB_PATH = os.path.expanduser(constants.API_SERVER_REQUEST_DB_PATH)
+_DB_PATH = os.path.expanduser(common.API_SERVER_REQUEST_DB_PATH)
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 

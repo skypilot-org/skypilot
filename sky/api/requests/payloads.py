@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import pydantic
 
 from sky import optimizer
-from sky.api import common
+from sky.utils import common
 
 
 class RequestBody(pydantic.BaseModel):
@@ -72,7 +72,7 @@ class StartBody(RequestBody):
 
 class AutostopBody(pydantic.BaseModel):
     cluster_name: str
-    idle_minutes_to_autostop: int
+    idle_minutes: int
     down: bool = False
 
 

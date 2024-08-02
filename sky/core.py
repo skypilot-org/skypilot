@@ -17,6 +17,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -48,8 +49,10 @@ def router(name, *args, **kwargs):
 
 
 @usage_lib.entrypoint
-def status(cluster_names: Optional[Union[str, List[str]]] = None,
-           refresh: bool = False) -> List[Dict[str, Any]]:
+def status(
+    cluster_names: Optional[Union[str, List[str]]] = None,
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get cluster statuses.
 
@@ -142,7 +145,7 @@ def endpoints(cluster_name: str,
     """
     with rich_utils.safe_status('[bold cyan]Fetching endpoints for cluster '
                                 f'{cluster_name}...[/]'):
-        return backend_utils.get_endpoints(cluster_name=cluster_name, port=port)
+        return backend_utils.get_endpoints(cluster=cluster_name, port=port)
 
 
 @usage_lib.entrypoint
@@ -527,7 +530,7 @@ def autostop(
 
 
 @usage_lib.entrypoint
-def queue(cluster_name: List[str],
+def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.

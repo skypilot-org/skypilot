@@ -26,20 +26,19 @@ import requests
 from sky import backends
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky.api.requests import payloads
 from sky.api.requests import tasks
-from sky.api import common
-from sky.api.requests import constants as requests_constants
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import status_lib
-from sky import skypilot_config
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -54,9 +53,10 @@ API_SERVER_CMD = 'python -m sky.api.rest'
 
 @functools.lru_cache()
 def _get_server_url():
-    return os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR,
-                          skypilot_config.get_nested(('api_server', 'endpoint'),
-                                                     DEFAULT_SERVER_URL))
+    return os.environ.get(
+        constants.SKY_API_SERVER_URL_ENV_VAR,
+        skypilot_config.get_nested(('api_server', 'endpoint'),
+                                   DEFAULT_SERVER_URL))
 
 
 @functools.lru_cache()
@@ -131,6 +131,7 @@ def _check_health(func):
         return func(*args, **kwargs)
 
     return wrapper
+
 
 @functools.lru_cache()
 def _request_body_env_vars() -> dict:
@@ -519,12 +520,15 @@ def cancel(
                              json=json.loads(body.model_dump_json()))
     return _get_request_id(response)
 
+
 @usage_lib.entrypoint
 @_check_health
-def status(cluster_names: Optional[List[str]] = None,
-           refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE) -> str:
+def status(
+        cluster_names: Optional[List[str]] = None,
+        refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+) -> str:
     """Get the status of clusters.
-    
+
     Args:
         cluster_names: names of clusters to get status for. If None, get status
             for all clusters. The cluster names specified can be in glob pattern
@@ -607,7 +611,7 @@ def get(request_id: str) -> Any:
 @_check_health
 def stream_and_get(request_id: str) -> Any:
     """Stream the logs of a request and get the final result.
-    
+
     This will block until the request is finished. The request id can be a
     prefix of the full request id.
     """
@@ -669,13 +673,13 @@ def api_stop():
             found = True
 
     # Remove the database for requests including any files starting with
-    # constants.API_SERVER_REQUEST_DB_PATH
-    db_path = os.path.expanduser(requests_constants.API_SERVER_REQUEST_DB_PATH)
+    # common.API_SERVER_REQUEST_DB_PATH
+    db_path = os.path.expanduser(common.API_SERVER_REQUEST_DB_PATH)
     for extension in ['', '-shm', '-wal']:
         try:
             os.remove(f'{db_path}{extension}')
-        except FileNotFoundError as e:
-            logger.info(f'Database file {db_path}{extension} not found.')
+        except FileNotFoundError:
+            logger.debug(f'Database file {db_path}{extension} not found.')
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'

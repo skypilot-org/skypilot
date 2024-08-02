@@ -44,6 +44,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import cluster_yaml_utils
 from sky.utils import command_runner
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
@@ -2420,7 +2421,7 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
 
 def get_clusters(
     include_controller: bool,
-    refresh: bool,
+    refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
@@ -2477,7 +2478,7 @@ def get_clusters(
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
 
-    if not refresh:
+    if refresh == common.StatusRefreshMode.NONE:
         return records
 
     plural = 's' if len(records) > 1 else ''
@@ -2488,11 +2489,16 @@ def get_clusters(
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
+    if refresh == common.StatusRefreshMode.FORCE:
+        force_refresh_statuses = set(status_lib.ClusterStatus)
+    else:
+        force_refresh_statuses = None
+
     def _refresh_cluster(cluster_name):
         try:
             record = refresh_cluster_record(
                 cluster_name,
-                force_refresh_statuses=set(status_lib.ClusterStatus),
+                force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
@@ -2769,7 +2775,7 @@ def get_endpoints(cluster: str,
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
     cluster_records = get_clusters(include_controller=True,
-                                   refresh=False,
+                                   refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster])
     cluster_record = cluster_records[0]
     if (not skip_status_check and

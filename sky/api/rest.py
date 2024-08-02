@@ -447,7 +447,7 @@ async def autostop(request: fastapi.Request,
         request_body=json.loads(autostop_body.model_dump_json()),
         func=core.autostop,
         cluster_name=autostop_body.cluster_name,
-        idle_minutes_to_autostop=autostop_body.idle_minutes_to_autostop,
+        idle_minutes=autostop_body.idle_minutes,
         down=autostop_body.down,
     )
 

@@ -61,14 +61,12 @@ def encode_launch(
 
 
 @register_handler('start')
-def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> bytes:
+def encode_start(resource_handle: 'backends.CloudVmRayResourceHandle') -> str:
     return pickle_and_encode(resource_handle)
 
 
 @register_handler('queue')
-def encode_queue(
-    jobs: List[dict],
-) -> Dict[str, Any]:
+def encode_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
     return jobs

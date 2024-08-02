@@ -1,10 +1,14 @@
 """Handlers for the REST API return values."""
 import base64
 import pickle
+import typing
 from typing import Any, Dict, List
 
-from sky.utils import status_lib
 from sky.skylet import job_lib
+from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky import backends
 
 handlers: Dict[str, Any] = {}
 
@@ -52,14 +56,14 @@ def decode_launch(return_value: Dict[str, Any]) -> Dict[str, Any]:
         'handle': decode_and_unpickle(return_value['handle']),
     }
 
+
 @register_handler('start')
-def decode_start(return_value: bytes) -> 'backends.CloudVmRayResourceHandle':
+def decode_start(return_value: str) -> 'backends.CloudVmRayResourceHandle':
     return decode_and_unpickle(return_value)
 
+
 @register_handler('queue')
-def decode_queue(
-    return_value: List[dict],
-) -> Dict[str, Any]:
+def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     jobs = return_value
     for job in jobs:
         job['status'] = job_lib.JobStatus(job['status'])
