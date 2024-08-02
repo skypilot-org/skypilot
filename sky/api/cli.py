@@ -1801,7 +1801,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = sdk.get(sdk.cost_report())
+    cluster_records = sdk.get(sdk.cost_report(all))
 
     normal_cluster_records = []
     controllers = dict()
@@ -2029,8 +2029,13 @@ def logs(
 @_add_click_options(_COMMON_OPTIONS)
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int], yes: bool,
-           async_call: bool):  # pylint: disable=redefined-builtin, redefined-outer-name
+def cancel(
+    cluster: str,
+    all: bool,  # pylint: disable=redefined-builtin
+    jobs: List[int],  # pylint: disable=redefined-outer-name
+    yes: bool,
+    async_call: bool,
+):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s).
 
@@ -3240,7 +3245,7 @@ def show_gpus(
                                                    all_regions=all_regions)
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common
+        from sky.clouds.service_catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud
@@ -3261,7 +3266,7 @@ def show_gpus(
             df = df.sort_values(by=['min_price', 'min_spot_price'])
             df = df.drop(columns=['min_price', 'min_spot_price'])
             sorted_dataclasses = [
-                common.InstanceTypeInfo(*row)
+                catalog_common.InstanceTypeInfo(*row)
                 for row in df.to_records(index=False)
             ]
             new_result[gpu] = sorted_dataclasses
@@ -3427,7 +3432,6 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
     request_ids = subprocess_utils.run_in_parallel(sdk.storage_delete, names)
     for request_id in request_ids:
         _async_call_or_wait(request_id, async_call, 'storage')
-
 
 
 @cli.group(cls=_NaturalOrderGroup)

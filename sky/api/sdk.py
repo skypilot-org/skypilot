@@ -298,7 +298,8 @@ def launch(
         # For internal use
         quiet_optimizer=need_confirmation,
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
-        is_launched_by_sky_serve_controller=_is_launched_by_sky_serve_controller,
+        is_launched_by_sky_serve_controller=(
+            _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
         env_vars=_request_body_env_vars(),
     )
