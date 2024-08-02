@@ -3,7 +3,7 @@
 Comparing SkyPilot with other systems
 =====================================
 
-SkyPilot provides a framework for running AI and batch workloads on any infrastructure. Due to it's flexible design, its capabilities overlap with other systems and it can be used in conjunction with them to provide additional benefits.
+SkyPilot is a framework for running AI and batch workloads on any infrastructure. While SkyPilot offers unique capabilities, certain functionalities like job scheduling overlap with existing systems (e.g., Kubernetes, Slurm). That said, SkyPilot can be used in conjunction with them to provide additional benefits.
 
 This page provides a comparison of SkyPilot with other systems, focusing on the unique benefits provided by SkyPilot. We welcome feedback and contributions to this page.
 
@@ -39,7 +39,7 @@ Kubernetes is a powerful system for managing containerized applications. :ref:`U
 Faster developer velocity
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters while observing the training runs.
+SkyPilot provides faster iteration for interactive development. For example, a common workflow for AI engineers is to iteratively develop and train models by tweaking code and hyperparameters and observing the training runs.
 
 * **With Kubernetes, a single iteration is a multi-step process** involving building a Docker image, pushing it to a registry, updating the Kubernetes YAML and then deploying it.
 
@@ -174,8 +174,8 @@ Here is a side-by-side comparison of the YAMLs for serving Gemma with vLLM on Sk
    </div>
 
 
-Scale beyond single region/cluster
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Scale beyond a single region/cluster
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/failover.png
     :align: center
