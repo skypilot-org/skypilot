@@ -98,6 +98,25 @@ Once you have done the setup once, you can `sky exec setup_juicefs.yaml` to moun
 
 #### Google Filestore 
 
+Filestore is a managed NFS service. Create a filestore instance in the same region as the cluster using the cloud console. Then run
+
+```bash
+sudo apt-get -y update &&
+sudo apt-get install nfs-common
+```
+
+```
+export MOUNT_DIR=/nfs
+sudo mkdir -p $MOUNT_DIR
+sudo chown $USER:$USER $MOUNT_DIR
+```
+
+Get the IP from the googlefilestore CLI
+```
+export MOUNT_DIR=/nfs
+sudo mount -o rw,intr 10.125.158.130:/skynfs $MOUNT_DIR
+```
+
 ### Running the benchmarks
 
 #### Synthetic benchmarks
@@ -502,7 +521,7 @@ Notebooks work.
 Tensorboard works fine. Cannot be accessed remotely - logs are written only after job completes.
 
 
-## GCS with Rclone VFS Full Cache
+## GCS with JuiceFS
 ### Synthetic
 `sky exec -c a100 --env BENCH_PATH=/testmnt synthetic_benchmarks.yaml`
 
@@ -523,8 +542,42 @@ Tensorboard works fine. Cannot be accessed remotely - logs are written only afte
 (storage-demo, pid=19893)       340.45 MB/s     324.68 IOPS
 ```
 
+===== CROSS REGION ======
+VM in us-central1, postgres and GCS and in me-west1. 
+```
+(storage-demo, pid=5260) ##### Sequential Read Results #####
+(storage-demo, pid=5260)        120.22 MB/s     114.65 IOPS
+(storage-demo, pid=5260) 
+(storage-demo, pid=5260) ##### Sequential Write Results #####
+(storage-demo, pid=5260)        38.05 MB/s      36.29 IOPS
+(storage-demo, pid=5260) 
+(storage-demo, pid=5260) ##### Small Files Read Results #####
+(storage-demo, pid=5260)        29.01 MB/s      27.67 IOPS
+(storage-demo, pid=5260) 
+(storage-demo, pid=5260) ##### Small Files Write Results #####
+(storage-demo, pid=5260)        1.87 MB/s       1.78 IOPS
+```
+
+Tuned with --buffer-size=5000 --max-uploads=50
+```
+(head, rank=0, pid=5971) ===== Benchmark Results =====
+(head, rank=0, pid=5971) All results are reported as (bandwidth, IOPS)
+(head, rank=0, pid=5971) 
+(head, rank=0, pid=5971) ##### Sequential Read Results #####
+(head, rank=0, pid=5971)        313.73 MB/s     299.20 IOPS
+(head, rank=0, pid=5971) 
+(head, rank=0, pid=5971) ##### Sequential Write Results #####
+(head, rank=0, pid=5971)        3693.01 MB/s    3521.93 IOPS
+(head, rank=0, pid=5971) 
+(head, rank=0, pid=5971) ##### Small Files Read Results #####
+(head, rank=0, pid=5971)        519.10 MB/s     495.05 IOPS
+(head, rank=0, pid=5971) 
+(head, rank=0, pid=5971) ##### Small Files Write Results #####
+(head, rank=0, pid=5971)        212.26 MB/s     202.43 IOPS
+```
+
 ### Real world - NeMo Read + Write (Checkpoint)
-`sky launch -c a100nemo nemo_yamls/nemo_gpt_rclone.yaml`
+`sky launch -c a100nemo nemo_yamls/nemo_gpt_juicefs.yaml`
 
 ```
 Epoch 0: :   0%|          | 5/300000 [01:50<1836:56:45, v_num=0, reduced_train_loss=11.00, global_step=4.000, consumed_samples=960.0, train_step_timing in s=4.680, val_loss=11.00]Epoch 0, global step 5: 'val_loss' reached 10.95736 (best 10.95736), saving model to '/juicefs/megatron_gpt--val_loss=10.96-step=5-consumed_samples=960.0.ckpt' as top 30it/s]
@@ -548,6 +601,29 @@ Epoch 0: :   0%|          | 15/300000 [13:49<4608:19:40, v_num=0, reduced_train_
 (head, rank=0, pid=5753) [NeMo I 2024-07-31 23:37:14 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
 (head, rank=0, pid=5753) [NeMo I 2024-07-31 23:38:03 nemo_model_checkpoint:226] New .nemo model saved to: /juicefs/megatron_gpt.nemo
 (head, rank=0, pid=5753) [NeMo I 2024-07-31 23:38:03 nemo_model_checkpoint:228] Removing old .nemo backup /juicefs/megatron_gpt-v1.nemo
+```
+
+Tuned with --buffer-size=5000 --max-uploads=50
+```
+(head, rank=0, pid=5969) Epoch 0: :   0%|          | 15/300000 [15:33<5188:20:56, v_num=0, reduced_train_loss=10.60, global_step=14.00, consumed_samples=2880.0, train_step_timing in s=4.600, val_loss=10.40]Epoch 0, global step 15: 'val_loss' reached 10.36892 (best 10.36892), saving model to '/juicefs/megatron_gpt--val_loss=10.37-step=15-consumed_samples=2880.0.ckpt' as top 3
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:27:23 nemo_model_checkpoint:299] /juicefs/megatron_gpt.nemo already exists, moving existing checkpoint to /juicefs/megatron_gpt-v1.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:27:23 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:28:17 nemo_model_checkpoint:226] New .nemo model saved to: /juicefs/megatron_gpt.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:28:17 nemo_model_checkpoint:228] Removing old .nemo backup /juicefs/megatron_gpt-v1.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:29:58 nemo_model_checkpoint:299] /juicefs/megatron_gpt.nemo already exists, moving existing checkpoint to /juicefs/megatron_gpt-v1.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:29:58 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:30:48 nemo_model_checkpoint:226] New .nemo model saved to: /juicefs/megatron_gpt.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:30:48 nemo_model_checkpoint:228] Removing old .nemo backup /juicefs/megatron_gpt-v1.nemo
+Epoch 0: :   0%|          | 20/300000 [22:21<5589:38:21, v_num=0, reduced_train_loss=10.30, global_step=19.00, consumed_samples=3840.0, train_step_timing in s=4.810, val_loss=10.10]Epoch 0, global step 20: 'val_loss' reached 10.12600 (best 10.12600), saving model to '/juicefs/megatron_gpt--val_loss=10.13-step=20-consumed_samples=3840.0.ckpt' as top 3 [01:12<00:01, 21.68it/s]
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:34:11 nemo_model_checkpoint:299] /juicefs/megatron_gpt.nemo already exists, moving existing checkpoint to /juicefs/megatron_gpt-v1.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:34:11 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:35:06 nemo_model_checkpoint:226] New .nemo model saved to: /juicefs/megatron_gpt.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:35:06 nemo_model_checkpoint:228] Removing old .nemo backup /juicefs/megatron_gpt-v1.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:37:04 nemo_model_checkpoint:299] /juicefs/megatron_gpt.nemo already exists, moving existing checkpoint to /juicefs/megatron_gpt-v1.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:37:04 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:37:59 nemo_model_checkpoint:226] New .nemo model saved to: /juicefs/megatron_gpt.nemo
+(head, rank=0, pid=5969) [NeMo I 2024-08-02 00:37:59 nemo_model_checkpoint:228] Removing old .nemo backup /juicefs/megatron_gpt-v1.nemo
+Epoch 0: :   0%|          | 25/300000 [29:59<5998:51:45, v_num=0, reduced_train_loss=9.830, global_step=24.00, consumed_samples=4800.0, train_step_timing in s=4.560, val_loss=9.740]Epoch 0, global step 25: 'val_loss' reached 9.73628 (best 9.73628), saving model to '/juicefs/megatron_gpt--val_loss=9.74-step=25-consumed_samples=4800.0.ckpt' as top 3    [01:12<00:01, 21.68it/s]
 ```
 
 Run multi node with also works. Consistency works for index files
@@ -744,10 +820,97 @@ Tensorboard works fine. Can also be accessed remotely - but only on the first lo
 [2024-08-01T01:53:05Z WARN  rustboard_core::run] Read error in /juicefs/tblogs/20240801-014652/validation/events.out.tfevents.1722476820.a100nemo-2ea4-head-dy5g78ob-compute.32289.1.v2: ReadRecordError(BadLengthCrc(ChecksumError { got: MaskedCrc(0x07980329), want: MaskedCrc(0x00000000) }))
 ```
 
+### JuiceFS Benchmark
+
++------------------+-------------------+----------------+
+|       ITEM       |       VALUE       |      COST      |
++------------------+-------------------+----------------+
+|   Write big file |      349.16 MiB/s |   35.19 s/file |
+|    Read big file |      266.43 MiB/s |   46.12 s/file |
+| Write small file |      34.3 files/s | 349.55 ms/file |
+|  Read small file |     586.6 files/s |  20.46 ms/file |
+|        Stat file |    1733.9 files/s |   6.92 ms/file |
+|   FUSE operation | 215523 operations |     7.11 ms/op |
+|      Update meta |  14865 operations |    10.04 ms/op |
+|       Put object |   4272 operations |   175.03 ms/op |
+|       Get object |   3072 operations |   633.24 ms/op |
+|    Delete object |      0 operations |     0.00 ms/op |
+| Write into cache |   4214 operations |     3.21 ms/op |
+|  Read from cache |   1200 operations |     0.08 ms/op |
++------------------+-------------------+----------------+
 
 
 
 
+
+
+## Google Filestore NFS
+
+### Synthetic benchmark
+
+```
+(storage-demo, pid=7062) ===== Benchmark Results =====
+(storage-demo, pid=7062) All results are reported as (bandwidth, IOPS)
+(storage-demo, pid=7062) 
+(storage-demo, pid=7062) ##### Sequential Read Results #####
+(storage-demo, pid=7062)        566.17 MB/s     539.94 IOPS
+(storage-demo, pid=7062) 
+(storage-demo, pid=7062) ##### Sequential Write Results #####
+(storage-demo, pid=7062)        99.54 MB/s      94.93 IOPS
+(storage-demo, pid=7062) 
+(storage-demo, pid=7062) ##### Small Files Read Results #####
+(storage-demo, pid=7062)        476.63 MB/s     454.55 IOPS
+(storage-demo, pid=7062) 
+(storage-demo, pid=7062) ##### Small Files Write Results #####
+(storage-demo, pid=7062)        519.10 MB/s     495.05 IOPS
+INFO: Job finished (status: SUCCEEDED).
+I 08-01 14:50:55 cloud_vm_ray_backend.py:3297] Job ID: 1
+```
+
+===== CROSS REGION ======
+VM in us-central1, filestore in me-west1. Works, but awful perf.
+
+```
+(storage-demo, pid=4687) ===== Benchmark Results =====
+(storage-demo, pid=4687) All results are reported as (bandwidth, IOPS)
+(storage-demo, pid=4687) 
+(storage-demo, pid=4687) ##### Sequential Read Results #####
+(storage-demo, pid=4687)        20.51 MB/s      19.56 IOPS
+(storage-demo, pid=4687) 
+(storage-demo, pid=4687) ##### Sequential Write Results #####
+(storage-demo, pid=4687)        19.21 MB/s      18.32 IOPS
+(storage-demo, pid=4687) 
+(storage-demo, pid=4687) ##### Small Files Read Results #####
+(storage-demo, pid=4687)        18.76 MB/s      17.89 IOPS
+(storage-demo, pid=4687) 
+(storage-demo, pid=4687) ##### Small Files Write Results #####
+(storage-demo, pid=4687)        6.28 MB/s       5.99 IOPS
+```
+
+### Real world - NeMo Read + Write (Checkpoint)
+
+Filestore wont mount on ubuntu 22.04 (Nemo image). Works fine on Ubuntu 24.04 (SkyPilot image).
+
+`mount.nfs: Protocol not supported`
+
+
+
+### Real world - VSCode SkyPilot Tutorial
+Git clone of the SkyPilot tutorial repo took 1.92s.
+```console
+(base) gcpuser@storagetest2-2ea4-head-6a3nkdsh-compute:/nfs$ time git clone https://github.com/skypilot-org/skypilot-tutorial.git
+Cloning into 'skypilot-tutorial'...
+remote: Enumerating objects: 186, done.
+remote: Counting objects: 100% (186/186), done.
+remote: Compressing objects: 100% (121/121), done.
+remote: Total 186 (delta 80), reused 161 (delta 59), pack-reused 0
+Receiving objects: 100% (186/186), 62.28 KiB | 436.00 KiB/s, done.
+Resolving deltas: 100% (80/80), done.
+
+real    0m1.920s
+user    0m0.044s
+sys     0m0.032s
+```
 
 
 

@@ -36,7 +36,7 @@ run: |
   sudo chown $USER:$USER ${MOUNT_PATH}
   
   # We assume volume is already created with juicefs format. Launch juicefs mount in daemon mode
-  juicefs mount postgres://postgres:${POSTGRES_PASSWORD}@localhost:5432/juicefs?sslmode=disable ${MOUNT_PATH} -d -o allow_other
+  juicefs mount postgres://postgres:${POSTGRES_PASSWORD}@localhost:5432/juicefs?sslmode=disable ${MOUNT_PATH} -d -o allow_other --buffer-size=5000 --max-uploads=50
   
   
   
