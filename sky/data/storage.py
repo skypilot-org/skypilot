@@ -2562,7 +2562,6 @@ class AzureBlobStore(AbstractStore):
             raise exceptions.StorageExternalDeletionError(
                 f'Attempted to fetch a non-existent container: {self.name}')
 
-
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the container to the mount_path.
 
