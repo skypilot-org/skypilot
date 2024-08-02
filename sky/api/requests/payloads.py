@@ -121,3 +121,28 @@ class CostReportBody(pydantic.BaseModel):
 class JobStatusBody(pydantic.BaseModel):
     cluster_name: str
     job_ids: Optional[List[int]]
+
+
+class JobsLaunchBody(RequestBody):
+    task: str
+    name: str
+    detach_run: bool
+    retry_until_up: bool
+
+
+class JobsQueueBody(pydantic.BaseModel):
+    refresh: bool = False
+    skip_finished: bool = False
+
+
+class JobsCancelBody(pydantic.BaseModel):
+    name: Optional[str]
+    job_ids: Optional[List[int]]
+    all: bool = False
+
+
+class JobsLogsBody(pydantic.BaseModel):
+    name: Optional[str]
+    job_id: Optional[int]
+    follow: bool = True
+    controller: bool = False

@@ -1,14 +1,15 @@
 """SDK functions for managed jobs."""
 import os
 import tempfile
+import typing
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
 
-import sky
 from sky import backends
 from sky import exceptions
+from sky import execution
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -24,6 +25,9 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 # TODO(zhwu): Fix jobs API to work with API server
 
@@ -126,13 +130,14 @@ def launch(
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
         sky_logging.print('Launching jobs controller...')
-        sky.launch(task=controller_task,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   _disable_controller_check=True)
+        execution.launch(task=controller_task,
+                         cluster_name=controller_name,
+                         detach_run=detach_run,
+                         stream_logs=stream_logs,
+                         idle_minutes_to_autostop=skylet_constants.
+                         CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                         retry_until_up=True,
+                         _disable_controller_check=True)
 
 
 @usage_lib.entrypoint

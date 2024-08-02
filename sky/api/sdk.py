@@ -9,7 +9,6 @@ method. For example:
     statuses = sky.get(request_id)
 
 """
-import functools
 import json
 import os
 import subprocess
@@ -26,7 +25,6 @@ import requests
 from sky import backends
 from sky import optimizer
 from sky import sky_logging
-from sky import skypilot_config
 from sky.api import common as api_common
 from sky.api.requests import payloads
 from sky.api.requests import tasks
@@ -48,173 +46,31 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_SERVER_URL = 'http://0.0.0.0:8000'
-API_SERVER_CMD = 'python -m sky.api.rest'
-
-
-@functools.lru_cache()
-def _get_server_url():
-    return os.environ.get(
-        constants.SKY_API_SERVER_URL_ENV_VAR,
-        skypilot_config.get_nested(('api_server', 'endpoint'),
-                                   DEFAULT_SERVER_URL))
-
-
-@functools.lru_cache()
-def _is_api_server_local():
-    return _get_server_url() == DEFAULT_SERVER_URL
-
-
-def _start_uvicorn_in_background(reload: bool = False):
-    log_path = os.path.expanduser(constants.API_SERVER_LOGS)
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    # The command to run uvicorn. Adjust the app:app to your application's
-    # location.
-    api_server_cmd = API_SERVER_CMD
-    if reload:
-        api_server_cmd += ' --reload'
-    cmd = f'{api_server_cmd} > {log_path} 2>&1'
-
-    # Start the uvicorn process in the background and don't wait for it.
-    subprocess.Popen(cmd, shell=True)
-    server_url = _get_server_url()
-    # Wait for the server to start.
-    retry_cnt = 0
-    while True:
-        try:
-            # TODO: Should check the process is running as well.
-            requests.get(f'{server_url}/health', timeout=1)
-            break
-        except requests.exceptions.ConnectionError as e:
-            if retry_cnt < 20:
-                retry_cnt += 1
-            else:
-                raise RuntimeError(
-                    f'Failed to connect to SkyPilot server at {server_url}. '
-                    'Please check the logs for more information: '
-                    f'tail -f {constants.API_SERVER_LOGS}') from e
-            time.sleep(0.5)
-
-
-def _get_request_id(response) -> str:
-    if response.status_code != 200:
-        raise RuntimeError(
-            f'Failed to connect to SkyPilot server at {_get_server_url()}. '
-            f'Response: {response.content}')
-    request_id = response.headers.get('X-Request-ID')
-    return request_id
-
-
-def _check_health(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, api_server_reload: bool = False, **kwargs):
-        server_url = _get_server_url()
-
-        try:
-            response = requests.get(f'{_get_server_url()}/health', timeout=5)
-        except requests.exceptions.ConnectionError:
-            response = None
-        if (response is None or response.status_code != 200):
-            if server_url == DEFAULT_SERVER_URL:
-                logger.info('Failed to connect to SkyPilot API server at '
-                            f'{server_url}. Starting a local server.')
-                # Automatically start a SkyPilot server locally
-                _start_uvicorn_in_background(reload=api_server_reload)
-                logger.info(f'{colorama.Fore.GREEN}SkyPilot API server started.'
-                            f'{colorama.Style.RESET_ALL}')
-            else:
-                raise RuntimeError(
-                    f'Could not connect to SkyPilot server at {server_url}. '
-                    'Please ensure that the server is running and that the '
-                    f'{constants.SKY_API_SERVER_URL_ENV_VAR} environment '
-                    f'variable is set correctly. Try: curl {server_url}/health')
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-@functools.lru_cache()
-def _request_body_env_vars() -> dict:
-    env_vars = {}
-    for env_var in os.environ:
-        if env_var.startswith('SKYPILOT_'):
-            env_vars[env_var] = os.environ[env_var]
-    env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    return env_vars
-
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
-    response = requests.get(f'{_get_server_url()}/check',
+    response = requests.get(f'{api_common.get_server_url()}/check',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def optimize(dag: 'sky.Dag') -> str:
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
     body = payloads.OptimizeBody(dag=dag_str)
-    response = requests.get(f'{_get_server_url()}/optimize',
+    response = requests.get(f'{api_common.get_server_url()}/optimize',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
-
-
-def _upload_mounts_to_api_server(
-        task: Union['sky.Task', 'sky.Dag']) -> 'dag_lib.Dag':
-    dag = dag_utils.convert_entrypoint_to_dag(task)
-
-    def _full_path(src: str) -> str:
-        return os.path.abspath(os.path.expanduser(src))
-
-    upload_list = []
-    # if not _is_api_server_local():
-    for task_ in dag.tasks:
-        file_mounts_mapping = {}
-        if task_.workdir:
-            workdir = task_.workdir
-            upload_list.append(_full_path(workdir))
-            file_mounts_mapping[workdir] = _full_path(workdir)
-        if task_.file_mounts is not None:
-            for src in task_.file_mounts.values():
-                if not data_utils.is_cloud_store_url(src):
-                    upload_list.append(_full_path(src))
-                    file_mounts_mapping[src] = _full_path(src)
-        if task_.storage_mounts is not None:
-            for storage in task_.storage_mounts.values():
-                storage_source = storage.source
-                if not data_utils.is_cloud_store_url(storage_source):
-                    upload_list.append(_full_path(storage_source))
-                    file_mounts_mapping[storage_source] = _full_path(
-                        storage_source)
-        task_.file_mounts_mapping = file_mounts_mapping
-
-    server_url = _get_server_url()
-    if upload_list:
-        logger.info('Uploading files to API server...')
-        with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-            common_utils.zip_files_and_folders(upload_list, f)
-            f.seek(0)
-            files = {'file': (f.name, f)}
-            # Send the POST request with the file
-            response = requests.post(
-                f'{server_url}/upload?user_hash={common_utils.get_user_hash()}',
-                files=files)
-            if response.status_code != 200:
-                err_msg = response.content.decode('utf-8')
-                raise RuntimeError(f'Failed to upload files: {err_msg}')
-
-    return dag
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -239,13 +95,14 @@ def launch(
     if cluster_name is None:
         cluster_name = backend_utils.generate_cluster_name()
 
+    # TODO(zhwu): implement clone_disk_from
     # clone_source_str = ''
     # if clone_disk_from is not None:
     #     clone_source_str = f' from the disk of {clone_disk_from!r}'
     #     task, _ = backend_utils.check_can_clone_disk_and_override_task(
     #         clone_disk_from, cluster_name, task)
 
-    dag = _upload_mounts_to_api_server(task)
+    dag = api_common.upload_mounts_to_api_server(task)
 
     cluster_status = None
     request_id = status([cluster_name])
@@ -301,18 +158,18 @@ def launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
-        env_vars=_request_body_env_vars(),
+        env_vars=api_common.request_body_env_vars(),
     )
     response = requests.post(
-        f'{_get_server_url()}/launch',
+        f'{api_common.get_server_url()}/launch',
         json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -333,44 +190,44 @@ def exec(  # pylint: disable=redefined-builtin
         down=down,
         backend=backend.NAME if backend else None,
         detach_run=detach_run,
-        env_vars=_request_body_env_vars(),
+        env_vars=api_common.request_body_env_vars(),
     )
 
     response = requests.post(
-        f'{_get_server_url()}/exec',
+        f'{api_common.get_server_url()}/exec',
         json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
     body = payloads.ClusterJobBody(
         cluster_name=cluster_name,
         job_id=job_id,
         follow=follow,
     )
-    response = requests.get(f'{_get_server_url()}/logs',
+    response = requests.get(f'{api_common.get_server_url()}/logs',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def download_logs(cluster_name: str, job_ids: Optional[int]) -> str:
     body = payloads.ClusterJobsBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.get(f'{_get_server_url()}/download_logs',
+    response = requests.get(f'{api_common.get_server_url()}/download_logs',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
@@ -385,18 +242,18 @@ def start(
         retry_until_up=retry_until_up,
         down=down,
         force=force,
-        env_vars=_request_body_env_vars(),
+        env_vars=api_common.request_body_env_vars(),
     )
     response = requests.post(
-        f'{_get_server_url()}/start',
+        f'{api_common.get_server_url()}/start',
         json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def down(cluster_name: str, purge: bool = False) -> str:
     """Tear down a cluster.
 
@@ -420,15 +277,15 @@ def down(cluster_name: str, purge: bool = False) -> str:
         purge=purge,
     )
     response = requests.post(
-        f'{_get_server_url()}/down',
+        f'{api_common.get_server_url()}/down',
         json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def stop(cluster_name: str, purge: bool = False) -> str:
     """Stop a cluster.
 
@@ -453,15 +310,15 @@ def stop(cluster_name: str, purge: bool = False) -> str:
         purge=purge,
     )
     response = requests.post(
-        f'{_get_server_url()}/stop',
+        f'{api_common.get_server_url()}/stop',
         json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  # pylint: disable=redefined-outer-name
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
@@ -469,15 +326,15 @@ def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  
         down=down,
     )
     response = requests.post(
-        f'{_get_server_url()}/autostop',
+        f'{api_common.get_server_url()}/autostop',
         json=json.loads(body.model_dump_json()),
         timeout=5,
     )
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def queue(cluster_name: List[str],
           skip_finished: bool = False,
           all_users: bool = False) -> str:
@@ -486,25 +343,25 @@ def queue(cluster_name: List[str],
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = requests.get(f'{_get_server_url()}/queue',
+    response = requests.get(f'{api_common.get_server_url()}/queue',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
     body = payloads.JobStatusBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.get(f'{_get_server_url()}/job_status',
+    response = requests.get(f'{api_common.get_server_url()}/job_status',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def cancel(
     cluster_name: str,
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -518,13 +375,13 @@ def cancel(
         job_ids=job_ids,
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )
-    response = requests.post(f'{_get_server_url()}/cancel',
+    response = requests.post(f'{api_common.get_server_url()}/cancel',
                              json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def status(
         cluster_names: Optional[List[str]] = None,
         refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
@@ -543,57 +400,57 @@ def status(
         cluster_names=cluster_names,
         refresh=refresh,
     )
-    response = requests.get(f'{_get_server_url()}/status',
+    response = requests.get(f'{api_common.get_server_url()}/status',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
     body = payloads.EndpointBody(
         cluster_name=cluster_name,
         port=port,
     )
-    response = requests.get(f'{_get_server_url()}/endpoints',
+    response = requests.get(f'{api_common.get_server_url()}/endpoints',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def cost_report(all: bool) -> str:  # pylint: disable=redefined-builtin
     body = payloads.CostReportBody(all=all)
-    response = requests.get(f'{_get_server_url()}/cost_report',
+    response = requests.get(f'{api_common.get_server_url()}/cost_report',
                             json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 # === Storage APIs ===
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def storage_ls() -> str:
-    response = requests.get(f'{_get_server_url()}/storage/ls')
-    return _get_request_id(response)
+    response = requests.get(f'{api_common.get_server_url()}/storage/ls')
+    return api_common.get_request_id(response)
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def storage_delete(name: str) -> str:
     body = payloads.StorageBody(name=name)
-    response = requests.post(f'{_get_server_url()}/storage/delete',
+    response = requests.post(f'{api_common.get_server_url()}/storage/delete',
                              json=json.loads(body.model_dump_json()))
-    return _get_request_id(response)
+    return api_common.get_request_id(response)
 
 
 # === API request API ===
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def get(request_id: str) -> Any:
     body = payloads.RequestIdBody(request_id=request_id)
-    response = requests.get(f'{_get_server_url()}/get',
+    response = requests.get(f'{api_common.get_server_url()}/get',
                             json=json.loads(body.model_dump_json()),
                             timeout=(5, None))
     request_task = tasks.RequestTask.decode(
@@ -610,7 +467,7 @@ def get(request_id: str) -> Any:
 
 
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def stream_and_get(request_id: str) -> Any:
     """Stream the logs of a request and get the final result.
 
@@ -619,7 +476,7 @@ def stream_and_get(request_id: str) -> Any:
     """
     body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(
-        f'{_get_server_url()}/stream',
+        f'{api_common.get_server_url()}/stream',
         json=json.loads(body.model_dump_json()),
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
@@ -638,10 +495,10 @@ def stream_and_get(request_id: str) -> Any:
 
 # === API server management ===
 @usage_lib.entrypoint
-@_check_health
+@api_common.check_health
 def api_start():
     """Start the API server."""
-    logger.info(f'SkyPilot API server: {_get_server_url()}')
+    logger.info(f'SkyPilot API server: {api_common.get_server_url()}')
     if _is_api_server_local():
         logger.info(
             f'Check API server logs: tail -f {constants.API_SERVER_LOGS}')
@@ -652,7 +509,7 @@ def api_start():
 def api_stop():
     """Kill the API server."""
     # Kill the uvicorn process by name: uvicorn sky.api.rest:app
-    server_url = _get_server_url()
+    server_url = api_common.get_server_url()
     if not _is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -694,8 +551,8 @@ def api_stop():
 @usage_lib.entrypoint
 def api_server_logs(follow: bool = True, tail: str = 'all'):
     """Stream the API server logs."""
-    server_url = _get_server_url()
-    if server_url != DEFAULT_SERVER_URL:
+    server_url = api_common.get_server_url()
+    if server_url != api_common.DEFAULT_SERVER_URL:
         raise RuntimeError(
             f'Cannot kill the API server at {server_url} because it is not '
             f'the default SkyPilot API server started locally.')

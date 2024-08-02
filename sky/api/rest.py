@@ -2,15 +2,13 @@
 import argparse
 import asyncio
 import json
-import multiprocessing
 import os
 import pathlib
 import sys
 import tempfile
 import time
-import traceback
 import typing
-from typing import Any, Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 import uuid
 import zipfile
 
@@ -23,16 +21,16 @@ from sky import core
 from sky import execution
 from sky import optimizer
 from sky import sky_logging
+from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import tasks
 from sky.data import data_utils
+from sky.jobs import rest as jobs_rest
 from sky.skylet import constants
-from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
@@ -63,6 +61,7 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True)
 app.add_middleware(RequestIDMiddleware)
+app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 
 
 def refresh_cluster_status_event():
@@ -81,108 +80,19 @@ def refresh_cluster_status_event():
 events = {'status': refresh_cluster_status_event}
 
 
-def wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
-            ignore_return_value: bool, *args: P.args, **kwargs: P.kwargs):
-    """Wrapper for a request task."""
-
-    def redirect_output(file):
-        """Redirect stdout and stderr to the log file."""
-        fd = file.fileno()  # Get the file descriptor from the file object
-        # Store copies of the original stdout and stderr file descriptors
-        original_stdout = os.dup(sys.stdout.fileno())
-        original_stderr = os.dup(sys.stderr.fileno())
-
-        # Copy this fd to stdout and stderr
-        os.dup2(fd, sys.stdout.fileno())
-        os.dup2(fd, sys.stderr.fileno())
-        return original_stdout, original_stderr
-
-    def restore_output(original_stdout, original_stderr):
-        """Restore stdout and stderr to their original file descriptors. """
-        os.dup2(original_stdout, sys.stdout.fileno())
-        os.dup2(original_stderr, sys.stderr.fileno())
-
-        # Close the duplicate file descriptors
-        os.close(original_stdout)
-        os.close(original_stderr)
-
-    logger.info(f'Running task {request_id}')
-    with tasks.update_rest_task(request_id) as request_task:
-        assert request_task is not None, request_id
-        log_path = request_task.log_path
-        request_task.pid = multiprocessing.current_process().pid
-        request_task.status = tasks.RequestStatus.RUNNING
-    with log_path.open('w') as f:
-        # Store copies of the original stdout and stderr file descriptors
-        original_stdout, original_stderr = redirect_output(f)
-        try:
-            os.environ.update(env_vars)
-            # Make sure the logger takes the new environment variables. This is
-            # necessary because the logger is initialized before the environment
-            # variables are set, such as SKYPILOT_DEBUG.
-            sky_logging.reload_logger()
-            return_value = func(*args, **kwargs)
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.enable_traceback():
-                stacktrace = traceback.format_exc()
-            setattr(e, 'stacktrace', stacktrace)
-            usage_lib.store_exception(e)
-            with tasks.update_rest_task(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = tasks.RequestStatus.FAILED
-                request_task.set_error(e)
-            restore_output(original_stdout, original_stderr)
-            logger.info(f'Task {request_id} failed')
-            return None
-        else:
-            with tasks.update_rest_task(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = tasks.RequestStatus.SUCCEEDED
-                if not ignore_return_value:
-                    request_task.set_return_value(return_value)
-            restore_output(original_stdout, original_stderr)
-            logger.info(f'Task {request_id} finished')
-        return return_value
-
-
-def _start_background_request(
-        request_id: str,
-        request_name: str,
-        request_body: Dict[str, Any],
-        func: Callable[P, Any],
-        ignore_return_value: bool = False,
-        # pylint: disable=keyword-arg-before-vararg
-        *args: P.args,
-        **kwargs: P.kwargs):
-    """Start a task."""
-    request_task = tasks.RequestTask(request_id=request_id,
-                                     name=request_name,
-                                     entrypoint=func.__module__,
-                                     request_body=request_body,
-                                     status=tasks.RequestStatus.PENDING)
-    tasks.dump_reqest(request_task)
-    request_task.log_path.touch()
-    kwargs['env_vars'] = request_body.get('env_vars', {})
-    kwargs['ignore_return_value'] = ignore_return_value
-    process = multiprocessing.Process(target=wrapper,
-                                      args=(func, request_id, *args),
-                                      kwargs=kwargs)
-    process.start()
-
-
 @app.on_event('startup')
 async def startup():
     for event_id, (event_name, event) in enumerate(events.items()):
-        _start_background_request(request_id=str(event_id),
-                                  request_name=event_name,
-                                  request_body={},
-                                  func=event)
+        executor.start_background_request(request_id=str(event_id),
+                                          request_name=event_name,
+                                          request_body={},
+                                          func=event)
 
 
 @app.get('/check')
 async def check(request: fastapi.Request, check_body: payloads.CheckBody):
     """Check enabled clouds."""
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='check',
         request_body=json.loads(check_body.model_dump_json()),
@@ -200,7 +110,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         f.flush()
         dag = dag_utils.load_chain_dag_from_yaml(f.name)
     request_id = request.state.request_id
-    _start_background_request(
+    executor.start_background_request(
         request_id,
         request_name='optimize',
         request_body=json.loads(optimize_body.model_dump_json()),
@@ -315,7 +225,7 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
 
     backend = registry.BACKEND_REGISTRY.from_str(launch_body.backend)
     request_id = request.state.request_id
-    _start_background_request(
+    executor.start_background_request(
         request_id,
         request_name='launch',
         request_body=json.loads(launch_body.model_dump_json()),
@@ -355,7 +265,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
     task = dag.tasks[0]
     backend = registry.BACKEND_REGISTRY.from_str(exec_body.backend)
 
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=json.loads(exec_body.model_dump_json()),
@@ -371,7 +281,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
 
 @app.post('/stop')
 async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='stop',
         request_body=json.loads(stop_body.model_dump_json()),
@@ -386,7 +296,7 @@ async def status(
     request: fastapi.Request,
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='status',
         request_body=json.loads(status_body.model_dump_json()),
@@ -399,7 +309,7 @@ async def status(
 @app.get('/endpoints')
 async def endpoints(request: fastapi.Request,
                     endpoint_body: payloads.EndpointBody) -> None:
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='endpoints',
         request_body=json.loads(endpoint_body.model_dump_json()),
@@ -411,7 +321,7 @@ async def endpoints(request: fastapi.Request,
 
 @app.post('/down')
 async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='down',
         request_body=json.loads(down_body.model_dump_json()),
@@ -424,7 +334,7 @@ async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
 @app.post('/start')
 async def start(request: fastapi.Request, start_body: payloads.StartBody):
     """Restart a cluster."""
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='start',
         request_body=json.loads(start_body.model_dump_json()),
@@ -441,7 +351,7 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
 async def autostop(request: fastapi.Request,
                    autostop_body: payloads.AutostopBody):
     """Set the autostop time for a cluster."""
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='autostop',
         request_body=json.loads(autostop_body.model_dump_json()),
@@ -455,7 +365,7 @@ async def autostop(request: fastapi.Request,
 @app.get('/queue')
 async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     """Get the queue of tasks for a cluster."""
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='queue',
         request_body=json.loads(queue_body.model_dump_json()),
@@ -470,7 +380,7 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody):
     """Get the status of a job."""
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='job_status',
         request_body=json.loads(job_status_body.model_dump_json()),
@@ -483,7 +393,7 @@ async def job_status(request: fastapi.Request,
 @app.post('/cancel')
 async def cancel(request: fastapi.Request,
                  cancel_body: payloads.CancelBody) -> None:
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='cancel',
         request_body=json.loads(cancel_body.model_dump_json()),
@@ -497,7 +407,7 @@ async def cancel(request: fastapi.Request,
 @app.get('/logs')
 async def logs(request: fastapi.Request,
                cluster_job_body: payloads.ClusterJobBody) -> None:
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=json.loads(cluster_job_body.model_dump_json()),
@@ -525,7 +435,7 @@ async def logs(request: fastapi.Request,
 @app.get('/cost_report')
 async def cost_report(request: fastapi.Request,
                       cost_report_body: payloads.CostReportBody) -> None:
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='cost_report',
         request_body=json.loads(cost_report_body.model_dump_json()),
@@ -536,7 +446,7 @@ async def cost_report(request: fastapi.Request,
 
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request):
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='storage_ls',
         request_body={},
@@ -547,7 +457,7 @@ async def storage_ls(request: fastapi.Request):
 @app.get('/storage/delete')
 async def storage_delete(request: fastapi.Request,
                          storage_body: payloads.StorageBody):
-    _start_background_request(
+    executor.start_background_request(
         request_id=request.state.request_id,
         request_name='storage_delete',
         request_body=json.loads(storage_body.model_dump_json()),
