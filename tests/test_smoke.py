@@ -4896,14 +4896,10 @@ class TestStorageWithCredentials:
                 private_bucket).path.strip('/')
         else:
             private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
-        match_str = storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-            name=private_bucket_name)
-        if store_type == 'https':
-            # Azure blob uses a different error string since container may
-            # not exist even though the bucket name is ok.
-            match_str = 'Attempted to fetch a non-existent public container'
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match=match_str):
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @pytest.mark.no_fluidstack
