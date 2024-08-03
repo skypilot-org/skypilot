@@ -92,7 +92,8 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
-def kill_children_processes(parent_pids: Optional[Union[int, List[Optional[int]]]] = None,
+def kill_children_processes(parent_pids: Optional[Union[
+    int, List[Optional[int]]]] = None,
                             force: bool = False) -> None:
     """Kill children processes recursively.
 
