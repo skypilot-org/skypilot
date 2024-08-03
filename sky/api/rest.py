@@ -24,7 +24,7 @@ from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import tasks
-from sky.jobs import rest as jobs_rest
+from sky.jobs.api import rest as jobs_rest
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
