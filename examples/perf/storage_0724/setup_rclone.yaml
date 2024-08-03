@@ -1,0 +1,36 @@
+envs:
+  RCLONE_PATH: /rclone_mount
+  GCS_BUCKET: sky-data-benchmark-me
+
+run: |
+  # Kill any existing rclone processes
+  pkill -f -9 rclone
+  
+  sudo umount -f ${RCLONE_PATH} || true
+  sudo mkdir -p ${RCLONE_PATH}
+  
+  # Set permissions
+  sudo chown -R $USER:$USER ${RCLONE_PATH}
+  
+  
+  # Check if rclone exists
+  if ! command -v rclone &> /dev/null
+  then
+  # Setup rclone
+  touch /tmp/rclone.log
+  curl https://rclone.org/install.sh | sudo bash
+  DEBIAN_FRONTEND=noninteractive sudo apt-get install -o DPkg::Options::="--force-confnew" -y fuse3
+  
+  mkdir -p ~/.config/rclone/
+  tee ~/.config/rclone/rclone.conf << END
+  [gcs]
+  type = google cloud storage
+  project_number = skypilot-375900
+  bucket_policy_only = true
+  END
+  else
+  echo "rclone exists"
+  rclone version
+  fi
+    
+  nohup rclone mount gcs:${GCS_BUCKET}/ ${RCLONE_PATH} --vfs-cache-mode full --allow-non-empty --dir-cache-time 5s --poll-interval 5s --log-level DEBUG --log-file=/tmp/rclone.log &

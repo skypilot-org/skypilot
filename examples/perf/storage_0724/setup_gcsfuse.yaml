@@ -1,0 +1,4 @@
+file_mounts:
+  /skystorage-mount:
+    source: gs://sky-data-benchmark-me
+    mode: MOUNT

@@ -1,0 +1,13 @@
+envs:
+  MOUNT_PATH: /nfs
+  NFS_CONN_STR: 10.15.44.66:/skynfs
+
+run: |
+  sudo apt-get -y update
+  sudo apt-get install -y nfs-common
+  
+  sudo mkdir -p $MOUNT_PATH
+  sudo chown $USER:$USER $MOUNT_PATH
+  
+  sudo mount -o rw,intr $NFS_CONN_STR $MOUNT_PATH -o nolock
+  sudo chown $USER:$USER $MOUNT_PATH

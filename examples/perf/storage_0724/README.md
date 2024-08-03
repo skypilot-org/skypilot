@@ -1,8 +1,6 @@
-# Benchmarking Storage options for K8s clusters
+# Benchmarking Storage options
 
-This directory is a collection of YAMLs used to benchmark SkyPilot's performance.
-
-## Running on raw VMs
+This directory is a collection of YAMLs used to benchmark performance of different storage options on SkyPilot.
 
 ### Setup
 
@@ -95,25 +93,21 @@ juicefs mount postgres://postgres:<password>@localhost:5432/juicefs?sslmode=disa
 ```
 Once you have done the setup once, you can `sky exec setup_juicefs.yaml` to mount it on VMs.
 
-
 #### Google Filestore 
 
-Filestore is a managed NFS service. Create a filestore instance in the same region as the cluster using the cloud console. Then run
+Filestore is a managed NFS service. Create a filestore instance in the same region as the cluster using the cloud console. 
+MAKE SURE TO USE NFS 4.1 IN FILESTORE SETUP IN THE CLOUD CONSOLE. Nvidia Nemo image fails with protocol not supported error with NFS 3.
 
 ```bash
+export MOUNT_DIR=/nfs
 sudo apt-get -y update &&
 sudo apt-get install nfs-common
-```
-
-```
-export MOUNT_DIR=/nfs
 sudo mkdir -p $MOUNT_DIR
 sudo chown $USER:$USER $MOUNT_DIR
 ```
 
 Get the IP from the googlefilestore CLI
 ```
-export MOUNT_DIR=/nfs
 sudo mount -o rw,intr 10.125.158.130:/skynfs $MOUNT_DIR
 ```
 
@@ -893,6 +887,47 @@ Filestore wont mount on ubuntu 22.04 (Nemo image). Works fine on Ubuntu 24.04 (S
 
 `mount.nfs: Protocol not supported`
 
+Fixed by changing to NFS 4.1.
+`sky exec a100nemo --env DATASET_ROOT=/nfs --env CHECKPOINT_PATH=/nfs --num-nodes 1 nemo_yamls/nemo_gpt_rclone.yaml
+`
+```
+Epoch 0: :   0%|          | 5/300000 [01:41<1699:14:58, v_num=0, reduced_train_loss=11.00, global_step=4.000, consumed_samples=960.0, train_step_timing in s=4.560, val_loss=11.00]Epoch 0, global step 5: 'val_loss' reached 10.95736 (best 10.95736), saving model to '/nfs/megatron_gpt--val_loss=10.96-step=5-consumed_samples=960.0.ckpt' as top 3█████▊| 1568/1600 [01:12<00:01, 21.66it/s]
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:50:41 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:51:02 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:51:20 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:51:21 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:51:41 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:51:41 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+Epoch 0: :   0%|          | 10/300000 [04:37<2314:10:03, v_num=0, reduced_train_loss=11.00, global_step=9.000, consumed_samples=1920.0, train_step_timing in s=4.580, val_loss=11.00]Epoch 0, global step 10: 'val_loss' reached 10.95736 (best 10.95736), saving model to '/nfs/megatron_gpt--val_loss=10.96-step=10-consumed_samples=1920.0.ckpt' as top 3▊| 1568/1600 [01:12<00:01, 21.71it/s]
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:53:37 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:53:37 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:53:59 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:53:59 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:54:25 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:54:25 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:54:46 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:54:46 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+Epoch 0: :   0%|          | 15/300000 [07:52<2625:07:24, v_num=0, reduced_train_loss=10.60, global_step=14.00, consumed_samples=2880.0, train_step_timing in s=4.570, val_loss=10.40]Epoch 0, global step 15: 'val_loss' reached 10.36892 (best 10.36892), saving model to '/nfs/megatron_gpt--val_loss=10.37-step=15-consumed_samples=2880.0.ckpt' as top 3▊| 1568/1600 [01:12<00:01, 21.70it/s]
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:56:52 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:56:52 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:57:15 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:57:15 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:57:43 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:57:43 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:58:04 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 20:58:04 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+Epoch 0: :   0%|          | 20/300000 [11:11<2796:09:37, v_num=0, reduced_train_loss=10.30, global_step=19.00, consumed_samples=3840.0, train_step_timing in s=4.570, val_loss=10.10]Epoch 0, global step 20: 'val_loss' reached 10.12600 (best 10.12600), saving model to '/nfs/megatron_gpt--val_loss=10.13-step=20-consumed_samples=3840.0.ckpt' as top 3▊| 1568/1600 [01:12<00:01, 21.71it/s]
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:00:10 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:00:10 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:00:32 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:00:32 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:01:00 nemo_model_checkpoint:299] /nfs/megatron_gpt.nemo already exists, moving existing checkpoint to /nfs/megatron_gpt-v1.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:01:00 dist_ckpt_io:95] Using ('zarr', 1) dist-ckpt save strategy.
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:01:22 nemo_model_checkpoint:226] New .nemo model saved to: /nfs/megatron_gpt.nemo
+(worker1, rank=0, pid=6023, ip=10.178.0.63) [NeMo I 2024-08-02 21:01:22 nemo_model_checkpoint:228] Removing old .nemo backup /nfs/megatron_gpt-v1.nemo
+Epoch 0: :   0%|          | 25/300000 [13:17<2657:00:06, v_num=0, reduced_train_loss=9.830, global_step=24.00, consumed_samples=4800.0, train_step_timing in s=4.570, val_loss=10.10]rain_step_timing in s=4.570, val_loss=10.10]
+```
+
 
 
 ### Real world - VSCode SkyPilot Tutorial
@@ -914,16 +949,9 @@ sys     0m0.032s
 
 
 
+## [Unused] Kubernetes cluster setup
 
-
-
-
-
-
-
-## Kubernetes cluster setup
-
-We use GKE.
+We use GKE for benchmarking on Kubernetes.
 
 Use pd-ssd for boot disk for best performing local disk. Remember to add additional local SSDs required for ceph and 
 other storage options (select Raw Block Local SSDs).

@@ -1,0 +1,21 @@
+# Usage:
+#   sky launch -c tensorboard tensorboard.yaml
+# In a separate terminal, run:
+#   ssh -L 6006:localhost:6006 tensorboard
+#   tensorboard --logdir /skystorage-mount
+#
+# Then open http://localhost:6006 in your browser.
+
+
+workdir: tensorboard_example
+
+envs:
+  LOGS_DIR: /skystorage-mount
+
+setup: |
+  pip install tensorflow
+
+run: |
+  python tb.py --logdir ${LOGS_DIR}
+
+# python tb.py --logdir /juicefs
