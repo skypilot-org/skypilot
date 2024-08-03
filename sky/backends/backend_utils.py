@@ -2493,7 +2493,6 @@ def get_clusters(
         force_refresh_statuses = set(status_lib.ClusterStatus)
     else:
         force_refresh_statuses = None
-    logger.info(f'zhwu debug: force refresh statuses {force_refresh_statuses}')
 
     def _refresh_cluster(cluster_name):
         try:

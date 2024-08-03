@@ -106,10 +106,10 @@ from sky.data import StorageMode
 from sky.data import StoreType
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
 # should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
-from sky.jobs.core import spot_cancel
-from sky.jobs.core import spot_launch
-from sky.jobs.core import spot_queue
-from sky.jobs.core import spot_tail_logs
+from sky.jobs.api.sdk import spot_cancel
+from sky.jobs.api.sdk import spot_launch
+from sky.jobs.api.sdk import spot_queue
+from sky.jobs.api.sdk import spot_tail_logs
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
