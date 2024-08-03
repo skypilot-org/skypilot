@@ -522,6 +522,8 @@ class Storage(object):
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
+            self._add_store_from_metadata(self.handle.sky_stores)
+
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
             if self.sync_on_reconstruction:
@@ -1018,7 +1020,7 @@ class Storage(object):
 
         name = config.pop('name', None)
         source = config.pop('source', None)
-        _ = config.pop('store', None)  
+        _ = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         if force_delete is None:
@@ -1134,11 +1136,11 @@ class S3Store(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.AWS())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: s3\' specified, but '
-                    'AWS access is disabled. To fix, enable '
-                    'AWS by running `sky check`. More info: '
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
-                )
+                    'Storage \'store: s3\' specified, but ' \
+                    'AWS access is disabled. To fix, enable '\
+                    'AWS by running `sky check`. More info: '\
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -2720,11 +2722,11 @@ class R2Store(AbstractStore):
         if not _is_storage_cloud_enabled(cloudflare.NAME):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: r2\' specified, but '
-                    'Cloudflare R2 access is disabled. To fix, '
-                    'enable Cloudflare R2 by running `sky check`. '
+                    'Storage \'store: r2\' specified, but ' \
+                    'Cloudflare R2 access is disabled. To fix, '\
+                    'enable Cloudflare R2 by running `sky check`. '\
                     'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
-                )
+                    )
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
@@ -3060,8 +3062,8 @@ class IBMCosStore(AbstractStore):
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
         self.bucket_rclone_profile = \
-            Rclone.generate_rclone_bucket_profile_name(
-                self.name, Rclone.RcloneClouds.IBM)
+          Rclone.generate_rclone_bucket_profile_name(
+            self.name, Rclone.RcloneClouds.IBM)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3336,7 +3338,7 @@ class IBMCosStore(AbstractStore):
 
         # bucket's region doesn't match specified region in URI
         if bucket_region and uri_region and uri_region != bucket_region\
-                and self.sync_on_reconstruction:
+              and self.sync_on_reconstruction:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     f'Bucket {self.name} exists in '
@@ -3428,8 +3430,7 @@ class IBMCosStore(AbstractStore):
                         f'with storage class smart tier')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
-        # type: ignore[union-attr]  # pylint: disable=line-too-long
-        except ibm.ibm_botocore.exceptions.ClientError as e:
+        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Failed to create bucket: '

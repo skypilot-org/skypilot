@@ -1,0 +1,9 @@
+resources:
+  cloud: gcp
+  region: europe-west1
+
+file_mounts:
+  /outputs:
+    name: shriiiii
+    store: gcs
+    mode: MOUNT
