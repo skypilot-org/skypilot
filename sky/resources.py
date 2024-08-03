@@ -9,7 +9,6 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -809,12 +808,8 @@ class Resources:
         """
         if self._job_recovery is None:
             return
-        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery} '
-                    'is not supported. The strategy should be among '
-                    f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
+        # Validate the job recovery strategy
+        registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(self._job_recovery)
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:

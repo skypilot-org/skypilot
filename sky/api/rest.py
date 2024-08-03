@@ -7,8 +7,7 @@ import pathlib
 import sys
 import tempfile
 import time
-import typing
-from typing import Dict, List, Optional
+from typing import List, Optional
 import uuid
 import zipfile
 
@@ -21,19 +20,14 @@ from sky import core
 from sky import execution
 from sky import optimizer
 from sky import sky_logging
+from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import tasks
-from sky.data import data_utils
 from sky.jobs import rest as jobs_rest
-from sky.skylet import constants
-from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    from sky import dag as dag_lib
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -44,8 +38,6 @@ else:
 P = ParamSpec('P')
 
 logger = sky_logging.init_logger(__name__)
-
-CLIENT_DIR = pathlib.Path('~/.sky/clients')
 
 
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
@@ -124,8 +116,8 @@ async def optimize(optimize_body: payloads.OptimizeBody,
 @app.post('/upload')
 async def upload_zip_file(user_hash: str,
                           file: fastapi.UploadFile = fastapi.File(...)):
-    client_file_mounts_dir = (CLIENT_DIR.expanduser().resolve() / user_hash /
-                              'file_mounts')
+    client_file_mounts_dir = (common.CLIENT_DIR.expanduser().resolve() /
+                              user_hash / 'file_mounts')
     os.makedirs(client_file_mounts_dir, exist_ok=True)
     timestamp = str(int(time.time()))
     try:
@@ -157,60 +149,6 @@ async def upload_zip_file(user_hash: str,
         return {'detail': str(e)}
 
 
-def _process_mounts_in_task(task: str, env_vars: Dict[str,
-                                                      str], cluster_name: str,
-                            workdir_only: bool) -> 'dag_lib.Dag':
-    user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
-
-    timestamp = str(int(time.time()))
-    client_dir = (CLIENT_DIR.expanduser().resolve() / user_hash)
-    client_task_dir = client_dir / 'tasks'
-    client_task_dir.mkdir(parents=True, exist_ok=True)
-
-    client_task_path = client_task_dir / f'{cluster_name}-{timestamp}.yaml'
-    client_task_path.write_text(task)
-
-    client_file_mounts_dir = client_dir / 'file_mounts'
-
-    task_configs = common_utils.read_yaml_all(str(client_task_path))
-    for task_config in task_configs:
-        if task_config is None:
-            continue
-        file_mounts_mapping = task_config.get('file_mounts_mapping', {})
-        if not file_mounts_mapping:
-            continue
-        if 'workdir' in task_config:
-            workdir = task_config['workdir']
-            task_config['workdir'] = str(
-                client_file_mounts_dir /
-                file_mounts_mapping[workdir].lstrip('/'))
-        if workdir_only:
-            continue
-        if 'file_mounts' in task_config:
-            file_mounts = task_config['file_mounts']
-            for dst, src in file_mounts.items():
-                if isinstance(src, str):
-                    if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = str(
-                            client_file_mounts_dir /
-                            file_mounts_mapping[src].lstrip('/'))
-                elif isinstance(src, dict):
-                    if 'source' in src:
-                        source = src['source']
-                        if not data_utils.is_cloud_store_url(source):
-                            src['source'] = str(
-                                client_file_mounts_dir /
-                                file_mounts_mapping[source].lstrip('/'))
-                else:
-                    raise ValueError(f'Unexpected file_mounts value: {src}')
-
-    translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
-    common_utils.dump_yaml(translated_client_task_path, task_configs)
-
-    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
-    return dag
-
-
 @app.post('/launch')
 async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     """Launch a task.
@@ -218,10 +156,10 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     Args:
         task: The YAML string of the task to launch.
     """
-    dag = _process_mounts_in_task(launch_body.task,
-                                  launch_body.env_vars,
-                                  launch_body.cluster_name,
-                                  workdir_only=False)
+    dag = common.process_mounts_in_task(launch_body.task,
+                                        launch_body.env_vars,
+                                        launch_body.cluster_name,
+                                        workdir_only=False)
 
     backend = registry.BACKEND_REGISTRY.from_str(launch_body.backend)
     request_id = request.state.request_id
@@ -254,10 +192,10 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
 @app.post('/exec')
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
-    dag = _process_mounts_in_task(exec_body.task,
-                                  exec_body.env_vars,
-                                  exec_body.cluster_name,
-                                  workdir_only=True)
+    dag = common.process_mounts_in_task(exec_body.task,
+                                        exec_body.env_vars,
+                                        exec_body.cluster_name,
+                                        workdir_only=True)
     if len(dag.tasks) != 1:
         raise fastapi.HTTPException(
             status_code=400,
@@ -433,14 +371,12 @@ async def logs(request: fastapi.Request,
 
 
 @app.get('/cost_report')
-async def cost_report(request: fastapi.Request,
-                      cost_report_body: payloads.CostReportBody) -> None:
+async def cost_report(request: fastapi.Request) -> None:
     executor.start_background_request(
         request_id=request.state.request_id,
         request_name='cost_report',
-        request_body=json.loads(cost_report_body.model_dump_json()),
+        request_body={},
         func=core.cost_report,
-        all=cost_report_body.all,
     )
 
 

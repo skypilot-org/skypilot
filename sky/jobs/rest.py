@@ -1,7 +1,9 @@
+"""REST API for managed jobs."""
 import json
 
 import fastapi
 
+from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.jobs import core
@@ -12,14 +14,18 @@ router = fastapi.APIRouter()
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody):
+    dag = common.process_mounts_in_task(jobs_launch_body.task,
+                                        jobs_launch_body.env_vars,
+                                        jobs_launch_body.name,
+                                        workdir_only=False)
+
     executor.start_background_request(
-        request_id=request.request_id,
+        request_id=request.state.request_id,
         request_name='jobs/launch',
         request_body=json.loads(jobs_launch_body.model_dump_json()),
         func=core.launch,
-        task=jobs_launch_body.task,
+        task=dag,
         name=jobs_launch_body.name,
-        stream_logs=jobs_launch_body.stream_logs,
         detach_run=jobs_launch_body.detach_run,
         retry_until_up=jobs_launch_body.retry_until_up,
     )
@@ -29,7 +35,7 @@ async def launch(request: fastapi.Request,
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody):
     executor.start_background_request(
-        request_id=request.request_id,
+        request_id=request.state.request_id,
         request_name='jobs/queue',
         request_body=json.loads(jobs_queue_body.model_dump_json()),
         func=core.queue,
@@ -42,7 +48,7 @@ async def queue(request: fastapi.Request,
 async def cancel(request: fastapi.Request,
                  jobs_cancel_body: payloads.JobsCancelBody):
     executor.start_background_request(
-        request_id=request.request_id,
+        request_id=request.state.request_id,
         request_name='jobs/cancel',
         request_body=json.loads(jobs_cancel_body.model_dump_json()),
         func=core.cancel,
@@ -55,7 +61,7 @@ async def cancel(request: fastapi.Request,
 @router.get('/logs')
 async def logs(request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody):
     executor.start_background_request(
-        request_id=request.request_id,
+        request_id=request.state.request_id,
         request_name='jobs/logs',
         request_body=json.loads(jobs_logs_body.model_dump_json()),
         func=core.tail_logs,

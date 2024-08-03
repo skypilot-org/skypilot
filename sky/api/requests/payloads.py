@@ -1,14 +1,28 @@
 """Payloads for the Sky API requests."""
+import functools
+import os
 from typing import Dict, List, Optional, Tuple, Union
 
 import pydantic
 
 from sky import optimizer
+from sky.skylet import constants
 from sky.utils import common
+from sky.utils import common_utils
+
+
+@functools.lru_cache()
+def request_body_env_vars() -> dict:
+    env_vars = {}
+    for env_var in os.environ:
+        if env_var.startswith('SKYPILOT_'):
+            env_vars[env_var] = os.environ[env_var]
+    env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
+    return env_vars
 
 
 class RequestBody(pydantic.BaseModel):
-    env_vars: Dict[str, str] = {}
+    env_vars: Dict[str, str] = request_body_env_vars()
 
 
 class CheckBody(RequestBody):
@@ -112,10 +126,6 @@ class RequestIdBody(pydantic.BaseModel):
 class EndpointBody(pydantic.BaseModel):
     cluster_name: str
     port: Optional[Union[int, str]] = None
-
-
-class CostReportBody(pydantic.BaseModel):
-    all: bool
 
 
 class JobStatusBody(pydantic.BaseModel):

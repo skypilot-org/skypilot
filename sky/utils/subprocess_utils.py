@@ -92,7 +92,7 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
-def kill_children_processes(parent_pids: Optional[List[Optional[int]]] = None,
+def kill_children_processes(parent_pids: Optional[Union[int, List[Optional[int]]]] = None,
                             force: bool = False) -> None:
     """Kill children processes recursively.
 
@@ -128,7 +128,12 @@ def kill_children_processes(parent_pids: Optional[List[Optional[int]]] = None,
     if parent_pids is None:
         parent_processes = [psutil.Process()]
     else:
-        parent_processes = [psutil.Process(pid) for pid in parent_pids]
+        for pid in parent_pids:
+            try:
+                process = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                continue
+            parent_processes.append(process)
 
     for parent_process in parent_processes:
         child_processes = parent_process.children(recursive=True)

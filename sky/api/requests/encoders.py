@@ -70,3 +70,10 @@ def encode_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
     return jobs
+
+
+@register_handler('jobs/queue')
+def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
+    for job in jobs:
+        job['status'] = job['status'].value
+    return jobs

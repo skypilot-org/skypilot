@@ -555,39 +555,6 @@ def _parse_override_params(
     return override_params
 
 
-def _launch_with_confirm(
-    task: sky.Task,
-    backend: backends.Backend,
-    cluster: Optional[str],
-    *,
-    dryrun: bool,
-    detach_run: bool,
-    detach_setup: bool = False,
-    no_confirm: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-    down: bool = False,  # pylint: disable=redefined-outer-name
-    retry_until_up: bool = False,
-    no_setup: bool = False,
-    clone_disk_from: Optional[str] = None,
-) -> str:
-    """Launch a cluster with a Task."""
-    request_id = sdk.launch(
-        task,
-        dryrun=dryrun,
-        cluster_name=cluster,
-        detach_setup=detach_setup,
-        detach_run=detach_run,
-        backend=backend,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        retry_until_up=retry_until_up,
-        no_setup=no_setup,
-        clone_disk_from=clone_disk_from,
-        need_confirmation=not no_confirm,
-    )
-    return request_id
-
-
 def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """Checks if entrypoint is a readable YAML file.
 
@@ -1095,19 +1062,20 @@ def launch(
             f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
             f'{colorama.Style.RESET_ALL}')
 
-    request_id = _launch_with_confirm(
+    request_id = sdk.launch(
         task,
-        backend,
-        cluster,
         dryrun=dryrun,
-        detach_setup=detach_setup or async_call,
-        detach_run=detach_run or async_call,
-        no_confirm=yes,
+        cluster_name=cluster,
+        detach_setup=detach_setup,
+        detach_run=detach_run,
+        backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
-        clone_disk_from=clone_disk_from)
+        clone_disk_from=clone_disk_from,
+        need_confirmation=not yes,
+    )
     _async_call_or_wait(request_id, async_call, 'Launch')
 
 
@@ -1284,10 +1252,8 @@ def _get_managed_jobs(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        with sky_logging.silent():
-            # Make the call silent
-            managed_jobs_ = managed_jobs.queue(refresh=refresh,
-                                               skip_finished=skip_finished)
+        managed_jobs_ = sdk.get(managed_jobs.queue(refresh=refresh,
+                                            skip_finished=skip_finished))
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1801,7 +1767,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = sdk.get(sdk.cost_report(all))
+    cluster_records = sdk.get(sdk.cost_report())
 
     normal_cluster_records = []
     controllers = dict()
@@ -3586,21 +3552,23 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
+    common_utils.check_cluster_name_is_valid(name)
+
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
                 fg='yellow')
-    dag = sky.optimize(dag)
 
+    sdk.stream_and_get(sdk.optimize(dag))
     if not yes:
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    common_utils.check_cluster_name_is_valid(name)
 
-    managed_jobs.launch(dag,
+    request_id = managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
                         retry_until_up=retry_until_up)
+    _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -3732,11 +3700,6 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message='All managed jobs should have finished.',
-        exit_if_not_accessible=True)
-
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
         argument_str = f'--job-ids {job_id_str}' if len(job_ids) > 0 else ''
@@ -3756,7 +3719,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    managed_jobs.cancel(job_ids=job_ids, name=name, all=all)
+    sdk.stream_and_get(managed_jobs.cancel(job_ids=job_ids, name=name, all=all))
+
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
@@ -3783,10 +3747,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
     """Tail the log of a managed job."""
     try:
-        managed_jobs.tail_logs(name=name,
+        sdk.stream_and_get(managed_jobs.tail_logs(name=name,
                                job_id=job_id,
                                follow=follow,
-                               controller=controller)
+                               controller=controller))
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

@@ -19,7 +19,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 
     if cloud is None:
         cloud = 'gcp'
-    cloud = sky.clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud = sky.utils.registry.CLOUD_REGISTRY.from_str(cloud)
 
     # Create the cluster.
     with sky.Dag() as dag:

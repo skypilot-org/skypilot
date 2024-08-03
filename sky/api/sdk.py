@@ -29,11 +29,9 @@ from sky.api import common as api_common
 from sky.api.requests import payloads
 from sky.api.requests import tasks
 from sky.backends import backend_utils
-from sky.data import data_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
-from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -158,7 +156,6 @@ def launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
-        env_vars=api_common.request_body_env_vars(),
     )
     response = requests.post(
         f'{api_common.get_server_url()}/launch',
@@ -190,7 +187,6 @@ def exec(  # pylint: disable=redefined-builtin
         down=down,
         backend=backend.NAME if backend else None,
         detach_run=detach_run,
-        env_vars=api_common.request_body_env_vars(),
     )
 
     response = requests.post(
@@ -242,7 +238,6 @@ def start(
         retry_until_up=retry_until_up,
         down=down,
         force=force,
-        env_vars=api_common.request_body_env_vars(),
     )
     response = requests.post(
         f'{api_common.get_server_url()}/start',
@@ -419,10 +414,8 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def cost_report(all: bool) -> str:  # pylint: disable=redefined-builtin
-    body = payloads.CostReportBody(all=all)
-    response = requests.get(f'{api_common.get_server_url()}/cost_report',
-                            json=json.loads(body.model_dump_json()))
+def cost_report() -> str:  # pylint: disable=redefined-builtin
+    response = requests.get(f'{api_common.get_server_url()}/cost_report')
     return api_common.get_request_id(response)
 
 
@@ -499,7 +492,7 @@ def stream_and_get(request_id: str) -> Any:
 def api_start():
     """Start the API server."""
     logger.info(f'SkyPilot API server: {api_common.get_server_url()}')
-    if _is_api_server_local():
+    if api_common.is_api_server_local():
         logger.info(
             f'Check API server logs: tail -f {constants.API_SERVER_LOGS}')
         return
@@ -510,7 +503,7 @@ def api_stop():
     """Kill the API server."""
     # Kill the uvicorn process by name: uvicorn sky.api.rest:app
     server_url = api_common.get_server_url()
-    if not _is_api_server_local():
+    if not api_common.is_api_server_local():
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Cannot kill the API server at {server_url} because it is not '
@@ -519,7 +512,7 @@ def api_stop():
     found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
-        if cmdline and API_SERVER_CMD in ' '.join(cmdline):
+        if cmdline and api_common.API_SERVER_CMD in ' '.join(cmdline):
             process.terminate()
             cnt = 0
             while cnt < 5:

@@ -8,6 +8,7 @@ import uuid
 import colorama
 
 from sky import backends
+from sky import core
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
@@ -188,7 +189,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         rich_utils.force_update_status(
             '[cyan] Checking managed jobs - restarting '
             'controller[/]')
-        handle = sky.start(jobs_controller_type.value.cluster_name)
+        handle = core.start(jobs_controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
 

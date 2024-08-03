@@ -113,7 +113,7 @@ class ClusterNotUpError(Exception):
 
     def __init__(self,
                  message: str,
-                 cluster_status: Optional['status_lib.ClusterStatus'],
+                 cluster_status: Optional['status_lib.ClusterStatus'] = None,
                  handle: Optional['backend.ResourceHandle'] = None) -> None:
         super().__init__(message)
         self.cluster_status = cluster_status

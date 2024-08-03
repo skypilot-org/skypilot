@@ -1,15 +1,18 @@
 """SDK functions for managed jobs."""
 import json
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+import typing
+from typing import List, Optional, Union
 
 import requests
 
-import sky
 from sky.api import common as api_common
 from sky.api.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import dag_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 
 @usage_lib.entrypoint
@@ -42,13 +45,13 @@ def launch(
 
 @usage_lib.entrypoint
 @api_common.check_health
-def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
+def queue(refresh: bool, skip_finished: bool = False) -> str:
     """Get statuses of managed jobs."""
     body = payloads.JobsQueueBody(
         refresh=refresh,
         skip_finished=skip_finished,
     )
-    response = requests.post(
+    response = requests.get(
         f'{api_common.get_server_url()}/jobs/queue',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
@@ -58,9 +61,11 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def cancel(name: Optional[str] = None,
-           job_ids: Optional[List[int]] = None,
-           all: bool = False) -> None:
+def cancel(
+        name: Optional[str] = None,
+        job_ids: Optional[List[int]] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+) -> str:
     """Cancel managed jobs."""
     body = payloads.JobsCancelBody(
         name=name,
@@ -86,7 +91,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         follow=follow,
         controller=controller,
     )
-    response = requests.post(
+    response = requests.get(
         f'{api_common.get_server_url()}/jobs/logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),

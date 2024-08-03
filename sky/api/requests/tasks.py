@@ -81,7 +81,8 @@ class RequestTask:
 
     def set_error(self, error: Exception) -> None:
         """Set the error."""
-
+        # TODO(zhwu): pickle.dump does not work well with custom exceptions if
+        # it has more than 1 arguments.
         self.error = {
             'object': encoders.pickle_and_encode(error),
             'type': type(error).__name__,

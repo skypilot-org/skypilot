@@ -4,7 +4,6 @@ import multiprocessing
 import os
 import sys
 import traceback
-import typing
 from typing import Any, Callable, Dict
 
 from sky import sky_logging

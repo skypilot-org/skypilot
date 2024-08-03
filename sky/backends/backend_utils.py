@@ -2784,7 +2784,9 @@ def get_endpoints(cluster: str,
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_record["name"]!r} '
-                'is not in UP status.', cluster_record['status'])
+                'is not in UP status.',
+                cluster_status=cluster_record['status'],
+                handle=cluster_record['handle'])
     handle = cluster_record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         with ux_utils.print_exception_no_traceback():

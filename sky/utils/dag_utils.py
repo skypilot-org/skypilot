@@ -3,11 +3,11 @@ import copy
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
-from sky import jobs
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -143,8 +143,8 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
         for resources in list(task_.resources):
             change_default_value: Dict[str, Any] = {}
             if resources.job_recovery is None:
-                change_default_value[
-                    'job_recovery'] = jobs.DEFAULT_RECOVERY_STRATEGY
+                change_default_value['job_recovery'] = (
+                    registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)
