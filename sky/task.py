@@ -393,6 +393,11 @@ class Task:
             config['service'] = _fill_in_env_vars(config['service'],
                                                   config.get('envs', {}))
 
+        # Fill in any Task.envs into workdir
+        if config.get('workdir') is not None:
+            config['workdir'] = _fill_in_env_vars(config['workdir'],
+                                                  config.get('envs', {}))
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),

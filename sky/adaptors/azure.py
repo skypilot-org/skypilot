@@ -190,7 +190,7 @@ def get_client(name: str,
                     if 'ERROR: AADSTS50020' in str(e):
                         with ux_utils.print_exception_no_traceback():
                             raise sky_exceptions.StorageBucketGetError(
-                                'Attempted to fetch a non-existant public '
+                                'Attempted to fetch a non-existent public '
                                 'container name: '
                                 f'{container_client.container_name}. '
                                 'Please check if the name is correct.')

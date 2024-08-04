@@ -211,7 +211,9 @@ class Fluidstack(clouds.Cloud):
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Fluidstack Cloud
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -239,9 +241,10 @@ class Fluidstack(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -256,8 +259,10 @@ class Fluidstack(clouds.Cloud):
             zone=resources.zone,
             clouds='fluidstack')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
