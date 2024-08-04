@@ -33,10 +33,6 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not '
              'supported yet on RunPod.'),
-        clouds.CloudImplementationFeatures.IMAGE_ID:
-            ('Specifying image ID is not supported on RunPod.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
@@ -179,10 +175,16 @@ class RunPod(clouds.Cloud):
         else:
             custom_resources = None
 
+        if r.extract_docker_image() is not None:
+            image_id = r.extract_docker_image()
+        else:
+            image_id = r.image_id
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'image_id': image_id,
         }
 
     def _get_feasible_launchable_resources(
@@ -280,3 +282,9 @@ class RunPod(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='runpod')
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        # TODO: use 0.0 for now to allow all images. We should change this to
+        # return the docker image size.
+        return 0.0
