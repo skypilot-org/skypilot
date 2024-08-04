@@ -178,7 +178,7 @@ def get_client(name: str,
                     container_url, credential)
                 try:
                     # Suppress noisy logs from Azure SDK when attempting
-                    # to run exists() on public container with credentials.
+                    # to run exists() on private container without access.
                     # Reference:
                     # https://github.com/Azure/azure-sdk-for-python/issues/9422
                     azure_logger = logging.getLogger('azure')
