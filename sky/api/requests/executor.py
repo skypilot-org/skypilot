@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky.api.requests import tasks
 from sky.usage import usage_lib
 from sky.utils import ux_utils
+from sky.utils import common
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -58,10 +59,7 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
         original_stdout, original_stderr = redirect_output(f)
         try:
             os.environ.update(env_vars)
-            # Make sure the logger takes the new environment variables. This is
-            # necessary because the logger is initialized before the environment
-            # variables are set, such as SKYPILOT_DEBUG.
-            sky_logging.reload_logger()
+            common.reload()
             return_value = func(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():

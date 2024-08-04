@@ -450,7 +450,6 @@ def get(request_id: str) -> Any:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
-        print('error object for', request_id, type(error_obj), error_obj)
         if env_options.Options.SHOW_DEBUG_INFO.get():
             logger.error('=== Traceback on SkyPilot API Server ===\n'
                          f'{error_obj.stacktrace}')
