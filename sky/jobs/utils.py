@@ -42,12 +42,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Add user hash so that two users don't have the same controller VM on
-# shared-account clouds such as GCP.
-JOB_CONTROLLER_NAME: str = (
-    f'sky-jobs-controller-{common_utils.get_user_hash()}')
-LEGACY_JOB_CONTROLLER_NAME: str = (
-    f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.

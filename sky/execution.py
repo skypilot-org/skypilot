@@ -16,6 +16,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -100,7 +101,7 @@ def _execute(
     handle: Optional[backends.ResourceHandle] = None,
     backend: Optional[backends.Backend] = None,
     retry_until_up: bool = False,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
@@ -256,9 +257,9 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
-                    dag = sky.optimize(dag,
-                                       minimize=optimize_target,
-                                       quiet=_quiet_optimizer)
+                    dag = optimizer.Optimizer.optimize(dag,
+                                                       minimize=optimize_target,
+                                                       quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
@@ -359,7 +360,7 @@ def launch(
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,

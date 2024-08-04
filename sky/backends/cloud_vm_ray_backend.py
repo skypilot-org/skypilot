@@ -54,6 +54,7 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import log_utils
@@ -1145,7 +1146,7 @@ class RetryingVmProvisioner(object):
     def __init__(self,
                  log_dir: str,
                  dag: 'dag.Dag',
-                 optimize_target: 'optimizer.OptimizeTarget',
+                 optimize_target: 'common.OptimizeTarget',
                  requested_features: Set[clouds.CloudImplementationFeatures],
                  local_wheel_path: pathlib.Path,
                  wheel_hash: str,
@@ -2031,7 +2032,7 @@ class RetryingVmProvisioner(object):
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
             try:
-                self._dag = sky.optimize(
+                self._dag = optimizer.Optimizer.optimize(
                     self._dag,
                     minimize=self._optimize_target,
                     blocked_resources=self._blocked_resources)
@@ -2571,7 +2572,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._dag = kwargs.pop('dag', self._dag)
         self._optimize_target = kwargs.pop(
             'optimize_target',
-            self._optimize_target) or optimizer.OptimizeTarget.COST
+            self._optimize_target) or common.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'

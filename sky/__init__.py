@@ -91,6 +91,7 @@ from sky.api.sdk import exec  # pylint: disable=redefined-builtin
 from sky.api.sdk import get
 from sky.api.sdk import job_status
 from sky.api.sdk import launch
+from sky.api.sdk import optimize
 from sky.api.sdk import queue
 from sky.api.sdk import start
 from sky.api.sdk import status
@@ -111,10 +112,10 @@ from sky.jobs.api.sdk import spot_launch
 from sky.jobs.api.sdk import spot_queue
 from sky.jobs.api.sdk import spot_tail_logs
 from sky.optimizer import Optimizer
-from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
+from sky.utils.common import OptimizeTarget
 from sky.utils.status_lib import ClusterStatus
 
 # Aliases.
@@ -131,7 +132,6 @@ Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
-optimize = Optimizer.optimize
 
 __all__ = [
     '__version__',

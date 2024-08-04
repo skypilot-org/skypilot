@@ -16,7 +16,6 @@ from sky import skypilot_config
 from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -114,6 +113,10 @@ def check_health(func):
 
 def upload_mounts_to_api_server(
         task: Union['sky.Task', 'sky.Dag']) -> 'dag_lib.Dag':
+    from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
+
+    # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
     def _full_path(src: str) -> str:
@@ -162,6 +165,8 @@ def upload_mounts_to_api_server(
 def process_mounts_in_task(task: str, env_vars: Dict[str,
                                                      str], cluster_name: str,
                            workdir_only: bool) -> 'dag_lib.Dag':
+    from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
+
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 
     timestamp = str(int(time.time()))

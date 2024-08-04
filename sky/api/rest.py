@@ -25,6 +25,7 @@ from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import tasks
 from sky.jobs.api import rest as jobs_rest
+from sky.serve.api import rest as serve_rest
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
@@ -54,6 +55,7 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 app = fastapi.FastAPI(prefix='/api/v1', debug=True)
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
+app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 
 
 def refresh_cluster_status_event():

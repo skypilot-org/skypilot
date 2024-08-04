@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import pydantic
 
-from sky import optimizer
+from sky import serve
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
@@ -32,7 +32,7 @@ class CheckBody(RequestBody):
 
 class OptimizeBody(pydantic.BaseModel):
     dag: str
-    minimize: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST
+    minimize: common.OptimizeTarget = common.OptimizeTarget.COST
 
 
 class LaunchBody(RequestBody):
@@ -44,7 +44,7 @@ class LaunchBody(RequestBody):
     dryrun: bool = False
     down: bool = False
     backend: Optional[str] = None
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST
     detach_setup: bool = False
     detach_run: bool = False
     no_setup: bool = False
@@ -156,3 +156,31 @@ class JobsLogsBody(pydantic.BaseModel):
     job_id: Optional[int]
     follow: bool = True
     controller: bool = False
+
+
+class ServeUpBody(RequestBody):
+    task: str
+    service_name: str
+
+
+class ServeUpdateBody(RequestBody):
+    task: str
+    service_name: str
+    mode: serve.UpdateMode
+
+
+class ServeDownBody(pydantic.BaseModel):
+    service_names: Optional[Union[str, List[str]]]
+    all: bool = False
+    purge: bool = False
+
+
+class ServeLogsBody(pydantic.BaseModel):
+    service_name: str
+    target: Union[str, serve.ServiceComponent]
+    replica_id: Optional[int] = None
+    follow: bool = True
+
+
+class ServeStatusBody(pydantic.BaseModel):
+    service_names: Optional[Union[str, List[str]]]

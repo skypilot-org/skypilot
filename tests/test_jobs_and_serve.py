@@ -16,6 +16,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import jobs
 from sky import serve
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import db_utils
 from sky.utils import message_utils
@@ -97,8 +98,8 @@ def _mock_cluster_state(_mock_db_conn):
 @pytest.fixture
 def _mock_jobs_controller(_mock_db_conn):
     handle = backends.CloudVmRayResourceHandle(
-        cluster_name=jobs.JOB_CONTROLLER_NAME,
-        cluster_name_on_cloud=jobs.JOB_CONTROLLER_NAME,
+        cluster_name=common.JOB_CONTROLLER_NAME,
+        cluster_name_on_cloud=common.JOB_CONTROLLER_NAME,
         cluster_yaml='/tmp/jobs_controller.yaml',
         launched_nodes=1,
         launched_resources=sky.Resources(sky.AWS(),
@@ -106,7 +107,7 @@ def _mock_jobs_controller(_mock_db_conn):
                                          region='us-west-1'),
     )
     global_user_state.add_or_update_cluster(
-        jobs.JOB_CONTROLLER_NAME,
+        common.JOB_CONTROLLER_NAME,
         handle,
         requested_resources={handle.launched_resources},
         ready=True)
@@ -183,7 +184,7 @@ class TestJobsOperations:
             mock_get_job_table_no_job)
 
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.down, [jobs.JOB_CONTROLLER_NAME],
+        result = cli_runner.invoke(cli.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -193,7 +194,7 @@ class TestJobsOperations:
         monkeypatch.setattr(
             'sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.run_on_head',
             mock_get_job_table_one_job)
-        result = cli_runner.invoke(cli.down, [jobs.JOB_CONTROLLER_NAME],
+        result = cli_runner.invoke(cli.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
         assert 'WARNING: Tearing down the managed jobs controller.' in result.output, (
             result.exception, result.output, result.exc_info)
@@ -219,9 +220,9 @@ class TestJobsOperations:
     def test_stop_jobs_controller(self, _mock_cluster_state,
                                   _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.stop, [jobs.JOB_CONTROLLER_NAME])
+        result = cli_runner.invoke(cli.stop, [common.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert (f'Stopping controller(s) \'{jobs.JOB_CONTROLLER_NAME}\' is '
+        assert (f'Stopping controller(s) \'{common.JOB_CONTROLLER_NAME}\' is '
                 'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-jobs-con*'])
@@ -236,10 +237,10 @@ class TestJobsOperations:
     def test_autostop_jobs_controller(self, _mock_cluster_state,
                                       _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.autostop, [jobs.JOB_CONTROLLER_NAME])
+        result = cli_runner.invoke(cli.autostop, [common.JOB_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert ('Scheduling autostop on controller(s) '
-                f'\'{jobs.JOB_CONTROLLER_NAME}\' is currently not supported'
+                f'\'{common.JOB_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-jobs-con*'])
@@ -253,7 +254,8 @@ class TestJobsOperations:
     def test_cancel_on_jobs_controller(self, _mock_cluster_state,
                                        _mock_jobs_controller):
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(cli.cancel, [jobs.JOB_CONTROLLER_NAME, '-a'])
+        result = cli_runner.invoke(cli.cancel,
+                                   [common.JOB_CONTROLLER_NAME, '-a'])
         assert result.exit_code == click.UsageError.exit_code
         assert 'Cancelling the jobs controller\'s jobs is not allowed.' in str(
             result.output)

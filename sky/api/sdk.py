@@ -23,7 +23,6 @@ import psutil
 import requests
 
 from sky import backends
-from sky import optimizer
 from sky import sky_logging
 from sky.api import common as api_common
 from sky.api.requests import payloads
@@ -77,7 +76,7 @@ def launch(
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional[backends.Backend] = None,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,

@@ -28,7 +28,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
-from sky.utils import common_utils
+from sky.utils import common
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
@@ -40,8 +40,6 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
 
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
@@ -725,7 +723,7 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 def get_endpoint(service_record: Dict[str, Any]) -> str:
     # Don't use backend_utils.is_controller_up since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
-        SKY_SERVE_CONTROLLER_NAME)
+        common.SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     if handle is None:
         return '-'

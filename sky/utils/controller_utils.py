@@ -22,10 +22,9 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
-from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -93,8 +92,7 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         candidate_cluster_names=[
-            managed_job_utils.JOB_CONTROLLER_NAME,
-            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
+            common.JOB_CONTROLLER_NAME, common.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
@@ -125,7 +123,7 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
+        candidate_cluster_names=[common.SKY_SERVE_CONTROLLER_NAME],
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),

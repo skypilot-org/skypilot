@@ -1252,8 +1252,8 @@ def _get_managed_jobs(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.get(managed_jobs.queue(refresh=refresh,
-                                            skip_finished=skip_finished))
+        managed_jobs_ = sdk.get(
+            managed_jobs.queue(refresh=refresh, skip_finished=skip_finished))
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1326,7 +1326,8 @@ def _get_services(service_names: Optional[List[str]],
             if not service_names:
                 # Change empty list to None
                 service_names = None
-            service_records = serve_lib.status(service_names)
+            request_id = serve_lib.status(service_names)
+            service_records = sdk.stream_and_get(request_id)
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -2611,7 +2612,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
-            services = serve_lib.status()
+            request_id = serve_lib.status(service_names=None)
+            services = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -3557,17 +3559,12 @@ def jobs_launch(
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
                 fg='yellow')
 
-    sdk.stream_and_get(sdk.optimize(dag))
-    if not yes:
-        prompt = f'Launching a managed job {dag.name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
 
     request_id = managed_jobs.launch(dag,
-                        name,
-                        detach_run=detach_run,
-                        retry_until_up=retry_until_up)
+                                     name,
+                                     detach_run=detach_run,
+                                     retry_until_up=retry_until_up,
+                                     need_confirmation=not yes)
     _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
 
 
@@ -3722,7 +3719,6 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     sdk.stream_and_get(managed_jobs.cancel(job_ids=job_ids, name=name, all=all))
 
 
-
 @jobs.command('logs', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
@@ -3747,10 +3743,11 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
     """Tail the log of a managed job."""
     try:
-        sdk.stream_and_get(managed_jobs.tail_logs(name=name,
-                               job_id=job_id,
-                               follow=follow,
-                               controller=controller))
+        sdk.stream_and_get(
+            managed_jobs.tail_logs(name=name,
+                                   job_id=job_id,
+                                   follow=follow,
+                                   controller=controller))
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
@@ -4027,14 +4024,9 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
-    sky.optimize(dag)
 
-    if not yes:
-        prompt = f'Launching a new service {service_name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    serve_lib.up(task, service_name)
+    request_id = serve_lib.up(task, service_name, need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'serve/up')
 
 
 # TODO(MaoZiming): Update Doc.
@@ -4131,15 +4123,12 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
-    sky.optimize(dag)
 
-    if not yes:
-        click.confirm(f'Updating service {service_name!r}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
-
-    serve_lib.update(task, service_name, mode=serve_lib.UpdateMode(mode))
+    request_id = serve_lib.update(task,
+                                  service_name,
+                                  mode=serve_lib.UpdateMode(mode),
+                                  need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'serve/update')
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4280,8 +4269,15 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
+def serve_down(
+    service_names: List[str],
+    all: bool,
+    purge: bool,
+    yes: bool,
+    async_call: bool,
+) -> None:
     """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
@@ -4332,7 +4328,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    serve_lib.down(service_names=service_names, all=all, purge=purge)
+    request_id = serve_lib.down(
+        service_names=service_names,
+        all=all,
+        purge=purge,
+    )
+    _async_call_or_wait(request_id, async_call, 'serve/down')
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4396,10 +4397,11 @@ def serve_logs(
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:
-        serve_lib.tail_logs(service_name,
-                            target=target_component,
-                            replica_id=replica_id,
-                            follow=follow)
+        request_id = serve_lib.tail_logs(service_name,
+                                         target=target_component,
+                                         replica_id=replica_id,
+                                         follow=follow)
+        sdk.stream_and_get(request_id)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
@@ -4448,242 +4450,242 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     return candidates
 
 
-@bench.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint',
-                required=True,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_file_name))
-@click.option('--benchmark',
-              '-b',
-              required=True,
-              type=str,
-              help='Benchmark name.')
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _COMMON_OPTIONS)
-@click.option('--gpus',
-              required=False,
-              type=str,
-              help=('Comma-separated list of GPUs to run benchmark on. '
-                    'Example values: "T4:4,V100:8" (without blank spaces).'))
-@click.option(
-    '--ports',
-    required=False,
-    type=str,
-    multiple=True,
-    help=('Ports to open on the cluster. '
-          'If specified, overrides the "ports" config in the YAML. '),
-)
-@click.option(
-    '--idle-minutes-to-autostop',
-    '-i',
-    default=None,
-    type=int,
-    required=False,
-    help=('Automatically stop the cluster after this many minutes '
-          'of idleness after setup/file_mounts. This is equivalent to '
-          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
-          'If not set, the cluster will not be autostopped.'))
-# Disabling quote check here, as there seems to be a bug in pylint,
-# which incorrectly recognizes the help string as a docstring.
-# pylint: disable=bad-docstring-quotes
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-@usage_lib.entrypoint
-def benchmark_launch(
-    entrypoint: str,
-    benchmark: str,
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    gpus: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    ports: Tuple[str],
-    idle_minutes_to_autostop: Optional[int],
-    yes: bool,
-    async_call: bool,
-) -> None:
-    """Benchmark a task on different resources.
+# @bench.command('launch', cls=_DocumentedCodeCommand)
+# @click.argument('entrypoint',
+#                 required=True,
+#                 type=str,
+#                 nargs=-1,
+#                 **_get_shell_complete_args(_complete_file_name))
+# @click.option('--benchmark',
+#               '-b',
+#               required=True,
+#               type=str,
+#               help='Benchmark name.')
+# @_add_click_options(_TASK_OPTIONS_WITH_NAME + _COMMON_OPTIONS)
+# @click.option('--gpus',
+#               required=False,
+#               type=str,
+#               help=('Comma-separated list of GPUs to run benchmark on. '
+#                     'Example values: "T4:4,V100:8" (without blank spaces).'))
+# @click.option(
+#     '--ports',
+#     required=False,
+#     type=str,
+#     multiple=True,
+#     help=('Ports to open on the cluster. '
+#           'If specified, overrides the "ports" config in the YAML. '),
+# )
+# @click.option(
+#     '--idle-minutes-to-autostop',
+#     '-i',
+#     default=None,
+#     type=int,
+#     required=False,
+#     help=('Automatically stop the cluster after this many minutes '
+#           'of idleness after setup/file_mounts. This is equivalent to '
+#           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
+#           'If not set, the cluster will not be autostopped.'))
+# # Disabling quote check here, as there seems to be a bug in pylint,
+# # which incorrectly recognizes the help string as a docstring.
+# # pylint: disable=bad-docstring-quotes
+# @click.option('--yes',
+#               '-y',
+#               is_flag=True,
+#               default=False,
+#               required=False,
+#               help='Skip confirmation prompt.')
+# @usage_lib.entrypoint
+# def benchmark_launch(
+#     entrypoint: str,
+#     benchmark: str,
+#     name: Optional[str],
+#     workdir: Optional[str],
+#     cloud: Optional[str],
+#     region: Optional[str],
+#     zone: Optional[str],
+#     gpus: Optional[str],
+#     num_nodes: Optional[int],
+#     use_spot: Optional[bool],
+#     image_id: Optional[str],
+#     env_file: Optional[Dict[str, str]],
+#     env: List[Tuple[str, str]],
+#     cpus: Optional[str],
+#     memory: Optional[str],
+#     disk_size: Optional[int],
+#     disk_tier: Optional[str],
+#     ports: Tuple[str],
+#     idle_minutes_to_autostop: Optional[int],
+#     yes: bool,
+#     async_call: bool,
+# ) -> None:
+#     """Benchmark a task on different resources.
 
-    Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
-    will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
-    Alternatively, specify the benchmarking resources in your YAML (see doc),
-    which allows benchmarking on many more resource fields.
-    """
-    env = _merge_env_vars(env_file, env)
-    record = benchmark_state.get_benchmark_from_name(benchmark)
-    if record is not None:
-        raise click.BadParameter(f'Benchmark {benchmark} already exists. '
-                                 'To delete the previous benchmark result, '
-                                 f'run `sky bench delete {benchmark}`.')
+#     Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
+#     will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
+#     Alternatively, specify the benchmarking resources in your YAML (see doc),
+#     which allows benchmarking on many more resource fields.
+#     """
+#     env = _merge_env_vars(env_file, env)
+#     record = benchmark_state.get_benchmark_from_name(benchmark)
+#     if record is not None:
+#         raise click.BadParameter(f'Benchmark {benchmark} already exists. '
+#                                  'To delete the previous benchmark result, '
+#                                  f'run `sky bench delete {benchmark}`.')
 
-    entrypoint = ' '.join(entrypoint)
-    if not entrypoint:
-        raise click.BadParameter('Please specify a task yaml to benchmark.')
+#     entrypoint = ' '.join(entrypoint)
+#     if not entrypoint:
+#         raise click.BadParameter('Please specify a task yaml to benchmark.')
 
-    is_yaml, config = _check_yaml(entrypoint)
-    if not is_yaml:
-        raise click.BadParameter(
-            'Sky Benchmark does not support command line tasks. '
-            'Please provide a YAML file.')
-    assert config is not None, (is_yaml, config)
+#     is_yaml, config = _check_yaml(entrypoint)
+#     if not is_yaml:
+#         raise click.BadParameter(
+#             'Sky Benchmark does not support command line tasks. '
+#             'Please provide a YAML file.')
+#     assert config is not None, (is_yaml, config)
 
-    click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
-    click.secho(entrypoint, bold=True)
+#     click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
+#     click.secho(entrypoint, bold=True)
 
-    candidates = _get_candidate_configs(entrypoint)
-    # Check if the candidate configs are specified in both CLI and YAML.
-    if candidates is not None:
-        message = ('is specified in both CLI and resources.candidates '
-                   'in the YAML. Please specify only one of them.')
-        if cloud is not None:
-            if any('cloud' in candidate for candidate in candidates):
-                raise click.BadParameter(f'cloud {message}')
-        if region is not None:
-            if any('region' in candidate for candidate in candidates):
-                raise click.BadParameter(f'region {message}')
-        if zone is not None:
-            if any('zone' in candidate for candidate in candidates):
-                raise click.BadParameter(f'zone {message}')
-        if gpus is not None:
-            if any('accelerators' in candidate for candidate in candidates):
-                raise click.BadParameter(f'gpus (accelerators) {message}')
-        if use_spot is not None:
-            if any('use_spot' in candidate for candidate in candidates):
-                raise click.BadParameter(f'use_spot {message}')
-        if image_id is not None:
-            if any('image_id' in candidate for candidate in candidates):
-                raise click.BadParameter(f'image_id {message}')
-        if disk_size is not None:
-            if any('disk_size' in candidate for candidate in candidates):
-                raise click.BadParameter(f'disk_size {message}')
-        if disk_tier is not None:
-            if any('disk_tier' in candidate for candidate in candidates):
-                raise click.BadParameter(f'disk_tier {message}')
-        if ports:
-            if any('ports' in candidate for candidate in candidates):
-                raise click.BadParameter(f'ports {message}')
+#     candidates = _get_candidate_configs(entrypoint)
+#     # Check if the candidate configs are specified in both CLI and YAML.
+#     if candidates is not None:
+#         message = ('is specified in both CLI and resources.candidates '
+#                    'in the YAML. Please specify only one of them.')
+#         if cloud is not None:
+#             if any('cloud' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'cloud {message}')
+#         if region is not None:
+#             if any('region' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'region {message}')
+#         if zone is not None:
+#             if any('zone' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'zone {message}')
+#         if gpus is not None:
+#             if any('accelerators' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'gpus (accelerators) {message}')
+#         if use_spot is not None:
+#             if any('use_spot' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'use_spot {message}')
+#         if image_id is not None:
+#             if any('image_id' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'image_id {message}')
+#         if disk_size is not None:
+#             if any('disk_size' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'disk_size {message}')
+#         if disk_tier is not None:
+#             if any('disk_tier' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'disk_tier {message}')
+#         if ports:
+#             if any('ports' in candidate for candidate in candidates):
+#                 raise click.BadParameter(f'ports {message}')
 
-    # The user can specify the benchmark candidates in either of the two ways:
-    # 1. By specifying resources.candidates in the YAML.
-    # 2. By specifying gpu types as a command line argument (--gpus).
-    override_gpu = None
-    if gpus is not None:
-        gpu_list = gpus.split(',')
-        gpu_list = [gpu.strip() for gpu in gpu_list]
-        if ' ' in gpus:
-            raise click.BadParameter('Remove blanks in --gpus.')
+#     # The user can specify the benchmark candidates in either of the two ways:
+#     # 1. By specifying resources.candidates in the YAML.
+#     # 2. By specifying gpu types as a command line argument (--gpus).
+#     override_gpu = None
+#     if gpus is not None:
+#         gpu_list = gpus.split(',')
+#         gpu_list = [gpu.strip() for gpu in gpu_list]
+#         if ' ' in gpus:
+#             raise click.BadParameter('Remove blanks in --gpus.')
 
-        if len(gpu_list) == 1:
-            override_gpu = gpu_list[0]
-        else:
-            # If len(gpu_list) > 1, gpus is interpreted
-            # as a list of benchmark candidates.
-            if candidates is None:
-                candidates = [{'accelerators': gpu} for gpu in gpu_list]
-                override_gpu = None
-            else:
-                raise ValueError('Provide benchmark candidates in either '
-                                 '--gpus or resources.candidates in the YAML.')
-    if candidates is None:
-        candidates = [{}]
+#         if len(gpu_list) == 1:
+#             override_gpu = gpu_list[0]
+#         else:
+#             # If len(gpu_list) > 1, gpus is interpreted
+#             # as a list of benchmark candidates.
+#             if candidates is None:
+#                 candidates = [{'accelerators': gpu} for gpu in gpu_list]
+#                 override_gpu = None
+#             else:
+#                 raise ValueError('Provide benchmark candidates in either '
+#                                  '--gpus or resources.candidates in the YAML.')
+#     if candidates is None:
+#         candidates = [{}]
 
-    if 'resources' not in config:
-        config['resources'] = {}
-    resources_config = config['resources']
+#     if 'resources' not in config:
+#         config['resources'] = {}
+#     resources_config = config['resources']
 
-    # Override the yaml config with the command line arguments.
-    if name is not None:
-        config['name'] = name
-    if workdir is not None:
-        config['workdir'] = workdir
-    if num_nodes is not None:
-        config['num_nodes'] = num_nodes
-    override_params = _parse_override_params(cloud=cloud,
-                                             region=region,
-                                             zone=zone,
-                                             gpus=override_gpu,
-                                             cpus=cpus,
-                                             memory=memory,
-                                             use_spot=use_spot,
-                                             image_id=image_id,
-                                             disk_size=disk_size,
-                                             disk_tier=disk_tier,
-                                             ports=ports)
-    _pop_and_ignore_fields_in_override_params(
-        override_params, field_to_ignore=['cpus', 'memory'])
-    resources_config.update(override_params)
-    if 'cloud' in resources_config:
-        cloud = resources_config.pop('cloud')
-        if cloud is not None:
-            resources_config['cloud'] = str(cloud)
-    if 'region' in resources_config:
-        if resources_config['region'] is None:
-            resources_config.pop('region')
-    if 'zone' in resources_config:
-        if resources_config['zone'] is None:
-            resources_config.pop('zone')
-    if 'accelerators' in resources_config:
-        if resources_config['accelerators'] is None:
-            resources_config.pop('accelerators')
-    if 'image_id' in resources_config:
-        if resources_config['image_id'] is None:
-            resources_config.pop('image_id')
+#     # Override the yaml config with the command line arguments.
+#     if name is not None:
+#         config['name'] = name
+#     if workdir is not None:
+#         config['workdir'] = workdir
+#     if num_nodes is not None:
+#         config['num_nodes'] = num_nodes
+#     override_params = _parse_override_params(cloud=cloud,
+#                                              region=region,
+#                                              zone=zone,
+#                                              gpus=override_gpu,
+#                                              cpus=cpus,
+#                                              memory=memory,
+#                                              use_spot=use_spot,
+#                                              image_id=image_id,
+#                                              disk_size=disk_size,
+#                                              disk_tier=disk_tier,
+#                                              ports=ports)
+#     _pop_and_ignore_fields_in_override_params(
+#         override_params, field_to_ignore=['cpus', 'memory'])
+#     resources_config.update(override_params)
+#     if 'cloud' in resources_config:
+#         cloud = resources_config.pop('cloud')
+#         if cloud is not None:
+#             resources_config['cloud'] = str(cloud)
+#     if 'region' in resources_config:
+#         if resources_config['region'] is None:
+#             resources_config.pop('region')
+#     if 'zone' in resources_config:
+#         if resources_config['zone'] is None:
+#             resources_config.pop('zone')
+#     if 'accelerators' in resources_config:
+#         if resources_config['accelerators'] is None:
+#             resources_config.pop('accelerators')
+#     if 'image_id' in resources_config:
+#         if resources_config['image_id'] is None:
+#             resources_config.pop('image_id')
 
-    # Fully generate the benchmark candidate configs.
-    clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
-        benchmark, config, candidates)
-    # Show the benchmarking VM instances selected by the optimizer.
-    # This also detects the case where the user requested infeasible resources.
-    benchmark_utils.print_benchmark_clusters(benchmark, clusters, config,
-                                             candidate_configs)
-    if not yes:
-        plural = 's' if len(candidates) > 1 else ''
-        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
-        click.confirm(prompt, default=True, abort=True, show_default=True)
+#     # Fully generate the benchmark candidate configs.
+#     clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
+#         benchmark, config, candidates)
+#     # Show the benchmarking VM instances selected by the optimizer.
+#     # This also detects the case where the user requested infeasible resources.
+#     benchmark_utils.print_benchmark_clusters(benchmark, clusters, config,
+#                                              candidate_configs)
+#     if not yes:
+#         plural = 's' if len(candidates) > 1 else ''
+#         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
+#         click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # Configs that are only accepted by the CLI.
-    commandline_args: Dict[str, Any] = {}
-    # Set the default idle minutes to autostop as 5, mimicking
-    # the serverless execution.
-    if idle_minutes_to_autostop is None:
-        idle_minutes_to_autostop = 5
-    commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
-    if len(env) > 0:
-        commandline_args['env'] = [f'{k}={v}' for k, v in env]
+#     # Configs that are only accepted by the CLI.
+#     commandline_args: Dict[str, Any] = {}
+#     # Set the default idle minutes to autostop as 5, mimicking
+#     # the serverless execution.
+#     if idle_minutes_to_autostop is None:
+#         idle_minutes_to_autostop = 5
+#     commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
+#     if len(env) > 0:
+#         commandline_args['env'] = [f'{k}={v}' for k, v in env]
 
-    # Launch the benchmarking clusters in detach mode in parallel.
-    benchmark_created = benchmark_utils.launch_benchmark_clusters(
-        benchmark, clusters, candidate_configs, commandline_args)
+#     # Launch the benchmarking clusters in detach mode in parallel.
+#     benchmark_created = benchmark_utils.launch_benchmark_clusters(
+#         benchmark, clusters, candidate_configs, commandline_args)
 
-    # If at least one cluster is created, print the following messages.
-    if benchmark_created:
-        logger.info(
-            f'\n{colorama.Fore.CYAN}Benchmark name: '
-            f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-            '\nTo see the benchmark results: '
-            f'{backend_utils.BOLD}sky bench show '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
-            '\nTo teardown the clusters: '
-            f'{backend_utils.BOLD}sky bench down '
-            f'{benchmark}{backend_utils.RESET_BOLD}')
-        subprocess_utils.run('sky bench ls')
-    else:
-        logger.error('No benchmarking clusters are created.')
-        subprocess_utils.run('sky status')
+#     # If at least one cluster is created, print the following messages.
+#     if benchmark_created:
+#         logger.info(
+#             f'\n{colorama.Fore.CYAN}Benchmark name: '
+#             f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
+#             '\nTo see the benchmark results: '
+#             f'{backend_utils.BOLD}sky bench show '
+#             f'{benchmark}{backend_utils.RESET_BOLD}'
+#             '\nTo teardown the clusters: '
+#             f'{backend_utils.BOLD}sky bench down '
+#             f'{benchmark}{backend_utils.RESET_BOLD}')
+#         subprocess_utils.run('sky bench ls')
+#     else:
+#         logger.error('No benchmarking clusters are created.')
+#         subprocess_utils.run('sky status')
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)

@@ -17,6 +17,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import resources_utils
@@ -134,7 +135,7 @@ def up(
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
-        controller_name = serve_utils.SKY_SERVE_CONTROLLER_NAME
+        controller_name = common.SKY_SERVE_CONTROLLER_NAME
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
@@ -482,7 +483,7 @@ def down(
     except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {serve_utils.SKY_SERVE_CONTROLLER_NAME}` '
+            f'by `sky status -r {common.SKY_SERVE_CONTROLLER_NAME}` '
             'and try again.') from e
 
     try:

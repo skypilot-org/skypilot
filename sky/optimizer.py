@@ -1,7 +1,6 @@
 """Optimizer: assigns best resources to user tasks."""
 import collections
 import copy
-import enum
 import json
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -17,6 +16,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import ux_utils
@@ -39,12 +39,6 @@ _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
 _PerCloudCandidates = Dict[clouds.Cloud, List[resources_lib.Resources]]
 # task -> per-cloud candidates
 _TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
-
-
-# Constants: minimize what target?
-class OptimizeTarget(enum.Enum):
-    COST = 0
-    TIME = 1
 
 
 # For logging purposes.
@@ -103,7 +97,7 @@ class Optimizer:
 
     @staticmethod
     def optimize(dag: 'dag_lib.Dag',
-                 minimize: OptimizeTarget = OptimizeTarget.COST,
+                 minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
                  quiet: bool = False) -> 'dag_lib.Dag':
@@ -128,7 +122,7 @@ class Optimizer:
         try:
             unused_best_plan = Optimizer._optimize_dag(
                 dag=dag,
-                minimize_cost=minimize == OptimizeTarget.COST,
+                minimize_cost=minimize == common.OptimizeTarget.COST,
                 blocked_resources=blocked_resources,
                 quiet=quiet)
         finally:

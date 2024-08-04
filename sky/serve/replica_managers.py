@@ -17,10 +17,11 @@ import requests
 
 import sky
 from sky import backends
+from sky import core
 from sky import exceptions
+from sky import execution
 from sky import global_user_state
 from sky import sky_logging
-from sky.api import sdk
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -94,12 +95,12 @@ def launch_cluster(replica_id: int,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
-            sky.launch(task,
-                       cluster_name,
-                       detach_setup=True,
-                       detach_run=True,
-                       retry_until_up=True,
-                       _is_launched_by_sky_serve_controller=True)
+            execution.launch(task,
+                             cluster_name,
+                             detach_setup=True,
+                             detach_run=True,
+                             retry_until_up=True,
+                             _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
@@ -147,7 +148,7 @@ def terminate_cluster(cluster_name: str,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
-            sky.down(cluster_name)
+            core.down(cluster_name)
             return
         except ValueError:
             # The cluster is already terminated.
@@ -431,7 +432,8 @@ class ReplicaInfo:
             return None
         replica_port_int = int(self.replica_port)
         try:
-            endpoint_dict = sdk.endpoints(handle.cluster_name, replica_port_int)
+            endpoint_dict = core.endpoints(handle.cluster_name,
+                                           replica_port_int)
         except exceptions.ClusterNotUpError:
             return None
         endpoint = endpoint_dict.get(replica_port_int, None)

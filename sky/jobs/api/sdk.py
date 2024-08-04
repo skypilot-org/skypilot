@@ -4,12 +4,13 @@ import tempfile
 import typing
 from typing import List, Optional, Union
 
+import click
 import requests
 
 from sky.api import common as api_common
 from sky.api.requests import payloads
-from sky.utils import common_utils
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
@@ -23,12 +24,22 @@ def launch(
     name: Optional[str] = None,
     detach_run: bool = False,
     retry_until_up: bool = False,
+    need_confirmation: bool = False,
 ) -> str:
     """Launch a managed job."""
+    from sky.api import sdk  # pylint: disable=import-outside-toplevel
+
     dag = api_common.upload_mounts_to_api_server(task)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
+
+    request_id = sdk.optimize(dag)
+    sdk.stream_and_get(request_id)
+    if need_confirmation:
+        prompt = f'Launching a managed job {dag.name!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
 
     body = payloads.JobsLaunchBody(
         task=dag_str,

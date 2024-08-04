@@ -23,6 +23,7 @@ from sky import backends
 from sky import clouds
 from sky import data
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
@@ -100,7 +101,7 @@ def _get_optimized_resources(
             task = sky.Task()
             task.set_resources(resources)
 
-        dag = sky.optimize(dag, quiet=True)
+        dag = optimizer.Optimizer.optimize(dag, quiet=True)
         task = dag.tasks[0]
         optimized_resources.append(task.best_resources)
     return optimized_resources
