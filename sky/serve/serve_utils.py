@@ -345,11 +345,12 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return message_utils.encode_payload(service_statuses)
+    return message_utils.encode_payload(service_statuses, payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = message_utils.decode_payload(payload)
+    print("load_service_status", payload)
+    service_statuses_encoded = message_utils.decode_payload(payload, payload_type='service_status')
     service_statuses = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
@@ -721,19 +722,21 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
+    from sky.api import sdk
     # Don't use backend_utils.is_controller_up since it is too slow.
-    handle = global_user_state.get_handle_from_cluster_name(
-        common.SKY_SERVE_CONTROLLER_NAME)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None:
-        return '-'
+    # handle = global_user_state.get_handle_from_cluster_name(
+    #     common.SKY_SERVE_CONTROLLER_NAME)
+    # assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    # if handle is None:
+    #     return '-'
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
     try:
-        endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                               load_balancer_port).get(
-                                                   load_balancer_port, None)
+        request_id = sdk.endpoints(common.SKY_SERVE_CONTROLLER_NAME,
+                                               load_balancer_port)
+        endpoints = sdk.stream_and_get(request_id)
+        endpoint = endpoints.get(load_balancer_port, None)
     except exceptions.ClusterNotUpError:
         return '-'
     if endpoint is None:

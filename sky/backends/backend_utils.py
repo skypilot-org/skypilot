@@ -2774,6 +2774,7 @@ def get_endpoints(cluster: str,
         except ValueError:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
+    print('get_endpoints', cluster, port)
     cluster_records = get_clusters(include_controller=True,
                                    refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster])

@@ -288,3 +288,7 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
+
+# The placeholder for the local skypilot config path in file mounts for
+# controllers.
+LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'

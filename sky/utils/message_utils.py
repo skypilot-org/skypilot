@@ -1,13 +1,13 @@
 """Utilities for encoding and decoding messages."""
 import json
 import re
-from typing import Any
+from typing import Any, Optional
 
-_PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
-_PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
+_PAYLOAD_PATTERN = re.compile(r'<sky-payload(.*?)>(.*?)</sky-payload>')
+_PAYLOAD_STR = '<sky-payload{type}>{content}</sky-payload>'
 
 
-def encode_payload(payload: Any) -> str:
+def encode_payload(payload: Any, payload_type: Optional[str] = None) -> str:
     """Encode a payload to make it more robust for parsing.
 
     This makes message transfer more robust to any additional strings added to
@@ -23,11 +23,13 @@ def encode_payload(payload: Any) -> str:
         A string that is encoded from the payload.
     """
     payload_str = json.dumps(payload)
-    payload_str = _PAYLOAD_STR.format(payload_str)
+    if payload_type is None:
+        payload_type = ''
+    payload_str = _PAYLOAD_STR.format(type=payload_type, content=payload_str)
     return payload_str
 
 
-def decode_payload(payload_str: str, raise_for_mismatch: bool = True) -> Any:
+def decode_payload(payload_str: str, payload_type: Optional[str]=None, raise_for_mismatch: bool = True) -> Any:
     """Decode a payload string.
 
     Args:
@@ -42,6 +44,7 @@ def decode_payload(payload_str: str, raise_for_mismatch: bool = True) -> Any:
             raise ValueError(f'Invalid payload string: \n{payload_str}')
         else:
             return payload_str
-    payload_str = matched[0]
-    payload = json.loads(payload_str)
-    return payload
+    
+    for payload_type_str, payload_str in matched:
+        if payload_type is None or payload_type == payload_type_str:
+            return json.loads(payload_str)

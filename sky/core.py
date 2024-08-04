@@ -851,3 +851,7 @@ def storage_delete(name: str) -> None:
                                       source=handle.source,
                                       sync_on_reconstruction=False)
         storage_object.delete()
+
+
+# @usage_lib.entrypoint
+# def get_gpu_infos(accelerator_str: Optional[str], all: bool, cloud: Optional[str], region: Optional[str], all_regions: Optional[bool])

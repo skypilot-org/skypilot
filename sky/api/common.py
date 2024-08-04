@@ -135,6 +135,11 @@ def upload_mounts_to_api_server(
                 if not data_utils.is_cloud_store_url(src):
                     upload_list.append(_full_path(src))
                     file_mounts_mapping[src] = _full_path(src)
+                if src == constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+                    # The placeholder for the local skypilot config path is in
+                    # file mounts for controllers. It will be replaced with the
+                    # real path for config file on API server.
+                    pass
         if task_.storage_mounts is not None:
             for storage in task_.storage_mounts.values():
                 storage_source = storage.source

@@ -77,3 +77,13 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
     return jobs
+
+
+@register_handler('serve/status')
+def encode_serve_status(service_statuses: List[dict]) -> List[Dict[str, Any]]:
+    for service_status in service_statuses:
+        service_status['status'] = service_status['status'].value
+        for replica_info in service_status.get('replica_info', []):
+            replica_info['status'] = replica_info['status'].value
+            replica_info['handle'] = pickle_and_encode(replica_info['handle'])
+    return service_statuses

@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from sky import jobs as managed_jobs
 from sky.skylet import job_lib
 from sky.utils import status_lib
+from sky.serve import serve_state
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -77,3 +78,14 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = managed_jobs.ManagedJobStatus(job['status'])
     return jobs
+
+
+@register_handler('serve/status')
+def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
+    service_statuses = return_value
+    for service_status in service_statuses:
+        service_status['status'] = serve_state.ServiceStatus(service_status['status'])
+        for replica_info in service_status.get('replica_info', []):
+            replica_info['status'] = serve_state.ReplicaStatus(replica_info['status'])
+            replica_info['handle'] = decode_and_unpickle(replica_info['handle'])
+    return service_statuses

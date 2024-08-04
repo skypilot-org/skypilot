@@ -30,7 +30,7 @@ class CheckBody(RequestBody):
     verbose: bool
 
 
-class OptimizeBody(pydantic.BaseModel):
+class OptimizeBody(RequestBody):
     dag: str
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST
 
@@ -66,12 +66,12 @@ class ExecBody(RequestBody):
     detach_run: bool = False
 
 
-class StopOrDownBody(pydantic.BaseModel):
+class StopOrDownBody(RequestBody):
     cluster_name: str
     purge: bool = False
 
 
-class StatusBody(pydantic.BaseModel):
+class StatusBody(RequestBody):
     cluster_names: Optional[List[str]] = None
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
 
@@ -84,19 +84,19 @@ class StartBody(RequestBody):
     force: bool = False
 
 
-class AutostopBody(pydantic.BaseModel):
+class AutostopBody(RequestBody):
     cluster_name: str
     idle_minutes: int
     down: bool = False
 
 
-class QueueBody(pydantic.BaseModel):
+class QueueBody(RequestBody):
     cluster_name: str
     skip_finished: bool = False
     all_users: bool = False
 
 
-class CancelBody(pydantic.BaseModel):
+class CancelBody(RequestBody):
     cluster_name: str
     job_ids: Optional[List[int]]
     all: bool = False
@@ -104,31 +104,31 @@ class CancelBody(pydantic.BaseModel):
     try_cancel_if_cluster_is_init: bool = False
 
 
-class ClusterJobBody(pydantic.BaseModel):
+class ClusterJobBody(RequestBody):
     cluster_name: str
     job_id: Optional[int]
     follow: bool = True
 
 
-class ClusterJobsBody(pydantic.BaseModel):
+class ClusterJobsBody(RequestBody):
     cluster_name: str
     job_ids: Optional[List[int]]
 
 
-class StorageBody(pydantic.BaseModel):
+class StorageBody(RequestBody):
     name: str
 
 
-class RequestIdBody(pydantic.BaseModel):
+class RequestIdBody(RequestBody):
     request_id: str
 
 
-class EndpointBody(pydantic.BaseModel):
+class EndpointBody(RequestBody):
     cluster_name: str
     port: Optional[Union[int, str]] = None
 
 
-class JobStatusBody(pydantic.BaseModel):
+class JobStatusBody(RequestBody):
     cluster_name: str
     job_ids: Optional[List[int]]
 
@@ -140,18 +140,18 @@ class JobsLaunchBody(RequestBody):
     retry_until_up: bool
 
 
-class JobsQueueBody(pydantic.BaseModel):
+class JobsQueueBody(RequestBody):
     refresh: bool = False
     skip_finished: bool = False
 
 
-class JobsCancelBody(pydantic.BaseModel):
+class JobsCancelBody(RequestBody):
     name: Optional[str]
     job_ids: Optional[List[int]]
     all: bool = False
 
 
-class JobsLogsBody(pydantic.BaseModel):
+class JobsLogsBody(RequestBody):
     name: Optional[str]
     job_id: Optional[int]
     follow: bool = True
@@ -169,18 +169,18 @@ class ServeUpdateBody(RequestBody):
     mode: serve.UpdateMode
 
 
-class ServeDownBody(pydantic.BaseModel):
+class ServeDownBody(RequestBody):
     service_names: Optional[Union[str, List[str]]]
     all: bool = False
     purge: bool = False
 
 
-class ServeLogsBody(pydantic.BaseModel):
+class ServeLogsBody(RequestBody):
     service_name: str
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
     follow: bool = True
 
 
-class ServeStatusBody(pydantic.BaseModel):
+class ServeStatusBody(RequestBody):
     service_names: Optional[Union[str, List[str]]]

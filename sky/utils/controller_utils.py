@@ -43,9 +43,6 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
 
-# The placeholder for the local skypilot config path in file mounts.
-LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
-
 
 @dataclasses.dataclass
 class _ControllerSpec:
@@ -92,6 +89,8 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         candidate_cluster_names=[
+            # TODO(zhwu): by having the controller name loaded in common, it
+            # will not respect the latest updated user hash.
             common.JOB_CONTROLLER_NAME, common.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
@@ -552,15 +551,16 @@ def replace_skypilot_config_path_in_file_mounts(
             # Empty config. Remove the placeholder below.
             to_replace = False
         for remote_path, local_path in list(file_mounts.items()):
-            if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+            if local_path == constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
                 if to_replace:
                     file_mounts[remote_path] = f.name
                     replaced = True
                 else:
                     del file_mounts[remote_path]
     if replaced:
-        logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
-                     f'the real path in file mounts: {file_mounts}')
+        logger.debug(
+            f'Replaced {constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} '
+            f'with the real path in file mounts: {file_mounts}')
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',

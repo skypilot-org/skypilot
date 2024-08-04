@@ -1,10 +1,10 @@
 """SDK for SkyServe."""
-import click
 import json
 import tempfile
 import typing
 from typing import List, Optional, Union
 
+import click
 import requests
 
 from sky.api import common as api_common
@@ -19,10 +19,12 @@ if typing.TYPE_CHECKING:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def up(task: Union['sky.Task', 'sky.Dag'], service_name: str, need_confirmation: bool = False) -> str:
+def up(task: Union['sky.Task', 'sky.Dag'],
+       service_name: str,
+       need_confirmation: bool = False) -> str:
     """Launch a service."""
     # This is to avoid circular import.
-    from sky.api import sdk # pylint: disable=import-outside-toplevel
+    from sky.api import sdk  # pylint: disable=import-outside-toplevel
     dag = api_common.upload_mounts_to_api_server(task)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
@@ -50,11 +52,13 @@ def up(task: Union['sky.Task', 'sky.Dag'], service_name: str, need_confirmation:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def update(task: Union['sky.Task', 'sky.Dag'], service_name: str,
-           mode: 'serve_utils.UpdateMode', need_confirmation: bool = False) -> str:
+def update(task: Union['sky.Task', 'sky.Dag'],
+           service_name: str,
+           mode: 'serve_utils.UpdateMode',
+           need_confirmation: bool = False) -> str:
     """Update a service."""
     # This is to avoid circular import.
-    from sky.api import sdk # pylint: disable=import-outside-toplevel
+    from sky.api import sdk  # pylint: disable=import-outside-toplevel
     dag = api_common.upload_mounts_to_api_server(task)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
@@ -68,7 +72,6 @@ def update(task: Union['sky.Task', 'sky.Dag'], service_name: str,
                       default=True,
                       abort=True,
                       show_default=True)
-
 
     body = payloads.ServeUpdateBody(
         task=dag_str,

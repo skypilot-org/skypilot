@@ -153,7 +153,10 @@ def decode_rich_status(encoded_msg: str) -> Optional[str]:
     if control is None:
         return encoded_msg
     if control == Control.INIT:
-        _rich_status = console.status(encoded_status)
+        if _rich_status is not None:
+            _rich_status.update(encoded_status)
+        else:
+            _rich_status = console.status(encoded_status)
     else:
         assert _rich_status, f'Rich status not initialized: {encoded_msg}'
         if control == Control.UPDATE:
