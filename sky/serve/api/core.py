@@ -194,7 +194,7 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-        controller_job_id, controller_handle  = execution.launch(
+        controller_job_id, controller_handle = execution.launch(
             task=controller_task,
             cluster_name=controller_name,
             detach_run=True,

@@ -42,12 +42,14 @@ async def update(
                                         update_body.env_vars,
                                         update_body.service_name,
                                         workdir_only=False)
+    assert len(dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                                 'a service.', dag)
     executor.start_background_request(
         request_id=request.state.request_id,
         request_name='serve/update',
         request_body=json.loads(update_body.model_dump_json()),
         func=core.update,
-        task=dag,
+        task=dag.tasks[0],
         service_name=update_body.service_name,
         mode=update_body.mode,
     )

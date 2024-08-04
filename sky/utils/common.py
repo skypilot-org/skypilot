@@ -38,7 +38,8 @@ def reload():
     # When a user request is sent to api server, it changes the user hash in the
     # env vars, but since controller_utils is imported before the env vars are
     # set, it doesn't get updated. So we need to reload it here.
-    from sky.utils import controller_utils  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import controller_utils
     global SKY_SERVE_CONTROLLER_NAME
     global JOB_CONTROLLER_NAME
     global LEGACY_JOB_CONTROLLER_NAME

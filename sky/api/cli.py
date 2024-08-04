@@ -3559,7 +3559,6 @@ def jobs_launch(
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
                 fg='yellow')
 
-
     request_id = managed_jobs.launch(dag,
                                      name,
                                      detach_run=detach_run,
@@ -4491,27 +4490,27 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_launch(
-    entrypoint: str,
-    benchmark: str,
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    gpus: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    ports: Tuple[str],
-    idle_minutes_to_autostop: Optional[int],
-    yes: bool,
-    async_call: bool,
+        entrypoint: str,
+        benchmark: str,
+        name: Optional[str],
+        workdir: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        zone: Optional[str],
+        gpus: Optional[str],
+        num_nodes: Optional[int],
+        use_spot: Optional[bool],
+        image_id: Optional[str],
+        env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]],
+        cpus: Optional[str],
+        memory: Optional[str],
+        disk_size: Optional[int],
+        disk_tier: Optional[str],
+        ports: Tuple[str],
+        idle_minutes_to_autostop: Optional[int],
+        yes: bool,
+        async_call: bool,  # pylint: disable=unused-argument
 ) -> None:
     """Benchmark a task on different resources.
 
@@ -4520,6 +4519,7 @@ def benchmark_launch(
     Alternatively, specify the benchmarking resources in your YAML (see doc),
     which allows benchmarking on many more resource fields.
     """
+    # TODO(zhwu): move benchmark to API server
     env = _merge_env_vars(env_file, env)
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
