@@ -23,7 +23,6 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
@@ -345,12 +344,13 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return message_utils.encode_payload(service_statuses, payload_type='service_status')
+    return message_utils.encode_payload(service_statuses,
+                                        payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    print("load_service_status", payload)
-    service_statuses_encoded = message_utils.decode_payload(payload, payload_type='service_status')
+    service_statuses_encoded = message_utils.decode_payload(
+        payload, payload_type='service_status')
     service_statuses = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
@@ -722,7 +722,8 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
-    from sky.api import sdk
+    from sky.api import sdk  # pylint: disable=import-outside-toplevel
+
     # Don't use backend_utils.is_controller_up since it is too slow.
     # handle = global_user_state.get_handle_from_cluster_name(
     #     common.SKY_SERVE_CONTROLLER_NAME)
@@ -734,7 +735,7 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
         return '-'
     try:
         request_id = sdk.endpoints(common.SKY_SERVE_CONTROLLER_NAME,
-                                               load_balancer_port)
+                                   load_balancer_port)
         endpoints = sdk.stream_and_get(request_id)
         endpoint = endpoints.get(load_balancer_port, None)
     except exceptions.ClusterNotUpError:

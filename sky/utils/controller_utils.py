@@ -91,7 +91,8 @@ class Controllers(enum.Enum):
         candidate_cluster_names=[
             # TODO(zhwu): by having the controller name loaded in common, it
             # will not respect the latest updated user hash.
-            common.JOB_CONTROLLER_NAME, common.LEGACY_JOB_CONTROLLER_NAME
+            common.JOB_CONTROLLER_NAME,
+            common.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '

@@ -29,7 +29,9 @@ def encode_payload(payload: Any, payload_type: Optional[str] = None) -> str:
     return payload_str
 
 
-def decode_payload(payload_str: str, payload_type: Optional[str]=None, raise_for_mismatch: bool = True) -> Any:
+def decode_payload(payload_str: str,
+                   payload_type: Optional[str] = None,
+                   raise_for_mismatch: bool = True) -> Any:
     """Decode a payload string.
 
     Args:
@@ -44,7 +46,7 @@ def decode_payload(payload_str: str, payload_type: Optional[str]=None, raise_for
             raise ValueError(f'Invalid payload string: \n{payload_str}')
         else:
             return payload_str
-    
+
     for payload_type_str, payload_str in matched:
         if payload_type is None or payload_type == payload_type_str:
             return json.loads(payload_str)

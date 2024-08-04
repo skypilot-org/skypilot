@@ -9,8 +9,8 @@ from typing import Any, Callable, Dict
 from sky import sky_logging
 from sky.api.requests import tasks
 from sky.usage import usage_lib
-from sky.utils import ux_utils
 from sky.utils import common
+from sky.utils import ux_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
