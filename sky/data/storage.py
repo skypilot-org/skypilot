@@ -2508,6 +2508,8 @@ class AzureBlobStore(AbstractStore):
                     resource_group_name=self.resource_group_name)
             except azure.exceptions().ClientAuthenticationError as e:
                 if 'ERROR: AADSTS50020' in str(e):
+                    # Caught when failing to obtain container client due to
+                    # lack of permission to passed given private container.
                     if self.resource_group_name is None:
                         with ux_utils.print_exception_no_traceback():
                             raise exceptions.StorageBucketGetError(
