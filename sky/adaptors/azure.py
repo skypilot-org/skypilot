@@ -189,7 +189,8 @@ def get_client(name: str,
                     return container_client
                 except exceptions().ClientAuthenticationError as e:
                     # Caught when user attempted to use private container
-                    # without access rights. This is handled at upper steam.
+                    # without access rights. Raised error is handled at the
+                    # upstream.
                     # Reference: https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # pylint: disable=line-too-long
                     if 'ERROR: AADSTS50020' in str(e):
                         raise e
