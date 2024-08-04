@@ -80,10 +80,22 @@ def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
 
 
 @register_handler('serve/status')
-def encode_serve_status(service_statuses: List[dict]) -> List[Dict[str, Any]]:
+def encode_serve_status(
+        service_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for service_status in service_statuses:
         service_status['status'] = service_status['status'].value
         for replica_info in service_status.get('replica_info', []):
             replica_info['status'] = replica_info['status'].value
             replica_info['handle'] = pickle_and_encode(replica_info['handle'])
     return service_statuses
+
+
+@register_handler('cost_report')
+def encode_cost_report(
+        cost_report: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for cluster_report in cost_report:
+        if cluster_report['status'] is not None:
+            cluster_report['status'] = cluster_report['status'].value
+        cluster_report['resources'] = pickle_and_encode(
+            cluster_report['resources'])
+    return cost_report

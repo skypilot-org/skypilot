@@ -91,3 +91,15 @@ def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
                 replica_info['status'])
             replica_info['handle'] = decode_and_unpickle(replica_info['handle'])
     return service_statuses
+
+
+@register_handler('cost_report')
+def decode_cost_report(
+        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for cluster_report in return_value:
+        if cluster_report['status'] is not None:
+            cluster_report['status'] = status_lib.ClusterStatus(
+                cluster_report['status'])
+        cluster_report['resources'] = decode_and_unpickle(
+            cluster_report['resources'])
+    return return_value
