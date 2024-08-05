@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 from sky import jobs as managed_jobs
 from sky.clouds.service_catalog import common
+from sky.data import storage
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import registry
@@ -129,3 +130,15 @@ def decode_list_accelerators(
             instance_dict[gpu].append(
                 common.InstanceTypeInfo(*instance_type_info))
     return instance_dict
+
+
+@register_handler('storage_ls')
+def decode_storage_ls(
+        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for storage_info in return_value:
+        storage_info['status'] = status_lib.StorageStatus(
+            storage_info['status'])
+        storage_info['store'] = [
+            storage.StoreType(store) for store in storage_info['store']
+        ]
+    return return_value

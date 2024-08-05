@@ -106,3 +106,11 @@ def encode_cost_report(
 def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
     enabled_clodus_list = [str(cloud) for cloud in clouds]
     return enabled_clodus_list
+
+
+@register_handler('storage_ls')
+def encode_storage_ls(return_value: List[Dict[str, Any]]) -> List[str]:
+    for storage_info in return_value:
+        storage_info['status'] = storage_info['status'].value
+        storage_info['store'] = [store.value for store in storage_info['store']]
+    return return_value

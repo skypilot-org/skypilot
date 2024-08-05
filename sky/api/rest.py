@@ -452,7 +452,7 @@ async def storage_ls(request: fastapi.Request):
     )
 
 
-@app.get('/storage/delete')
+@app.post('/storage/delete')
 async def storage_delete(request: fastapi.Request,
                          storage_body: payloads.StorageBody):
     executor.start_background_request(
