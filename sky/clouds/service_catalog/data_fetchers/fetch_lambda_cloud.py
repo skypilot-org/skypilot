@@ -50,7 +50,7 @@ GPU_TO_MEMORY = {
 
 def name_to_gpu_and_cnt(name: str) -> Optional[Tuple[str, int]]:
     """Extract GPU and count from instance type name.
-    
+
     The instance type name is in the format:
       'gpu_{gpu_count}x_{gpu_name}_<suffix>'.
     """
