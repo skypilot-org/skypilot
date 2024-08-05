@@ -118,7 +118,10 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
             node_selectors.append(f'{label_key}={label_value}')
         return ', '.join(node_selectors)
 
-    def lack_resource_msg(resource, pod, extra_msg=None, details=None) -> str:
+    def _lack_resource_msg(resource: str,
+                           pod: 'kubernetes.kubernetes.client.V1Pod',
+                           extra_msg: Optional[str] = None,
+                           details: Optional[str] = None) -> str:
         resource_requirements = _formatted_resource_requirements(pod)
         node_selectors = _formatted_node_selector(pod)
         node_selector_str = f' and labels ({node_selectors})' if (
@@ -132,7 +135,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
         if extra_msg:
             msg += f' {extra_msg}'
         if details:
-            msg += f'\nFull error: {event_message}'
+            msg += f'\nFull error: {details}'
         return msg
 
     for new_node in new_nodes:
@@ -171,10 +174,11 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                 logger.info(event_message)
                 if 'Insufficient cpu' in event_message:
                     raise config_lib.KubernetesError(
-                        lack_resource_msg('CPU', pod, details=event_message))
+                        _lack_resource_msg('CPU', pod, details=event_message))
                 if 'Insufficient memory' in event_message:
                     raise config_lib.KubernetesError(
-                        lack_resource_msg('memory', pod, details=event_message))
+                        _lack_resource_msg('memory', pod,
+                                           details=event_message))
                 if 'Insufficient smarter-devices/fuse' in event_message:
                     raise config_lib.KubernetesError(
                         'Something went wrong with FUSE device daemonset.'
@@ -200,8 +204,10 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
                                     f'{pod.spec.node_selector[label_key]}'
                                     ' is available in the cluster.')
                                 raise config_lib.KubernetesError(
-                                    lack_resource_msg('GPU', pod, extra_msg,
-                                                      event_message))
+                                    _lack_resource_msg('GPU',
+                                                       pod,
+                                                       extra_msg,
+                                                       details=event_message))
             raise config_lib.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
                                              f'Details: \'{event_message}\' ')
