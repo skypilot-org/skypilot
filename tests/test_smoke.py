@@ -2976,10 +2976,13 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                 region=region, user_hash=common_utils.get_user_hash()))
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
-            storage_lib.StoreType.AZURE, storage_account_name=storage_account_name)
+            storage_lib.StoreType.AZURE,
+            storage_account_name=storage_account_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
         az_check_file_count = TestStorageWithCredentials.cli_count_name_in_bucket(
-            storage_lib.StoreType.AZURE, output_storage_name, 'output.txt',
+            storage_lib.StoreType.AZURE,
+            output_storage_name,
+            'output.txt',
             storage_account_name=storage_account_name)
         output_check_cmd = f'{az_check_file_count} | grep 1'
     elif generic_cloud == 'kubernetes':
@@ -4330,7 +4333,7 @@ class TestStorageWithCredentials:
             return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
 
     @staticmethod
-    def cli_region_cmd(store_type, bucket_name = None, storage_account_name = None):
+    def cli_region_cmd(store_type, bucket_name=None, storage_account_name=None):
         if store_type == storage_lib.StoreType.S3:
             assert bucket_name is not None
             return ('aws s3api get-bucket-location '
@@ -4351,7 +4354,11 @@ class TestStorageWithCredentials:
                                       f'{store_type}')
 
     @staticmethod
-    def cli_count_name_in_bucket(store_type, bucket_name, file_name, suffix='', storage_account_name=None):
+    def cli_count_name_in_bucket(store_type,
+                                 bucket_name,
+                                 file_name,
+                                 suffix='',
+                                 storage_account_name=None):
         if store_type == storage_lib.StoreType.S3:
             if suffix:
                 return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)"'
@@ -4366,9 +4373,9 @@ class TestStorageWithCredentials:
             if storage_account_name is None:
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                        region=default_region,
-                        user_hash=common_utils.get_user_hash()))
+                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
+                    format(region=default_region,
+                           user_hash=common_utils.get_user_hash()))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
