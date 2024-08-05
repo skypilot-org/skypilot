@@ -119,7 +119,7 @@ def _raise_pod_scheduling_errors(namespace, new_nodes):
         return ', '.join(node_selectors)
 
     def _lack_resource_msg(resource: str,
-                           pod: 'kubernetes.kubernetes.client.V1Pod',
+                           pod,
                            extra_msg: Optional[str] = None,
                            details: Optional[str] = None) -> str:
         resource_requirements = _formatted_resource_requirements(pod)
