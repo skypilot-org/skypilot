@@ -2461,9 +2461,7 @@ def get_clusters(
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
-        print(f'zhwu debug: get glob cluster {cluster_names}')
         cluster_names = _get_glob_clusters(cluster_names, silent=True)
-        print(f'zhwu debug: got glob cluster {cluster_names}')
         new_records = []
         not_exist_cluster_names = []
         for cluster_name in cluster_names:
@@ -2774,7 +2772,6 @@ def get_endpoints(cluster: str,
         except ValueError:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
-    print('get_endpoints', cluster, port)
     cluster_records = get_clusters(include_controller=True,
                                    refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster])
