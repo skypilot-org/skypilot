@@ -3955,7 +3955,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
     test = Test(
-        f'test-skyserve-new-autoscaler-update_{mode}',
+        f'test-skyserve-new-autoscaler-update-{mode}',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
@@ -5264,7 +5264,7 @@ def test_multiple_accelerators_unordered():
 def test_multiple_accelerators_unordered_with_default():
     name = _get_cluster_name()
     test = Test(
-        'multiple-accelerators-unordered_with_default',
+        'multiple-accelerators-unordered-with_default',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
