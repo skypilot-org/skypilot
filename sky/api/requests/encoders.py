@@ -109,7 +109,8 @@ def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
 
 
 @register_handler('storage_ls')
-def encode_storage_ls(return_value: List[Dict[str, Any]]) -> List[str]:
+def encode_storage_ls(
+        return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for storage_info in return_value:
         storage_info['status'] = storage_info['status'].value
         storage_info['store'] = [store.value for store in storage_info['store']]
