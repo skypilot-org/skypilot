@@ -1,5 +1,6 @@
 """Common enumerators and classes."""
 
+import collections
 import enum
 import importlib
 
@@ -22,6 +23,9 @@ class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
 
+
+RealtimeGpuAvailability = collections.namedtuple(
+    'RealtimeGpuAvailability', ['gpu', 'counts', 'capacity', 'available'])
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')

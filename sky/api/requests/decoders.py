@@ -5,12 +5,15 @@ import typing
 from typing import Any, Dict, List
 
 from sky import jobs as managed_jobs
+from sky.clouds.service_catalog import common
 from sky.serve import serve_state
 from sky.skylet import job_lib
+from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import clouds
 
 handlers: Dict[str, Any] = {}
 
@@ -103,3 +106,26 @@ def decode_cost_report(
         cluster_report['resources'] = decode_and_unpickle(
             cluster_report['resources'])
     return return_value
+
+
+@register_handler('enabled_clouds')
+def decode_enabled_clouds(return_value: List[str]) -> List['clouds.Cloud']:
+    clouds = []
+    for cloud_name in return_value:
+        cloud = registry.CLOUD_REGISTRY.from_str(cloud_name)
+        assert cloud is not None, return_value
+        clouds.append(cloud)
+    return clouds
+
+
+@register_handler('list_accelerators')
+def decode_list_accelerators(
+    return_value: Dict[str, List[List[Any]]]
+) -> Dict[str, List['common.InstanceTypeInfo']]:
+    instance_dict: Dict[str, List['common.InstanceTypeInfo']] = {}
+    for gpu, instance_type_infos in return_value.items():
+        instance_dict[gpu] = []
+        for instance_type_info in instance_type_infos:
+            instance_dict[gpu].append(
+                common.InstanceTypeInfo(*instance_type_info))
+    return instance_dict

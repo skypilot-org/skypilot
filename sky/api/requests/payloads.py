@@ -184,3 +184,19 @@ class ServeLogsBody(RequestBody):
 
 class ServeStatusBody(RequestBody):
     service_names: Optional[Union[str, List[str]]]
+
+
+class RealtimeGpuAvailabilityRequestBody(RequestBody):
+    name_filter: Optional[str]
+    quantity_filter: Optional[int]
+
+
+class ListAcceleratorsBody(RequestBody):
+    gpus_only: bool = True
+    name_filter: Optional[str] = None
+    region_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
+    clouds: Optional[Union[List[str], str]] = None
+    all_regions: bool = False
+    require_price: bool = True
+    case_sensitive: bool = True

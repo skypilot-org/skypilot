@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import clouds
 
 handlers: Dict[str, Any] = {}
 
@@ -99,3 +100,9 @@ def encode_cost_report(
         cluster_report['resources'] = pickle_and_encode(
             cluster_report['resources'])
     return cost_report
+
+
+@register_handler('enabled_clouds')
+def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
+    enabled_clodus_list = [str(cloud) for cloud in clouds]
+    return enabled_clodus_list

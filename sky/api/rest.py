@@ -24,6 +24,7 @@ from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import tasks
+from sky.clouds import service_catalog
 from sky.jobs.api import rest as jobs_rest
 from sky.serve.api import rest as serve_rest
 from sky.utils import dag_utils
@@ -93,6 +94,65 @@ async def check(request: fastapi.Request, check_body: payloads.CheckBody):
         func=sky_check.check,
         clouds=check_body.clouds,
         verbose=check_body.verbose,
+    )
+
+
+@app.get('/enabled_clouds')
+async def enabled_clouds(request: fastapi.Request) -> None:
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='enabled_clouds',
+        request_body={},
+        func=core.enabled_clouds,
+    )
+
+
+@app.get('/realtime_gpu_availability')
+async def realtime_gpu_availability(
+    request: fastapi.Request,
+    realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
+) -> None:
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='realtime_gpu_availability',
+        request_body=json.loads(
+            realtime_gpu_availability_body.model_dump_json()),
+        func=core.realtime_gpu_availability,
+        name_filter=realtime_gpu_availability_body.name_filter,
+        quantity_filter=realtime_gpu_availability_body.quantity_filter,
+    )
+
+
+@app.get('/list_accelerators')
+async def list_accelerators(
+        request: fastapi.Request,
+        list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='list_accelerators',
+        request_body=json.loads(list_accelerator_counts_body.model_dump_json()),
+        func=service_catalog.list_accelerators,
+        gpus_only=list_accelerator_counts_body.gpus_only,
+        clouds=list_accelerator_counts_body.clouds,
+        region_filter=list_accelerator_counts_body.region_filter,
+        all_regions=list_accelerator_counts_body.all_regions,
+        require_price=list_accelerator_counts_body.require_price,
+        case_sensitive=list_accelerator_counts_body.case_sensitive,
+    )
+
+
+@app.get('/list_accelerator_counts')
+async def list_accelerator_counts(
+        request: fastapi.Request,
+        list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='list_accelerator_counts',
+        request_body=json.loads(list_accelerator_counts_body.model_dump_json()),
+        func=service_catalog.list_accelerator_counts,
+        gpus_only=list_accelerator_counts_body.gpus_only,
+        clouds=list_accelerator_counts_body.clouds,
+        region_filter=list_accelerator_counts_body.region_filter,
     )
 
 

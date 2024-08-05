@@ -39,6 +39,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import clouds
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -50,6 +51,73 @@ def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.get(f'{api_common.get_server_url()}/check',
                             json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def enabled_clouds() -> str:
+    response = requests.get(f'{api_common.get_server_url()}/enabled_clouds')
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def realtime_gpu_availability(name_filter: Optional[str] = None,
+                              quantity_filter: Optional[int] = None) -> str:
+    body = payloads.RealtimeGpuAvailabilityRequestBody(
+        name_filter=name_filter,
+        quantity_filter=quantity_filter,
+    )
+    response = requests.get(
+        f'{api_common.get_server_url()}/realtime_gpu_availability',
+        json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def list_accelerators(gpus_only: bool = True,
+                      name_filter: Optional[str] = None,
+                      region_filter: Optional[str] = None,
+                      quantity_filter: Optional[int] = None,
+                      clouds: Optional[Union[List[str], str]] = None,
+                      all_regions: bool = False,
+                      require_price: bool = True,
+                      case_sensitive: bool = True) -> str:
+    body = payloads.ListAcceleratorsBody(
+        gpus_only=gpus_only,
+        name_filter=name_filter,
+        region_filter=region_filter,
+        quantity_filter=quantity_filter,
+        clouds=clouds,
+        all_regions=all_regions,
+        require_price=require_price,
+        case_sensitive=case_sensitive,
+    )
+    response = requests.get(f'{api_common.get_server_url()}/list_accelerators',
+                            json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def list_accelerator_counts(
+        gpus_only: bool = True,
+        name_filter: Optional[str] = None,
+        region_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None,
+        clouds: Optional[Union[List[str], str]] = None) -> str:
+    body = payloads.ListAcceleratorsBody(
+        gpus_only=gpus_only,
+        name_filter=name_filter,
+        region_filter=region_filter,
+        quantity_filter=quantity_filter,
+        clouds=clouds,
+    )
+    response = requests.get(
+        f'{api_common.get_server_url()}/list_accelerator_counts',
+        json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 

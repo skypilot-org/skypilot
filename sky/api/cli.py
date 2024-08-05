@@ -2993,16 +2993,19 @@ def show_gpus(
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    # service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     # Kubernetes specific bools
+    enabled_clouds = sdk.get(sdk.enabled_clouds())
     cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = clouds.cloud_in_iterable(
-        clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+        clouds.Kubernetes(),
+        enabled_clouds,
+    )
 
     if cloud_is_kubernetes and region is not None:
         raise click.UsageError(
@@ -3022,37 +3025,16 @@ def show_gpus(
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
-            gpus_only=True,
-            clouds='kubernetes',
-            name_filter=name_filter,
-            region_filter=region,
-            quantity_filter=quantity_filter,
-            case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be same.')
-        if len(counts) == 0:
-            err_msg = 'No GPUs found in Kubernetes cluster. '
-            debug_msg = 'To further debug, run: sky check '
-            if name_filter is not None:
-                gpu_info_msg = f' {name_filter!r}'
-                if quantity_filter is not None:
-                    gpu_info_msg += (' with requested quantity'
-                                     f' {quantity_filter}')
-                err_msg = (f'Resources{gpu_info_msg} not found '
-                           'in Kubernetes cluster. ')
-                debug_msg = ('To show available accelerators on kubernetes,'
-                             ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
-                            debug_msg)
-            raise ValueError(full_err_msg)
-        for gpu, _ in sorted(counts.items()):
+        realtime_gpu_availability_list = sdk.stream_and_get(
+            sdk.realtime_gpu_availability(name_filter=name_filter,
+                                          quantity_filter=quantity_filter))
+
+        for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
             realtime_gpu_table.add_row([
-                gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+                realtime_gpu_availability.gpu,
+                _list_to_str(realtime_gpu_availability.counts),
+                realtime_gpu_availability.capacity,
+                realtime_gpu_availability.available,
             ])
         return realtime_gpu_table
 
@@ -3113,11 +3095,12 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
-            result = service_catalog.list_accelerator_counts(
-                gpus_only=True,
-                clouds=clouds_to_list,
-                region_filter=region,
-            )
+            result = sdk.stream_and_get(
+                sdk.list_accelerator_counts(
+                    gpus_only=True,
+                    clouds=clouds_to_list,
+                    region_filter=region,
+                ))
 
             if print_section_titles:
                 # If section titles were printed above, print again here
@@ -3204,13 +3187,14 @@ def show_gpus(
 
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
-        result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=name,
-                                                   quantity_filter=quantity,
-                                                   region_filter=region,
-                                                   clouds=clouds_to_list,
-                                                   case_sensitive=False,
-                                                   all_regions=all_regions)
+        result = sdk.stream_and_get(
+            sdk.list_accelerators(gpus_only=True,
+                                  name_filter=name,
+                                  quantity_filter=quantity,
+                                  region_filter=region,
+                                  clouds=clouds_to_list,
+                                  case_sensitive=False,
+                                  all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
         from sky.clouds.service_catalog import common as catalog_common
