@@ -737,7 +737,7 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
         request_id = sdk.endpoints(common.SKY_SERVE_CONTROLLER_NAME,
                                    load_balancer_port)
         endpoints = sdk.stream_and_get(request_id)
-        endpoint = endpoints.get(load_balancer_port, None)
+        endpoint = endpoints.get(str(load_balancer_port), None)
     except exceptions.ClusterNotUpError:
         return '-'
     if endpoint is None:
