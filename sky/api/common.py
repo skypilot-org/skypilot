@@ -114,11 +114,11 @@ def check_health(func):
                         f'{colorama.Style.RESET_ALL}')
                 else:
                     raise RuntimeError(
-                        f'Could not connect to SkyPilot server at {server_url}. '
-                        'Please ensure that the server is running and that the '
-                        f'{constants.SKY_API_SERVER_URL_ENV_VAR} environment '
-                        f'variable is set correctly. Try: curl {server_url}/health'
-                    )
+                        f'Could not connect to SkyPilot server at {server_url}.'
+                        ' Please ensure that the server is running and that the'
+                        f' {constants.SKY_API_SERVER_URL_ENV_VAR} environment '
+                        'variable is set correctly. Try: '
+                        f'curl {server_url}/health')
         return func(*args, **kwargs)
 
     return wrapper
