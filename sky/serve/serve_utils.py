@@ -422,7 +422,10 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
         # If the `services` and `version_specs` table are not aligned, it might
         # result in a None service status. In this case, the controller process
         # is not functioning as well and we should also use the
-        # _terminate_failed_services function to clean up the service.
+        # `_terminate_failed_services` function to clean up the service.
+        # This is a safeguard for a rare case, that is accidentally abort
+        # between `serve_state.add_service` and
+        # `serve_state.add_or_update_version` in service.py.
         if (service_status is None or service_status['status']
                 in serve_state.ServiceStatus.failed_statuses()):
             failed_status = (service_status['status']
