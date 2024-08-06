@@ -181,6 +181,7 @@ Read the research:
    ../reference/tpu
    ../reference/logging
    ../reference/faq
+   SkyPilot vs. Other Systems <../reference/comparison>
 
 
 .. toctree::
