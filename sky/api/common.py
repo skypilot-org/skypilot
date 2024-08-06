@@ -9,6 +9,7 @@ import typing
 from typing import Dict, Union
 
 import colorama
+import filelock
 import requests
 
 from sky import sky_logging
@@ -40,6 +41,14 @@ def get_server_url():
 @functools.lru_cache()
 def is_api_server_local():
     return get_server_url() == DEFAULT_SERVER_URL
+
+
+def is_api_server_running() -> bool:
+    try:
+        response = requests.get(f'{get_server_url()}/health', timeout=5)
+    except requests.exceptions.ConnectionError:
+        return False
+    return response.status_code == 200
 
 
 def start_uvicorn_in_background(reload: bool = False):
@@ -86,26 +95,30 @@ def check_health(func):
 
     @functools.wraps(func)
     def wrapper(*args, api_server_reload: bool = False, **kwargs):
+        if is_api_server_running():
+            return func(*args, **kwargs)
         server_url = get_server_url()
 
-        try:
-            response = requests.get(f'{get_server_url()}/health', timeout=5)
-        except requests.exceptions.ConnectionError:
-            response = None
-        if (response is None or response.status_code != 200):
-            if server_url == DEFAULT_SERVER_URL:
-                logger.info('Failed to connect to SkyPilot API server at '
-                            f'{server_url}. Starting a local server.')
-                # Automatically start a SkyPilot server locally
-                start_uvicorn_in_background(reload=api_server_reload)
-                logger.info(f'{colorama.Fore.GREEN}SkyPilot API server started.'
-                            f'{colorama.Style.RESET_ALL}')
-            else:
-                raise RuntimeError(
-                    f'Could not connect to SkyPilot server at {server_url}. '
-                    'Please ensure that the server is running and that the '
-                    f'{constants.SKY_API_SERVER_URL_ENV_VAR} environment '
-                    f'variable is set correctly. Try: curl {server_url}/health')
+        # Automatically start a SkyPilot server locally.
+        # Lock to prevent multiple processes from starting the server at the
+        # same time, causing issues with database initialization.
+        with filelock.FileLock(
+                os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+            if not is_api_server_running():
+                if server_url == DEFAULT_SERVER_URL:
+                    logger.info('Failed to connect to SkyPilot API server at '
+                                f'{server_url}. Starting a local server.')
+                    start_uvicorn_in_background(reload=api_server_reload)
+                    logger.info(
+                        f'{colorama.Fore.GREEN}SkyPilot API server started.'
+                        f'{colorama.Style.RESET_ALL}')
+                else:
+                    raise RuntimeError(
+                        f'Could not connect to SkyPilot server at {server_url}. '
+                        'Please ensure that the server is running and that the '
+                        f'{constants.SKY_API_SERVER_URL_ENV_VAR} environment '
+                        f'variable is set correctly. Try: curl {server_url}/health'
+                    )
         return func(*args, **kwargs)
 
     return wrapper
