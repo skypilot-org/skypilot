@@ -121,6 +121,17 @@ See yamls in nemo_yamls directory. Run them and observe the batch time and check
 
 Takes about 30 min to start.
 
+#### Real world - deepspeed
+```
+cd deepspeed
+sky exec -c a100ds --cloud gcp --num-nodes 2 --env OUTPUT_PATH=/skystorage-mount/ deepspeed.yaml
+```
+
+We modify the SkyPilot deepspeed example to use deepspeed's model.save/load_checkpoint instead and provide timing information.
+This updated main.py is uploaded to the VM as workdir and cp'd to the example directory.
+
+Writes a checkpoint ~ 4GB in size.
+
 #### Real world - VSCode SkyPilot Tutorial
 Run `code --remote ssh-remote+a100 "/skystorage-mount"`
 
@@ -489,6 +500,16 @@ Epoch 0: :   0%|          | 25/300000 [12:05<2418:23:46, v_num=1, reduced_train_
 Epoch 0: :   0%|          | 26/300000 [13:18<2560:20:19, v_num=1, reduced_train_loss=9.830, global_step=24.00, consumed_samples=4800.0, train_step_timing in s=4.560, val_loss=9.740(task, pid=6679) Epoch 0: :   0%|          | 26/300000 [13:18<2560:20:31, v_num=1, reduced_train_loss=9.790, global_step=25.00, consumed_samples=4992.0, train_step_timing in s=4.59Epoch 0: :   0%|          | 27/300000 [13:23<2479:36:44, v_num=1, reduced_train_loss=9.790, global_step=25.00, consumed_samples=4992.0, train_step_timing in s=4.590, val_loss=9.740(task, pid=6679) Epoch 0: :   0%|          | 27/300000 [13:23<2479:36:49, v_num=1, reduced_train_loss=9.740, global_step=26.00, consumed_samples=5184.0, train_step_timing in s=4.57Epoch 0: :   0%|          | 28/300000 [13:28<2404:38:11, v_num=1, reduced_train_loss=9.740, global_step=26.00, consumed_samples=5184.0, train_step_timing in s=4.570, val_loss=9.740(task, pid=6679) Epoch 0: :   0%|          | 28/300000 [13:28<2404:38:18, v_num=1, reduced_train_loss=9.700, global_step=27.00, consumed_samples=5376.0, train_step_timing in s=4.56Epoch 0: :   0%|          | 29/300000 [13:32<2334:49:57, v_num=1, reduced_train_loss=9.700, global_step=27.00, consumed_samples=5376.0, train_step_timing in s=4.560, val_loss=9.740(task, pid=6679) Epoch 0: :   0%|          | 29/300000 [13:32<2334:50:03, v_num=1, reduced_train_loss=9.640, global_step=28.00, consumed_samples=5568.0, train_step_timing in s=4.56Epoch 0: :   0%|          | 30/300000 [13:37<2269:40:30, v_num=1, reduced_train_loss=9.640, global_step=28.00, consumed_samples=5568.0, train_step_timing in s=4.560, val_loss=9.740Epoch 0: :   0%|          | 30/300000 [13:37<2269:40:35, v_num=1, reduced_train_loss=9.620, global_step=29.00, consumed_samples=5760.0, train_step_timing in s=4.560, val_loss=9.740]
 (task, pid=6679) Validation DataLoader 0: 
 ```
+
+### Real world - Deepspeed
+
+Takes 12.1s to write ~4GB checkpoint, but lack of consistency breaks things.
+
+The `latest` file (a text file containing the tag of the known healthy checkpoint) is uploaded earlier than the actual checkpoint uploads, which causes restore to fail if the node is preempted at the wrong time. 
+
+Adding --transfers=1 to rclone mounting command helps only if the checkpoints are not too frequent. If checkpointed very frequently, it just keeps uploading the checkpoint files and never writes the `latest` file since it keeps getting a new modtime.
+
+
 
 ### Real world - VSCode SkyPilot Tutorial
 

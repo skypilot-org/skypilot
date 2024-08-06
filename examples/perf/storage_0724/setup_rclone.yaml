@@ -32,5 +32,6 @@ run: |
   echo "rclone exists"
   rclone version
   fi
-    
+  
+  # Add --transfers 1 to make uploads strictly sequential in order of creation  
   nohup rclone mount gcs:${GCS_BUCKET}/ ${RCLONE_PATH} --vfs-cache-mode full --allow-non-empty --dir-cache-time 5s --poll-interval 5s --log-level DEBUG --log-file=/tmp/rclone.log &
