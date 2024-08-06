@@ -118,7 +118,7 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
 
 
 class LazyDataFrame:
-    """A lazy data frame that reads the catalog on demand.
+    """A lazy data frame that updates and reads the catalog on demand.
 
     We don't need to load the catalog for every SkyPilot call, and this class
     allows us to load the catalog only when needed.
@@ -189,8 +189,6 @@ def read_catalog(filename: str,
 
     def _update_catalog():
         # Atomic check, to avoid conflicts with other processes.
-        # TODO(mraheja): remove pylint disabling when filelock version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(meta_path + '.lock'):
             if _need_update():
                 url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
