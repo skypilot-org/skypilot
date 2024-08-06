@@ -57,7 +57,8 @@ def _bulk_provision(
     else:
         zone_str = ','.join(z.name for z in zones)
 
-    if isinstance(cloud, clouds.Kubernetes):
+    # TODO(vsoch): there should be a special set of Kubernetes based "clouds"
+    if isinstance(cloud, (clouds.Kubernetes, clouds.Flux)):
         # Omit the region name for Kubernetes.
         logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
                     f'{cluster_name!r}.')
@@ -92,6 +93,7 @@ def _bulk_provision(
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
+
         status.update('[bold cyan]Launching - Checking instance status[/]')
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
@@ -442,8 +444,12 @@ def _post_provision_setup(
 
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
-        wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+
+        # We don't need ssh for kubectl accessed clouds like flux
+        if provider_config is not None and provider_config[
+                'module'] != 'sky.provision.flux':
+            wait_for_ssh(cluster_info, ssh_credentials)
+        logger.debug(f'SSH Connection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                     f'or found existing instance{plural}.'

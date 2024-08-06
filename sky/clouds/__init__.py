@@ -15,6 +15,7 @@ from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.cudo import Cudo
 from sky.clouds.fluidstack import Fluidstack
+from sky.clouds.flux import Flux
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
@@ -31,6 +32,7 @@ __all__ = [
     'Azure',
     'Cloud',
     'Cudo',
+    'Flux',
     'GCP',
     'Lambda',
     'Paperspace',
