@@ -17,7 +17,7 @@ from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import cluster_yaml_utils
+from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
@@ -140,10 +140,9 @@ class AutostopEvent(SkyletEvent):
             autostop_lib.set_autostopping_started()
 
             config_path = os.path.abspath(
-                os.path.expanduser(
-                    cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
+                os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
             config = common_utils.read_yaml(config_path)
-            provider_name = cluster_yaml_utils.get_provider_name(config)
+            provider_name = cluster_utils.get_provider_name(config)
             cloud = registry.CLOUD_REGISTRY.from_str(provider_name)
             assert cloud is not None, f'Unknown cloud: {provider_name}'
 

@@ -53,6 +53,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
+from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
@@ -2994,15 +2995,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
-            auth_config = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml,
-                ssh_user=handle.ssh_user,
-                docker_user=handle.docker_user)
-            backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
-                                                      ip_list, auth_config,
-                                                      ssh_port_list,
-                                                      handle.docker_user,
-                                                      handle.ssh_user)
+            # Do not need to add the cluster to ssh config file on API server.
+            # auth_config = backend_utils.ssh_credential_from_yaml(
+            #     handle.cluster_yaml,
+            #     ssh_user=handle.ssh_user,
+            #     docker_user=handle.docker_user)
+            # cluster_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
+            #                                           ip_list, auth_config,
+            #                                           ssh_port_list,
+            #                                           handle.docker_user,
+            #                                           handle.ssh_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -4056,10 +4058,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
-        backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
-                                                     handle.head_ip,
-                                                     auth_config,
-                                                     handle.docker_user)
+        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
+            handle.cluster_name, handle.head_ip, auth_config,
+            handle.docker_user)
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

@@ -294,3 +294,6 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
 # The placeholder for the local skypilot config path in file mounts for
 # controllers.
 LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
+
+# Path to the generated cluster config yamls and ssh configs.
+SKY_USER_FILE_PATH = '~/.sky/generated'
