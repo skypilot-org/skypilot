@@ -107,6 +107,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     gpu_specs = runpod.runpod.get_gpu(gpu_type)
 
+    # Port 8081 is occupied for nginx in the base image.
     custom_ports_str = ''
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
