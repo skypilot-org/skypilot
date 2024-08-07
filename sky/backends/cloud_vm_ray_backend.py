@@ -53,7 +53,6 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
-from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
@@ -2844,8 +2843,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, handle.external_ips(),
-                    handle.external_ssh_ports(), lock_path)
+                    prev_cluster_status, lock_path)
                 return handle
 
             cluster_config_file = config_dict['ray']
@@ -2917,7 +2915,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, ip_list, ssh_port_list, lock_path)
+                prev_cluster_status, lock_path)
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -2935,7 +2933,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            ip_list: List[str], ssh_port_list: List[int],
             lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)

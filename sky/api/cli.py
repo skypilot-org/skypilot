@@ -168,9 +168,9 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
 
 
 def _async_call_or_wait(request_id: str, async_call: bool,
-                        request_name: str) -> None:
+                        request_name: str) -> Any:
     if not async_call:
-        sdk.stream_and_get(request_id)
+        return sdk.stream_and_get(request_id)
     else:
         click.secho(f'Submitted {request_name} request: {request_id}',
                     fg='green')
@@ -1091,10 +1091,11 @@ def launch(
         clone_disk_from=clone_disk_from,
         need_confirmation=not yes,
     )
-    _async_call_or_wait(request_id, async_call, 'Launch')
+    _, handle = _async_call_or_wait(request_id, async_call, 'Launch')
     if async_call:
         # Add ssh config for the cluster
-        _get_cluster_records_and_set_ssh_config(clusters=[cluster])
+        _get_cluster_records_and_set_ssh_config(
+            clusters=[handle.get_cluster_name()])
 
 
 @cli.command(cls=_DocumentedCodeCommand)

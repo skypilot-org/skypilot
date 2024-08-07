@@ -123,10 +123,13 @@ class SSHConfigHelper(object):
                 cluster_private_key_path)
             expanded_cluster_private_key_dir = os.path.dirname(
                 expanded_cluster_private_key_path)
-            os.makedirs(expanded_cluster_private_key_dir, exist_ok=True)
-            os.chmod(expanded_cluster_private_key_dir, 0o700)
-            with open(expanded_cluster_private_key_path, 'w',
-                      encoding='utf-8') as f:
+            os.makedirs(expanded_cluster_private_key_dir,
+                        exist_ok=True,
+                        mode=0o700)
+            with open(expanded_cluster_private_key_path,
+                      'w',
+                      encoding='utf-8',
+                      opener=functools.partial(os.open, mode=0o600)) as f:
                 f.write(key_content)
             auth_config['ssh_private_key'] = cluster_private_key_path
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
