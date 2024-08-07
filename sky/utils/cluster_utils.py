@@ -119,12 +119,13 @@ class SSHConfigHelper(object):
         if key_content is not None:
             cluster_private_key_path = cls.ssh_cluster_key_path.format(
                 cluster_name)
-            expanded_cluster_private_key_path = os.path.expanduser(cluster_private_key_path)
-            os.makedirs(os.path.dirname(expanded_cluster_private_key_path),
-                        exist_ok=True)
-            os.chmod(expanded_cluster_private_key_path, 0o600)
-            with open(expanded_cluster_private_key_path,
-                      'w',
+            expanded_cluster_private_key_path = os.path.expanduser(
+                cluster_private_key_path)
+            expanded_cluster_private_key_dir = os.path.dirname(
+                expanded_cluster_private_key_path)
+            os.makedirs(expanded_cluster_private_key_dir, exist_ok=True)
+            os.chmod(expanded_cluster_private_key_dir, 0o700)
+            with open(expanded_cluster_private_key_path, 'w',
                       encoding='utf-8') as f:
                 f.write(key_content)
             auth_config['ssh_private_key'] = cluster_private_key_path
