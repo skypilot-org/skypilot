@@ -85,6 +85,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.OCI: 300,
+    clouds.Paperspace: 600,
     clouds.Kubernetes: 300,
     clouds.Vsphere: 240,
 }
