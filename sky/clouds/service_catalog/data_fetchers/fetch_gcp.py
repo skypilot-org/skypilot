@@ -432,9 +432,6 @@ def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     new_tpus = []
     for tpu in tpus:
         tpu_name = tpu['type']
-        # skip tpu v5 as we currently don't support it
-        if 'v5' in tpu_name:
-            continue
         new_tpus.append({
             'AcceleratorName': f'tpu-{tpu_name}',
             'AcceleratorCount': 1,
@@ -458,10 +455,21 @@ def _get_tpus() -> 'pd.DataFrame':
 
 
 # TODO: the TPUs fetched fails to contain us-east1
-def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
+def get_tpu_df(gce_skus: List[Dict[str, Any]],
+               tpu_skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
     df = _get_tpus()
     if df.empty:
         return df
+
+    def _get_tpu_str(tpu_version: str) -> str:
+        # TPU V5 has a different naming convention since it is contained in
+        # the GCE SKUs. v5p -> TpuV5p, v5litepod -> TpuV5e.
+        if tpu_version.startswith('v5'):
+            if tpu_version == 'v5p':
+                return 'TpuV5p'
+            assert tpu_version == 'v5litepod', tpu_version
+            return 'TpuV5e'
+        return f'Tpu-{tpu_version}'
 
     def get_tpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         assert row['AcceleratorCount'] == 1, row
@@ -475,9 +483,13 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
         # whether the TPU is a single device or a pod.
         # For TPU-v4, the pricing is uniform, and thus the pricing API
         # only provides the price of TPU-v4 pods.
-        is_pod = num_cores > 8 or tpu_version == 'v4'
+        # TODO(tian): Seems like there is no 'Pod' kw in the v5 description.
+        # Does that means v5 only have TPU Node (instead of VM)? Another
+        # possibility is that the price shown for v5 TPU is for one core.
+        is_pod = ((num_cores > 8 or tpu_version == 'v4') and
+                  not tpu_version.startswith('v5'))
 
-        for sku in skus:
+        for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
                 continue
             description = sku['description']
@@ -489,7 +501,7 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
                 if 'Preemptible' in description:
                     continue
 
-            if f'Tpu-{tpu_version}' not in description:
+            if _get_tpu_str(tpu_version) not in description:
                 continue
             if is_pod:
                 if 'Pod' not in description:
@@ -500,7 +512,13 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
 
             unit_price = _get_unit_price(sku)
             tpu_device_price = unit_price
-            tpu_core_price = tpu_device_price / 8
+            # V5 price is shown as per chip price, which is 2 cores
+            # for v5p and 1 core for v5e. Reference here:
+            # https://cloud.google.com/tpu/docs/v5p
+            # https://cloud.google.com/tpu/docs/v5e
+            core_per_sku = (1 if tpu_version == 'v5litepod' else
+                            2 if tpu_version == 'v5p' else 8)
+            tpu_core_price = tpu_device_price / core_per_sku
             tpu_price = num_cores * tpu_core_price
             break
 
@@ -546,7 +564,7 @@ def get_catalog_df(region_prefix: str) -> 'pd.DataFrame':
         region_prefix)] if not gpu_df.empty else gpu_df
 
     gcp_tpu_skus = get_skus(TPU_SERVICE_ID)
-    tpu_df = get_tpu_df(gcp_tpu_skus)
+    tpu_df = get_tpu_df(gcp_skus, gcp_tpu_skus)
 
     # Merge the dataframes.
     df = pd.concat([vm_df, gpu_df, tpu_df, TPU_V4_HOST_DF])
