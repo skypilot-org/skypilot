@@ -797,7 +797,7 @@ def job_status(cluster_name: str,
 # = Storage Management =
 # ======================
 @usage_lib.entrypoint
-def storage_ls() -> List[Dict[str, Any]]:
+def storage_status() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the storages.
 

@@ -697,7 +697,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.
         logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                    f'{colorama.Style.RESET_ALL} See: sky storage ls')
+                    f'{colorama.Style.RESET_ALL} See: sky storage status')
     try:
         task.sync_storage_mounts()
     except ValueError as e:
