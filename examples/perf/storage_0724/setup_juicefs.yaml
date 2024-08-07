@@ -2,7 +2,7 @@
 envs:
   MOUNT_PATH: /juicefs
   CLOUDSQL_CONN_STR: skypilot-375900:me-west1:juicefs-exp-meta
-  POSTGRES_PASSWORD: qweasdzxc
+  POSTGRES_PASSWORD:
 
 run: |
   # Kill any existing juicefs processes

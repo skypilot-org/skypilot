@@ -90,6 +90,6 @@ run: |
       --only_optimize_lora \
       --deepspeed \
       --output_dir $OUTPUT_PATH \
+      --checkpoint_frequency 20 \
       | tee training.log
-
   fi
