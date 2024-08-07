@@ -166,6 +166,12 @@ class StorageUploadError(StorageError):
     pass
 
 
+class StorageBucketLabelNameError(StorageError):
+    # Error raised when bucket is successfully initialized, but labeling fails,
+    # due to key value labeling limitations.
+    pass
+
+
 class StorageSourceError(StorageSpecError):
     # Error raised when the source of the storage is invalid. E.g., does not
     # exist, malformed path, or other reasons.
