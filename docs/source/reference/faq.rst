@@ -235,7 +235,7 @@ How Can I Use Elastic Fiber Adapter (EFA) with a Capacity Reservation on AWS?
 
 1. Install the aws cli tool
 
-2. Download `this cloud formation input json <https://gist.github.com/jasonkrone/7e6a446b24e1bc93ed0c25869e5353ff>`__ and `this cloud formation template <https://gist.github.com/jasonkrone/7e6a446b24e1bc93ed0c25869e5353ff>`__.
+2. Download `this cloud formation input json <https://gist.github.com/jasonkrone/7e6a446b24e1bc93ed0c25869e5353ff>`__ and `this cloud formation template <https://gist.github.com/jasonkrone/fc3e5f10d549b0d91b7a0061792afb80>`__.
     - Credit to Sean Smith at AWS for creating the cloud formation template.
 
 3. Edit the coudformation input json to specify the values for VPCName, PrimarySubnetAZ, and CreateS3Endpoint
