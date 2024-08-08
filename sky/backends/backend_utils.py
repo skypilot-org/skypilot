@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import contextlib
 from datetime import datetime
 import enum
 import fnmatch
@@ -1475,14 +1476,21 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
-def _update_cluster_status_no_lock(
-        cluster_name: str) -> Optional[Dict[str, Any]]:
-    """Updates the status of the cluster.
+def _maybe_acquire_lock(lock_path: str, timeout: int, acquire_lock: bool):
+    if acquire_lock:
+        # TODO(zhwu): handle timeout
+        return filelock.FileLock(lock_path, timeout=timeout)
+    else:
+        return contextlib.nullcontext()
 
-    Raises:
-        exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
-    """
+
+def _update_cluster_status_or_abort(
+    cluster_name: str,
+    acquire_per_cluster_status_lock: bool,
+    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
+) -> Optional[Dict[str, Any]]:
+    """Update cluster status or abort if the cluster's record has been updated."""
+    transaction_id = global_user_state.get_transaction_id(cluster_name)
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
@@ -1566,12 +1574,17 @@ def _update_cluster_status_no_lock(
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
         record['status'] = status_lib.ClusterStatus.UP
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True,
-                                                is_launch=False)
-        return record
+        with _maybe_acquire_lock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
+                                 timeout=cluster_status_lock_timeout,
+                                 acquire_lock=acquire_per_cluster_status_lock):
+            global_user_state.add_or_update_cluster(
+                cluster_name,
+                handle,
+                requested_resources=None,
+                ready=True,
+                is_launch=False,
+                expected_transaction_id=transaction_id)
+        return global_user_state.get_cluster_from_name(cluster_name)
 
     # All cases below are transitioning the cluster to non-UP states.
     if len(node_statuses) > handle.launched_nodes:
@@ -1633,48 +1646,61 @@ def _update_cluster_status_no_lock(
                       backends.CloudVmRayBackend) and record['autostop'] >= 0:
             if not backend.is_definitely_autostopping(handle,
                                                       stream_logs=False):
-                # Friendly hint.
-                autostop = record['autostop']
-                maybe_down_str = ' --down' if record['to_down'] else ''
-                noun = 'autodown' if record['to_down'] else 'autostop'
+                # Autostop cancellation should not be applied when there is
+                # another launch in progress, and it should be aborted when the
+                # cluster's record has been updated, i.e., the transaction_id
+                # has been changed.
+                with _maybe_acquire_lock(
+                        CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
+                        timeout=cluster_status_lock_timeout,
+                        acquire_lock=acquire_per_cluster_status_lock):
+                    if (transaction_id == global_user_state.get_transaction_id(
+                            cluster_name)):
+                        # Friendly hint.
+                        autostop = record['autostop']
+                        maybe_down_str = ' --down' if record['to_down'] else ''
+                        noun = 'autodown' if record['to_down'] else 'autostop'
 
-                # Reset the autostopping as the cluster is abnormal, and may
-                # not correctly autostop. Resetting the autostop will let
-                # the user know that the autostop may not happen to avoid
-                # leakages from the assumption that the cluster will autostop.
-                success = True
-                reset_local_autostop = True
-                try:
-                    backend.set_autostop(handle, -1, stream_logs=False)
-                except exceptions.CommandError as e:
-                    success = False
-                    if e.returncode == 255:
-                        logger.debug(f'The cluster is likely {noun}ed.')
-                        reset_local_autostop = False
-                except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-                    success = False
-                    logger.debug(f'Failed to reset autostop. Due to '
-                                 f'{common_utils.format_exception(e)}')
-                if reset_local_autostop:
-                    global_user_state.set_cluster_autostop_value(
-                        handle.cluster_name, -1, to_down=False)
+                        # Reset the autostopping as the cluster is abnormal, and may
+                        # not correctly autostop. Resetting the autostop will let
+                        # the user know that the autostop may not happen to avoid
+                        # leakages from the assumption that the cluster will autostop.
+                        success = True
+                        reset_local_autostop = True
+                        try:
+                            backend.set_autostop(handle, -1, stream_logs=False)
+                        except exceptions.CommandError as e:
+                            success = False
+                            if e.returncode == 255:
+                                logger.debug(f'The cluster is likely {noun}ed.')
+                                reset_local_autostop = False
+                        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                            success = False
+                            logger.debug(f'Failed to reset autostop. Due to '
+                                         f'{common_utils.format_exception(e)}')
+                        if reset_local_autostop:
+                            global_user_state.set_cluster_autostop_value(
+                                handle.cluster_name,
+                                -1,
+                                to_down=False,
+                                expected_transaction_id=transaction_id)
 
-                if success:
-                    operation_str = (f'Canceled {noun} on the cluster '
-                                     f'{cluster_name!r}')
-                else:
-                    operation_str = (
-                        f'Attempted to cancel {noun} on the '
-                        f'cluster {cluster_name!r} with best effort')
-                yellow = colorama.Fore.YELLOW
-                bright = colorama.Style.BRIGHT
-                reset = colorama.Style.RESET_ALL
-                ux_utils.console_newline()
-                logger.warning(
-                    f'{yellow}{operation_str}, since it is found to be in an '
-                    f'abnormal state. To fix, try running: {reset}{bright}sky '
-                    f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
-                    f'{reset}')
+                        if success:
+                            operation_str = (f'Canceled {noun} on the cluster '
+                                             f'{cluster_name!r}')
+                        else:
+                            operation_str = (
+                                f'Attempted to cancel {noun} on the '
+                                f'cluster {cluster_name!r} with best effort')
+                        yellow = colorama.Fore.YELLOW
+                        bright = colorama.Style.BRIGHT
+                        reset = colorama.Style.RESET_ALL
+                        ux_utils.console_newline()
+                        logger.warning(
+                            f'{yellow}{operation_str}, since it is found to be in an '
+                            f'abnormal state. To fix, try running: {reset}{bright}sky '
+                            f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
+                            f'{reset}')
             else:
                 ux_utils.console_newline()
                 operation_str = 'autodowning' if record[
@@ -1688,16 +1714,27 @@ def _update_cluster_status_no_lock(
         # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=False,
-                                                is_launch=False)
+        with _maybe_acquire_lock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
+                                 timeout=cluster_status_lock_timeout,
+                                 acquire_lock=acquire_per_cluster_status_lock):
+            global_user_state.add_or_update_cluster(
+                cluster_name,
+                handle,
+                requested_resources=None,
+                ready=False,
+                is_launch=False,
+                expected_transaction_id=transaction_id)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
-    backend = backends.CloudVmRayBackend()
-    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
+    with _maybe_acquire_lock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
+                             timeout=cluster_status_lock_timeout,
+                             acquire_lock=acquire_per_cluster_status_lock):
+        if transaction_id == global_user_state.get_transaction_id(cluster_name):
+            backend = backends.CloudVmRayBackend()
+            backend.post_teardown_cleanup(handle,
+                                          terminate=to_terminate,
+                                          purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
@@ -1735,13 +1772,10 @@ def _update_cluster_status(
           fetched from the cloud provider or there are leaked nodes causing
           the node number larger than expected.
     """
-    if not acquire_per_cluster_status_lock:
-        return _update_cluster_status_no_lock(cluster_name)
-
     try:
-        with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
-                               timeout=cluster_status_lock_timeout):
-            return _update_cluster_status_no_lock(cluster_name)
+        return _update_cluster_status_or_abort(cluster_name,
+                                               acquire_per_cluster_status_lock,
+                                               cluster_status_lock_timeout)
     except filelock.Timeout:
         logger.debug('Refreshing status: Failed get the lock for cluster '
                      f'{cluster_name!r}. Using the cached status.')

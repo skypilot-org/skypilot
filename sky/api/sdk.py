@@ -39,8 +39,6 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
-    from sky import clouds
-    from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 
