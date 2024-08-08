@@ -55,6 +55,7 @@ ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
                            '\nTo debug, run: {debug_cmd}')
 
 KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
+KIND_NODE_NAME = 'skypilot-control-plane'  # Node name used by sky local up
 
 # Port-forward proxy command constants
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
@@ -1726,6 +1727,7 @@ def is_inside_kubernetes() -> bool:
     """Returns whether the caller is running inside a Kubernetes cluster"""
     return 'KUBERNETES_SERVICE_HOST' in os.environ
 
+
 def is_kind_cluster() -> bool:
     """Returns whether the caller is running on or in a local KinD cluster"""
     curr_kube_config = get_current_kube_config_context_name()
@@ -1733,5 +1735,8 @@ def is_kind_cluster() -> bool:
         # If kubeconfig is not present, we could be inside a KinD cluster
         # Test if it is a kind cluster by inspecting nodes
         nodes = get_kubernetes_nodes()
-
-    running_kind = curr_kube_config == KIND_CONTEXT_NAME
+        for node in nodes:
+            if node.metadata.name == KIND_NODE_NAME:
+                return True
+        return False
+    return curr_kube_config == KIND_CONTEXT_NAME

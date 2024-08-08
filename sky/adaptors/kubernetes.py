@@ -81,6 +81,10 @@ def _load_config():
         kubernetes.config.load_incluster_config()
     except kubernetes.config.config_exception.ConfigException:
         try:
+            # Remove the environment variables set by the in-cluster config
+            # to avoid conflicts with the kubeconfig file
+            del os.environ['KUBERNETES_SERVICE_HOST']
+            del os.environ['KUBERNETES_SERVICE_PORT']
             kubernetes.config.load_kube_config()
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = ''

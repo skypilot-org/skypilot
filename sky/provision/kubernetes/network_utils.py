@@ -25,8 +25,7 @@ def get_port_mode(
         mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
     """Get the port mode from the provider config."""
 
-    curr_kube_config = kubernetes_utils.get_current_kube_config_context_name()
-    running_kind = curr_kube_config == kubernetes_utils.KIND_CONTEXT_NAME
+    running_kind = kubernetes_utils.is_kind_cluster()
 
     if running_kind:
         # If running in kind (`sky local up`), use ingress mode
@@ -247,6 +246,9 @@ def get_ingress_external_ip_and_ports(
             if (kubernetes_utils.is_inside_kubernetes() and
                     ingress_service.spec.cluster_ip is not None):
                 ip = ingress_service.spec.cluster_ip
+                http_port = 80
+                https_port = 443
+                return ip, (http_port, https_port)
             else:
                 ip = 'localhost'
         ports = ingress_service.spec.ports
