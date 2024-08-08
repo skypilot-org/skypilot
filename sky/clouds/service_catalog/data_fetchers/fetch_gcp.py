@@ -54,6 +54,110 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
+
+# TPU V5 is not visible in specific zones. We hardcode the missing zones here.
+# NOTE(dev): Keep the zones and the df in sync.
+# TODO(tian): Double check if the price is correct.
+TPU_V5_MISSING_ZONES = ['europe-west4-b']
+HIDDEN_V5P_TPU_DF = pd.read_csv(
+    io.StringIO(
+        textwrap.dedent("""\
+ AcceleratorName,AcceleratorCount,Region,AvailabilityZone
+ tpu-v5p-8,1,europe-west4,europe-west4-b
+ tpu-v5p-16,1,europe-west4,europe-west4-b
+ tpu-v5p-32,1,europe-west4,europe-west4-b
+ tpu-v5p-64,1,europe-west4,europe-west4-b
+ tpu-v5p-128,1,europe-west4,europe-west4-b
+ tpu-v5p-256,1,europe-west4,europe-west4-b
+ tpu-v5p-384,1,europe-west4,europe-west4-b
+ tpu-v5p-512,1,europe-west4,europe-west4-b
+ tpu-v5p-640,1,europe-west4,europe-west4-b
+ tpu-v5p-768,1,europe-west4,europe-west4-b
+ tpu-v5p-896,1,europe-west4,europe-west4-b
+ tpu-v5p-1024,1,europe-west4,europe-west4-b
+ tpu-v5p-1152,1,europe-west4,europe-west4-b
+ tpu-v5p-1280,1,europe-west4,europe-west4-b
+ tpu-v5p-1408,1,europe-west4,europe-west4-b
+ tpu-v5p-1536,1,europe-west4,europe-west4-b
+ tpu-v5p-1664,1,europe-west4,europe-west4-b
+ tpu-v5p-1792,1,europe-west4,europe-west4-b
+ tpu-v5p-1920,1,europe-west4,europe-west4-b
+ tpu-v5p-2048,1,europe-west4,europe-west4-b
+ tpu-v5p-2176,1,europe-west4,europe-west4-b
+ tpu-v5p-2304,1,europe-west4,europe-west4-b
+ tpu-v5p-2432,1,europe-west4,europe-west4-b
+ tpu-v5p-2560,1,europe-west4,europe-west4-b
+ tpu-v5p-2688,1,europe-west4,europe-west4-b
+ tpu-v5p-2816,1,europe-west4,europe-west4-b
+ tpu-v5p-2944,1,europe-west4,europe-west4-b
+ tpu-v5p-3072,1,europe-west4,europe-west4-b
+ tpu-v5p-3200,1,europe-west4,europe-west4-b
+ tpu-v5p-3328,1,europe-west4,europe-west4-b
+ tpu-v5p-3456,1,europe-west4,europe-west4-b
+ tpu-v5p-3584,1,europe-west4,europe-west4-b
+ tpu-v5p-3712,1,europe-west4,europe-west4-b
+ tpu-v5p-3840,1,europe-west4,europe-west4-b
+ tpu-v5p-3968,1,europe-west4,europe-west4-b
+ tpu-v5p-4096,1,europe-west4,europe-west4-b
+ tpu-v5p-4224,1,europe-west4,europe-west4-b
+ tpu-v5p-4352,1,europe-west4,europe-west4-b
+ tpu-v5p-4480,1,europe-west4,europe-west4-b
+ tpu-v5p-4608,1,europe-west4,europe-west4-b
+ tpu-v5p-4736,1,europe-west4,europe-west4-b
+ tpu-v5p-4864,1,europe-west4,europe-west4-b
+ tpu-v5p-4992,1,europe-west4,europe-west4-b
+ tpu-v5p-5120,1,europe-west4,europe-west4-b
+ tpu-v5p-5248,1,europe-west4,europe-west4-b
+ tpu-v5p-5376,1,europe-west4,europe-west4-b
+ tpu-v5p-5504,1,europe-west4,europe-west4-b
+ tpu-v5p-5632,1,europe-west4,europe-west4-b
+ tpu-v5p-5760,1,europe-west4,europe-west4-b
+ tpu-v5p-5888,1,europe-west4,europe-west4-b
+ tpu-v5p-6016,1,europe-west4,europe-west4-b
+ tpu-v5p-6144,1,europe-west4,europe-west4-b
+ tpu-v5p-6272,1,europe-west4,europe-west4-b
+ tpu-v5p-6400,1,europe-west4,europe-west4-b
+ tpu-v5p-6528,1,europe-west4,europe-west4-b
+ tpu-v5p-6656,1,europe-west4,europe-west4-b
+ tpu-v5p-6784,1,europe-west4,europe-west4-b
+ tpu-v5p-6912,1,europe-west4,europe-west4-b
+ tpu-v5p-7040,1,europe-west4,europe-west4-b
+ tpu-v5p-7168,1,europe-west4,europe-west4-b
+ tpu-v5p-7296,1,europe-west4,europe-west4-b
+ tpu-v5p-7424,1,europe-west4,europe-west4-b
+ tpu-v5p-7552,1,europe-west4,europe-west4-b
+ tpu-v5p-7680,1,europe-west4,europe-west4-b
+ tpu-v5p-7808,1,europe-west4,europe-west4-b
+ tpu-v5p-7936,1,europe-west4,europe-west4-b
+ tpu-v5p-8064,1,europe-west4,europe-west4-b
+ tpu-v5p-8192,1,europe-west4,europe-west4-b
+ tpu-v5p-8320,1,europe-west4,europe-west4-b
+ tpu-v5p-8448,1,europe-west4,europe-west4-b
+ tpu-v5p-8704,1,europe-west4,europe-west4-b
+ tpu-v5p-8832,1,europe-west4,europe-west4-b
+ tpu-v5p-8960,1,europe-west4,europe-west4-b
+ tpu-v5p-9216,1,europe-west4,europe-west4-b
+ tpu-v5p-9472,1,europe-west4,europe-west4-b
+ tpu-v5p-9600,1,europe-west4,europe-west4-b
+ tpu-v5p-9728,1,europe-west4,europe-west4-b
+ tpu-v5p-9856,1,europe-west4,europe-west4-b
+ tpu-v5p-9984,1,europe-west4,europe-west4-b
+ tpu-v5p-10240,1,europe-west4,europe-west4-b
+ tpu-v5p-10368,1,europe-west4,europe-west4-b
+ tpu-v5p-10496,1,europe-west4,europe-west4-b
+ tpu-v5p-10752,1,europe-west4,europe-west4-b
+ tpu-v5p-10880,1,europe-west4,europe-west4-b
+ tpu-v5p-11008,1,europe-west4,europe-west4-b
+ tpu-v5p-11136,1,europe-west4,europe-west4-b
+ tpu-v5p-11264,1,europe-west4,europe-west4-b
+ tpu-v5p-11520,1,europe-west4,europe-west4-b
+ tpu-v5p-11648,1,europe-west4,europe-west4-b
+ tpu-v5p-11776,1,europe-west4,europe-west4-b
+ tpu-v5p-11904,1,europe-west4,europe-west4-b
+ tpu-v5p-12032,1,europe-west4,europe-west4-b
+ tpu-v5p-12160,1,europe-west4,europe-west4-b
+ tpu-v5p-12288,1,europe-west4,europe-west4-b
+ """)))
 # FIXME(woosuk): Remove this once the bug is fixed.
 # See https://github.com/skypilot-org/skypilot/issues/1759#issue-1619614345
 TPU_V4_HOST_DF = pd.read_csv(
@@ -415,6 +519,9 @@ def get_gpu_df(skus: List[Dict[str, Any]],
 
 
 def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
+    # Use hardcoded TPU V5 data as it is invisible in some zones.
+    if zone in TPU_V5_MISSING_ZONES:
+        return HIDDEN_V5P_TPU_DF[HIDDEN_V5P_TPU_DF['AvailabilityZone'] == zone]
     tpus = []
     parent = f'projects/{project_id}/locations/{zone}'
     tpus_request = tpu_client.projects().locations().acceleratorTypes().list(
