@@ -23,15 +23,15 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky import status_lib
-from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
-from sky.utils import common_utils
+from sky.utils import common
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -39,8 +39,6 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
 
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
@@ -306,7 +304,7 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         raise ValueError(f'Failed to update service: {resp.text}')
 
     service_msg = resp.json()['message']
-    return common_utils.encode_payload(service_msg)
+    return message_utils.encode_payload(service_msg)
 
 
 def _get_service_status(
@@ -346,11 +344,13 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return common_utils.encode_payload(service_statuses)
+    return message_utils.encode_payload(service_statuses,
+                                        payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = common_utils.decode_payload(payload)
+    service_statuses_encoded = message_utils.decode_payload(
+        payload, payload_type='service_status')
     service_statuses = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
@@ -362,11 +362,11 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
 
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
-    return common_utils.encode_payload(new_version)
+    return message_utils.encode_payload(new_version)
 
 
 def load_version_string(payload: str) -> str:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def _terminate_failed_services(
@@ -495,7 +495,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         'be supported in the future).')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
-                return common_utils.encode_payload(lb_port)
+                return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
@@ -518,7 +518,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
 
 
 def load_service_initialization_result(payload: str) -> int:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -732,19 +732,22 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
+    from sky.api import sdk  # pylint: disable=import-outside-toplevel
+
     # Don't use backend_utils.is_controller_up since it is too slow.
-    handle = global_user_state.get_handle_from_cluster_name(
-        SKY_SERVE_CONTROLLER_NAME)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None:
-        return '-'
+    # handle = global_user_state.get_handle_from_cluster_name(
+    #     common.SKY_SERVE_CONTROLLER_NAME)
+    # assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    # if handle is None:
+    #     return '-'
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
     try:
-        endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                               load_balancer_port).get(
-                                                   load_balancer_port, None)
+        request_id = sdk.endpoints(common.SKY_SERVE_CONTROLLER_NAME,
+                                   load_balancer_port)
+        endpoints = sdk.stream_and_get(request_id)
+        endpoint = endpoints.get(str(load_balancer_port), None)
     except exceptions.ClusterNotUpError:
         return '-'
     if endpoint is None:

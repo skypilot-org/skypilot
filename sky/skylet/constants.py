@@ -253,6 +253,14 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
+# The log for SkyPilot API server.
+API_SERVER_LOGS = '~/.sky/api_server/server.log'
+# The lock for creating the SkyPilot API server.
+API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
+
+# The name for the environment variable that stores the URL of the SkyPilot
+# API server.
+SKY_API_SERVER_URL_ENV_VAR = 'SKYPILOT_API_SERVER_ENDPOINT'
 
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'
@@ -282,3 +290,10 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
+
+# The placeholder for the local skypilot config path in file mounts for
+# controllers.
+LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
+
+# Path to the generated cluster config yamls and ssh configs.
+SKY_USER_FILE_PATH = '~/.sky/generated'

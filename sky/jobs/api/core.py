@@ -1,16 +1,17 @@
 """SDK functions for managed jobs."""
 import os
 import tempfile
+import typing
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
 
-import sky
 from sky import backends
+from sky import core
 from sky import exceptions
+from sky import execution
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -22,8 +23,14 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import sky
+
+# TODO(zhwu): Fix jobs API to work with API server
 
 
 @usage_lib.entrypoint
@@ -124,14 +131,14 @@ def launch(
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
         sky_logging.print('Launching jobs controller...')
-        sky.launch(task=controller_task,
-                   stream_logs=stream_logs,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   _disable_controller_check=True)
+        execution.launch(task=controller_task,
+                         cluster_name=controller_name,
+                         detach_run=detach_run,
+                         stream_logs=stream_logs,
+                         idle_minutes_to_autostop=skylet_constants.
+                         CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                         retry_until_up=True,
+                         _disable_controller_check=True)
 
 
 @usage_lib.entrypoint
@@ -182,7 +189,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         rich_utils.force_update_status(
             '[cyan] Checking managed jobs - restarting '
             'controller[/]')
-        handle = sky.start(jobs_controller_type.value.cluster_name)
+        handle = core.start(jobs_controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
         rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
 
@@ -307,24 +314,3 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                   job_name=name,
                                   follow=follow,
                                   controller=controller)
-
-
-spot_launch = common_utils.deprecated_function(
-    launch,
-    name='sky.jobs.launch',
-    deprecated_name='spot_launch',
-    removing_version='0.8.0',
-    override_argument={'use_spot': True})
-spot_queue = common_utils.deprecated_function(queue,
-                                              name='sky.jobs.queue',
-                                              deprecated_name='spot_queue',
-                                              removing_version='0.8.0')
-spot_cancel = common_utils.deprecated_function(cancel,
-                                               name='sky.jobs.cancel',
-                                               deprecated_name='spot_cancel',
-                                               removing_version='0.8.0')
-spot_tail_logs = common_utils.deprecated_function(
-    tail_logs,
-    name='sky.jobs.tail_logs',
-    deprecated_name='spot_tail_logs',
-    removing_version='0.8.0')

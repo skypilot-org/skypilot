@@ -16,6 +16,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -100,7 +101,7 @@ def _execute(
     handle: Optional[backends.ResourceHandle] = None,
     backend: Optional[backends.Backend] = None,
     retry_until_up: bool = False,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
@@ -110,6 +111,7 @@ def _execute(
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -255,7 +257,9 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
-                    dag = sky.optimize(dag, minimize=optimize_target)
+                    dag = optimizer.Optimizer.optimize(dag,
+                                                       minimize=optimize_target,
+                                                       quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
@@ -333,8 +337,11 @@ def _execute(
             # pollute the controller logs.
             #
             # Disable the usage collection for this status command.
-            env = dict(os.environ,
-                       **{env_options.Options.DISABLE_LOGGING.value: '1'})
+            env = dict(
+                os.environ, **{
+                    env_options.Options.DISABLE_LOGGING.value: '1',
+                    env_options.Options.CLI_LOCAL_MODE.value: '1'
+                })
             subprocess_utils.run(
                 'sky status --no-show-managed-jobs --no-show-services', env=env)
         print()
@@ -353,13 +360,14 @@ def launch(
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
@@ -374,6 +382,16 @@ def launch(
     Currently, the first argument must be a sky.Task, or (EXPERIMENTAL advanced
     usage) a sky.Dag. In the latter case, currently it must contain a single
     task; support for pipelines/general DAGs are in experimental branches.
+
+    Example:
+        .. code-block:: python
+
+            import sky
+            task = sky.Task(run='echo hello SkyPilot')
+            task.set_resources(
+                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+            sky.launch(task, cluster_name='my-cluster')
+
 
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
@@ -413,15 +431,6 @@ def launch(
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
 
-    Example:
-        .. code-block:: python
-
-            import sky
-            task = sky.Task(run='echo hello SkyPilot')
-            task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
-            sky.launch(task, cluster_name='my-cluster')
-
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
             owned by another user.
@@ -450,6 +459,7 @@ def launch(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+
     entrypoint = task
     if not _disable_controller_check:
         controller_utils.check_cluster_name_not_controller(
@@ -470,6 +480,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,

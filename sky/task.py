@@ -184,6 +184,8 @@ class Task:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
+        # Internal use only.
+        file_mounts_mapping: Optional[Dict[str, str]] = None,
     ):
         """Initializes a Task.
 
@@ -280,6 +282,10 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
+
+        # For internal use only.
+        self.file_mounts_mapping = file_mounts_mapping
+
         # Check if the task is legal.
         self._validate()
 
@@ -335,7 +341,10 @@ class Task:
 
         # Workdir.
         if self.workdir is not None:
-            full_workdir = os.path.abspath(os.path.expanduser(self.workdir))
+            workdir = self.workdir
+            if self.file_mounts_mapping is not None:
+                workdir = self.file_mounts_mapping.get(workdir, workdir)
+            full_workdir = os.path.expanduser(workdir)
             if not os.path.isdir(full_workdir):
                 # Symlink to a dir is legal (isdir() follows symlinks).
                 with ux_utils.print_exception_no_traceback():
@@ -406,6 +415,7 @@ class Task:
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
             event_callback=config.pop('event_callback', None),
+            file_mounts_mapping=config.pop('file_mounts_mapping', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -750,15 +760,16 @@ class Task:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
-            if not data_utils.is_cloud_store_url(source):
-                if (not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))) and
-                        not source.startswith('skypilot:')):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'File mount source {source!r} does not exist '
-                            'locally. To fix: check if it exists, and correct '
-                            'the path.')
+            # if not data_utils.is_cloud_store_url(source):
+            # file_mounts[target] = os.path.expanduser(source)
+            # if (not os.path.exists(
+            #         os.path.abspath(os.path.expanduser(source))) and
+            #         not source.startswith('skypilot:')):
+            #     with ux_utils.print_exception_no_traceback():
+            #         raise ValueError(
+            #             f'File mount source {source!r} does not exist '
+            #             'locally. To fix: check if it exists, and correct '
+            #             'the path.')
             # TODO(zhwu): /home/username/sky_workdir as the target path need
             # to be filtered out as well.
             if (target == constants.SKY_REMOTE_WORKDIR and
@@ -1130,6 +1141,8 @@ class Task:
                 mount_path: storage.to_yaml_config()
                 for mount_path, storage in self.storage_mounts.items()
             })
+
+        add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
         return config
 
     def get_required_cloud_features(

@@ -16,6 +16,7 @@ from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -47,7 +48,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Azure(clouds.Cloud):
     """Azure."""
 

@@ -1,15 +1,15 @@
 """Modules for SkyServe services."""
 import os
 
+from sky.serve.api.sdk import down
+from sky.serve.api.sdk import status
+from sky.serve.api.sdk import tail_logs
+from sky.serve.api.sdk import up
+from sky.serve.api.sdk import update
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import INITIAL_VERSION
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
 from sky.serve.constants import SKYSERVE_METADATA_DIR
-from sky.serve.core import down
-from sky.serve.core import status
-from sky.serve.core import tail_logs
-from sky.serve.core import up
-from sky.serve.core import update
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import DEFAULT_UPDATE_MODE
@@ -19,7 +19,6 @@ from sky.serve.serve_utils import generate_service_name
 from sky.serve.serve_utils import get_endpoint
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceComponent
-from sky.serve.serve_utils import SKY_SERVE_CONTROLLER_NAME
 from sky.serve.serve_utils import UpdateMode
 from sky.serve.service_spec import SkyServiceSpec
 
@@ -39,7 +38,6 @@ __all__ = [
     'ServiceStatus',
     'ServeCodeGen',
     'SkyServiceSpec',
-    'SKY_SERVE_CONTROLLER_NAME',
     'SKYSERVE_METADATA_DIR',
     'status',
     'tail_logs',

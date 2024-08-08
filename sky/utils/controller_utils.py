@@ -22,10 +22,9 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
-from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -43,9 +42,6 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '~/.sky/config.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
-
-# The placeholder for the local skypilot config path in file mounts.
-LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
 
 @dataclasses.dataclass
@@ -93,8 +89,10 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         candidate_cluster_names=[
-            managed_job_utils.JOB_CONTROLLER_NAME,
-            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
+            # TODO(zhwu): by having the controller name loaded in common, it
+            # will not respect the latest updated user hash.
+            common.JOB_CONTROLLER_NAME,
+            common.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
@@ -125,7 +123,7 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
+        candidate_cluster_names=[common.SKY_SERVE_CONTROLLER_NAME],
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
@@ -554,15 +552,16 @@ def replace_skypilot_config_path_in_file_mounts(
             # Empty config. Remove the placeholder below.
             to_replace = False
         for remote_path, local_path in list(file_mounts.items()):
-            if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+            if local_path == constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
                 if to_replace:
                     file_mounts[remote_path] = f.name
                     replaced = True
                 else:
                     del file_mounts[remote_path]
     if replaced:
-        logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
-                     f'the real path in file mounts: {file_mounts}')
+        logger.debug(
+            f'Replaced {constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} '
+            f'with the real path in file mounts: {file_mounts}')
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',

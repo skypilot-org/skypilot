@@ -7,9 +7,9 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
 
@@ -23,7 +23,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Fluidstack(clouds.Cloud):
     """FluidStack GPU Cloud."""
 
@@ -317,14 +317,3 @@ class Fluidstack(clouds.Cloud):
             'new_york_1_usa': 'fsuser',
             'illinois_1_usa': 'fsuser'
         }.get(region, 'ubuntu')
-
-    @classmethod
-    def query_status(
-        cls,
-        name: str,
-        tag_filters: Dict[str, str],
-        region: Optional[str],
-        zone: Optional[str],
-        **kwargs,
-    ) -> List[status_lib.ClusterStatus]:
-        return []

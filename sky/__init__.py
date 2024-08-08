@@ -82,38 +82,41 @@ _set_http_proxy_env_vars()
 from sky import backends
 from sky import benchmark
 from sky import clouds
+# from sky.api.sdk import download_logs
+from sky.api.sdk import autostop
+from sky.api.sdk import cancel
+from sky.api.sdk import cost_report
+from sky.api.sdk import down
+from sky.api.sdk import exec  # pylint: disable=redefined-builtin
+from sky.api.sdk import get
+from sky.api.sdk import job_status
+from sky.api.sdk import launch
+from sky.api.sdk import optimize
+from sky.api.sdk import queue
+from sky.api.sdk import start
+from sky.api.sdk import status
+from sky.api.sdk import stop
+from sky.api.sdk import storage_delete
+from sky.api.sdk import storage_ls
+from sky.api.sdk import stream_and_get
+from sky.api.sdk import tail_logs
 from sky.clouds.service_catalog import list_accelerators
-from sky.core import autostop
-from sky.core import cancel
-from sky.core import cost_report
-from sky.core import down
-from sky.core import download_logs
-from sky.core import job_status
-from sky.core import queue
-from sky.core import start
-from sky.core import status
-from sky.core import stop
-from sky.core import storage_delete
-from sky.core import storage_ls
-from sky.core import tail_logs
 from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
-from sky.execution import exec  # pylint: disable=redefined-builtin
-from sky.execution import launch
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
 # should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
-from sky.jobs.core import spot_cancel
-from sky.jobs.core import spot_launch
-from sky.jobs.core import spot_queue
-from sky.jobs.core import spot_tail_logs
+from sky.jobs.api.sdk import spot_cancel
+from sky.jobs.api.sdk import spot_launch
+from sky.jobs.api.sdk import spot_queue
+from sky.jobs.api.sdk import spot_tail_logs
 from sky.optimizer import Optimizer
-from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
-from sky.status_lib import ClusterStatus
 from sky.task import Task
+from sky.utils.common import OptimizeTarget
+from sky.utils.status_lib import ClusterStatus
 
 # Aliases.
 IBM = clouds.IBM
@@ -129,7 +132,6 @@ Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
-optimize = Optimizer.optimize
 
 __all__ = [
     '__version__',
@@ -161,11 +163,10 @@ __all__ = [
     'Dag',
     'Task',
     'Resources',
-    # execution APIs
+    # core APIs
     'launch',
     'exec',
     'spot_launch',
-    # core APIs
     'status',
     'start',
     'stop',
@@ -177,12 +178,16 @@ __all__ = [
     'cancel',
     'tail_logs',
     'spot_tail_logs',
-    'download_logs',
+    # 'download_logs',
     'job_status',
     # core APIs Spot Job Management
     'spot_queue',
     'spot_cancel',
+    'spot_tail_logs',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # Request APIs
+    'get',
+    'stream_and_get',
 ]

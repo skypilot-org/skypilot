@@ -69,8 +69,8 @@ class SkyLocalUpLineProcessor(LineProcessor):
     """A processor for `sky local up` log lines."""
 
     def __enter__(self):
-        status = rich_utils.safe_status('[bold cyan]Creating local cluster - '
-                                        'initializing Kubernetes')
+        status = rich_utils.client_status('[bold cyan]Creating local cluster - '
+                                          'initializing Kubernetes')
         self.status_display = status
         self.status_display.start()
 

@@ -4,8 +4,8 @@ import typing
 from typing import List, Optional
 
 if typing.TYPE_CHECKING:
-    from sky import status_lib
     from sky.backends import backend
+    from sky.utils import status_lib
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
@@ -113,7 +113,7 @@ class ClusterNotUpError(Exception):
 
     def __init__(self,
                  message: str,
-                 cluster_status: Optional['status_lib.ClusterStatus'],
+                 cluster_status: Optional['status_lib.ClusterStatus'] = None,
                  handle: Optional['backend.ResourceHandle'] = None) -> None:
         super().__init__(message)
         self.cluster_status = cluster_status

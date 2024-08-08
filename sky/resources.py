@@ -9,7 +9,6 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -18,6 +17,7 @@ from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -808,12 +808,8 @@ class Resources:
         """
         if self._job_recovery is None:
             return
-        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery} '
-                    'is not supported. The strategy should be among '
-                    f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
+        # Validate the job recovery strategy
+        registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(self._job_recovery)
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
@@ -1370,7 +1366,7 @@ class Resources:
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
         resources_fields = {}
-        resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
+        resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)

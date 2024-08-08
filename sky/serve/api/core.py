@@ -8,6 +8,7 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
+from sky import execution
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -17,6 +18,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import resources_utils
@@ -134,7 +136,7 @@ def up(
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
-        controller_name = serve_utils.SKY_SERVE_CONTROLLER_NAME
+        controller_name = common.SKY_SERVE_CONTROLLER_NAME
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
@@ -192,9 +194,8 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-        controller_job_id, controller_handle = sky.launch(
+        controller_job_id, controller_handle = execution.launch(
             task=controller_task,
-            stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -482,7 +483,7 @@ def down(
     except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {serve_utils.SKY_SERVE_CONTROLLER_NAME}` '
+            f'by `sky status -r {common.SKY_SERVE_CONTROLLER_NAME}` '
             'and try again.') from e
 
     try:

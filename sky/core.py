@@ -12,15 +12,24 @@ from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
+
+try:
+    import fastapi
+    app_router = fastapi.APIRouter()
+except ImportError:
+    app_router = None
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -34,9 +43,18 @@ logger = sky_logging.init_logger(__name__)
 # pylint: disable=redefined-builtin
 
 
+def router(name, *args, **kwargs):
+    """Decorator for adding a function to the API router."""
+    if app_router is None:
+        return lambda func: func
+    return getattr(app_router, name)(*args, **kwargs)
+
+
 @usage_lib.entrypoint
-def status(cluster_names: Optional[Union[str, List[str]]] = None,
-           refresh: bool = False) -> List[Dict[str, Any]]:
+def status(
+    cluster_names: Optional[Union[str, List[str]]] = None,
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get cluster statuses.
 
@@ -110,7 +128,7 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       cluster_names=cluster_names)
 
 
-def endpoints(cluster: str,
+def endpoints(cluster_name: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
@@ -128,8 +146,8 @@ def endpoints(cluster: str,
             are exposed yet.
     """
     with rich_utils.safe_status('[bold cyan]Fetching endpoints for cluster '
-                                f'{cluster}...[/]'):
-        return backend_utils.get_endpoints(cluster=cluster, port=port)
+                                f'{cluster_name}...[/]'):
+        return backend_utils.get_endpoints(cluster=cluster_name, port=port)
 
 
 @usage_lib.entrypoint
@@ -835,3 +853,58 @@ def storage_delete(name: str) -> None:
                                       source=handle.source,
                                       sync_on_reconstruction=False)
         storage_object.delete()
+
+
+# ===================
+# = Catalog Observe =
+# ===================
+@usage_lib.entrypoint
+def enabled_clouds() -> List[clouds.Cloud]:
+    return global_user_state.get_cached_enabled_clouds()
+
+
+@usage_lib.entrypoint
+def realtime_gpu_availability(
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None
+) -> List[common.RealtimeGpuAvailability]:
+
+    counts, capacity, available = service_catalog.list_accelerator_realtime(
+        gpus_only=True,
+        clouds='kubernetes',
+        name_filter=name_filter,
+        region_filter=None,
+        quantity_filter=quantity_filter,
+        case_sensitive=False)
+    assert (set(counts.keys()) == set(capacity.keys()) == set(
+        available.keys())), (f'Keys of counts ({list(counts.keys())}), '
+                             f'capacity ({list(capacity.keys())}), '
+                             f'and available ({list(available.keys())}) '
+                             'must be same.')
+    if len(counts) == 0:
+        err_msg = 'No GPUs found in Kubernetes cluster. '
+        debug_msg = 'To further debug, run: sky check '
+        if name_filter is not None:
+            gpu_info_msg = f' {name_filter!r}'
+            if quantity_filter is not None:
+                gpu_info_msg += (' with requested quantity'
+                                 f' {quantity_filter}')
+            err_msg = (f'Resources{gpu_info_msg} not found '
+                       'in Kubernetes cluster. ')
+            debug_msg = ('To show available accelerators on kubernetes,'
+                         ' run: sky show-gpus --cloud kubernetes ')
+        full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+                        debug_msg)
+        raise ValueError(full_err_msg)
+
+    realtime_gpu_availability_list: List[common.RealtimeGpuAvailability] = []
+
+    for gpu, _ in sorted(counts.items()):
+        realtime_gpu_availability_list.append(
+            common.RealtimeGpuAvailability(
+                gpu,
+                counts.pop(gpu),
+                capacity[gpu],
+                available[gpu],
+            ))
+    return realtime_gpu_availability_list

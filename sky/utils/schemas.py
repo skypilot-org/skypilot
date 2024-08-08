@@ -512,6 +512,9 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            'file_mounts_mapping': {
+                'type': 'object',
+            },
             **_experimental_task_schema(),
         }
     }
@@ -877,6 +880,19 @@ def get_config_schema():
         }
     }
 
+    api_server = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'endpoint': {
+                'type': 'string',
+                # Apply validation for URL
+                'pattern': r'^https?://.*$',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -898,6 +914,7 @@ def get_config_schema():
             'allowed_clouds': allowed_clouds,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
+            'api_server': api_server,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

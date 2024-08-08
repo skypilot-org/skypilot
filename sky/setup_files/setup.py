@@ -162,6 +162,12 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    'fastapi',
+    'uvicorn[standard]',
+    # Some pydantic versions are not compatible with ray. Adopted from ray's
+    # setup.py: https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
+    # We need pydantic>=2.0.0 for API server and client.
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3,>2',
 ]
 
 local_ray = [
@@ -185,9 +191,6 @@ remote = [
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
-    # Some pydantic versions are not compatible with ray. Adopted from ray's
-    # setup.py: https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
-    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
@@ -279,7 +282,7 @@ setuptools.setup(
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
-        'console_scripts': ['sky = sky.cli:cli'],
+        'console_scripts': ['sky = sky.api.cli:cli'],
     },
     include_package_data=True,
     classifiers=[

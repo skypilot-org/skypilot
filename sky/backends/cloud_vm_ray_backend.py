@@ -36,7 +36,6 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
@@ -55,11 +54,15 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -1144,7 +1147,7 @@ class RetryingVmProvisioner(object):
     def __init__(self,
                  log_dir: str,
                  dag: 'dag.Dag',
-                 optimize_target: 'optimizer.OptimizeTarget',
+                 optimize_target: 'common.OptimizeTarget',
                  requested_features: Set[clouds.CloudImplementationFeatures],
                  local_wheel_path: pathlib.Path,
                  wheel_hash: str,
@@ -2030,7 +2033,7 @@ class RetryingVmProvisioner(object):
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
             try:
-                self._dag = sky.optimize(
+                self._dag = optimizer.Optimizer.optimize(
                     self._dag,
                     minimize=self._optimize_target,
                     blocked_resources=self._blocked_resources)
@@ -2529,6 +2532,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 pass
 
 
+@registry.BACKEND_REGISTRY.register
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
@@ -2537,7 +2541,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
       * Cloud providers' implementations under clouds/
     """
 
-    NAME = 'cloudvmray'
+    NAME = 'cloudvmraybackend'
 
     # Backward compatibility, with the old name of the handle.
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
@@ -2567,7 +2571,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._dag = kwargs.pop('dag', self._dag)
         self._optimize_target = kwargs.pop(
             'optimize_target',
-            self._optimize_target) or optimizer.OptimizeTarget.COST
+            self._optimize_target) or common.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
@@ -2837,8 +2841,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, handle.external_ips(),
-                    handle.external_ssh_ports(), lock_path)
+                    prev_cluster_status, lock_path)
                 return handle
 
             cluster_config_file = config_dict['ray']
@@ -2910,7 +2913,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, ip_list, ssh_port_list, lock_path)
+                prev_cluster_status, lock_path)
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -2928,7 +2931,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            ip_list: List[str], ssh_port_list: List[int],
             lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
@@ -2988,15 +2990,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
-            auth_config = backend_utils.ssh_credential_from_yaml(
-                handle.cluster_yaml,
-                ssh_user=handle.ssh_user,
-                docker_user=handle.docker_user)
-            backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
-                                                      ip_list, auth_config,
-                                                      ssh_port_list,
-                                                      handle.docker_user,
-                                                      handle.ssh_user)
+            # Do not need to add the cluster to ssh config file on API server.
+            # auth_config = backend_utils.ssh_credential_from_yaml(
+            #     handle.cluster_yaml,
+            #     ssh_user=handle.ssh_user,
+            #     docker_user=handle.docker_user)
+            # cluster_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
+            #                                           ip_list, auth_config,
+            #                                           ssh_port_list,
+            #                                           handle.docker_user,
+            #                                           handle.ssh_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
@@ -3527,7 +3530,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
-        cancelled_ids = common_utils.decode_payload(stdout)
+        cancelled_ids = message_utils.decode_payload(stdout)
         if cancelled_ids:
             logger.info(
                 f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
@@ -3554,7 +3557,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = common_utils.decode_payload(run_timestamps)
+        run_timestamps = message_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -4050,10 +4053,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
-        backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
-                                                     handle.head_ip,
-                                                     auth_config,
-                                                     handle.docker_user)
+        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
+            handle.cluster_name, handle.head_ip, auth_config,
+            handle.docker_user)
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
@@ -4132,7 +4134,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=stream_logs)
 
         if returncode == 0:
-            return common_utils.decode_payload(stdout)
+            return message_utils.decode_payload(stdout)
         logger.debug('Failed to check if cluster is autostopping with '
                      f'{returncode}: {stdout+stderr}\n'
                      f'Command: {code}')
@@ -4362,7 +4364,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
-                assert os.path.exists(full_src), f'{full_src} does not exist.'
+                assert os.path.exists(
+                    full_src), f'{full_src} does not exist. {file_mounts}'
                 src_size = backend_utils.path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(

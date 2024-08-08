@@ -32,6 +32,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
@@ -41,12 +42,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Add user hash so that two users don't have the same controller VM on
-# shared-account clouds such as GCP.
-JOB_CONTROLLER_NAME: str = (
-    f'sky-jobs-controller-{common_utils.get_user_hash()}')
-LEGACY_JOB_CONTROLLER_NAME: str = (
-    f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
@@ -167,7 +162,7 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     subprocess_utils.handle_returncode(returncode, code,
                                        'Failed to get job time.',
                                        stdout + stderr)
-    stdout = common_utils.decode_payload(stdout)
+    stdout = message_utils.decode_payload(stdout)
     return float(stdout)
 
 
@@ -534,12 +529,12 @@ def dump_managed_job_queue() -> str:
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
-    return common_utils.encode_payload(jobs)
+    return message_utils.encode_payload(jobs)
 
 
 def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
-    jobs = common_utils.decode_payload(payload)
+    jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
     return jobs
