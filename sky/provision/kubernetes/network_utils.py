@@ -242,7 +242,8 @@ def get_ingress_external_ip_and_ports(
             ip = ingress_service.metadata.annotations.get(
                 'skypilot.co/external-ip', None)
         if ip is None:
-            # If running inside a Kubernetes cluster, use the internal cluster IP
+            # If running inside a Kubernetes cluster, use the internal
+            # cluster IP
             if (kubernetes_utils.is_inside_kubernetes() and
                     ingress_service.spec.cluster_ip is not None):
                 ip = ingress_service.spec.cluster_ip
