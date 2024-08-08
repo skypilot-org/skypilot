@@ -1652,3 +1652,18 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
 
     fake_kube_response = FakeKubeResponse(object_dict)
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
+
+
+def is_inside_kubernetes() -> bool:
+    """Returns whether the caller is running inside a Kubernetes cluster"""
+    return 'KUBERNETES_SERVICE_HOST' in os.environ
+
+def is_kind_cluster() -> bool:
+    """Returns whether the caller is running on or in a local KinD cluster"""
+    curr_kube_config = get_current_kube_config_context_name()
+    if curr_kube_config is None:
+        # If kubeconfig is not present, we could be inside a KinD cluster
+        # Test if it is a kind cluster by inspecting nodes
+        nodes = get_kubernetes_nodes()
+
+    running_kind = curr_kube_config == KIND_CONTEXT_NAME
