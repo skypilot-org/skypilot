@@ -137,6 +137,7 @@ class DockerInitializer:
         self.initialized = False
         # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
+        # TODO(zhwu): Only add sudo when required
         self.docker_cmd = 'podman' if use_podman else 'sudo docker'
         self.log_path = log_path
 
