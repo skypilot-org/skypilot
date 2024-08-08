@@ -22,6 +22,8 @@ def cudo_api():
 
 
 def get_gpu_info(count, model):
+    if not model:
+        return ''
     mem = utils.cudo_gpu_mem[model]
     # pylint: disable=line-too-long
     # {'Name': 'A4000', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}"
@@ -45,14 +47,11 @@ def get_instance_type(machine_type, vcpu, mem, gpu):
         mem) + 'gb'
 
 
-def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
+def machine_types():
     try:
         api = cudo_api()
-        types = api.list_vm_machine_types2(mem_gib,
-                                          vcpu_count,
-                                          gpu=gpu_count,
-                                          gpu_model=gpu_model)
-        return types.to_dict()
+        types = api.list_vm_machine_types2()
+        return types.to_dict()['machine_types']
     except cudo_compute.rest.ApiException as e:
         raise e
 
@@ -60,24 +59,33 @@ def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
 def update_prices():
     rows = []
     for spec in utils.machine_specs:
-        mts = machine_types('', spec['mem'], spec['vcpu'], spec['gpu'])
-        for hc in mts['host_configs']:
-            if not utils.gpu_exists(hc['gpu_model']):
+        mts = machine_types()
+        for mt in mts:
+            if not utils.gpu_exists(mt['gpu_model']):
                 continue
-            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(hc['gpu_model'])
+            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(mt['gpu_model'])
+            gpu_count = spec['gpu']
+            if not accelerator_name:
+                gpu_count = 0
+
+            price = ((float(mt['vcpu_price_hr']['value']) * spec['vcpu'])
+                     + (float(mt['memory_gib_price_hr']['value']) * spec['mem'])
+                     + (float(mt['gpu_price_hr']['value']) * gpu_count))
             row = {
-                'instance_type': get_instance_type(hc['machine_type'],
+                'instance_type': get_instance_type(mt['machine_type'],
                                                    spec['vcpu'], spec['mem'],
-                                                   spec['gpu']),
+                                                   gpu_count),
                 'accelerator_name': accelerator_name,
-                'accelerator_count': str(spec['gpu']) + '.0',
+                'accelerator_count': str(gpu_count) + '.0',
                 'vcpus': str(spec['vcpu']),
                 'memory_gib': str(spec['mem']),
-                'price': hc['total_price_hr']['value'],
-                'region': hc['data_center_id'],
-                'gpu_info': get_gpu_info(spec['gpu'], accelerator_name),
+                'price': str(price),
+                'region': mt['data_center_id'],
+                'gpu_info': get_gpu_info(gpu_count, accelerator_name),
             }
-            rows.append(row)
+            if mt['total_gpu_free'] > 0 or gpu_count == 0:
+                rows.append(row)
+
     path = VMS_CSV
     with open(path, 'w', encoding='utf-8') as file:
         file.write(

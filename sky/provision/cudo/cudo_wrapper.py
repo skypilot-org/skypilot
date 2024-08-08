@@ -140,7 +140,8 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
             if type['data_center_id'] == data_center_id and type['gpu_model'] == gpu_model:
                 exists = True
 
-                if type['max_gpu_free'] > gpu_count and type['total_gpu_free'] > (gpu_count * to_start_count):
+                if (type['max_gpu_free'] > gpu_count and type['total_gpu_free'] > (
+                        gpu_count * to_start_count)) or gpu_count == 0:
                     gpu_count_okay = True
 
                 if type['max_memory_gib_free'] > mem and type['total_memory_gib_free'] > (mem * to_start_count):

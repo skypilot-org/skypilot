@@ -1,6 +1,7 @@
 """Cudo catalog helper."""
 
 cudo_gpu_model = {
+    '': '',
     'V100': 'V100',
     'A40 (compute mode)': 'A40',
     'A40': 'A40',
