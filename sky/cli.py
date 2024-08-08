@@ -3079,7 +3079,8 @@ def show_gpus(
         node_info_dict = kubernetes_utils.get_kubernetes_node_info()
         for node_name, node_info in node_info_dict.items():
             node_table.add_row([
-                node_name, node_info.gpu_type, node_info.total['nvidia.com/gpu'],
+                node_name, node_info.gpu_type,
+                node_info.total['nvidia.com/gpu'],
                 node_info.free['nvidia.com/gpu']
             ])
         return node_table
@@ -3127,7 +3128,8 @@ def show_gpus(
                     k8s_node_table = _get_kubernetes_node_info_table()
                     yield '\n\n'
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node GPU availability{colorama.Style.RESET_ALL}\n')
+                           f'Kubernetes per node GPU availability'
+                           f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
                     k8s_messages += (

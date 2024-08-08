@@ -1661,8 +1661,8 @@ class KubernetesNodeInfo:
     name: str
     gpu_type: Optional[str]
     # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
-    total: Dict[str, str]
-    free: Dict[str, str]
+    total: Dict[str, int]
+    free: Dict[str, int]
 
 
 def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
@@ -1690,14 +1690,14 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
 
     for node in nodes:
         allocated_qty = 0
-        if label_key is not None and label_key in node.metadata.labels:
+        if label_formatter is not None and label_key in node.metadata.labels:
             accelerator_name = label_formatter.get_accelerator_from_label_value(
                 node.metadata.labels.get(label_key))
         else:
             accelerator_name = None
 
-        accelerator_count = int(
-            node.status.allocatable.get('nvidia.com/gpu', 0))
+        accelerator_count = int(node.status.allocatable.get(
+            'nvidia.com/gpu', 0))
 
         for pod in pods:
             # Get all the pods running on the node
