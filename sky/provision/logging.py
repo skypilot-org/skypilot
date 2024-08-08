@@ -9,6 +9,7 @@ import sys
 import threading
 
 from sky import sky_logging
+from sky.utils import log_utils
 
 
 @dataclasses.dataclass
@@ -24,7 +25,7 @@ def setup_provision_logging(log_dir: str):
     try:
         # Redirect underlying provision logs to file.
         log_path = os.path.expanduser(os.path.join(log_dir, 'provision.log'))
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        log_utils.create_and_symlink_log_dir(os.path.dirname(log_path))
         log_abs_path = pathlib.Path(log_path).expanduser().absolute()
         fh = logging.FileHandler(log_abs_path)
         fh.setFormatter(sky_logging.FORMATTER)

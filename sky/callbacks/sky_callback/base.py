@@ -9,6 +9,8 @@ from typing import List, Optional
 
 import psutil
 
+from sky.utils import log_utils
+
 # NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR_SYMLINK
 # in sky/benchmark/benchmark_utils.py.
 _SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
@@ -39,7 +41,7 @@ class BaseCallback:
             log_dir, 'sky-callback-' +
             datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f'))
         log_dir = os.path.expanduser(log_dir)
-        os.makedirs(log_dir, exist_ok=True)
+        log_utils.create_and_symlink_log_dir(log_dir)
 
         # TODO(woosuk): Do not store the entire timestamps.
         self._step_begins = []
