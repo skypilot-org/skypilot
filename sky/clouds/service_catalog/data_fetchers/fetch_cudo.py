@@ -48,7 +48,7 @@ def get_instance_type(machine_type, vcpu, mem, gpu):
 def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
     try:
         api = cudo_api()
-        types = api.list_vm_machine_types(mem_gib,
+        types = api.list_vm_machine_types2(mem_gib,
                                           vcpu_count,
                                           gpu=gpu_count,
                                           gpu_model=gpu_model)

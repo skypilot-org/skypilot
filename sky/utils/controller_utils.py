@@ -251,7 +251,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
                 'pip list | grep cudo-compute > /dev/null 2>&1 || '
-                'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
+                'pip install "cudo-compute>=0.2.0" > /dev/null 2>&1 && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
         if controller == Controllers.JOBS_CONTROLLER:

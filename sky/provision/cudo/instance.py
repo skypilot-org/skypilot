@@ -24,7 +24,7 @@ def _filter_instances(cluster_name_on_cloud: str,
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name').startsWith(cluster_name_on_cloud):
+        if instance.get('name').startswith(cluster_name_on_cloud):
             filtered_nodes[instance_id] = instance
     return filtered_nodes
 
@@ -87,8 +87,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         logger.warning(f'run_instances: {e}')
         raise
     for _ in range(to_start_count):
+        node_type = 'head' if head_instance_id is None else 'worker'
 
-        if head_instance_id:
+        if node_type == 'head':
             node_name = f'{cluster_name_on_cloud}-head'
         else:
             node_name = f'{cluster_name_on_cloud}-worker-{uuid.uuid4().hex[:4]}'
@@ -102,7 +103,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 vcpu_count=vcpu_count,
                 gpu_count=gpu_count,
                 tags={},
-                disk_size=config.node_config['DiskSize'])
+                disk_size=config.node_config['DiskSize'],
+                node_type=node_type,
+                net_name=cluster_name_on_cloud)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
