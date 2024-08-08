@@ -137,7 +137,7 @@ class DockerInitializer:
         self.initialized = False
         # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
-        self.docker_cmd = 'podman' if use_podman else 'docker'
+        self.docker_cmd = 'podman' if use_podman else 'sudo docker'
         self.log_path = log_path
 
     def _run(self,
@@ -253,12 +253,13 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
-                '[ -f /etc/docker/daemon.json ] || '
+                '{ which jq || sudo apt update && sudo apt install -y jq; } && '
+                '{ [ -f /etc/docker/daemon.json ] || '
                 'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
-                'sudo systemctl restart docker')
+                'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
