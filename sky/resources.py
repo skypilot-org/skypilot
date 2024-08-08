@@ -1037,7 +1037,8 @@ class Resources:
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, dryrun)
         if 'docker_run_options' in cloud_specific_variables:
-            docker_run_options.extend(cloud_specific_variables['docker_run_options'])
+            docker_run_options.extend(
+                cloud_specific_variables['docker_run_options'])
         return dict(
             cloud_specific_variables,
             **{
