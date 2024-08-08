@@ -230,3 +230,117 @@ To fix this, you can choose one of the following solutions:
     # Other commands using PyTorch 2.2.0
     ...
 
+How Can I Use Elastic Fiber Adapter (EFA) with a Capacity Reservation on AWS?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Install the aws cli tool
+
+2. Download `this cloud formation input json <https://gist.github.com/jasonkrone/7e6a446b24e1bc93ed0c25869e5353ff>`__ and `this cloud formation template <https://gist.github.com/jasonkrone/7e6a446b24e1bc93ed0c25869e5353ff>`__.
+    - Credit to Sean Smith at AWS for creating the cloud formation template.
+
+3. Edit the coudformation input json to specify the values for VPCName, PrimarySubnetAZ, and CreateS3Endpoint
+
+4. Make a VPC and security group using cloudformation
+
+    .. code-block:: bash
+
+       aws cloudformation create-stack \
+        --cli-input-json file://./configs/cloud_formation/cli-input.json \
+        --template-body "$(cat ./configs/cloud_formation/parallelcluster-prerequisites.yaml)" \
+        --capabilities CAPABILITY_IAM
+
+5. Launch your head node via skypilot.
+    - edit the ~/.sky/config.yaml file to include the head node security group name and vpc name
+
+        .. code-block:: yaml
+
+             aws:
+               security_group_name: {your-security-group-name}
+               vpc_name: {your-vpc-name}
+
+    - launch the head node via
+
+        .. code-block:: bash
+
+            sky launch ./configs/sky/train/capacity_reservation/head_node.yaml
+
+    - for reference, here's what was in head_node.yaml
+
+        .. code-block:: yaml
+
+             name: capacity-res-head-node
+
+             resources:
+               instance_type: m5.8xlarge
+               cloud: aws
+               region: us-east-1
+               zone: us-east-1f
+
+             num_nodes: 1
+
+             workdir: ~/Developer/jpt
+
+             setup:
+               echo "setup"
+
+             run: |
+               echo "running"
+
+6. Launch the worker nodes via skypilot
+    - Edit the ~/.sky/config.yaml file to (a) specify the worker node security group name (b) set use_internal_ip to true (c) list the ssh_proxy_command to connect to the workers via the head node.
+
+        .. code-block:: yaml
+
+              aws:
+                  security_group_name: my-worker-security-group
+                  vpc_name: {your-vpc-name}
+                  use_internal_ips: true
+                  ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ubuntu@{host-ip-address}
+
+    - Modify the networking interface section of _create_instances inside aws/instance.py to use EFA. Note: here we assume you're using a P.5 instance which supports 32 cards.
+
+        .. code-block:: python
+
+              use_efa = True
+              # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/p5-efa.html
+              if use_efa:
+                  network_interfaces = [{
+                      'SubnetId': subnet_id,
+                      "NetworkCardIndex": 0,
+                      "DeviceIndex": 0,
+                      "AssociatePublicIpAddress": False,
+                      "Groups": security_group_ids,
+                      "InterfaceType": "efa",
+                      "DeleteOnTermination": True
+                  }]
+                  for card_idx in range(1, 32):
+                      network_interfaces.append({
+                          'SubnetId': subnet_id,
+                          "NetworkCardIndex": card_idx,
+                          "DeviceIndex": 1,
+                          "InterfaceType": "efa",
+                          "AssociatePublicIpAddress": False,
+                          "Groups": security_group_ids,
+                          "DeleteOnTermination": True
+                      })
+              conf['NetworkInterfaces'] = network_interfaces
+
+    - If you're using a capacity reservation, modify the aws-ray.yaml.j2 template to include the reservation info i.e.
+
+        .. code-block:: yaml
+
+                 InstanceMarketOptions:
+                      MarketType: capacity-block
+                 CapacityReservationSpecification:
+                   CapacityReservationTarget:
+                     CapacityReservationId: {reservation-id}
+
+    - If you're using a capacity reservation, modify _create_node_tag in aws/instance.py to filter out keys that are reserved for AWS internal use
+
+        .. code-block:: python
+
+               target_instance_tags = [tag for tag in target_instance.tags if tag["Key"][:4] != "aws:"]
+               ec2.meta.client.create_tags(
+                   Resources=[target_instance.id],
+                   Tags=target_instance_tags + node_tag,
+               )
