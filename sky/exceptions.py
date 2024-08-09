@@ -39,7 +39,6 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
         exception_class = getattr(builtins, exception_type)
     else:
         exception_class = globals().get(exception_type, Exception)
-    print(serialized)
     return exception_class(*serialized['args'], **serialized['attributes'])
 
 
