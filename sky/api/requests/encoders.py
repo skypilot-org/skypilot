@@ -15,7 +15,10 @@ handlers: Dict[str, Any] = {}
 
 
 def pickle_and_encode(obj: Any) -> str:
-    return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
+    try:
+        return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
+    except TypeError as e:
+        raise ValueError(f'Failed to pickle object: {obj}') from e
 
 
 def register_handler(*names: str):

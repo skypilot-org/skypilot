@@ -1,6 +1,8 @@
 """Exceptions."""
 import builtins
 import enum
+import traceback
+import types
 import typing
 from typing import Any, Dict, List, Optional
 
@@ -26,8 +28,14 @@ def serialize_exception(e) -> Dict[str, Any]:
     attributes = e.__dict__.copy()
     if 'stacktrace' in attributes:
         del attributes['stacktrace']
+    for attr_k in list(attributes.keys()):
+        attr_v = attributes[attr_k]
+        if isinstance(attr_v, types.TracebackType):
+            attributes[attr_k] = traceback.format_tb(attr_v)
+
     data = {
         'type': e.__class__.__name__,
+        'message': str(e),
         'args': e.args,
         'attributes': attributes,
         'stacktrace': stacktrace,
@@ -43,7 +51,10 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
     if hasattr(builtins, exception_type):
         exception_class = getattr(builtins, exception_type)
     else:
-        exception_class = globals().get(exception_type, Exception)
+        exception_class = globals().get(exception_type, None)
+    if exception_class is None:
+        # Unknown exception type.
+        return Exception(f'{exception_type}: {serialized["message"]}')
     e = exception_class(*serialized['args'], **serialized['attributes'])
     if serialized['stacktrace'] is not None:
         setattr(e, 'stacktrace', serialized['stacktrace'])

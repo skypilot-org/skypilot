@@ -11,10 +11,10 @@ from sky import exceptions
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.api import common as api_common
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
-from sky.api import common as api_common
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
