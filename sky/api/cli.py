@@ -5251,7 +5251,7 @@ def api_get(request_id: Optional[str]):
 @usage_lib.entrypoint
 def api_abort(request_id: str):
     """Abort a request running on API server."""
-    sdk.stream_and_get(sdk.abort(request_id))
+    sdk.abort(request_id)
 
 
 @api.command('server_logs', cls=_DocumentedCodeCommand)

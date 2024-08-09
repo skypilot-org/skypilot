@@ -115,6 +115,10 @@ def kill_children_processes(parent_pids: Optional[Union[
         parent_pids = [parent_pids]
 
     def kill(proc: psutil.Process):
+        if not proc.is_running():
+            # Skip if the process is not running.
+            return
+        print(f'Killing process {proc.pid}', flush=True)
         try:
             if force:
                 proc.kill()
@@ -140,7 +144,7 @@ def kill_children_processes(parent_pids: Optional[Union[
         child_processes = parent_process.children(recursive=True)
         if parent_pids is not None:
             kill(parent_process)
-
+        print(f'Killing child processes: {child_processes}', flush=True)
         for child in child_processes:
             kill(child)
 

@@ -632,5 +632,6 @@ def abort(request_id: str) -> str:
     body = payloads.RequestIdBody(request_id=request_id)
     print(f'Sending abort request to API server for {request_id}')
     response = requests.post(f'{api_common.get_server_url()}/abort',
-                             json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()),
+                             timeout=5)
     return api_common.get_request_id(response)

@@ -47,11 +47,12 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
         os.close(original_stdout)
         os.close(original_stderr)
 
-    logger.info(f'Running task {request_id}')
+    pid = multiprocessing.current_process().pid
+    logger.info(f'Running task {request_id} with pid {pid}')
     with tasks.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
-        request_task.pid = multiprocessing.current_process().pid
+        request_task.pid = pid
         request_task.status = tasks.RequestStatus.RUNNING
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
