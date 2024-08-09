@@ -55,25 +55,6 @@ DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES = 200 * 10**9
 DEFAULT_OBJECT_STORE_MEMORY_PROPORTION = 0.3
 
 
-def _check_helper(cname, template, docker_cmd):
-    return ' '.join([
-        docker_cmd, 'inspect', '-f', '"{{' + template + '}}"', cname, '||',
-        'true'
-    ])
-
-
-def check_docker_running_cmd(cname, docker_cmd):
-    return _check_helper(cname, '.State.Running', docker_cmd)
-
-
-def check_bind_mounts_cmd(cname, docker_cmd):
-    return _check_helper(cname, 'json .Mounts', docker_cmd)
-
-
-def check_docker_image(cname, docker_cmd):
-    return _check_helper(cname, '.Config.Image', docker_cmd)
-
-
 def docker_start_cmds(
     image,
     container_name,
@@ -192,32 +173,103 @@ class DockerInitializer:
             stream_logs=log_err_when_fail)
         return stdout.strip()
 
+    def _check_host_status(self) -> dict:
+        result = self._run(f"""
+                # passing initializer state
+                _self_initialized={"1" if self.initialized else "0"}
+                _docker_socket_wait_timeout_seconds={_DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS}
+
+                # get mem
+                cat /proc/meminfo | grep MemAvailable || true
+
+                # check if docker is installed
+                docker_command_exist=$(command -v {self.docker_cmd})
+                if [[ -n $docker_command_exist && $docker_command_exist == *"docker"* ]]
+                then
+                    docker_installed=1
+                    echo "docker_installed:" "Y"
+                else
+                    docker_installed=0
+                    echo "docker_installed:" "N"
+                fi
+
+                if [[ $docker_installed -eq 1 ]]
+                then
+                    # wait for docker daemon to be ready
+                    docker_ready=0
+                    end_time=$((SECONDS + _docker_socket_wait_timeout_seconds))
+                    while [ $SECONDS -lt $end_time ]; do
+                        if {self.docker_cmd} info >/dev/null 2>&1; then
+                            echo "docker_ready:" "Y"
+                            docker_ready=1
+                            break
+                        else
+                            exec su -l $USER
+                            sleep 5
+                        fi
+                    done
+                    if [[ $docker_ready -eq 0 ]]
+                    then
+                        echo "docker_ready:" "N"
+                    fi
+
+                    # check runtime info
+                    echo "docker_runtime:" $({self.docker_cmd} info -f "{{{{.Runtimes}}}}")
+
+                    if [[ $_self_initialized -eq 0 ]]
+                    then 
+                        # check container status
+                        container_status=$({self.docker_cmd} ps -a --filter name="{self.container_name}" --format "{{{{.Status}}}}")
+                        echo "container_status:" $container_status
+                        # if container is up, check its image
+                        if [[ $container_status == *"Up"* ]]
+                        then
+                            container_image=$({self.docker_cmd} inspect --format='{{{{.Config.Image}}}}' {self.container_name})
+                            echo "container_image:" $container_image
+                        fi
+                    fi 
+                fi
+                echo "status_checking_completed:" "Y"
+            """)
+        ret = {}
+
+        for l in result.split("\n"):
+            if ":" in l:
+                x = l.split(":")
+                k = x[0].strip()
+                v = ":".join(x[1:]).strip()
+                if v in ["Y", "N"]:
+                    v = True if v == "Y" else False
+                if k == "MemAvailable":
+                    k = "mem_available_in_kb"
+                    v = int(v.split()[0])
+                ret[k] = v
+        return ret
+
     def initialize(self) -> str:
         specific_image = self.docker_config['image']
 
-        self._check_docker_installed()
+        status = self._check_host_status()
+        logger.info(f"Host status: {str(status)}")
 
-        # SkyPilot: Check if the container is exited but not removed.
-        # If true, then we can start the container directly.
-        # Notice that we will skip all setup commands, so we need to
-        # manually start the ssh service.
-        if self._check_container_exited():
-            self.initialized = True
-            self._run(f'{self.docker_cmd} start {self.container_name}')
-            self._run('sudo service ssh start', run_env='docker')
-            return self._run('whoami', run_env='docker')
+        if "container_status" in status:
+            if "Exited" in status["container_status"]:
+                logger.info("Container is exited but not removed.")
+                self.initialized = True
+                self._run(f'{self.docker_cmd} start {self.container_name}')
+                self._run('sudo service ssh start', run_env='docker')
+                return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
+        cmd_login = ""
         if 'docker_login_config' in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
-            self._run(
-                f'{self.docker_cmd} login --username '
-                f'{docker_login_config.username} '
-                f'--password {docker_login_config.password} '
-                f'{docker_login_config.server}',
-                wait_for_docker_daemon=True)
+            cmd_login = f'{self.docker_cmd} login --username '\
+                f'{docker_login_config.username} '\
+                f'--password {docker_login_config.password} '\
+                f'{docker_login_config.server};'
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             server_prefix = f'{docker_login_config.server}/'
@@ -227,21 +279,19 @@ class DockerInitializer:
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
                                     'pull_before_run is specified')
-            self._run(f'{self.docker_cmd} pull {specific_image}',
-                      wait_for_docker_daemon=True)
+            cmd_pull = f'{self.docker_cmd} pull {specific_image};'
         else:
-            self._run(
-                f'{self.docker_cmd} image inspect {specific_image} '
-                '1> /dev/null  2>&1 || '
-                f'{self.docker_cmd} pull {specific_image}',
-                wait_for_docker_daemon=True)
+            cmd_pull = f'{self.docker_cmd} image inspect {specific_image} '\
+                '1> /dev/null  2>&1 || '\
+                f'{self.docker_cmd} pull {specific_image};'
 
         logger.info(f'Starting container {self.container_name} with image '
                     f'{specific_image}')
-        container_running = self._check_container_status()
+
+        cmd_run = ""
+        container_running = 'Up' in status.get('container_status', False)
         if container_running:
-            running_image = self._run(
-                check_docker_image(self.container_name, self.docker_cmd))
+            running_image = status.get('container_image', None)
             if running_image != specific_image:
                 logger.error(
                     f'A container with name {self.container_name} is running '
@@ -252,22 +302,42 @@ class DockerInitializer:
             # from GPUs when a systemctl command is called. This is a known
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
-            self._run(
-                '[ -f /etc/docker/daemon.json ] || '
-                'echo "{}" | sudo tee /etc/docker/daemon.json;'
-                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
-                '/etc/docker/daemon.json > /tmp/daemon.json;'
-                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
-                'sudo systemctl restart docker')
+            cmd_run ='[ -f /etc/docker/daemon.json ] || '\
+                'echo "{}" | sudo tee /etc/docker/daemon.json;'\
+                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '\
+                '/etc/docker/daemon.json > /tmp/daemon.json;'\
+                'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'\
+                'sudo systemctl restart docker;'
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
                 self.container_name,
-                self._configure_runtime(
-                    self._auto_configure_shm(user_docker_run_options)),
+                self._configure_runtime(self._auto_configure_shm(
+                    user_docker_run_options,
+                    available_memory=status.get("mem_available_in_kb", None)),
+                                        runtime_output=status.get(
+                                            "docker_runtime", None)),
                 self.docker_cmd,
             )
-            self._run(start_command)
+            cmd_run += "\n" + start_command + ";"
+
+        # Copy local authorized_keys to docker container.
+        # Stop and disable jupyter service. This is to avoid port conflict on
+        # 8080 if we use default deep learning image in GCP, and 8888 if we use
+        # default deep learning image in Azure.
+        # Azure also has a jupyterhub service running on 8081, so we stop and
+        # disable that too.
+        container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
+        cmd_copy = f'{self.docker_cmd} cp ~/.ssh/authorized_keys '\
+            f'{container_name}:/tmp/host_ssh_authorized_keys;'\
+            'sudo systemctl stop jupyter > /dev/null 2>&1 || true;'\
+            'sudo systemctl disable jupyter > /dev/null 2>&1 || true;'\
+            'sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;'\
+            'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;'
+
+        cmd_action = f"{cmd_login} {cmd_pull} {cmd_run} {cmd_copy}"
+        cmd_result = self._run(cmd_action)
+        # logger.debug(f"Command (host) result: {cmd_result}")
 
         # SkyPilot: Setup Commands.
         # TODO(zhwu): the following setups should be aligned with the kubernetes
@@ -279,36 +349,17 @@ class DockerInitializer:
         # commands won't fail.
         # Disable apt-get from asking user input during installation.
         # see https://askubuntu.com/questions/909277/avoiding-user-interaction-with-tzdata-when-installing-certbot-in-a-docker-contai  # pylint: disable=line-too-long
-        self._run(
-            f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '
-            '>> ~/.bashrc;'
-            'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;',
-            run_env='docker')
+        cmd_d_shell = f'echo \'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}\' '\
+            '>> ~/.bashrc;'\
+            'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;'\
+            'source ~/.bashrc;'
         # Install dependencies.
-        self._run(
-            'sudo apt-get update; '
-            # Our mount script will install gcsfuse without fuse package.
-            # We need to install fuse package first to enable storage mount.
-            # The dpkg option is to suppress the prompt for fuse installation.
-            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '
-            'rsync curl wget patch openssh-server python3-pip fuse;',
-            run_env='docker')
-
-        # Copy local authorized_keys to docker container.
-        # Stop and disable jupyter service. This is to avoid port conflict on
-        # 8080 if we use default deep learning image in GCP, and 8888 if we use
-        # default deep learning image in Azure.
-        # Azure also has a jupyterhub service running on 8081, so we stop and
-        # disable that too.
-        container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
-        self._run(
-            f'rsync -e "{self.docker_cmd} exec -i" -avz ~/.ssh/authorized_keys '
-            f'{container_name}:/tmp/host_ssh_authorized_keys;'
-            'sudo systemctl stop jupyter > /dev/null 2>&1 || true;'
-            'sudo systemctl disable jupyter > /dev/null 2>&1 || true;'
-            'sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;'
-            'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;',
-            run_env='host')
+        cmd_d_dep = f'sudo apt-get update; '\
+            'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '\
+            'rsync curl wget patch openssh-server python3-pip fuse;'
+        # Our mount script will install gcsfuse without fuse package.
+        # We need to install fuse package first to enable storage mount.
+        # The dpkg option is to suppress the prompt for fuse installation.
 
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
         # Append the host VM's authorized_keys to the container's authorized_keys.
@@ -319,37 +370,21 @@ class DockerInitializer:
         # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         port = constants.DEFAULT_DOCKER_PORT
         # pylint: disable=anomalous-backslash-in-string
-        self._run(
-            f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'
-            'mkdir -p ~/.ssh;'
-            'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
-            'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'
-            f'{SETUP_ENV_VARS_CMD}',
-            run_env='docker')
+        cmd_d_port = f'sudo sed -i "s/#Port 22/Port {port}/" /etc/ssh/sshd_config;'\
+            'mkdir -p ~/.ssh;'\
+            'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'\
+            'sudo service ssh start;'\
+            'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'\
+            f'{SETUP_ENV_VARS_CMD};'
+
+        cmd_d_action = f"{cmd_d_shell} {cmd_d_dep} {cmd_d_port}"
+        cmd_d_result = self._run(cmd_d_action, run_env='docker')
+        # logger.debug(f"Command (docker) result: {cmd_d_result}")
 
         # SkyPilot: End of Setup Commands.
         docker_user = self._run('whoami', run_env='docker')
         self.initialized = True
         return docker_user
-
-    def _check_docker_installed(self):
-        no_exist = 'NoExist'
-        cleaned_output = self._run(
-            f'command -v {self.docker_cmd} || echo {no_exist!r}')
-        if no_exist in cleaned_output or 'docker' not in cleaned_output:
-            logger.error(
-                f'{self.docker_cmd.capitalize()} not installed. Please use an '
-                f'image with {self.docker_cmd.capitalize()} installed.')
-
-    def _check_container_status(self):
-        if self.initialized:
-            return True
-        output = (self._run(
-            check_docker_running_cmd(self.container_name, self.docker_cmd)))
-        # Checks for the false positive where 'true' is in the container name
-        return 'true' in output.lower(
-        ) and 'no such object' not in output.lower()
 
     def _docker_expand_user(self, string, any_char=False):
         user_pos = string.find('~')
@@ -372,12 +407,15 @@ class DockerInitializer:
 
         return string
 
-    def _configure_runtime(self, run_options: List[str]) -> List[str]:
+    def _configure_runtime(self,
+                           run_options: List[str],
+                           runtime_output=None) -> List[str]:
         if self.docker_config.get('disable_automatic_runtime_detection'):
             return run_options
 
-        runtime_output = (self._run(f'{self.docker_cmd} ' +
-                                    'info -f "{{.Runtimes}}"'))
+        if runtime_output is None:
+            runtime_output = (self._run(f'{self.docker_cmd} ' +
+                                        'info -f "{{.Runtimes}}"'))
         if 'nvidia-container-runtime' in runtime_output:
             try:
                 self._run('nvidia-smi', log_err_when_fail=False)
@@ -392,7 +430,9 @@ class DockerInitializer:
 
         return run_options
 
-    def _auto_configure_shm(self, run_options: List[str]) -> List[str]:
+    def _auto_configure_shm(self,
+                            run_options: List[str],
+                            available_memory=None) -> List[str]:
         if self.docker_config.get('disable_shm_size_detection'):
             return run_options
         for run_opt in run_options:
@@ -401,10 +441,11 @@ class DockerInitializer:
                             f'`run_option`: {run_opt}')
                 return run_options
         try:
-            shm_output = self._run('cat /proc/meminfo || true')
-            available_memory = int([
-                ln for ln in shm_output.split('\n') if 'MemAvailable' in ln
-            ][0].split()[1])
+            if available_memory is None:
+                shm_output = self._run('cat /proc/meminfo || true')
+                available_memory = int([
+                    ln for ln in shm_output.split('\n') if 'MemAvailable' in ln
+                ][0].split()[1])
             available_memory_bytes = available_memory * 1024
             # Overestimate SHM size by 10%
             shm_size = min(
@@ -417,15 +458,3 @@ class DockerInitializer:
             logger.warning(
                 f'Received error while trying to auto-compute SHM size {e}')
             return run_options
-
-    # SkyPilot: New function to check whether a container is exited
-    # (but not removed). This is due to previous `sky stop` command,
-    # which will stop the container but not remove it.
-    def _check_container_exited(self) -> bool:
-        if self.initialized:
-            return True
-        output = (self._run(check_docker_running_cmd(self.container_name,
-                                                     self.docker_cmd),
-                            wait_for_docker_daemon=True))
-        return 'false' in output.lower(
-        ) and 'no such object' not in output.lower()
