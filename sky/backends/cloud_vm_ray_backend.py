@@ -1472,6 +1472,9 @@ class RetryingVmProvisioner(object):
                 # Some clouds, like RunPod, only support exposing ports during
                 # launch. For those clouds, we pass the ports to open in the
                 # `bulk_provision` to expose the ports during provisioning.
+                # If the `bulk_provision` is to apply on an existing cluster,
+                # it should be ignored by the underlying provisioner impl
+                # as it will only apply to newly-created instances.
                 ports_to_open_on_launch = (
                     list(resources_utils.port_ranges_to_set(to_provision.ports))
                     if to_provision.cloud.OPEN_PORTS_VERSION <=
