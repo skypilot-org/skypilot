@@ -104,7 +104,7 @@
         "subnet": {
             "type": "string",
             "metadata": {
-                "descriptions": "Subnet resource id."
+                "description": "Subnet resource id."
             }
         },
         "osDiskTier": {
@@ -123,10 +123,16 @@
             "metadata": {
                 "description": "Base64 encoded cloud-init setup commands."
             }
+        },
+        "location": {
+            "type": "string",
+            "metadata": {
+                "description": "Location of where the resources are allocated." 
+            }
         }
     },
     "variables": {
-        "location": "[resourceGroup().location]",
+        "location": "[parameters('location')]",
         "networkInterfaceNamePrivate": "[concat(parameters('vmName'), '-nic')]",
         "networkInterfaceNamePublic": "[concat(parameters('vmName'), '-nic-public')]",
         "networkInterfaceName": "[if(parameters('provisionPublicIp'), variables('networkInterfaceNamePublic'), variables('networkInterfaceNamePrivate'))]",
@@ -215,7 +221,7 @@
         },
         {
             "type": "Microsoft.Compute/virtualMachines",
-            "apiVersion": "2019-03-01",
+            "apiVersion": "2022-08-01",
             "name": "[concat(parameters('vmName'), copyIndex())]",
             "location": "[variables('location')]",
             "dependsOn": [
@@ -233,6 +239,7 @@
                 "storageProfile": {
                     "osDisk": {
                         "createOption": "fromImage",
+                        "deleteOption": "Delete",
                         "managedDisk": {
                             "storageAccountType": "[parameters('osDiskTier')]"
                         },
@@ -296,6 +303,6 @@
                 "count": "[parameters('vmCount')]",
                 "input": "[reference(concat(variables('networkInterfaceName'), copyIndex())).ipConfigurations[0].properties.privateIPAddress]"
             }
-        }
+          }
     }
 }
