@@ -65,6 +65,8 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
+    # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
+    #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
     if not any(

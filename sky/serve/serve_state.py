@@ -525,3 +525,12 @@ def delete_version(service_name: str, version: int) -> None:
             DELETE FROM version_specs
             WHERE service_name=(?)
             AND version=(?)""", (service_name, version))
+
+
+def delete_all_versions(service_name: str) -> None:
+    """Deletes all versions from the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM version_specs
+            WHERE service_name=(?)""", (service_name,))
