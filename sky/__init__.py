@@ -75,6 +75,7 @@ def _set_http_proxy_env_vars() -> None:
 
 
 _set_http_proxy_env_vars()
+
 # ----------------------------------------------------------------- #
 
 # Keep this order to avoid cyclic imports

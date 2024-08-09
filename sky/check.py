@@ -14,6 +14,10 @@ from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.utils import registry
 from sky.utils import ux_utils
+from sky.utils import rich_utils
+
+CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
+PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
 
 
 def check(
@@ -21,7 +25,9 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
 ) -> List[str]:
-    echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
+    echo = (lambda *_args, **_kwargs: None
+           ) if quiet else lambda *args, **kwargs: click.echo(
+               *args, **kwargs, color=True)
     echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
     disabled_clouds = []
@@ -30,14 +36,13 @@ def check(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
                                           ModuleType]]) -> None:
         cloud_repr, cloud = cloud_tuple
-        echo(f'  Checking {cloud_repr}...', nl=False)
-        try:
-            ok, reason = cloud.check_credentials()
-        except Exception:  # pylint: disable=broad-except
-            # Catch all exceptions to prevent a single cloud from blocking the
-            # check for other clouds.
-            ok, reason = False, traceback.format_exc()
-        echo('\r', nl=False)
+        with rich_utils.safe_status(f'Checking {cloud_repr}...'):
+            try:
+                ok, reason = cloud.check_credentials()
+            except Exception:  # pylint: disable=broad-except
+                # Catch all exceptions to prevent a single cloud from blocking the
+                # check for other clouds.
+                ok, reason = False, traceback.format_exc()
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
         echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
@@ -154,10 +159,15 @@ def check(
 
         # Pretty print for UX.
         if not quiet:
-            enabled_clouds_str = '\n  :heavy_check_mark: '.join(
-                [''] + sorted(all_enabled_clouds))
-            rich.print('\n[green]:tada: Enabled clouds :tada:'
-                       f'{enabled_clouds_str}[/green]')
+            enabled_clouds_str = '\n  ' + '\n  '.join([
+                CHECK_MARK_EMOJI + ' ' + cloud
+                for cloud in sorted(all_enabled_clouds)
+            ])
+            echo(
+                click.style(
+                    f'\n{PARTY_POPPER_EMOJI} Enabled clouds {PARTY_POPPER_EMOJI}'
+                    + enabled_clouds_str,
+                    fg='green'))
     return enabled_clouds
 
 

@@ -625,3 +625,11 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
             raise ValueError(f'Invalid tail argument: {tail}') from e
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
+
+@usage_lib.entrypoint
+def abort(request_id: str) -> str:
+    body = payloads.RequestIdBody(request_id=request_id)
+    print(f'Sending abort request to API server for {request_id}')
+    response = requests.post(f'{api_common.get_server_url()}/abort',
+                             json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)

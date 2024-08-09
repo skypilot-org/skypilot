@@ -1,4 +1,5 @@
 """Executor for the requests."""
+import colorama
 
 import multiprocessing
 import os
@@ -54,11 +55,13 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
         log_path = request_task.log_path
         request_task.pid = multiprocessing.current_process().pid
         request_task.status = tasks.RequestStatus.RUNNING
-    with log_path.open('w') as f:
+    with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
         try:
             os.environ.update(env_vars)
+            # Force color to be enabled.
+            os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()
             return_value = func(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
