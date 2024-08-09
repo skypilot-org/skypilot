@@ -2257,9 +2257,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
-            use_internal_ips = self._use_internal_ips()
-            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips(
-                use_internal_ips)
+            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
             cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
                 force_internal_ips=True)
         else:

@@ -371,7 +371,7 @@ def load_version_string(payload: str) -> str:
 
 def _terminate_failed_services(
         service_name: str,
-        service_status: serve_state.ServiceStatus) -> Optional[str]:
+        service_status: Optional[serve_state.ServiceStatus]) -> Optional[str]:
     """Terminate service in failed status.
 
     Services included in ServiceStatus.failed_statuses() do not have an
@@ -397,6 +397,7 @@ def _terminate_failed_services(
         generate_remote_service_dir_name(service_name))
     shutil.rmtree(service_dir)
     serve_state.remove_service(service_name)
+    serve_state.delete_all_versions(service_name)
 
     if not remaining_replica_clusters:
         return None
@@ -414,21 +415,30 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False)
-        assert service_status is not None, service_name
-        if service_status['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
+        if (service_status is not None and service_status['status']
+                == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
             continue
-        if (service_status['status']
+        # If the `services` and `version_specs` table are not aligned, it might
+        # result in a None service status. In this case, the controller process
+        # is not functioning as well and we should also use the
+        # `_terminate_failed_services` function to clean up the service.
+        # This is a safeguard for a rare case, that is accidentally abort
+        # between `serve_state.add_service` and
+        # `serve_state.add_or_update_version` in service.py.
+        if (service_status is None or service_status['status']
                 in serve_state.ServiceStatus.failed_statuses()):
+            failed_status = (service_status['status']
+                             if service_status is not None else None)
             if purge:
                 message = _terminate_failed_services(service_name,
-                                                     service_status['status'])
+                                                     failed_status)
                 if message is not None:
                     messages.append(message)
             else:
                 messages.append(
                     f'{colorama.Fore.YELLOW}Service {service_name!r} is in '
-                    f'failed status ({service_status["status"]}). Skipping '
+                    f'failed status ({failed_status}). Skipping '
                     'its termination as it could lead to a resource leak. '
                     f'(Use `sky serve down {service_name} --purge` to '
                     'forcefully terminate the service.)'
