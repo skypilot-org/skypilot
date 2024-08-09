@@ -316,13 +316,9 @@ available_node_types:
           image: {{image_id}}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
-          command: ["/bin/bash", "-c"]
+          command: ["/bin/bash", "-c", "--"]
           args: 
             - |
-              FILE_PATTERN="~/sky_logs/*/tasks/*.log"
-              while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
-                sleep 0.1
-              done
               # Tails file and checks every 5 sec for
               # open file handlers with write access
               # closes if none exist
@@ -340,23 +336,31 @@ available_node_types:
                 done
               }
 
-              # Keep track of already monitored files
-              already_monitored=""
-
-              # Infinite loop to continuously check for new files
-              while true; do
-                for file in $(eval echo $FILE_PATTERN); do
-                  if echo $already_monitored | grep -q $file; then
-                    # File is already being monitored
-                    continue
-                  fi
-                  
-                  # Monitor the new file
-                  monitor_file $file &
-                  already_monitored="${already_monitored} ${file}"
+              log_tail() {
+                FILE_PATTERN="~/sky_logs/*/tasks/*.log"
+                while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
+                  sleep 0.1
                 done
-                sleep 0.1
-              done
+
+                # Keep track of already monitored files
+                already_monitored=""
+
+                # Infinite loop to continuously check for new files
+                while true; do
+                  for file in $(eval echo $FILE_PATTERN); do
+                    if echo $already_monitored | grep -q $file; then
+                      # File is already being monitored
+                      continue
+                    fi
+                    
+                    # Monitor the new file
+                    monitor_file $file &
+                    already_monitored="${already_monitored} ${file}"
+                  done
+                  sleep 0.1
+                done
+              }
+              trap : TERM INT; log_tail || sleep infinity & wait
 
           ports:
           - containerPort: 22  # Used for SSH
