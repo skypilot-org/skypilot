@@ -1020,7 +1020,7 @@ class Storage(object):
 
         name = config.pop('name', None)
         source = config.pop('source', None)
-        store = config.pop('store', None)
+        _ = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         if force_delete is None:
@@ -1043,8 +1043,6 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode)
-        if store is not None:
-            storage_obj.add_store(StoreType(store.upper()))
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
