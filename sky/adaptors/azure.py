@@ -193,7 +193,8 @@ def get_client(name: str,
                     # upstream.
                     # Reference: https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # pylint: disable=line-too-long
                     if 'ERROR: AADSTS50020' in str(e):
-                        raise e
+                        with ux_utils.print_exception_no_traceback():
+                            raise e
                     with ux_utils.print_exception_no_traceback():
                         raise sky_exceptions.StorageBucketGetError(
                             'Failed to retreive the container client for the '
