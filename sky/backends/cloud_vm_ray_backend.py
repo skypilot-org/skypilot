@@ -57,6 +57,7 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -4482,7 +4483,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4491,10 +4492,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
+                storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHED)
         }
 
-        # Handle cases when there aren't any Storages with MOUNT mode.
+        # Handle cases when there aren't any Storages with either MOUNT or
+        # MOUNT_CACHED mode.
         if not storage_mounts:
             return
 
@@ -4521,7 +4524,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'successfully without mounting the bucket.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            mount_cmd = store.mount_command(dst)
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+                action_message = 'Mounting'
+            else:
+                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
+                mount_cmd = store.mount_cached_command(dst)
+                action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4533,7 +4542,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=dst,
                     cmd=mount_cmd,
                     run_rsync=False,
-                    action_message='Mounting',
+                    action_message=action_message,
                     log_path=log_path,
                     # Need to source bashrc, as the cloud specific CLI or SDK
                     # may require PATH in bashrc.
@@ -4551,12 +4560,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
                 else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode,
-                        command='to mount',
-                        error_msg=e.error_msg,
-                        detailed_reason=e.detailed_reason) from None
+                    # By default, raising an error caused from mounting_utils
+                    # shows a big heredoc as part of it. Here, we want to
+                    # conditionally show the heredoc only if SKYPILOT_DEBUG
+                    # is set
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason)
+                    else:
+                        # Strip the command (a big heredoc) from the exception
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')

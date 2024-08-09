@@ -1,7 +1,7 @@
 """Miscellaneous Utils for Sky Data
 """
 import concurrent.futures
-from enum import Enum
+import enum
 from multiprocessing import pool
 import os
 import re
@@ -13,6 +13,7 @@ import urllib.parse
 
 from filelock import FileLock
 
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
@@ -21,6 +22,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.utils import common_utils
+from sky.skylet import constants
 from sky.utils import ux_utils
 
 Client = Any
@@ -558,73 +560,112 @@ def get_cos_regions() -> List[str]:
     ]
 
 
-class Rclone():
-    """Static class implementing common utilities of rclone without rclone sdk.
+class Rclone:
+    """Provides methods to manage and generate Rclone configuration profile."""
 
-    Storage providers supported by rclone are required to:
-    - list their rclone profile prefix in RcloneClouds
-    - implement configuration in get_rclone_config()
-    """
+    class RcloneStores(enum.Enum):
+        S3 = 'S3'
+        GCS = 'GCS'
+        IBM = 'IBM'
 
-    RCLONE_CONFIG_PATH = '~/.config/rclone/rclone.conf'
-    _RCLONE_ABS_CONFIG_PATH = os.path.expanduser(RCLONE_CONFIG_PATH)
+        def get_profile_name(self, bucket_name: str) -> str:
+            """Gets the Rclone profile name for a given bucket.
 
-    # Mapping of storage providers using rclone
-    # to their respective profile prefix
-    class RcloneClouds(Enum):
-        IBM = 'sky-ibm-'
+            Args:
+                bucket_name: The name of the bucket.
+
+            Returns:
+                A string containing the Rclone profile name, which combines
+                prefix based on the storage type and the bucket name.
+            """
+            profile_prefix = {
+                Rclone.RcloneStores.S3: 'sky-s3',
+                Rclone.RcloneStores.GCS: 'sky-gcs',
+                Rclone.RcloneStores.IBM: 'sky-ibm',
+            }
+            return f'{profile_prefix[self]}-{bucket_name}'
+
+        def get_config(self,
+                       bucket_name: Optional[str] = None,
+                       rclone_profile_name: Optional[str] = None,
+                       region: Optional[str] = None) -> str:
+            """Generates an Rclone configuration for a specific storage type.
+
+            This method creates an Rclone configuration string based on the storage
+            type and the provided parameters.
+
+            Args:
+                bucket_name: The name of the bucket.
+                rclone_profile_name: The name of the Rclone profile. If not
+                    provided, it will be generated using the bucket_name.
+                region: Region of bucket.
+
+            Returns:
+                A string containing the Rclone configuration.
+
+            Raises:
+                NotImplementedError: If the storage type is not supported.
+            """
+            if rclone_profile_name is None:
+                assert bucket_name is not None
+                rclone_profile_name = self.get_profile_name(bucket_name)
+            if self is Rclone.RcloneStores.S3:
+                aws_credentials = (
+                    aws.session().get_credentials().get_frozen_credentials())
+                access_key_id = aws_credentials.access_key
+                secret_access_key = aws_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = AWS
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.GCS:
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = google cloud storage
+                    project_number = {clouds.GCP.get_project_id()}
+                    bucket_policy_only = true
+                    """)
+            elif self is Rclone.RcloneStores.IBM:
+                access_key_id, secret_access_key = ibm.get_hmac_keys()
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = IBMCOS
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    region = {region}
+                    endpoint = s3.{region}.cloud-object-storage.appdomain.cloud
+                    location_constraint = {region}-smart
+                    acl = private
+                    """)
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise NotImplementedError(
+                        f'Unsupported store type for Rclone: {self}')
+            return config
 
     @staticmethod
-    def generate_rclone_bucket_profile_name(bucket_name: str,
-                                            cloud: RcloneClouds) -> str:
-        """Returns rclone profile name for specified bucket
+    def store_rclone_config(bucket_name: str, cloud: RcloneStores,
+                            region: str) -> str:
+        """Creates rclone configuration files for bucket syncing and mounting.
 
         Args:
-            bucket_name (str): name of bucket
-            cloud (RcloneClouds): enum object of storage provider
-                supported via rclone
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+            region: Region of the bucket.
+
+        Returns:
+            str: The configuration data written to the file.
+
+        Raises:
+            StorageError: If rclone is not installed.
         """
-        try:
-            return cloud.value + bucket_name
-        except AttributeError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Value: {cloud} isn\'t a member of '
-                                 'Rclone.RcloneClouds') from e
-
-    @staticmethod
-    def get_rclone_config(bucket_name: str, cloud: RcloneClouds,
-                          region: str) -> str:
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, cloud)
-        if cloud is Rclone.RcloneClouds.IBM:
-            access_key_id, secret_access_key = ibm.get_hmac_keys()
-            config_data = textwrap.dedent(f"""\
-                [{bucket_rclone_profile}]
-                type = s3
-                provider = IBMCOS
-                access_key_id = {access_key_id}
-                secret_access_key = {secret_access_key}
-                region = {region}
-                endpoint = s3.{region}.cloud-object-storage.appdomain.cloud
-                location_constraint = {region}-smart
-                acl = private
-                """)
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise NotImplementedError('No rclone configuration builder was '
-                                          f'implemented for cloud: {cloud}.')
-        return config_data
-
-    @staticmethod
-    def store_rclone_config(bucket_name: str, cloud: RcloneClouds,
-                            region: str) -> str:
-        """Creates a configuration files for rclone - used for
-        bucket syncing and mounting """
-
-        rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
-        config_data = Rclone.get_rclone_config(bucket_name, cloud, region)
-
-        # Raise exception if rclone isn't installed
+        rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
+        config_data = cloud.get_config(bucket_name=bucket_name, region=region)
         try:
             subprocess.run('rclone version',
                            shell=True,
@@ -638,9 +679,7 @@ class Rclone():
                     '"curl https://rclone.org/install.sh '
                     '| sudo bash" ') from None
 
-        # create ~/.config/rclone/ if doesn't exist
         os.makedirs(os.path.dirname(rclone_config_path), exist_ok=True)
-        # create rclone.conf if doesn't exist
         if not os.path.isfile(rclone_config_path):
             open(rclone_config_path, 'w', encoding='utf-8').close()
 
@@ -661,18 +700,24 @@ class Rclone():
         return config_data
 
     @staticmethod
-    def get_region_from_rclone(bucket_name: str, cloud: RcloneClouds) -> str:
-        """Returns region field of the specified bucket in rclone.conf
-         if bucket exists, else empty string"""
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, cloud)
-        with open(Rclone._RCLONE_ABS_CONFIG_PATH, 'r',
-                  encoding='utf-8') as file:
+    def get_region_from_rclone(bucket_name: str, cloud: RcloneStores) -> str:
+        """Returns the region field of the specified bucket in rclone.conf.
+
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+
+        Returns:
+            The region field if the bucket exists, otherwise an empty string.
+        """
+        rclone_profile = cloud.get_profile_name(bucket_name)
+        rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
+        with open(rclone_config_path, 'r', encoding='utf-8') as file:
             bucket_profile_found = False
             for line in file:
                 if line.lstrip().startswith('#'):  # skip user's comments.
                     continue
-                if line.strip() == f'[{bucket_rclone_profile}]':
+                if line.strip() == f'[{rclone_profile}]':
                     bucket_profile_found = True
                 elif bucket_profile_found and line.startswith('region'):
                     return line.split('=')[1].strip()
@@ -684,36 +729,45 @@ class Rclone():
         return ''
 
     @staticmethod
-    def delete_rclone_bucket_profile(bucket_name: str, cloud: RcloneClouds):
-        """Deletes specified bucket profile for rclone.conf"""
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, cloud)
-        rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
+    def delete_rclone_bucket_profile(bucket_name: str, cloud: RcloneStores):
+        """Deletes specified bucket profile from rclone.conf.
+
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+        """
+        rclone_profile = cloud.get_profile_name(bucket_name)
+        rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
 
         if not os.path.isfile(rclone_config_path):
-            logger.warning(
-                'Failed to locate "rclone.conf" while '
-                f'trying to delete rclone profile: {bucket_rclone_profile}')
+            logger.warning('Failed to locate "rclone.conf" while '
+                           f'trying to delete rclone profile: {rclone_profile}')
             return
 
         with FileLock(rclone_config_path + '.lock'):
             profiles_to_keep = Rclone._remove_bucket_profile_rclone(
                 bucket_name, cloud)
 
-            # write back file without profile: [bucket_rclone_profile]
+            # write back file without profile: [rclone_profile]
             with open(f'{rclone_config_path}', 'w', encoding='utf-8') as file:
                 file.writelines(profiles_to_keep)
 
     @staticmethod
     def _remove_bucket_profile_rclone(bucket_name: str,
-                                      cloud: RcloneClouds) -> List[str]:
-        """Returns rclone profiles without profiles matching
-          [profile_prefix+bucket_name]"""
-        bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-            bucket_name, cloud)
-        rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
+                                      cloud: RcloneStores) -> List[str]:
+        """Returns rclone profiles without profiles matching [profile_prefix+bucket_name].
 
-        with open(f'{rclone_config_path}', 'r', encoding='utf-8') as file:
+        Args:
+            bucket_name: Name of the bucket.
+            cloud: RcloneStores enum representing the cloud provider.
+
+        Returns:
+            Lines to keep in the rclone config file.
+        """
+        rclone_profile_name = cloud.get_profile_name(bucket_name)
+        rclone_config_path = os.path.expanduser(constants.RCLONE_CONFIG_PATH)
+
+        with open(rclone_config_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()  # returns a list of the file's lines
             # delete existing bucket profile matching:
             # '[profile_prefix+bucket_name]'
@@ -726,7 +780,7 @@ class Rclone():
                 # keep user comments only if they aren't under
                 # a profile we are discarding
                 lines_to_keep.append(line)
-            elif f'[{bucket_rclone_profile}]' in line:
+            elif f'[{rclone_profile_name}]' in line:
                 skip_lines = True
             elif skip_lines:
                 if '[' in line:

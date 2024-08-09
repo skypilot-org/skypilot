@@ -1028,7 +1028,7 @@ class Task:
                         assert storage.name is not None, storage
                         # extract region from rclone.conf
                         cos_region = data_utils.Rclone.get_region_from_rclone(
-                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                            storage.name, data_utils.Rclone.RcloneStores.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     self.update_file_mounts({mnt_path: blob_path})
                 else:
@@ -1149,7 +1149,8 @@ class Task:
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT:
+            if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
+                    storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHED):
                 required_features.add(
                     clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
                 break
