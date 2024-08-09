@@ -170,7 +170,12 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
 def _async_call_or_wait(request_id: str, async_call: bool,
                         request_name: str) -> Any:
     if not async_call:
-        return sdk.stream_and_get(request_id)
+        try:
+            return sdk.stream_and_get(request_id)
+        except KeyboardInterrupt:
+            click.secho(f'Interrupted {request_name} request: {request_id}',
+                        fg='red')
+            raise
     else:
         click.secho(f'Submitted {request_name} request: {request_id}',
                     fg='green')
