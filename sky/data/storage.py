@@ -2500,22 +2500,23 @@ class AzureBlobStore(AbstractStore):
             container_url = data_utils.AZURE_CONTAINER_URL.format(
                 storage_account_name=self.storage_account_name,
                 container_name=self.name)
-            container_client = data_utils.create_az_client(
-                client_type='container',
-                container_url=container_url,
-                storage_account_name=self.storage_account_name,
-                resource_group_name=self.resource_group_name)
+            try:
+                container_client = data_utils.create_az_client(
+                    client_type='container',
+                    container_url=container_url,
+                    storage_account_name=self.storage_account_name,
+                    resource_group_name=self.resource_group_name)
+            except azure.exceptions().ClientAuthenticationError as e:
+                if 'ERROR: AADSTS50020' in str(e):
+                    # Caught when failing to obtain container client due to
+                    # lack of permission to passed given private container.
+                    if self.resource_group_name is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.StorageBucketGetError(
+                                _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                                    name=self.name))
+                raise
             if container_client.exists():
-                is_private = (True if
-                              container_client.get_container_properties().get(
-                                  'public_access', None) is None else False)
-                # when user attempts to use private container without
-                # access rights
-                if self.resource_group_name is None and is_private:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketGetError(
-                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                                name=self.name))
                 self._validate_existing_bucket()
                 return container_client.container_name, False
             # when the container name does not exist under the provided
