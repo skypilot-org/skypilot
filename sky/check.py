@@ -5,7 +5,6 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import click
 import colorama
-import rich
 
 from sky import clouds as sky_clouds
 from sky import exceptions
@@ -13,8 +12,9 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.utils import registry
-from sky.utils import ux_utils
 from sky.utils import rich_utils
+from sky.utils import ux_utils
+from sky.api import common as api_common
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
@@ -40,8 +40,8 @@ def check(
             try:
                 ok, reason = cloud.check_credentials()
             except Exception:  # pylint: disable=broad-except
-                # Catch all exceptions to prevent a single cloud from blocking the
-                # check for other clouds.
+                # Catch all exceptions to prevent a single cloud from blocking
+                # the check for other clouds.
                 ok, reason = False, traceback.format_exc()
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
@@ -164,10 +164,11 @@ def check(
                 for cloud in sorted(all_enabled_clouds)
             ])
             echo(
-                click.style(
-                    f'\n{PARTY_POPPER_EMOJI} Enabled clouds {PARTY_POPPER_EMOJI}'
-                    + enabled_clouds_str,
-                    fg='green'))
+                click.style(f'\n{PARTY_POPPER_EMOJI} Enabled clouds '
+                            f'{PARTY_POPPER_EMOJI}' + enabled_clouds_str,
+                            fg='green'))
+            api_server_url = api_common.get_server_url()
+            echo(click.style(f'Using API server: {api_server_url}', fg='blue'))
     return enabled_clouds
 
 

@@ -626,6 +626,7 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
 
+
 @usage_lib.entrypoint
 def abort(request_id: str) -> str:
     body = payloads.RequestIdBody(request_id=request_id)

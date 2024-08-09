@@ -1,6 +1,4 @@
 """Executor for the requests."""
-import colorama
-
 import multiprocessing
 import os
 import sys
