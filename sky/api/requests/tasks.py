@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
+from sky import exceptions
 from sky.api import common
 from sky.api.requests import decoders
 from sky.api.requests import encoders
@@ -83,8 +84,9 @@ class RequestTask:
         """Set the error."""
         # TODO(zhwu): pickle.dump does not work well with custom exceptions if
         # it has more than 1 arguments.
+        serialized = exceptions.serialize_exception(error)
         self.error = {
-            'object': encoders.pickle_and_encode(error),
+            'object': encoders.pickle_and_encode(serialized),
             'type': type(error).__name__,
             'message': str(error),
         }
@@ -93,8 +95,10 @@ class RequestTask:
         """Get the error."""
         if self.error is None:
             return None
+        unpickled = decoders.decode_and_unpickle(self.error['object'])
+        deserialized = exceptions.deserialize_exception(unpickled)
         return {
-            'object': decoders.decode_and_unpickle(self.error['object']),
+            'object': deserialized,
             'type': self.error['type'],
             'message': self.error['message'],
         }

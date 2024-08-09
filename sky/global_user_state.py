@@ -258,8 +258,7 @@ def add_or_update_cluster(cluster_name: str,
         '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?), '
         # transaction_id
         '?'
-        ')'
-        ,
+        ')',
         (
             # name
             cluster_name,

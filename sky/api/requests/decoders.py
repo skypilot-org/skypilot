@@ -2,7 +2,7 @@
 import base64
 import pickle
 import typing
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from sky import jobs as managed_jobs
 from sky.clouds.service_catalog import common
@@ -56,11 +56,10 @@ def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 @register_handler('launch', 'exec')
-def decode_launch(return_value: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        'job_id': return_value['job_id'],
-        'handle': decode_and_unpickle(return_value['handle']),
-    }
+def decode_launch(
+    return_value: Dict[str, Any]
+) -> Tuple[str, 'backends.CloudVmRayResourceHandle']:
+    return return_value['job_id'], decode_and_unpickle(return_value['handle'])
 
 
 @register_handler('start')

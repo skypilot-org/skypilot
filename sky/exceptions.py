@@ -1,7 +1,8 @@
 """Exceptions."""
+import builtins
 import enum
 import typing
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend
@@ -17,6 +18,29 @@ MOUNT_PATH_NON_EMPTY_CODE = 42
 INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
+
+
+def serialize_exception(e) -> Dict[str, Any]:
+    """Serialize the exception."""
+    data = {
+        'type': e.__class__.__name__,
+        'args': e.args,
+        'attributes': e.__dict__,
+    }
+    if hasattr(e, 'serialize'):
+        data.update(e.serialize())
+    return data
+
+
+def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
+    """Deserialize the exception."""
+    exception_type = serialized['type']
+    if hasattr(builtins, exception_type):
+        exception_class = getattr(builtins, exception_type)
+    else:
+        exception_class = globals().get(exception_type, Exception)
+    print(serialized)
+    return exception_class(*serialized['args'], **serialized['attributes'])
 
 
 class ResourcesUnavailableError(Exception):
@@ -106,6 +130,13 @@ class CommandError(Exception):
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}')
         super().__init__(message)
+
+    def serialize(self) -> Dict[str, Any]:
+        serialized = self.__dict__.copy()
+        return {
+            'args': tuple(),
+            'attributes': serialized,
+        }
 
 
 class ClusterNotUpError(Exception):
@@ -273,6 +304,12 @@ class AWSAzFetchingError(Exception):
         self.reason = reason
 
         super().__init__(reason.message)
+
+    def serialize(self) -> Dict[str, Any]:
+        return {
+            'args': tuple(),
+            'attributes': self.__dict__,
+        }
 
 
 class ServeUserTerminatedError(Exception):
