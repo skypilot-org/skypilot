@@ -48,6 +48,7 @@ from sky import global_user_state
 from sky import jobs
 from sky import serve
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -1105,7 +1106,9 @@ def test_azure_storage_mounts_with_stop():
     default_region = 'eastus'
     storage_account_name = (
         storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-            region=default_region, user_hash=common_utils.get_user_hash()))
+            region=default_region,
+            user_hash=common_utils.get_user_hash(),
+            subscription_hash=azure.get_subscription_hash()))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     template_str = pathlib.Path(
@@ -4289,7 +4292,8 @@ class TestStorageWithCredentials:
             storage_account_name = (
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                    user_hash=common_utils.get_user_hash(),
+                    subscription_hash=azure.get_subscription_hash()))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage container delete '
@@ -4328,7 +4332,8 @@ class TestStorageWithCredentials:
             ) else (
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                    user_hash=common_utils.get_user_hash(),
+                    subscription_hash=azure.get_subscription_hash()))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
@@ -4392,7 +4397,8 @@ class TestStorageWithCredentials:
                 storage_account_name = (
                     storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
                     format(region=default_region,
-                           user_hash=common_utils.get_user_hash()))
+                           user_hash=common_utils.get_user_hash(),
+                           subscription_hash=azure.get_subscription_hash()))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4420,7 +4426,8 @@ class TestStorageWithCredentials:
             storage_account_name = (
                 storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                     region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                    user_hash=common_utils.get_user_hash(),
+                    subscription_hash=azure.get_subscription_hash()))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4623,7 +4630,9 @@ class TestStorageWithCredentials:
         default_region = 'eastus'
         storage_account_name = (
             storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=default_region, user_hash=common_utils.get_user_hash()))
+                region=default_region,
+                user_hash=common_utils.get_user_hash(),
+                subscription_hash=azure.get_subscription_hash()))
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
@@ -4861,7 +4870,8 @@ class TestStorageWithCredentials:
                 storage_account_name = (
                     storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
                     format(region=default_region,
-                           user_hash=common_utils.get_user_hash()))
+                           user_hash=common_utils.get_user_hash(),
+                           subscription_hash=azure.get_subscription_hash()))
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
