@@ -3140,6 +3140,23 @@ def test_kubernetes_custom_image(image_id):
     run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_ssh_hostname():
+    name = _get_cluster_name()
+    test = Test(
+        'test-kubernetes-ssh-hostname',
+        [
+            f'sky launch -c {name} -y --num-nodes 3',
+            f'ssh {name} -t "hostname" | grep head',
+            f'ssh {name}-worker1 -t "hostname" | grep worker1',
+            f'ssh {name}-worker2 -t "hostname" | grep worker2',
+            f'sky down -y {name}'
+        ] * 10,
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    run_one_test(test)
+
 @pytest.mark.azure
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
