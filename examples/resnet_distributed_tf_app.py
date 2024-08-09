@@ -4,7 +4,7 @@ import socket
 import sys
 from typing import List, Optional
 
-import sky
+import apex
 
 
 def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
@@ -16,7 +16,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
         _user_and_host = f'{getpass.getuser()}-{hostname_hash}'
         cluster = f'test-distributed-tf-{_user_and_host}'
 
-    with sky.Dag() as dag:
+    with apex.Dag() as dag:
         # Total Nodes, INCLUDING Head Node
         num_nodes = 2
 
@@ -65,7 +65,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
                     --amp --xla --loss_scale=128"""
             return run
 
-        train = sky.Task(
+        train = apex.Task(
             'train',
             setup=setup,
             num_nodes=num_nodes,
@@ -76,10 +76,10 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
                          estimated_size_gigabytes=70)
         train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
         train.set_resources(
-            sky.Resources(sky.clouds.CLOUD_REGISTRY.from_str(cloud),
+            apex.Resources(apex.clouds.CLOUD_REGISTRY.from_str(cloud),
                           accelerators='V100'))
 
-    sky.launch(dag, cluster_name=cluster, retry_until_up=True)
+    apex.launch(dag, cluster_name=cluster, retry_until_up=True)
 
 
 if __name__ == '__main__':

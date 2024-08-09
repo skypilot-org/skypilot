@@ -1,6 +1,6 @@
-import sky
+import apex
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = './examples/tpu/tpu_app_code'
 
@@ -14,18 +14,18 @@ with sky.Dag() as dag:
     # The command to run.  Will be run under the working directory.
     run = 'conda activate huggingface && python -u run_tpu.py'
 
-    train = sky.Task(
+    train = apex.Task(
         'train',
         workdir=workdir,
         setup=setup,
         run=run,
     )
     train.set_resources({
-        sky.Resources(accelerators='tpu-v3-8',
+        apex.Resources(accelerators='tpu-v3-8',
                       accelerator_args={
                           'runtime_version': '2.12.0',
                           'tpu_name': 'weilin-bert-test-big'
                       }),
     })
 
-sky.launch(dag)
+apex.launch(dag)

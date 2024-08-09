@@ -2,8 +2,8 @@ from unittest.mock import patch
 
 import pytest
 
-from sky import exceptions
-from sky.utils import common_utils
+from apex import exceptions
+from apex.utils import common_utils
 
 MOCKED_USER_HASH = 'ab12cd34'
 

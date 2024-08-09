@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 import pytest
 
-from sky import clouds
-from sky import skypilot_config
-from sky.resources import Resources
-from sky.utils import resources_utils
+from apex import clouds
+from apex import apex_config
+from apex.resources import Resources
+from apex.utils import resources_utils
 
 GLOBAL_VALID_LABELS = {
     'plaintext': 'plainvalue',
@@ -91,10 +91,10 @@ def test_kubernetes_labels_resources():
     _run_label_test(allowed_labels, invalid_labels, cloud)
 
 
-@patch.object(skypilot_config, 'CONFIG_PATH',
+@patch.object(apex_config, 'CONFIG_PATH',
               './tests/test_yamls/test_aws_config.yaml')
-@patch.object(skypilot_config, '_dict', None)
-@patch.object(skypilot_config, '_loaded_config_path', None)
+@patch.object(apex_config, '_dict', None)
+@patch.object(apex_config, '_loaded_config_path', None)
 @patch('sky.clouds.service_catalog.instance_type_exists', return_value=True)
 @patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
        return_value={'fake-acc': 2})
@@ -102,7 +102,7 @@ def test_kubernetes_labels_resources():
        return_value='fake-image')
 @patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
-    skypilot_config._try_load_config()
+    apex_config._try_load_config()
 
     cloud = clouds.AWS()
     cluster_name = resources_utils.ClusterName(display_name='display',

@@ -6,17 +6,17 @@ from typing import Dict, Tuple
 import numpy as np
 import pandas as pd
 
-import sky
-from sky import clouds
-from sky import exceptions
-from sky.clouds import service_catalog
+import apex
+from apex import clouds
+from apex import exceptions
+from apex.clouds import service_catalog
 
 ALL_INSTANCE_TYPE_INFOS = sum(
-    sky.list_accelerators(gpus_only=True).values(), [])
+    apex.list_accelerators(gpus_only=True).values(), [])
 
 DUMMY_NODES = [
-    sky.optimizer._DUMMY_SOURCE_NAME,
-    sky.optimizer._DUMMY_SINK_NAME,
+    apex.optimizer._DUMMY_SOURCE_NAME,
+    apex.optimizer._DUMMY_SINK_NAME,
 ]
 
 
@@ -28,14 +28,14 @@ def generate_random_dag(
     max_num_candidate_resources: int = 5,
     max_task_runtime: int = 3600,
     max_data_size: int = 1000,
-) -> sky.Dag:
+) -> apex.Dag:
     """Generates a random Sky DAG to test Sky optimizer."""
     random.seed(seed)
     single_node_task_ids = random.choices(list(range(num_tasks)),
                                           k=num_tasks // 2)
-    with sky.Dag() as dag:
+    with apex.Dag() as dag:
         for i in range(num_tasks):
-            op = sky.Task(name=f'task{i}')
+            op = apex.Task(name=f'task{i}')
             task_runtime = random.random() * max_task_runtime
             op.set_time_estimator(lambda _: task_runtime)
             op.num_nodes = random.randint(2, max_num_nodes)
@@ -81,7 +81,7 @@ def generate_random_dag(
                     instance_type = random.choice(instance_list)
                     if 'tpu' in candidate.accelerator_name:
                         instance_type = 'TPU-VM'
-                resources = sky.Resources(
+                resources = apex.Resources(
                     cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
                     accelerators={
@@ -106,8 +106,8 @@ def generate_random_dag(
 
 
 def find_min_objective(
-        dag: sky.Dag,
-        minimize_cost: bool) -> Tuple[float, Dict[sky.Task, sky.Resources]]:
+        dag: apex.Dag,
+        minimize_cost: bool) -> Tuple[float, Dict[apex.Task, apex.Resources]]:
     """Manually finds the minimum objective value."""
     graph = dag.get_graph()
     topo_order = dag.tasks
@@ -127,10 +127,10 @@ def find_min_objective(
             resources_stack.append(resources)
             if len(tasks) == 1:
                 if minimize_cost:
-                    objective = sky.Optimizer._compute_total_cost(
+                    objective = apex.Optimizer._compute_total_cost(
                         graph, topo_order, plan)
                 else:
-                    objective = sky.Optimizer._compute_total_time(
+                    objective = apex.Optimizer._compute_total_time(
                         graph, topo_order, plan)
                 if objective < min_objective:
                     final_plan = {
@@ -146,19 +146,19 @@ def find_min_objective(
     return min_objective, final_plan
 
 
-def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
+def compare_optimization_results(dag: apex.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
     if minimize_cost:
-        optimizer_plan = sky.Optimizer._optimize_dag(dag,
-                                                     sky.OptimizeTarget.COST)
+        optimizer_plan = apex.Optimizer._optimize_dag(dag,
+                                                     apex.OptimizeTarget.COST)
     else:
-        optimizer_plan = sky.Optimizer._optimize_dag(dag,
-                                                     sky.OptimizeTarget.TIME)
+        optimizer_plan = apex.Optimizer._optimize_dag(dag,
+                                                     apex.OptimizeTarget.TIME)
     if minimize_cost:
-        objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
+        objective = apex.Optimizer._compute_total_cost(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
     else:
-        objective = sky.Optimizer._compute_total_time(dag.get_graph(),
+        objective = apex.Optimizer._compute_total_time(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
 
     min_objective, bf_plan = find_min_objective(copy_dag, minimize_cost)
@@ -172,7 +172,7 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
 def test_optimizer(enable_all_clouds):
     for seed in range(3):
         dag = generate_random_dag(num_tasks=5, seed=seed)
-        sky.Optimizer._add_dummy_source_sink_nodes(dag)
+        apex.Optimizer._add_dummy_source_sink_nodes(dag)
 
         # TODO(tian): Add test for minimize_cost=False. We need a time estimator
         # that dependent on the resources, rather than returns a constant.

@@ -205,10 +205,10 @@ def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
-    from sky import skypilot_config
+    from apex import apex_config
     region = 'us-west-2'
-    if skypilot_config.loaded():
-        ssh_proxy_command = skypilot_config.get_nested(
+    if apex_config.loaded():
+        ssh_proxy_command = apex_config.get_nested(
             ('aws', 'ssh_proxy_command'), None)
         if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
             region = list(ssh_proxy_command.keys())[0]

@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from sky.clouds.aws import AWS
+from apex.clouds.aws import AWS
 
 
 def test_aws_label():

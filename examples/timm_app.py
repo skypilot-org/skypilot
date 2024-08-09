@@ -8,7 +8,7 @@ large datasets.
 import os
 import subprocess
 
-import sky
+import apex
 
 PROJECT_DIR = '~/Downloads/pytorch-image-models'
 
@@ -24,7 +24,7 @@ def clone_project():
 
 clone_project()
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = PROJECT_DIR
 
@@ -39,7 +39,7 @@ with sky.Dag() as dag:
     #  /tmp/fake_imagenet. Supported image extensions are .png, .jpg, .jpeg
     run = './distributed_train.sh 1 /tmp/fake_imagenet --model efficientnet_b2 -b 128 --sched step --epochs 450 --decay-epochs 2.4 --decay-rate .97 --opt rmsproptf --opt-eps .001 -j 8 --warmup-lr 1e-6 --weight-decay 1e-5 --drop 0.3 --drop-connect 0.2 --model-ema --model-ema-decay 0.9999 --aa rand-m9-mstd0.5 --remode pixel --reprob 0.2 --amp --lr .016'
 
-    train = sky.Task(
+    train = apex.Task(
         'train',
         workdir=workdir,
         setup=setup,
@@ -49,6 +49,6 @@ with sky.Dag() as dag:
         # Download from GCS.
         '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
     })
-    train.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
+    train.set_resources({apex.Resources(apex.AWS(), accelerators='V100')})
 
-sky.launch(dag)
+apex.launch(dag)

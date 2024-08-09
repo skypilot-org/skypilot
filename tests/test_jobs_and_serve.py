@@ -9,16 +9,16 @@ import click
 from click import testing as cli_testing
 import pytest
 
-import sky
-from sky import backends
-from sky import cli
-from sky import exceptions
-from sky import global_user_state
-from sky import jobs
-from sky import serve
-from sky.utils import common_utils
-from sky.utils import controller_utils
-from sky.utils import db_utils
+import apex
+from apex import backends
+from apex import cli
+from apex import exceptions
+from apex import global_user_state
+from apex import jobs
+from apex import serve
+from apex.utils import common_utils
+from apex.utils import controller_utils
+from apex.utils import db_utils
 
 
 def test_job_nonexist_strategy():
@@ -34,7 +34,7 @@ def test_job_nonexist_strategy():
         with pytest.raises(
                 ValueError,
                 match='is not supported. The strategy should be among'):
-            sky.Task.from_yaml(f.name)
+            apex.Task.from_yaml(f.name)
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def _mock_cluster_state(_mock_db_conn):
         cluster_name_on_cloud='test-cluster1',
         cluster_yaml='/tmp/cluster1.yaml',
         launched_nodes=2,
-        launched_resources=sky.Resources(sky.AWS(),
+        launched_resources=apex.Resources(apex.AWS(),
                                          instance_type='p3.2xlarge',
                                          region='us-east-1'),
     )
@@ -68,7 +68,7 @@ def _mock_cluster_state(_mock_db_conn):
         cluster_name_on_cloud='test-cluster2',
         cluster_yaml='/tmp/cluster2.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.GCP(),
+        launched_resources=apex.Resources(apex.GCP(),
                                          instance_type='a2-highgpu-4g',
                                          accelerators={'A100': 4},
                                          region='us-west1'),
@@ -83,7 +83,7 @@ def _mock_cluster_state(_mock_db_conn):
         cluster_name_on_cloud='test-cluster3',
         cluster_yaml='/tmp/cluster3.yaml',
         launched_nodes=4,
-        launched_resources=sky.Resources(sky.Azure(),
+        launched_resources=apex.Resources(apex.Azure(),
                                          instance_type='Standard_D4s_v3',
                                          region='eastus'),
     )
@@ -101,7 +101,7 @@ def _mock_jobs_controller(_mock_db_conn):
         cluster_name_on_cloud=jobs.JOB_CONTROLLER_NAME,
         cluster_yaml='/tmp/jobs_controller.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.AWS(),
+        launched_resources=apex.Resources(apex.AWS(),
                                          instance_type='m4.2xlarge',
                                          region='us-west-1'),
     )
@@ -119,7 +119,7 @@ def _mock_serve_controller(_mock_db_conn):
         cluster_name_on_cloud=serve.SKY_SERVE_CONTROLLER_NAME,
         cluster_yaml='/tmp/serve_controller.yaml',
         launched_nodes=1,
-        launched_resources=sky.Resources(sky.AWS(),
+        launched_resources=apex.Resources(apex.AWS(),
                                          instance_type='m4.2xlarge',
                                          region='us-west-1'),
     )
@@ -307,7 +307,7 @@ class TestServeOperations:
                 'controller_port': 30001,
                 'load_balancer_port': 30000,
                 'policy': None,
-                'requested_resources': sky.Resources(),
+                'requested_resources': apex.Resources(),
                 'requested_resources_str': '',
                 'replica_info': [],
             }

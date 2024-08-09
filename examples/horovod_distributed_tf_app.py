@@ -4,11 +4,11 @@ from typing import Dict, List
 
 import time_estimators
 
-import sky
+import apex
 
 IPAddr = str
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
 
@@ -43,7 +43,7 @@ with sky.Dag() as dag:
 
     run = run_fn
 
-    train = sky.Task(
+    train = apex.Task(
         'train',
         setup=setup,
         post_setup_fn=post_setup_fn,
@@ -55,8 +55,8 @@ with sky.Dag() as dag:
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
-        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        apex.Resources(apex.AWS(), 'p3.2xlarge'),
     })
 
-dag = sky.Optimizer.optimize(dag)
-sky.launch(dag)
+dag = apex.Optimizer.optimize(dag)
+apex.launch(dag)

@@ -3,9 +3,9 @@ import textwrap
 
 from click import testing as cli_testing
 
-import sky
-from sky import exceptions
-import sky.cli as cli
+import apex
+from apex import exceptions
+import apex.cli as cli
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere'

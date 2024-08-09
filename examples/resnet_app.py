@@ -1,6 +1,6 @@
 import subprocess
 
-import sky
+import apex
 
 # The working directory contains all code and will be synced to remote.
 workdir = '~/Downloads/tpu'
@@ -55,7 +55,7 @@ file_mounts = {
 #                   '/tmp/fake_imagenet')
 ### Optional end ###
 
-task = sky.Task(
+task = apex.Task(
     'train',
     workdir=workdir,
     setup=setup,
@@ -85,7 +85,7 @@ task.set_resources({
     # sky.Resources(accelerators='tpu-v3-8'),
     # sky.Resources(accelerators='V100', use_spot=True),
     # sky.Resources(accelerators={'T4': 4}),
-    sky.Resources(sky.AWS(), accelerators='V100'),
+    apex.Resources(apex.AWS(), accelerators='V100'),
     # sky.Resources(sky.GCP(), accelerators={'V100': 4}),
     # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
     # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
@@ -95,4 +95,4 @@ task.set_resources({
 # task.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
 # sky.launch(task, dryrun=True)
-sky.launch(task)
+apex.launch(task)

@@ -1,9 +1,9 @@
 import os
 from typing import List, Optional
 
-import sky
+import apex
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
 
@@ -21,7 +21,7 @@ with sky.Dag() as dag:
     def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
         return head_run if node_rank == 0 else None
 
-    train = sky.Task(
+    train = apex.Task(
         'train',
         workdir=workdir,
         setup=setup,
@@ -30,7 +30,7 @@ with sky.Dag() as dag:
     )
 
     train.set_resources({
-        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        apex.Resources(apex.AWS(), 'p3.2xlarge'),
     })
 
-sky.launch(dag)
+apex.launch(dag)

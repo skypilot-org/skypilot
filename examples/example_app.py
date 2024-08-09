@@ -17,15 +17,15 @@ Incorporate the notion of per-account egress quota (affects pricing).
 """
 import time_estimators
 
-import sky
+import apex
 
 
 def make_application():
     """A simple application: train_op -> infer_op."""
 
-    with sky.Dag() as dag:
+    with apex.Dag() as dag:
         # Train.
-        train_op = sky.Task(
+        train_op = apex.Task(
             'train_op',
             run='python train.py --data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
 
@@ -40,16 +40,16 @@ def make_application():
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
         train_op.set_resources({
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            apex.Resources(apex.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
+            apex.Resources(apex.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), accelerators='tpu-v3-8'),
+            apex.Resources(apex.GCP(), accelerators='tpu-v3-8'),
         })
 
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
-        infer_op = sky.Task('infer_op',
+        infer_op = apex.Task('infer_op',
                             run='python infer.py --model_dir=INPUTS[0]')
 
         # Data dependency.
@@ -58,10 +58,10 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
-            sky.Resources(sky.AWS(), 'inf1.2xlarge'),
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),
-            sky.Resources(sky.GCP(), 'n1-standard-4', accelerators='T4'),
-            sky.Resources(sky.GCP(), 'n1-standard-8', accelerators='T4'),
+            apex.Resources(apex.AWS(), 'inf1.2xlarge'),
+            apex.Resources(apex.AWS(), 'p3.2xlarge'),
+            apex.Resources(apex.GCP(), 'n1-standard-4', accelerators='T4'),
+            apex.Resources(apex.GCP(), 'n1-standard-8', accelerators='T4'),
         })
 
         infer_op.set_time_estimator(
@@ -75,5 +75,5 @@ def make_application():
 
 
 dag = make_application()
-sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
+apex.optimize(dag, minimize=apex.OptimizeTarget.COST)
 # sky.optimize(dag, minimize=sky.OptimizeTarget.TIME)

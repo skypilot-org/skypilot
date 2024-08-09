@@ -2,8 +2,8 @@ from unittest.mock import patch
 
 import pytest
 
-from sky.clouds.gcp import GCP
-from sky.clouds.utils import gcp_utils
+from apex.clouds.gcp import GCP
+from apex.clouds.utils import gcp_utils
 
 
 @pytest.mark.parametrize((

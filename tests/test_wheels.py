@@ -2,7 +2,7 @@ import os
 import shutil
 import time
 
-from sky.backends import wheel_utils
+from apex.backends import wheel_utils
 
 
 def test_build_wheels():

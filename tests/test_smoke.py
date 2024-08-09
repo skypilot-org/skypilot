@@ -43,24 +43,24 @@ import colorama
 import jinja2
 import pytest
 
-import sky
-from sky import global_user_state
-from sky import jobs
-from sky import serve
-from sky import skypilot_config
-from sky.adaptors import cloudflare
-from sky.adaptors import ibm
-from sky.clouds import AWS
-from sky.clouds import Azure
-from sky.clouds import GCP
-from sky.data import data_utils
-from sky.data import storage as storage_lib
-from sky.data.data_utils import Rclone
-from sky.skylet import constants
-from sky.skylet import events
-from sky.utils import common_utils
-from sky.utils import resources_utils
-from sky.utils import subprocess_utils
+import apex
+from apex import global_user_state
+from apex import jobs
+from apex import serve
+from apex import apex_config
+from apex.adaptors import cloudflare
+from apex.adaptors import ibm
+from apex.clouds import AWS
+from apex.clouds import Azure
+from apex.clouds import GCP
+from apex.data import data_utils
+from apex.data import storage as storage_lib
+from apex.data.data_utils import Rclone
+from apex.skylet import constants
+from apex.skylet import events
+from apex.utils import common_utils
+from apex.utils import resources_utils
+from apex.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
@@ -221,7 +221,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
-    original_resources = sky.Resources(cloud=sky.AWS(),
+    original_resources = apex.Resources(cloud=apex.AWS(),
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
@@ -248,7 +248,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
-    original_resources = sky.Resources(cloud=sky.GCP(),
+    original_resources = apex.Resources(cloud=apex.GCP(),
                                        instance_type='a2-ultragpu-1g',
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
@@ -886,7 +886,7 @@ def test_stale_job(generic_cloud: str):
 def test_aws_stale_job_manual_restart():
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.AWS.max_cluster_name_length())
+        name, apex.AWS.max_cluster_name_length())
     region = 'us-east-2'
     test = Test(
         'aws_stale_job_manual_restart',
@@ -917,7 +917,7 @@ def test_aws_stale_job_manual_restart():
 def test_gcp_stale_job_manual_restart():
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.GCP.max_cluster_name_length())
+        name, apex.GCP.max_cluster_name_length())
     zone = 'us-west2-a'
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name={name_on_cloud})" '
@@ -3203,7 +3203,7 @@ def test_aws_disk_tier():
         specs = AWS._get_disk_specs(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, sky.AWS.max_cluster_name_length())
+            name, apex.AWS.max_cluster_name_length())
         region = 'us-east-2'
         test = Test(
             'aws-disk-tier-' + disk_tier.value,
@@ -3233,7 +3233,7 @@ def test_gcp_disk_tier():
         type = GCP._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, sky.GCP.max_cluster_name_length())
+            name, apex.GCP.max_cluster_name_length())
         region = 'us-west2'
         test = Test(
             'gcp-disk-tier-' + disk_tier.value,
@@ -3261,7 +3261,7 @@ def test_azure_disk_tier():
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
-            name, sky.Azure.max_cluster_name_length())
+            name, apex.Azure.max_cluster_name_length())
         region = 'westus2'
         test = Test(
             'azure-disk-tier-' + disk_tier.value,
@@ -3283,7 +3283,7 @@ def test_azure_best_tier_failover():
     type = Azure._get_disk_type(resources_utils.DiskTier.LOW)
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, sky.Azure.max_cluster_name_length())
+        name, apex.Azure.max_cluster_name_length())
     region = 'westus2'
     test = Test(
         'azure-best-tier-failover',
@@ -4092,23 +4092,23 @@ def test_user_dependencies(generic_cloud: str):
 @pytest.mark.gcp
 def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
-    task = sky.Task(run="whoami")
-    task.set_resources(sky.Resources(cloud=sky.GCP()))
-    job_id, handle = sky.launch(task, cluster_name=name)
+    task = apex.Task(run="whoami")
+    task.set_resources(apex.Resources(cloud=apex.GCP()))
+    job_id, handle = apex.launch(task, cluster_name=name)
     assert job_id == 1
     assert handle is not None
     assert handle.cluster_name == name
-    assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())
-    job_id_exec, handle_exec = sky.exec(task, cluster_name=name)
+    assert handle.launched_resources.cloud.is_same_cloud(apex.GCP())
+    job_id_exec, handle_exec = apex.exec(task, cluster_name=name)
     assert job_id_exec == 2
     assert handle_exec is not None
     assert handle_exec.cluster_name == name
-    assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())
+    assert handle_exec.launched_resources.cloud.is_same_cloud(apex.GCP())
     # For dummy task (i.e. task.run is None), the job won't be submitted.
-    dummy_task = sky.Task()
-    job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)
+    dummy_task = apex.Task()
+    job_id_dummy, _ = apex.exec(dummy_task, cluster_name=name)
     assert job_id_dummy is None
-    sky.down(name)
+    apex.down(name)
 
 
 # ---------- Testing Storage ----------
@@ -4321,7 +4321,7 @@ class TestStorageWithCredentials:
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
-            config_storage_account = skypilot_config.get_nested(
+            config_storage_account = apex_config.get_nested(
                 ('azure', 'storage_account'), None)
             storage_account_name = config_storage_account if (
                 config_storage_account is not None
@@ -4582,7 +4582,7 @@ class TestStorageWithCredentials:
             self.create_dir_structure(tmpdir, gitignore_structure)
 
             # Create .gitignore and list files/dirs to be excluded in it
-            skypilot_path = os.path.dirname(os.path.dirname(sky.__file__))
+            skypilot_path = os.path.dirname(os.path.dirname(apex.__file__))
             temp_path = f'{tmpdir}/.gitignore'
             file_path = os.path.join(skypilot_path, 'tests/gitignore_test')
             shutil.copyfile(file_path, temp_path)
@@ -4904,7 +4904,7 @@ class TestStorageWithCredentials:
                                        'to use. This is higly unlikely - '
                                        'check if the tests are correct.')
 
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
+        with pytest.raises(apex.exceptions.StorageBucketGetError,
                            match='Attempted to use a non-existent'):
             if nonexist_bucket_url.startswith('https'):
                 storage_obj = storage_lib.Storage(
@@ -4942,7 +4942,7 @@ class TestStorageWithCredentials:
             # Azure blob uses a different error string since container may
             # not exist even though the bucket name is ok.
             match_str = 'Attempted to fetch a non-existent public container'
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
+        with pytest.raises(apex.exceptions.StorageBucketGetError,
                            match=match_str):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
@@ -5044,7 +5044,7 @@ class TestStorageWithCredentials:
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
         for name in invalid_name_list:
-            with pytest.raises(sky.exceptions.StorageNameError):
+            with pytest.raises(apex.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
@@ -5111,7 +5111,7 @@ class TestStorageWithCredentials:
         ext_bucket_name, ext_bucket_uri = request.getfixturevalue(
             ext_bucket_fixture)
         # invalid spec
-        with pytest.raises(sky.exceptions.StorageSpecError) as e:
+        with pytest.raises(apex.exceptions.StorageSpecError) as e:
             storage_obj = storage_lib.Storage(
                 name=ext_bucket_name, mode=storage_lib.StorageMode.MOUNT)
             storage_obj.add_store(store_type)
@@ -5220,7 +5220,7 @@ class TestYamlSpecs:
                 self._is_dict_subset(v, d2[k])
             elif isinstance(v, str):
                 if k == 'accelerators':
-                    resources = sky.Resources()
+                    resources = apex.Resources()
                     resources._set_accelerators(v, None)
                     assert resources.accelerators == d2[k], (k, v, d2)
                 else:
@@ -5232,7 +5232,7 @@ class TestYamlSpecs:
         """Check if the yaml is equivalent after load and dump again."""
         origin_task_config = common_utils.read_yaml(yaml_path)
 
-        task = sky.Task.from_yaml(yaml_path)
+        task = apex.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
         # d1 <= d2
         print(origin_task_config, new_task_config)

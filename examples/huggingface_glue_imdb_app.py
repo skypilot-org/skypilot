@@ -6,9 +6,9 @@ https://github.com/huggingface/transformers/tree/master/examples/pytorch/text-cl
 The dataset is downloaded automatically by huggingface, and saved to
 ~/.cache/huggingface.
 """
-import sky
+import apex
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # The setup command.  Will be run under the working directory.
     # https://github.com/huggingface/transformers/tree/master/examples#important-note
     setup = '\
@@ -31,11 +31,11 @@ with sky.Dag() as dag:
   --output_dir /tmp/imdb/ \
   --fp16'
 
-    train = sky.Task(
+    train = apex.Task(
         'train',
         setup=setup,
         run=run,
     )
-    train.set_resources({sky.Resources(accelerators='V100')})
+    train.set_resources({apex.Resources(accelerators='V100')})
 
-sky.launch(dag)
+apex.launch(dag)

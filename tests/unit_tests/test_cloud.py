@@ -1,6 +1,6 @@
 import pytest
 
-from sky.clouds.cloud import Cloud
+from apex.clouds.cloud import Cloud
 
 
 @pytest.mark.parametrize(("specific_reservations", "expected"), [({"a"}, {

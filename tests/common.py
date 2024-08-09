@@ -4,8 +4,8 @@ from typing import List, Optional
 import pandas as pd
 import pytest
 
-from sky import clouds
-from sky.provision.kubernetes import utils as kubernetes_utils
+from apex import clouds
+from apex.provision.kubernetes import utils as kubernetes_utils
 
 
 def enable_all_clouds_in_monkeypatch(

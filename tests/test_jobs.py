@@ -1,11 +1,11 @@
 import pytest
 
-import sky
-from sky import backends
-from sky import exceptions
-from sky import global_user_state
-from sky.utils import db_utils
-from sky.utils import resources_utils
+import apex
+from apex import backends
+from apex import exceptions
+from apex import global_user_state
+from apex.utils import db_utils
+from apex.utils import resources_utils
 
 
 class TestExecutionOnExistingClusters:
@@ -37,7 +37,7 @@ class TestExecutionOnExistingClusters:
             cluster_name_on_cloud='test-cluster1',
             cluster_yaml='/tmp/cluster1.yaml',
             launched_nodes=2,
-            launched_resources=sky.Resources(sky.AWS(),
+            launched_resources=apex.Resources(apex.AWS(),
                                              instance_type='p4d.24xlarge',
                                              region='us-east-1',
                                              zone='us-east-1a'),
@@ -52,7 +52,7 @@ class TestExecutionOnExistingClusters:
             cluster_name_on_cloud='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
             launched_nodes=1,
-            launched_resources=sky.Resources(sky.GCP(),
+            launched_resources=apex.Resources(apex.GCP(),
                                              instance_type='n1-highmem-64',
                                              accelerators='V100:4',
                                              region='us-west1',
@@ -68,7 +68,7 @@ class TestExecutionOnExistingClusters:
             cluster_name_on_cloud='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             launched_nodes=1,
-            launched_resources=sky.Resources(sky.Azure(),
+            launched_resources=apex.Resources(apex.Azure(),
                                              instance_type='Standard_D4s_v3',
                                              region='eastus'),
         )
@@ -82,8 +82,8 @@ class TestExecutionOnExistingClusters:
             cluster_name_on_cloud='test-disk-tier1',
             cluster_yaml='/tmp/disk-tier1.yaml',
             launched_nodes=1,
-            launched_resources=sky.Resources(
-                sky.AWS(),
+            launched_resources=apex.Resources(
+                apex.AWS(),
                 instance_type='m6i.2xlarge',
                 region='us-east-1',
                 zone='us-east-1a',
@@ -98,8 +98,8 @@ class TestExecutionOnExistingClusters:
             cluster_name_on_cloud='test-disk-tier2',
             cluster_yaml='/tmp/disk-tier2.yaml',
             launched_nodes=1,
-            launched_resources=sky.Resources(
-                sky.GCP(),
+            launched_resources=apex.Resources(
+                apex.GCP(),
                 instance_type='n2-standard-8',
                 region='us-west1',
                 zone='us-west1-a',
@@ -116,82 +116,82 @@ class TestExecutionOnExistingClusters:
         This test runs launch and exec with less demanding resources
         than the existing clusters can pass the check.
         """
-        task = sky.Task(run='echo hi')
-        task.set_resources(sky.Resources(accelerators='A100:8'))
-        sky.launch(task, cluster_name='test-cluster1', dryrun=True)
-        sky.exec(task, cluster_name='test-cluster1', dryrun=True)
-        task.set_resources(sky.Resources(accelerators='A100:3'))
-        sky.launch(task, cluster_name='test-cluster1', dryrun=True)
-        sky.exec(task, cluster_name='test-cluster1', dryrun=True)
+        task = apex.Task(run='echo hi')
+        task.set_resources(apex.Resources(accelerators='A100:8'))
+        apex.launch(task, cluster_name='test-cluster1', dryrun=True)
+        apex.exec(task, cluster_name='test-cluster1', dryrun=True)
+        task.set_resources(apex.Resources(accelerators='A100:3'))
+        apex.launch(task, cluster_name='test-cluster1', dryrun=True)
+        apex.exec(task, cluster_name='test-cluster1', dryrun=True)
         task.set_resources(
-            sky.Resources(
-                sky.AWS(),
+            apex.Resources(
+                apex.AWS(),
                 accelerators='A100:1',
                 region='us-east-1',
             ))
-        sky.launch(task, cluster_name='test-cluster1', dryrun=True)
-        sky.exec(task, cluster_name='test-cluster1', dryrun=True)
+        apex.launch(task, cluster_name='test-cluster1', dryrun=True)
+        apex.exec(task, cluster_name='test-cluster1', dryrun=True)
 
-        task = sky.Task(run='echo hi')
-        task.set_resources(sky.Resources(accelerators='V100:4'))
-        sky.launch(task, cluster_name='test-cluster2', dryrun=True)
-        sky.exec(task, cluster_name='test-cluster2', dryrun=True)
+        task = apex.Task(run='echo hi')
+        task.set_resources(apex.Resources(accelerators='V100:4'))
+        apex.launch(task, cluster_name='test-cluster2', dryrun=True)
+        apex.exec(task, cluster_name='test-cluster2', dryrun=True)
         task.set_resources(
-            sky.Resources(sky.GCP(), accelerators='V100:3', region='us-west1'))
-        sky.launch(task, cluster_name='test-cluster2', dryrun=True)
-        sky.exec(task, cluster_name='test-cluster2', dryrun=True)
+            apex.Resources(apex.GCP(), accelerators='V100:3', region='us-west1'))
+        apex.launch(task, cluster_name='test-cluster2', dryrun=True)
+        apex.exec(task, cluster_name='test-cluster2', dryrun=True)
 
-        task = sky.Task(run='echo hi')
-        sky.exec(task, cluster_name='test-cluster3', dryrun=True)
+        task = apex.Task(run='echo hi')
+        apex.exec(task, cluster_name='test-cluster3', dryrun=True)
 
-        task = sky.Task(run='echo hi')
+        task = apex.Task(run='echo hi')
         task.set_resources(
-            sky.Resources(disk_tier=resources_utils.DiskTier.BEST))
-        sky.launch(task, cluster_name='test-disk-tier1', dryrun=True)
-        sky.exec(task, cluster_name='test-disk-tier1', dryrun=True)
-        sky.launch(task, cluster_name='test-disk-tier2', dryrun=True)
-        sky.exec(task, cluster_name='test-disk-tier2', dryrun=True)
+            apex.Resources(disk_tier=resources_utils.DiskTier.BEST))
+        apex.launch(task, cluster_name='test-disk-tier1', dryrun=True)
+        apex.exec(task, cluster_name='test-disk-tier1', dryrun=True)
+        apex.launch(task, cluster_name='test-disk-tier2', dryrun=True)
+        apex.exec(task, cluster_name='test-disk-tier2', dryrun=True)
         task.set_resources(
-            sky.Resources(disk_tier=resources_utils.DiskTier.LOW))
-        sky.launch(task, cluster_name='test-disk-tier1', dryrun=True)
-        sky.exec(task, cluster_name='test-disk-tier1', dryrun=True)
-        sky.launch(task, cluster_name='test-disk-tier2', dryrun=True)
-        sky.exec(task, cluster_name='test-disk-tier2', dryrun=True)
+            apex.Resources(disk_tier=resources_utils.DiskTier.LOW))
+        apex.launch(task, cluster_name='test-disk-tier1', dryrun=True)
+        apex.exec(task, cluster_name='test-disk-tier1', dryrun=True)
+        apex.launch(task, cluster_name='test-disk-tier2', dryrun=True)
+        apex.exec(task, cluster_name='test-disk-tier2', dryrun=True)
         task.set_resources(
-            sky.Resources(disk_tier=resources_utils.DiskTier.HIGH))
-        sky.launch(task, cluster_name='test-disk-tier1', dryrun=True)
-        sky.exec(task, cluster_name='test-disk-tier1', dryrun=True)
+            apex.Resources(disk_tier=resources_utils.DiskTier.HIGH))
+        apex.launch(task, cluster_name='test-disk-tier1', dryrun=True)
+        apex.exec(task, cluster_name='test-disk-tier1', dryrun=True)
 
     def _run_launch_exec_with_error(self, task, cluster_name):
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
-            sky.launch(task, cluster_name=cluster_name, dryrun=True)
+            apex.launch(task, cluster_name=cluster_name, dryrun=True)
             assert 'do not match the existing cluster.' in str(e.value), str(
                 e.value)
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
-            sky.exec(task, cluster_name=cluster_name, dryrun=True)
+            apex.exec(task, cluster_name=cluster_name, dryrun=True)
             assert 'do not match the existing cluster.' in str(e.value), str(
                 e.value)
 
     def test_launch_exec_mismatch(self, _mock_cluster_state, monkeypatch):
         """Test launch and exec on existing clusters with mismatched resources."""
-        task = sky.Task(run='echo hi')
+        task = apex.Task(run='echo hi')
         # Accelerators mismatch
-        task.set_resources(sky.Resources(accelerators='V100:8'))
+        task.set_resources(apex.Resources(accelerators='V100:8'))
         self._run_launch_exec_with_error(task, 'test-cluster1')
         self._run_launch_exec_with_error(task, 'test-cluster2')
 
-        task.set_resources(sky.Resources(accelerators='A100:8'))
+        task.set_resources(apex.Resources(accelerators='A100:8'))
         self._run_launch_exec_with_error(task, 'test-cluster2')
         self._run_launch_exec_with_error(task, 'test-cluster3')
 
         # Cloud mismatch
-        task.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
+        task.set_resources(apex.Resources(apex.AWS(), accelerators='V100'))
         self._run_launch_exec_with_error(task, 'test-cluster2')
 
-        task.set_resources(sky.Resources(sky.GCP()))
+        task.set_resources(apex.Resources(apex.GCP()))
         self._run_launch_exec_with_error(task, 'test-cluster1')
 
         # Disk tier mismatch
         task.set_resources(
-            sky.Resources(disk_tier=resources_utils.DiskTier.HIGH))
+            apex.Resources(disk_tier=resources_utils.DiskTier.HIGH))
         self._run_launch_exec_with_error(task, 'test-disk-tier2')

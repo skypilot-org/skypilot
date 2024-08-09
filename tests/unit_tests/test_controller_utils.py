@@ -3,10 +3,10 @@ from typing import Any, Dict
 
 import pytest
 
-import sky
-from sky.jobs import constants as managed_job_constants
-from sky.serve import constants as serve_constants
-from sky.utils import controller_utils
+import apex
+from apex.jobs import constants as managed_job_constants
+from apex.serve import constants as serve_constants
+from apex.utils import controller_utils
 
 
 @pytest.mark.parametrize(
@@ -78,11 +78,11 @@ def test_get_controller_resources_with_task_resources(
     # 1. All resources has cloud specified. All of them
     # could host controllers. Return a set, each item has
     # one cloud specified plus the default resources.
-    all_clouds = {sky.AWS(), sky.GCP(), sky.Azure()}
+    all_clouds = {apex.AWS(), apex.GCP(), apex.Azure()}
     all_cloud_names = {str(c) for c in all_clouds}
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(cloud=c) for c in all_clouds])
+        task_resources=[apex.Resources(cloud=c) for c in all_clouds])
     for r in controller_resources:
         config = r.to_yaml_config()
         cloud = config.pop('cloud')
@@ -95,21 +95,21 @@ def test_get_controller_resources_with_task_resources(
     # could NOT host controllers. Return a set, only
     # containing those could host controllers.
     all_clouds = {
-        sky.AWS(),
-        sky.GCP(),
-        sky.Azure(),
-        sky.Fluidstack(),
-        sky.Kubernetes(),
-        sky.Lambda(),
-        sky.RunPod()
+        apex.AWS(),
+        apex.GCP(),
+        apex.Azure(),
+        apex.Fluidstack(),
+        apex.Kubernetes(),
+        apex.Lambda(),
+        apex.RunPod()
     }
 
-    def _could_host_controllers(cloud: sky.clouds.Cloud) -> bool:
+    def _could_host_controllers(cloud: apex.clouds.Cloud) -> bool:
         try:
             cloud.check_features_are_supported(
-                sky.Resources(),
-                {sky.clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
-        except sky.exceptions.NotSupportedError:
+                apex.Resources(),
+                {apex.clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
+        except apex.exceptions.NotSupportedError:
             return False
         return True
 
@@ -118,7 +118,7 @@ def test_get_controller_resources_with_task_resources(
     }
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
-        task_resources=[sky.Resources(cloud=c) for c in all_clouds])
+        task_resources=[apex.Resources(cloud=c) for c in all_clouds])
     for r in controller_resources:
         config = r.to_yaml_config()
         cloud = config.pop('cloud')
@@ -132,8 +132,8 @@ def test_get_controller_resources_with_task_resources(
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
-            sky.Resources(accelerators='L4'),
-            sky.Resources(cloud=sky.RunPod(), accelerators='A40'),
+            apex.Resources(accelerators='L4'),
+            apex.Resources(cloud=apex.RunPod(), accelerators='A40'),
         ])
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()

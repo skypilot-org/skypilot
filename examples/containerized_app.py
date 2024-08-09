@@ -6,7 +6,7 @@ the MNIST dataset in setup and attaches it as volume to the  container,
 illustrating how volume mounts can be used to share data with containers.
 """
 
-import sky
+import apex
 
 # Though the mnist dataset is not used, we show download and mounting
 # it to the docker container as an example here. If you are running this on
@@ -20,8 +20,8 @@ setup_cmd = 'mkdir -p ~/mnist && \
 
 run_command = 'docker run -v ~/mnist/:/mnist/ --runtime=nvidia --rm cemizm/tf-benchmark-gpu --model resnet50 --num_gpus=1'
 
-with sky.Dag() as dag:
-    t = sky.Task(run=run_command, setup=setup_cmd)
-    t.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
+with apex.Dag() as dag:
+    t = apex.Task(run=run_command, setup=setup_cmd)
+    t.set_resources(apex.Resources(apex.AWS(), accelerators='V100'))
 
-sky.launch(dag)
+apex.launch(dag)

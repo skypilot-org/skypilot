@@ -3,7 +3,7 @@ import textwrap
 
 import pytest
 
-from sky.task import Task
+from apex.task import Task
 
 
 def _create_config_file(config: str, tmp_path: pathlib.Path) -> str:

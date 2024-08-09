@@ -5,7 +5,7 @@ import socket
 import sys
 from typing import Optional
 
-import sky
+import apex
 
 
 def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
@@ -19,22 +19,22 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 
     if cloud is None:
         cloud = 'gcp'
-    cloud = sky.clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud = apex.clouds.CLOUD_REGISTRY.from_str(cloud)
 
     # Create the cluster.
-    with sky.Dag() as dag:
-        cluster_resources = sky.Resources(cloud, accelerators={'T4': 1})
-        task = sky.Task(num_nodes=2).set_resources(cluster_resources)
+    with apex.Dag() as dag:
+        cluster_resources = apex.Resources(cloud, accelerators={'T4': 1})
+        task = apex.Task(num_nodes=2).set_resources(cluster_resources)
     # `detach_run` will only detach the `run` command. The provision and
     # `setup` are still blocking.
-    sky.launch(dag, cluster_name=cluster, detach_run=True)
+    apex.launch(dag, cluster_name=cluster, detach_run=True)
 
     # Submit multiple tasks in parallel to trigger queueing behaviors.
     def _exec(i):
-        task = sky.Task(run=f'echo {i}; sleep 5')
-        resources = sky.Resources(accelerators={'T4': 0.5})
+        task = apex.Task(run=f'echo {i}; sleep 5')
+        resources = apex.Resources(accelerators={'T4': 0.5})
         task.set_resources(resources)
-        sky.exec(task, cluster_name=cluster, detach_run=True)
+        apex.exec(task, cluster_name=cluster, detach_run=True)
 
     with pool.ThreadPool(8) as p:
         list(p.imap(_exec, range(32)))

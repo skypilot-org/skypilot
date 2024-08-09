@@ -1,7 +1,7 @@
-import sky
-from sky import sky_logging
+import apex
+from apex import apex_logging
 
-logger = sky_logging.init_logger(__name__)
+logger = apex_logging.init_logger(__name__)
 
 
 def resnet50_estimate_runtime(resources):
@@ -36,7 +36,7 @@ def resnet50_estimate_runtime(resources):
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
         return estimated_run_time_seconds
 
-    if isinstance(resources.cloud, sky.AWS):
+    if isinstance(resources.cloud, apex.AWS):
         instance = resources.instance_type
         if instance == 'p3.2xlarge':
             num_v100s = 1
@@ -48,7 +48,7 @@ def resnet50_estimate_runtime(resources):
             assert False, 'Not supported: {}'.format(resources)
         return _v100(num_v100s)
 
-    elif isinstance(resources.cloud, sky.GCP):
+    elif isinstance(resources.cloud, apex.GCP):
         accelerators = resources.accelerators
         if accelerators is None:
             assert False, 'not supported'

@@ -6,11 +6,11 @@ from typing import Callable, List, Optional, Set
 import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
 
-import sky
-from sky import clouds
-from sky import exceptions
-from sky import optimizer
-from sky.utils import resources_utils
+import apex
+from apex import clouds
+from apex import exceptions
+from apex import optimizer
+from apex.utils import resources_utils
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
@@ -18,8 +18,8 @@ def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
         f.flush()
-        with sky.Dag():
-            task = sky.Task.from_yaml(f.name)
+        with apex.Dag():
+            task = apex.Task.from_yaml(f.name)
             if test_fn is not None:
                 test_fn(task)
 
@@ -57,7 +57,7 @@ def _make_resources(
     # See comments inside to see why we monkey patch:
     common.enable_all_clouds_in_monkeypatch(monkeypatch, enabled_clouds)
     # Should create Resources here, since it uses the enabled clouds.
-    return sky.Resources(*resources_args, **resources_kwargs)
+    return apex.Resources(*resources_args, **resources_kwargs)
 
 
 def _test_resources(monkeypatch,
@@ -83,23 +83,23 @@ def _test_resources_launch(monkeypatch,
                                 **resources_kwargs,
                                 enabled_clouds=enabled_clouds)
 
-    with sky.Dag() as dag:
-        task = sky.Task('test_task')
+    with apex.Dag() as dag:
+        task = apex.Task('test_task')
         task.set_resources({resources})
-    sky.launch(dag, dryrun=True, cluster_name=cluster_name)
+    apex.launch(dag, dryrun=True, cluster_name=cluster_name)
     assert True
 
 
 def test_resources_aws(monkeypatch):
-    _test_resources_launch(monkeypatch, sky.AWS(), 'p3.2xlarge')
+    _test_resources_launch(monkeypatch, apex.AWS(), 'p3.2xlarge')
 
 
 def test_resources_azure(monkeypatch):
-    _test_resources_launch(monkeypatch, sky.Azure(), 'Standard_NC24s_v3')
+    _test_resources_launch(monkeypatch, apex.Azure(), 'Standard_NC24s_v3')
 
 
 def test_resources_gcp(monkeypatch):
-    _test_resources_launch(monkeypatch, sky.GCP(), 'n1-standard-16')
+    _test_resources_launch(monkeypatch, apex.GCP(), 'n1-standard-16')
 
 
 def test_partial_cpus(monkeypatch):
@@ -136,18 +136,18 @@ def test_partial_tpu(monkeypatch):
 
 
 def test_partial_v100(monkeypatch):
-    _test_resources_launch(monkeypatch, sky.AWS(), accelerators='V100')
+    _test_resources_launch(monkeypatch, apex.AWS(), accelerators='V100')
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            accelerators='V100',
                            use_spot=True)
-    _test_resources_launch(monkeypatch, sky.AWS(), accelerators={'V100': 8})
+    _test_resources_launch(monkeypatch, apex.AWS(), accelerators={'V100': 8})
 
 
 def test_invalid_cloud_tpu(monkeypatch):
     with pytest.raises(AssertionError) as e:
         _test_resources_launch(monkeypatch,
-                               cloud=sky.AWS(),
+                               cloud=apex.AWS(),
                                accelerators='tpu-v3-8')
     assert 'Cloud must be GCP' in str(e.value)
 
@@ -155,21 +155,21 @@ def test_invalid_cloud_tpu(monkeypatch):
 def test_clouds_not_enabled(monkeypatch):
     with pytest.raises(exceptions.ResourcesUnavailableError):
         _test_resources_launch(monkeypatch,
-                               sky.AWS(),
+                               apex.AWS(),
                                enabled_clouds=[
-                                   sky.Azure(),
-                                   sky.GCP(),
+                                   apex.Azure(),
+                                   apex.GCP(),
                                ])
 
     with pytest.raises(exceptions.ResourcesUnavailableError):
         _test_resources_launch(monkeypatch,
-                               sky.Azure(),
-                               enabled_clouds=[sky.AWS()])
+                               apex.Azure(),
+                               enabled_clouds=[apex.AWS()])
 
     with pytest.raises(exceptions.ResourcesUnavailableError):
         _test_resources_launch(monkeypatch,
-                               sky.GCP(),
-                               enabled_clouds=[sky.AWS()])
+                               apex.GCP(),
+                               enabled_clouds=[apex.AWS()])
 
 
 def test_instance_type_mismatches_cpus(monkeypatch):
@@ -182,7 +182,7 @@ def test_instance_type_mismatches_cpus(monkeypatch):
     for instance, cpus in bad_instance_and_cpus:
         with pytest.raises(ValueError) as e:
             _test_resources_launch(monkeypatch,
-                                   sky.AWS(),
+                                   apex.AWS(),
                                    instance_type=instance,
                                    cpus=cpus)
         assert 'does not have the requested number of vCPUs' in str(e.value)
@@ -198,7 +198,7 @@ def test_instance_type_mismatches_memory(monkeypatch):
     for instance, memory in bad_instance_and_memory:
         with pytest.raises(ValueError) as e:
             _test_resources_launch(monkeypatch,
-                                   sky.AWS(),
+                                   apex.AWS(),
                                    instance_type=instance,
                                    memory=memory)
         assert 'does not have the requested memory' in str(e.value)
@@ -206,38 +206,38 @@ def test_instance_type_mismatches_memory(monkeypatch):
 
 def test_instance_type_matches_cpus(monkeypatch):
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            instance_type='c6i.8xlarge',
                            cpus=32)
     _test_resources_launch(monkeypatch,
-                           sky.Azure(),
+                           apex.Azure(),
                            instance_type='Standard_E8s_v5',
                            cpus='8')
     _test_resources_launch(monkeypatch,
-                           sky.GCP(),
+                           apex.GCP(),
                            instance_type='n1-standard-8',
                            cpus='7+')
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            instance_type='g4dn.2xlarge',
                            cpus=8.0)
 
 
 def test_instance_type_matches_memory(monkeypatch):
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            instance_type='c6i.8xlarge',
                            memory=64)
     _test_resources_launch(monkeypatch,
-                           sky.Azure(),
+                           apex.Azure(),
                            instance_type='Standard_E8s_v5',
                            memory='64')
     _test_resources_launch(monkeypatch,
-                           sky.GCP(),
+                           apex.GCP(),
                            instance_type='n1-standard-8',
                            memory='30+')
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            instance_type='g4dn.2xlarge',
                            memory=32)
 
@@ -311,28 +311,28 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
     for instance, acc in bad_instance_and_accs:
         with pytest.raises(exceptions.ResourcesMismatchError) as e:
             _test_resources_launch(monkeypatch,
-                                   sky.AWS(),
+                                   apex.AWS(),
                                    instance_type=instance,
                                    accelerators=acc)
         assert 'Infeasible resource demands found' in str(e.value)
 
     with pytest.raises(exceptions.ResourcesMismatchError) as e:
         _test_resources_launch(monkeypatch,
-                               sky.GCP(),
+                               apex.GCP(),
                                instance_type='n2-standard-8',
                                accelerators={'V100': 1})
         assert 'can only be attached to N1 VMs,' in str(e.value), str(e.value)
 
     with pytest.raises(exceptions.ResourcesMismatchError) as e:
         _test_resources_launch(monkeypatch,
-                               sky.GCP(),
+                               apex.GCP(),
                                instance_type='a2-highgpu-1g',
                                accelerators={'A100': 2})
         assert 'cannot be attached to' in str(e.value), str(e.value)
 
     with pytest.raises(exceptions.ResourcesMismatchError) as e:
         _test_resources_launch(monkeypatch,
-                               sky.AWS(),
+                               apex.AWS(),
                                instance_type='p3.16xlarge',
                                accelerators={'V100': 1})
         assert 'Infeasible resource demands found' in str(e.value)
@@ -340,32 +340,32 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
 
 def test_instance_type_matches_accelerators(monkeypatch):
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            instance_type='p3.2xlarge',
                            accelerators='V100')
     _test_resources_launch(monkeypatch,
-                           sky.GCP(),
+                           apex.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
 
     _test_resources_launch(monkeypatch,
-                           sky.GCP(),
+                           apex.GCP(),
                            instance_type='n1-standard-8',
                            accelerators='tpu-v3-8',
                            accelerator_args={'tpu_vm': False})
     _test_resources_launch(monkeypatch,
-                           sky.GCP(),
+                           apex.GCP(),
                            instance_type='a2-highgpu-1g',
                            accelerators='a100')
 
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           apex.AWS(),
                            instance_type='p3.16xlarge',
                            accelerators={'V100': 8})
 
 
 def test_invalid_instance_type(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+    for cloud in [apex.AWS(), apex.Azure(), apex.GCP(), None]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, instance_type='invalid')
         assert 'Invalid instance type' in str(e.value)
@@ -374,73 +374,73 @@ def test_invalid_instance_type(monkeypatch):
 def test_infer_cloud_from_instance_type(monkeypatch):
     # AWS instances
     _test_resources(monkeypatch,
-                    cloud=sky.AWS(),
+                    cloud=apex.AWS(),
                     instance_type='m5.12xlarge',
-                    expected_cloud=sky.AWS())
+                    expected_cloud=apex.AWS())
     _test_resources(monkeypatch,
                     instance_type='p3.8xlarge',
-                    expected_cloud=sky.AWS())
+                    expected_cloud=apex.AWS())
     _test_resources(monkeypatch,
                     instance_type='g4dn.2xlarge',
-                    expected_cloud=sky.AWS())
+                    expected_cloud=apex.AWS())
     # GCP instances
     _test_resources(monkeypatch,
                     instance_type='n1-standard-96',
-                    expected_cloud=sky.GCP())
+                    expected_cloud=apex.GCP())
     #Azure instances
     _test_resources(monkeypatch,
                     instance_type='Standard_NC12s_v3',
-                    expected_cloud=sky.Azure())
+                    expected_cloud=apex.Azure())
 
 
 def test_invalid_cpus(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+    for cloud in [apex.AWS(), apex.Azure(), apex.GCP(), None]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, cpus='invalid')
         assert '"cpus" field should be' in str(e.value)
 
 
 def test_invalid_memory(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+    for cloud in [apex.AWS(), apex.Azure(), apex.GCP(), None]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, memory='invalid')
         assert '"memory" field should be' in str(e.value)
 
 
 def test_invalid_region(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
+    for cloud in [apex.AWS(), apex.Azure(), apex.GCP()]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
 
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
         _test_resources_launch(monkeypatch,
-                               sky.GCP(),
+                               apex.GCP(),
                                region='us-west1',
                                accelerators='tpu-v3-8')
         assert 'No launchable resource found' in str(e.value)
 
 
 def test_invalid_zone(monkeypatch):
-    for cloud in [sky.AWS(), sky.GCP()]:
+    for cloud in [apex.AWS(), apex.GCP()]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, zone='invalid')
         assert 'Invalid zone' in str(e.value)
 
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch, sky.Azure(), zone='invalid')
+        _test_resources(monkeypatch, apex.Azure(), zone='invalid')
     assert 'Azure does not support zones.' in str(e.value)
 
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch,
-                        sky.AWS(),
+                        apex.AWS(),
                         region='us-east-1',
                         zone='us-east-2a')
     assert 'Invalid zone' in str(e.value)
 
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch,
-                        sky.GCP(),
+                        apex.GCP(),
                         region='us-west2',
                         zone='us-west1-a')
     assert 'Invalid zone' in str(e.value)
@@ -450,7 +450,7 @@ def test_invalid_zone(monkeypatch):
         'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f'
     ]
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch, sky.GCP(), zone=input_zone)
+        _test_resources(monkeypatch, apex.GCP(), zone=input_zone)
     assert 'Invalid zone' in str(e.value)
     for cand in expected_candidates:
         assert cand in str(e.value)
@@ -459,7 +459,7 @@ def test_invalid_zone(monkeypatch):
 def test_invalid_image(monkeypatch):
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch,
-                        cloud=sky.AWS(),
+                        cloud=apex.AWS(),
                         image_id='ami-0868a20f5a3bf9702')
     assert 'in a specific region' in str(e.value)
 
@@ -468,25 +468,25 @@ def test_invalid_image(monkeypatch):
     assert 'Cloud must be specified' in str(e.value)
 
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch, cloud=sky.Lambda(), image_id='some-image')
+        _test_resources(monkeypatch, cloud=apex.Lambda(), image_id='some-image')
     assert 'only supported for AWS/GCP/Azure/IBM/OCI/Kubernetes' in str(e.value)
 
 
 def test_valid_image(monkeypatch):
     _test_resources(monkeypatch,
-                    cloud=sky.AWS(),
+                    cloud=apex.AWS(),
                     region='us-east-1',
                     image_id='ami-0868a20f5a3bf9702')
     _test_resources(
         monkeypatch,
-        cloud=sky.GCP(),
+        cloud=apex.GCP(),
         region='us-central1',
         image_id=
         'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
     _test_resources(
         monkeypatch,
-        cloud=sky.GCP(),
+        cloud=apex.GCP(),
         image_id=
         'projects/deeplearning-platform-release/global/images/family/common-cpu-v20230126'
     )
@@ -569,8 +569,8 @@ def test_parse_accelerators_from_yaml():
 def test_invalid_num_nodes():
     for invalid_value in (-1, 2.2, 1.0):
         with pytest.raises(ValueError) as e:
-            with sky.Dag():
-                task = sky.Task()
+            with apex.Dag():
+                task = apex.Task()
                 task.num_nodes = invalid_value
             assert 'num_nodes should be a positive int' in str(e.value)
 
@@ -620,24 +620,24 @@ def test_parse_valid_envs_yaml(monkeypatch):
 
 
 def test_invalid_accelerators_regions(enable_all_clouds, monkeypatch):
-    task = sky.Task(run='echo hi')
+    task = apex.Task(run='echo hi')
     task.set_resources(
-        sky.Resources(
-            sky.AWS(),
+        apex.Resources(
+            apex.AWS(),
             accelerators='A100:8',
             region='us-west-1',
         ))
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
-        sky.launch(task, cluster_name='should-fail', dryrun=True)
+        apex.launch(task, cluster_name='should-fail', dryrun=True)
         assert 'No launchable resource found for' in str(e.value), str(e.value)
 
 
-def _test_optimize_speed(resources: sky.Resources):
-    with sky.Dag() as dag:
-        task = sky.Task(run='echo hi')
+def _test_optimize_speed(resources: apex.Resources):
+    with apex.Dag() as dag:
+        task = apex.Task(run='echo hi')
         task.set_resources(resources)
     start = time.time()
-    sky.optimize(dag)
+    apex.optimize(dag)
     end = time.time()
     # 5.0 seconds = somewhat flaky.
     assert end - start < 6.0, (f'optimize took too long for {resources}, '
@@ -645,16 +645,16 @@ def _test_optimize_speed(resources: sky.Resources):
 
 
 def test_optimize_speed(enable_all_clouds, monkeypatch):
-    _test_optimize_speed(sky.Resources(cpus=4))
+    _test_optimize_speed(apex.Resources(cpus=4))
     for cloud in clouds.CLOUD_REGISTRY.values():
-        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
-    _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
+        _test_optimize_speed(apex.Resources(cloud, cpus='4+'))
+    _test_optimize_speed(apex.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
+        apex.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
     _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
+        apex.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
     _test_optimize_speed(
-        sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))
+        apex.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))
 
 
 def test_infer_cloud_from_region_or_zone(monkeypatch):
@@ -670,8 +670,8 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
     _test_resources_launch(monkeypatch)
 
     # Same-named regions need `cloud`.
-    _test_resources_launch(monkeypatch, region='us-east-1', cloud=sky.AWS())
-    _test_resources_launch(monkeypatch, region='us-east-1', cloud=sky.Lambda())
+    _test_resources_launch(monkeypatch, region='us-east-1', cloud=apex.AWS())
+    _test_resources_launch(monkeypatch, region='us-east-1', cloud=apex.Lambda())
 
     # Cases below: cannot infer cloud.
 
@@ -683,7 +683,7 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
 
     # Typo, fuzzy hint.
     with pytest.raises(ValueError) as e:
-        _test_resources_launch(monkeypatch, zone='us-west-2-a', cloud=sky.AWS())
+        _test_resources_launch(monkeypatch, zone='us-west-2-a', cloud=apex.AWS())
     assert ('Did you mean one of these: \'us-west-2a\'?' in str(e))
 
     # Detailed hints.
@@ -719,15 +719,15 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
 
 def test_ordered_resources(enable_all_clouds, monkeypatch):
 
-    with sky.Dag() as dag:
-        task = sky.Task('test_task')
+    with apex.Dag() as dag:
+        task = apex.Task('test_task')
         task.set_resources([
-            sky.Resources(accelerators={'V100': 1}),
-            sky.Resources(accelerators={'T4': 1}),
-            sky.Resources(accelerators={'K80': 1}),
-            sky.Resources(accelerators={'T4': 4}),
+            apex.Resources(accelerators={'V100': 1}),
+            apex.Resources(accelerators={'T4': 1}),
+            apex.Resources(accelerators={'K80': 1}),
+            apex.Resources(accelerators={'T4': 4}),
         ])
-    dag = sky.optimize(dag)
+    dag = apex.optimize(dag)
     # 'V100' is picked because it is the first in the list.
     assert 'V100' in repr(task.best_resources)
 
@@ -735,38 +735,38 @@ def test_ordered_resources(enable_all_clouds, monkeypatch):
 def test_disk_tier_mismatch(enable_all_clouds):
     for cloud in clouds.CLOUD_REGISTRY.values():
         for tier in cloud._SUPPORTED_DISK_TIERS:
-            sky.Resources(cloud=cloud, disk_tier=tier)
+            apex.Resources(cloud=cloud, disk_tier=tier)
         for unsupported_tier in (set(resources_utils.DiskTier) -
                                  cloud._SUPPORTED_DISK_TIERS):
             with pytest.raises(ValueError) as e:
-                sky.Resources(cloud=cloud, disk_tier=unsupported_tier)
+                apex.Resources(cloud=cloud, disk_tier=unsupported_tier)
             assert f'is not supported' in str(e.value), str(e.value)
 
 
 def test_optimize_disk_tier(enable_all_clouds):
 
-    def _get_all_candidate_cloud(r: sky.Resources) -> Set[clouds.Cloud]:
-        task = sky.Task()
+    def _get_all_candidate_cloud(r: apex.Resources) -> Set[clouds.Cloud]:
+        task = apex.Task()
         task.set_resources(r)
         _, per_cloud_candidates, _ = optimizer._fill_in_launchable_resources(
             task, blocked_resources=None)
         return set(per_cloud_candidates.keys())
 
     # All cloud supports BEST disk tier.
-    best_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.BEST)
+    best_tier_resources = apex.Resources(disk_tier=resources_utils.DiskTier.BEST)
     best_tier_candidates = _get_all_candidate_cloud(best_tier_resources)
     assert best_tier_candidates == set(
         clouds.CLOUD_REGISTRY.values()), best_tier_candidates
 
     # Only AWS, GCP, Azure, OCI supports LOW disk tier.
-    low_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.LOW)
+    low_tier_resources = apex.Resources(disk_tier=resources_utils.DiskTier.LOW)
     low_tier_candidates = _get_all_candidate_cloud(low_tier_resources)
     assert low_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get,
             ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
 
     # Only AWS, GCP, OCI supports HIGH disk tier.
-    high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
+    high_tier_resources = apex.Resources(disk_tier=resources_utils.DiskTier.HIGH)
     high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
     assert high_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get,

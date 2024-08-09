@@ -5,17 +5,17 @@ from unittest.mock import patch
 
 import pytest
 
-from sky import clouds
-from sky import skypilot_config
-from sky.backends import backend_utils
-from sky.resources import Resources
-from sky.resources import resources_utils
+from apex import clouds
+from apex import apex_config
+from apex.backends import backend_utils
+from apex.resources import Resources
+from apex.resources import resources_utils
 
 
-@patch.object(skypilot_config, 'CONFIG_PATH',
+@patch.object(apex_config, 'CONFIG_PATH',
               './tests/test_yamls/test_aws_config.yaml')
-@patch.object(skypilot_config, '_dict', None)
-@patch.object(skypilot_config, '_loaded_config_path', None)
+@patch.object(apex_config, '_dict', None)
+@patch.object(apex_config, '_loaded_config_path', None)
 @patch('sky.clouds.service_catalog.instance_type_exists', return_value=True)
 @patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
        return_value={'fake-acc': 2})
@@ -29,7 +29,7 @@ from sky.resources import resources_utils
 @patch('sky.utils.common_utils.fill_template')
 def test_write_cluster_config_w_remote_identity(mock_fill_template,
                                                 *mocks) -> None:
-    skypilot_config._try_load_config()
+    apex_config._try_load_config()
 
     cloud = clouds.AWS()
 

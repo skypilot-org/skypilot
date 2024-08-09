@@ -1,9 +1,9 @@
 import openai
 
-import sky
-from sky import serve
+import apex
+from apex import serve
 
-service_records = sky.serve.status('code-llama')
+service_records = apex.serve.status('code-llama')
 endpoint = serve.get_endpoint(service_records[0])
 
 print('Using endpoint:', endpoint)

@@ -1,9 +1,9 @@
 import subprocess
 
-import sky
+import apex
 
 # Start the instance.
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
     subprocess.run(f'cd {workdir} && git checkout 222cc86',
@@ -18,11 +18,11 @@ with sky.Dag() as dag:
            pip install tensorflow==2.4.0 pyyaml && \
            cd models && pip install -e .)'
 
-    task = sky.Task('setup', workdir=workdir, setup=setup)
-    task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
+    task = apex.Task('setup', workdir=workdir, setup=setup)
+    task.set_resources(apex.Resources(apex.AWS(), accelerators={'V100': 1}))
 # `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
-sky.launch(dag, cluster_name='tb', detach_run=True)
+apex.launch(dag, cluster_name='tb', detach_run=True)
 
 # Run the training task.
 # The command to run.  Will be run under the working directory.
@@ -35,27 +35,27 @@ run = 'conda activate resnet && mkdir -p resnet-model-dir && \
     --model_dir=resnet-model-dir \
     --amp --xla --loss_scale=128'
 
-train = sky.Task(
+train = apex.Task(
     'train',
     workdir=workdir,
     run=run,
 )
 
 train.set_resources({
-    sky.Resources(accelerators='V100'),
+    apex.Resources(accelerators='V100'),
 })
-sky.exec(train, cluster_name='tb', detach_run=True)
+apex.exec(train, cluster_name='tb', detach_run=True)
 
 # Run the tensorboard task.
 # Use 'ssh -L 4650:localhost:4650 <cluster_name>' to forward port to local.
 # 'ssh -L 4650:localhost:4650 tb'
-tensorboard = sky.Task(
+tensorboard = apex.Task(
     'tensorboard',
     workdir=workdir,
     setup=setup,
     run='conda activate resnet && \
         tensorboard --logdir resnet-model-dir --port 4650',
 )
-tensorboard.set_resources(sky.Resources())
+tensorboard.set_resources(apex.Resources())
 
-sky.exec(tensorboard, cluster_name='tb', detach_run=True)
+apex.exec(tensorboard, cluster_name='tb', detach_run=True)

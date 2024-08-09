@@ -8,7 +8,7 @@ import os
 
 import memory_profiler
 
-from sky.provision.aws import instance
+from apex.provision.aws import instance
 
 aws_regions = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 

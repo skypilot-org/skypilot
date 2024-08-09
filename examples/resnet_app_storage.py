@@ -1,8 +1,8 @@
 import subprocess
 
-import sky
+import apex
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
 
@@ -52,13 +52,13 @@ with sky.Dag() as dag:
     # If the backend to be added is not specified, then SkyPilot's optimizer
     # will choose the backend bucket to be stored.
     # S3 Example
-    storage = sky.Storage(source="s3://imagenet-bucket")
+    storage = apex.Storage(source="s3://imagenet-bucket")
     # GCS Example
     #storage = sky.Storage(name="imagenet_test_mluo",source="gs://imagenet_test_mluo")
     # Can also be from a local dir
     # storage = sky.Storage(name="imagenet-bucket", source="~/imagenet-data/")
 
-    train = sky.Task(
+    train = apex.Task(
         'train',
         workdir=workdir,
         setup=setup,
@@ -71,7 +71,7 @@ with sky.Dag() as dag:
     train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
-        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        apex.Resources(apex.AWS(), 'p3.2xlarge'),
     })
 
-sky.launch(dag)
+apex.launch(dag)

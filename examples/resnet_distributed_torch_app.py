@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-import sky
+import apex
 
 # Total Nodes, INCLUDING Head Node
 num_nodes = 2
@@ -26,7 +26,7 @@ def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
     """
 
 
-train = sky.Task(
+train = apex.Task(
     'train',
     setup=setup,
     num_nodes=num_nodes,
@@ -35,7 +35,7 @@ train = sky.Task(
 
 train.set_resources({
     ##### Fully specified
-    sky.Resources(sky.AWS(), 'p3.2xlarge'),
+    apex.Resources(apex.AWS(), 'p3.2xlarge'),
     # sky.Resources(sky.GCP(), 'n1-standard-16'),
     #sky.Resources(
     #     sky.GCP(),
@@ -50,5 +50,5 @@ train.set_resources({
     # sky.Resources(sky.AWS(), accelerators='V100'),
 })
 
-sky.launch(train, cluster_name='dth')
+apex.launch(train, cluster_name='dth')
 # sky.exec(train, cluster_name='dth')

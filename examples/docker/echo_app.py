@@ -10,9 +10,9 @@
 import random
 import string
 
-import sky
+import apex
 
-with sky.Dag() as dag:
+with apex.Dag() as dag:
     # The setup command to build the container image
     setup = 'docker build -t echo:v0 /echo_app'
 
@@ -21,7 +21,7 @@ with sky.Dag() as dag:
            '--volume="/outputs:/outputs:rw" '
            'echo:v0 /inputs/README.md /outputs/output.txt')
 
-    echo_app = sky.Task(
+    echo_app = apex.Task(
         setup=setup,
         run=run,
     )
@@ -34,8 +34,8 @@ with sky.Dag() as dag:
 
     # Configure outputs for the task - we'll write to a bucket using Sky Storage
     output_bucket_name = ''.join(random.choices(string.ascii_lowercase, k=15))
-    output_storage = sky.Storage(name=output_bucket_name,
-                                 mode=sky.StorageMode.MOUNT)
+    output_storage = apex.Storage(name=output_bucket_name,
+                                 mode=apex.StorageMode.MOUNT)
     echo_app.set_storage_mounts({
         '/outputs': output_storage,
     })
@@ -45,7 +45,7 @@ with sky.Dag() as dag:
     #     sky.Resources(accelerators='V100'),
     # })
 
-sky.launch(dag)
+apex.launch(dag)
 
 print('Remember to clean up resources after this script is done!\n'
       'Run sky status and sky storage ls to list current resources.\n'

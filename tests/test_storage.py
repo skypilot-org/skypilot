@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from sky import exceptions
-from sky.data import storage as storage_lib
+from apex import exceptions
+from apex.data import storage as storage_lib
 
 
 class TestStorageSpecLocalSource:

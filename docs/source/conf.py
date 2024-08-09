@@ -19,7 +19,7 @@ author = 'the SkyPilot authors'
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
-from sky import __version__ as version
+from apex import __version__ as version
 
 # The full version, including alpha/beta/rc tags.
 release = version
