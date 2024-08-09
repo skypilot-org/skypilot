@@ -1,0 +1,40 @@
+envs:
+  MODEL_NAME: meta-llama/Llama-2-13b-chat-hf
+  HF_TOKEN: <your-huggingface-token>  # TODO: Replace with huggingface token
+
+service:
+  readiness_probe: 
+    # Use an actual workload for multi-node service.
+    path: /v1/completions
+    post_data:
+      model: $MODEL_NAME
+      prompt: "Hello world,"
+      max_tokens: 7
+  replicas: 1
+
+resources:
+  ports: 8000
+  accelerators: A100:4
+  use_spot: true
+  memory: 64+
+
+setup: |
+  conda create -n vllm python=3.11 -y
+  conda activate vllm
+  pip install "ray[default]==2.10.0"
+  pip install "transformers==4.39.2"
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+  # Need to install vllm from source.
+  pip install git+https://github.com/vllm-project/vllm.git@563c1d7ec56aa0f9fdc28720f3517bf9297f5476
+
+
+run: |
+  conda activate vllm
+  num_gpus=$SKYPILOT_NUM_GPUS_PER_NODE
+  python -u -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 --port 8000 \
+    --model $MODEL_NAME \
+    --tensor-parallel-size $num_gpus \
+    --max-num-seqs 64
+
