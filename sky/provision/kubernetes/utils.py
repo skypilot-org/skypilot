@@ -351,7 +351,8 @@ def get_kubernetes_nodes() -> List[Any]:
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get node info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry.') from None
+            'Please check if the cluster is healthy and retry. To debug, run: '
+            'kubectl get nodes') from None
     return nodes
 
 
@@ -363,7 +364,8 @@ def get_kubernetes_pods() -> List[Any]:
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get pod info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry.') from None
+            'Please check if the cluster is healthy and retry. To debug, run: '
+            'kubectl get pods') from None
     return pods
 
 
