@@ -1469,6 +1469,9 @@ class RetryingVmProvisioner(object):
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
                 num_nodes = handle.launched_nodes
+                # Some clouds, like RunPod, only support exposing ports during
+                # launch. For those clouds, we pass the ports to open in the
+                # `bulk_provision` to expose the ports during provisioning.
                 ports_to_open_on_launch = (
                     list(resources_utils.port_ranges_to_set(to_provision.ports))
                     if to_provision.cloud.OPEN_PORTS_VERSION <=
