@@ -301,13 +301,12 @@ RunPod
 Fluidstack
 ~~~~~~~~~~~~~~~~~~
 
-`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://console.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` and the :code:`API token` to :code:`~/.fluidstack/api_token`:
-
+`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://dashboard.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` :
 .. code-block:: shell
 
   mkdir -p ~/.fluidstack
   echo "your_api_key_here" > ~/.fluidstack/api_key
-  echo "your_api_token_here" > ~/.fluidstack/api_token
+
 
 
 Cudo Compute
