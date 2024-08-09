@@ -22,10 +22,15 @@ GIT_FATAL_EXIT_CODE = 128
 
 def serialize_exception(e) -> Dict[str, Any]:
     """Serialize the exception."""
+    stacktrace = getattr(e, 'stacktrace', None)
+    attributes = e.__dict__.copy()
+    if 'stacktrace' in attributes:
+        del attributes['stacktrace']
     data = {
         'type': e.__class__.__name__,
         'args': e.args,
-        'attributes': e.__dict__,
+        'attributes': attributes,
+        'stacktrace': stacktrace,
     }
     if hasattr(e, 'serialize'):
         data.update(e.serialize())
@@ -39,7 +44,10 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
         exception_class = getattr(builtins, exception_type)
     else:
         exception_class = globals().get(exception_type, Exception)
-    return exception_class(*serialized['args'], **serialized['attributes'])
+    e = exception_class(*serialized['args'], **serialized['attributes'])
+    if serialized['stacktrace'] is not None:
+        setattr(e, 'stacktrace', serialized['stacktrace'])
+    return e
 
 
 class ResourcesUnavailableError(Exception):
@@ -131,10 +139,8 @@ class CommandError(Exception):
         super().__init__(message)
 
     def serialize(self) -> Dict[str, Any]:
-        serialized = self.__dict__.copy()
         return {
             'args': tuple(),
-            'attributes': serialized,
         }
 
 
@@ -307,7 +313,6 @@ class AWSAzFetchingError(Exception):
     def serialize(self) -> Dict[str, Any]:
         return {
             'args': tuple(),
-            'attributes': self.__dict__,
         }
 
 
