@@ -93,6 +93,25 @@ class StatusVersion(enum.Enum):
         return self.value >= other.value
 
 
+class OpenPortsVersion(enum.Enum):
+    """The version of the open ports implementation.
+
+    1: Open ports on launching of the cluster only, cannot be modified after
+    provisioning of the cluster. This is for clouds like RunPod which only
+    accepts port argument on VM creation API, and requires Web GUI and an VM
+    restart to update ports. We currently do not support this.
+    2: Open ports after provisioning of the cluster, updatable. This is for most
+    of the cloud providers which allow opening ports using an programmable API
+    and won't affect the running VMs.
+    """
+    LAUNCH_ONLY = 'LAUNCH ONLY'
+    UPDATABLE = 'UPDATABLE'
+
+    def __le__(self, other):
+        versions = list(OpenPortsVersion)
+        return versions.index(self) <= versions.index(other)
+
+
 class Cloud:
     """A cloud provider."""
 
@@ -107,6 +126,7 @@ class Cloud:
     # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
     PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
     STATUS_VERSION = StatusVersion.CLOUD_CLI
+    OPEN_PORTS_VERSION = OpenPortsVersion.UPDATABLE
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

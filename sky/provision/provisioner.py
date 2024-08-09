@@ -129,6 +129,7 @@ def bulk_provision(
     cluster_yaml: str,
     prev_cluster_ever_up: bool,
     log_dir: str,
+    ports_to_open_on_launch: Optional[List[int]] = None,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
 
@@ -150,7 +151,8 @@ def bulk_provision(
         ['node_config'],
         count=num_nodes,
         tags={},
-        resume_stopped_nodes=True)
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=ports_to_open_on_launch)
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
