@@ -233,16 +233,16 @@ class DockerInitializer:
             """)
         ret = {}
 
-        for l in result.split("\n"):
-            if ":" in l:
-                x = l.split(":")
+        for l in result.split('\n'):
+            if ':' in l:
+                x = l.split(':')
                 k = x[0].strip()
-                v = ":".join(x[1:]).strip()
-                if v in ["Y", "N"]:
-                    v = True if v == "Y" else False
-                if k == "MemAvailable":
-                    k = "mem_available_in_kb"
-                    v = int(v.split()[0])
+                v = ':'.join(x[1:]).strip()
+                if v in ['Y', 'N']:
+                    v = True if v == 'Y' else False  # type: ignore
+                if k == 'MemAvailable':
+                    k = 'mem_available_in_kb'
+                    v = int(v.split()[0])  # type: ignore
                 ret[k] = v
         return ret
 
@@ -250,18 +250,18 @@ class DockerInitializer:
         specific_image = self.docker_config['image']
 
         status = self._check_host_status()
-        logger.info(f"Host status: {str(status)}")
+        logger.info(f'Host status: {str(status)}')
 
-        if "container_status" in status:
-            if "Exited" in status["container_status"]:
-                logger.info("Container is exited but not removed.")
+        if 'container_status' in status:
+            if 'Exited' in status['container_status']:
+                logger.info('Container is exited but not removed.')
                 self.initialized = True
                 self._run(f'{self.docker_cmd} start {self.container_name}')
                 self._run('sudo service ssh start', run_env='docker')
                 return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
-        cmd_login = ""
+        cmd_login = ''
         if 'docker_login_config' in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
@@ -288,7 +288,7 @@ class DockerInitializer:
         logger.info(f'Starting container {self.container_name} with image '
                     f'{specific_image}')
 
-        cmd_run = ""
+        cmd_run = ''
         container_running = 'Up' in status.get('container_status', False)
         if container_running:
             running_image = status.get('container_image', None)
@@ -304,7 +304,8 @@ class DockerInitializer:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             cmd_run ='[ -f /etc/docker/daemon.json ] || '\
                 'echo "{}" | sudo tee /etc/docker/daemon.json;'\
-                'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '\
+                'sudo jq \'.["exec-opts"] ='\
+                '["native.cgroupdriver=cgroupfs"]\' '\
                 '/etc/docker/daemon.json > /tmp/daemon.json;'\
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'\
                 'sudo systemctl restart docker;'
@@ -314,12 +315,12 @@ class DockerInitializer:
                 self.container_name,
                 self._configure_runtime(self._auto_configure_shm(
                     user_docker_run_options,
-                    available_memory=status.get("mem_available_in_kb", None)),
+                    available_memory=status.get('mem_available_in_kb', None)),
                                         runtime_output=status.get(
-                                            "docker_runtime", None)),
+                                            'docker_runtime', None)),
                 self.docker_cmd,
             )
-            cmd_run += "\n" + start_command + ";"
+            cmd_run += '\n' + start_command + ';'
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on
@@ -335,8 +336,8 @@ class DockerInitializer:
             'sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;'\
             'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;'
 
-        cmd_action = f"{cmd_login} {cmd_pull} {cmd_run} {cmd_copy}"
-        cmd_result = self._run(cmd_action)
+        cmd_action = f'{cmd_login} {cmd_pull} {cmd_run} {cmd_copy}'
+        cmd_result = self._run(cmd_action)  # pylint: disable=unused-variable
         # logger.debug(f"Command (host) result: {cmd_result}")
 
         # SkyPilot: Setup Commands.
@@ -354,7 +355,7 @@ class DockerInitializer:
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;'\
             'source ~/.bashrc;'
         # Install dependencies.
-        cmd_d_dep = f'sudo apt-get update; '\
+        cmd_d_dep = 'sudo apt-get update; '\
             'sudo apt-get -o DPkg::Options::="--force-confnew" install -y '\
             'rsync curl wget patch openssh-server python3-pip fuse;'
         # Our mount script will install gcsfuse without fuse package.
@@ -377,8 +378,8 @@ class DockerInitializer:
             'sudo sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;'\
             f'{SETUP_ENV_VARS_CMD};'
 
-        cmd_d_action = f"{cmd_d_shell} {cmd_d_dep} {cmd_d_port}"
-        cmd_d_result = self._run(cmd_d_action, run_env='docker')
+        cmd_d_action = f'{cmd_d_shell} {cmd_d_dep} {cmd_d_port}'
+        cmd_d_result = self._run(cmd_d_action, run_env='docker')  # pylint: disable=unused-variable
         # logger.debug(f"Command (docker) result: {cmd_d_result}")
 
         # SkyPilot: End of Setup Commands.
