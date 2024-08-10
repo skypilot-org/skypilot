@@ -1097,7 +1097,7 @@ def launch(
         need_confirmation=not yes,
     )
     _, handle = _async_call_or_wait(request_id, async_call, 'Launch')
-    if async_call:
+    if not async_call:
         # Add ssh config for the cluster
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])
