@@ -2192,6 +2192,26 @@ def get_clusters(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
+    def _update_record_with_credentials(record: Dict[str, Any]) -> None:
+        handle = record['handle']
+        if handle is None:
+            return
+        credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                               handle.docker_user,
+                                               handle.ssh_user)
+        ssh_private_key_path = credentials.pop('ssh_private_key', None)
+        if ssh_private_key_path is not None:
+            with open(os.path.expanduser(ssh_private_key_path),
+                      'r',
+                      encoding='utf-8') as f:
+                credentials['ssh_private_key_content'] = f.read()
+        else:
+            with open(os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH),
+                      'r',
+                      encoding='utf-8') as f:
+                credentials['ssh_private_key_content'] = f.read()
+        record['credentials'] = credentials
+
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -2211,24 +2231,7 @@ def get_clusters(
         records = new_records
     # Add auth_config to the records
     for record in records:
-        handle = record['handle']
-        if handle is None:
-            continue
-        credentials = ssh_credential_from_yaml(handle.cluster_yaml,
-                                               handle.docker_user,
-                                               handle.ssh_user)
-        ssh_private_key_path = credentials.pop('ssh_private_key', None)
-        if ssh_private_key_path is not None:
-            with open(os.path.expanduser(ssh_private_key_path),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        else:
-            with open(os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH),
-                      'r',
-                      encoding='utf-8') as f:
-                credentials['ssh_private_key_content'] = f.read()
-        record['credentials'] = credentials
+        record = _update_record_with_credentials(record)
 
     if refresh == common.StatusRefreshMode.NONE:
         return records
@@ -2252,6 +2255,7 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
+            _update_record_with_credentials(record)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
