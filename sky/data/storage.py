@@ -27,7 +27,6 @@ from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -191,6 +190,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    MOUNT_CACHED = 'MOUNT_CACHED'
 
 
 class AbstractStore:
@@ -337,7 +337,19 @@ class AbstractStore:
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the Store to the specified mount_path.
 
-        Includes the setup commands to install mounting tools.
+        This command is used for MOUNT mode. Includes the setup commands to
+        install mounting tools.
+
+        Args:
+          mount_path: str; Mount path on remote server
+        """
+        raise NotImplementedError
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """Returns the command to mount the Store to the specified mount_path.
+
+        This command is used for MOUNT_CACHED mode. Includes the setup commands
+        to install mounting tools.
 
         Args:
           mount_path: str; Mount path on remote server
@@ -1422,6 +1434,17 @@ class S3Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.S3.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.S3.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
     def _create_s3_bucket(self,
                           bucket_name: str,
                           region='us-east-2') -> StorageHandle:
@@ -1861,6 +1884,17 @@ class GcsStore(AbstractStore):
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = data_utils.Rclone.RcloneStores.GCS.get_profile_name(
+            self.name)
+        rclone_config = data_utils.Rclone.RcloneStores.GCS.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -3061,11 +3095,10 @@ class IBMCosStore(AbstractStore):
                  sync_on_reconstruction: bool = True):
         self.client: 'storage.Client'
         self.bucket: 'StorageHandle'
+        self.rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.IBM.get_profile_name(self.name))
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
-        self.bucket_rclone_profile = \
-          Rclone.generate_rclone_bucket_profile_name(
-            self.name, Rclone.RcloneClouds.IBM)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3254,7 +3287,7 @@ class IBMCosStore(AbstractStore):
             sync_command = (
                 'rclone copy --exclude ".git/*" '
                 f'{src_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
+                f'{self.rclone_profile_name}:{self.name}/{dest_dir_name}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -3282,7 +3315,7 @@ class IBMCosStore(AbstractStore):
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('rclone copy '
                             f'{includes} {base_dir_path} '
-                            f'{self.bucket_rclone_profile}:{self.name}')
+                            f'{self.rclone_profile_name}:{self.name}')
             return sync_command
 
         # Generate message for upload
@@ -3321,7 +3354,7 @@ class IBMCosStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
 
-        bucket_profile_name = Rclone.RcloneClouds.IBM.value + self.name
+        bucket_profile_name = data_utils.Rclone.RcloneStores.IBM.value + self.name
         try:
             bucket_region = data_utils.get_ibm_cos_bucket_region(self.name)
         except exceptions.StorageBucketGetError as e:
@@ -3356,9 +3389,9 @@ class IBMCosStore(AbstractStore):
                     '`rclone lsd <remote>` on relevant remotes returned '
                     'via `rclone listremotes` to debug.')
 
-        Rclone.store_rclone_config(
+        data_utils.Rclone.store_rclone_config(
             self.name,
-            Rclone.RcloneClouds.IBM,
+            data_utils.Rclone.RcloneStores.IBM,
             self.region,  # type: ignore
         )
         if not bucket_region and self.sync_on_reconstruction:
@@ -3397,15 +3430,12 @@ class IBMCosStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         # install rclone if not installed.
-        install_cmd = mounting_utils.get_cos_mount_install_cmd()
-        rclone_config_data = Rclone.get_rclone_config(
-            self.bucket.name,
-            Rclone.RcloneClouds.IBM,
-            self.region,  # type: ignore
-        )
-        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config_data,
-                                                     Rclone.RCLONE_CONFIG_PATH,
-                                                     self.bucket_rclone_profile,
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
+            rclone_profile_name=self.rclone_profile_name,
+            region=self.region)  # type: ignore
+        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config,
+                                                     self.rclone_profile_name,
                                                      self.bucket.name,
                                                      mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
@@ -3457,4 +3487,5 @@ class IBMCosStore(AbstractStore):
         except ibm.ibm_botocore.exceptions.ClientError as e:
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
-        Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
+        data_utils.Rclone.delete_rclone_bucket_profile(
+            self.name, data_utils.Rclone.RcloneStores.IBM)

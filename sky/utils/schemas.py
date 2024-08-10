@@ -876,6 +876,8 @@ def get_config_schema():
             },
         }
     }
+    # Storage schema is validated separately
+    global_file_mounts = {'type': 'object'}
 
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
@@ -898,6 +900,7 @@ def get_config_schema():
             'allowed_clouds': allowed_clouds,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
+            'global_file_mounts': global_file_mounts,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.
