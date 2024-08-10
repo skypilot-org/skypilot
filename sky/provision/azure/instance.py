@@ -37,8 +37,10 @@ UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
 _WAIT_CREATION_TIMEOUT_SECONDS = 600
 
-_RESOURCE_MANAGED_IDENTITY_TYPE = 'Microsoft.ManagedIdentity/userAssignedIdentities'
-_RESOURCE_NETWORK_SECURITY_GROUP_TYPE = 'Microsoft.Network/networkSecurityGroups'
+_RESOURCE_MANAGED_IDENTITY_TYPE = (
+    'Microsoft.ManagedIdentity/userAssignedIdentities')
+_RESOURCE_NETWORK_SECURITY_GROUP_TYPE = (
+    'Microsoft.Network/networkSecurityGroups')
 _RESOURCE_VIRTUAL_NETWORK_TYPE = 'Microsoft.Network/virtualNetworks'
 _RESOURCE_PUBLIC_IP_ADDRESS_TYPE = 'Microsoft.Network/publicIPAddresses'
 _RESOURCE_VIRTUAL_MACHINE_TYPE = 'Microsoft.Compute/virtualMachines'
@@ -279,11 +281,10 @@ def _create_instances(
             in provider_config), ('Provider config must include '
                                   'use_external_resource_group field')
     use_external_resource_group = provider_config['use_external_resource_group']
-    
+
     if use_external_resource_group:
-        deployment_name = (
-            constants.EXTERNAL_RG_VM_DEPLOYMENT_NAME.format(
-                cluster_name_on_cloud=cluster_name_on_cloud))
+        deployment_name = (constants.EXTERNAL_RG_VM_DEPLOYMENT_NAME.format(
+            cluster_name_on_cloud=cluster_name_on_cloud))
     else:
         deployment_name = vm_name
 
@@ -625,20 +626,22 @@ def terminate_instances(
     # cannot remove the entire resource group as it may contain other resources
     # unrelated to this VM being removed.
     if use_external_resource_group:
-        delete_vm_and_attached_resources(
-            subscription_id, resource_group, cluster_name_on_cloud)
+        delete_vm_and_attached_resources(subscription_id, resource_group,
+                                         cluster_name_on_cloud)
     else:
         # For SkyPilot default resource groups, delete entire resource group.
         # This automatically terminates all resources within, including VMs
         resource_group_client = azure.get_client('resource', subscription_id)
         delete_resource_group = _get_azure_sdk_function(
-            client=resource_group_client.resource_groups, function_name='delete')
+            client=resource_group_client.resource_groups,
+            function_name='delete')
         try:
             delete_resource_group(resource_group, force_deletion_types=None)
         except azure.exceptions().ResourceNotFoundError as e:
             if 'ResourceGroupNotFound' in str(e):
-                logger.warning(f'Resource group {resource_group} not found. Skip '
-                            'terminating it.')
+                logger.warning(
+                    f'Resource group {resource_group} not found. Skip '
+                    'terminating it.')
                 return
             raise
 
@@ -702,12 +705,10 @@ def _filter_instances(
     return nodes
 
 
-def delete_vm_and_attached_resources(
-    subscription_id: str,
-    resource_group: str,
-    cluster_name_on_cloud: str) -> None:
+def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
+                                     cluster_name_on_cloud: str) -> None:
     """Removes VM with attached resources and Deployments.
-    
+
     This function deletes a virtual machine and its associated resources
     (public IP addresses, virtual networks, managed identities, network
     interface and network security groups) that match cluster_name_on_cloud.
@@ -723,15 +724,15 @@ def delete_vm_and_attached_resources(
     resource_client = azure.get_client('resource', subscription_id)
     try:
         list_resources = _get_azure_sdk_function(
-                    client=resource_client.resources,
-                    function_name='list_by_resource_group')
+            client=resource_client.resources,
+            function_name='list_by_resource_group')
         resources = list(list_resources(resource_group))
     except azure.exceptions().ResourceNotFoundError as e:
         if _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE in str(e):
             return
         raise
-    
-    filtered_resources = {
+
+    filtered_resources: Dict[str, List[str]] = {
         _RESOURCE_VIRTUAL_MACHINE_TYPE: [],
         _RESOURCE_MANAGED_IDENTITY_TYPE: [],
         _RESOURCE_NETWORK_SECURITY_GROUP_TYPE: [],
@@ -742,19 +743,18 @@ def delete_vm_and_attached_resources(
 
     for resource in resources:
         if (resource.type in filtered_resources and
-            cluster_name_on_cloud in resource.name):
+                cluster_name_on_cloud in resource.name):
             filtered_resources[resource.type].append(resource.name)
 
     network_client = azure.get_client('network', subscription_id)
     msi_client = azure.get_client('msi', subscription_id)
     compute_client = azure.get_client('compute', subscription_id)
     auth_client = azure.get_client('authorization', subscription_id)
-    
+
     delete_virtual_machine = _get_azure_sdk_function(
         client=compute_client.virtual_machines, function_name='delete')
     delete_public_ip_addresses = _get_azure_sdk_function(
-        client=network_client.public_ip_addresses,
-        function_name='begin_delete')
+        client=network_client.public_ip_addresses, function_name='begin_delete')
     delete_virtual_networks = _get_azure_sdk_function(
         client=network_client.virtual_networks, function_name='begin_delete')
     delete_managed_identity = _get_azure_sdk_function(
@@ -763,11 +763,9 @@ def delete_vm_and_attached_resources(
         client=network_client.network_security_groups,
         function_name='begin_delete')
     delete_network_interfaces = _get_azure_sdk_function(
-        client=network_client.network_interfaces,
-        function_name='begin_delete')
+        client=network_client.network_interfaces, function_name='begin_delete')
     delete_role_assignment = _get_azure_sdk_function(
-        client=auth_client.role_assignments,
-        function_name='delete')
+        client=auth_client.role_assignments, function_name='delete')
 
     for vm_name in filtered_resources[_RESOURCE_VIRTUAL_MACHINE_TYPE]:
         try:
@@ -775,8 +773,8 @@ def delete_vm_and_attached_resources(
             # be completely removed with .result() so the dependency of VM on
             # Network Interface is disassociated. This takes abour ~30s.
             delete_virtual_machine(resource_group_name=resource_group,
-                                vm_name=vm_name).result()
-        except Exception as e:
+                                   vm_name=vm_name).result()
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete VM: {}'.format(e))
 
     for nic_name in filtered_resources[_RESOURCE_NETWORK_INTERFACE_TYPE]:
@@ -786,24 +784,24 @@ def delete_vm_and_attached_resources(
             # dependency of Network Interface on Public IP Address is
             # disassociated. This takes about ~1s.
             delete_network_interfaces(resource_group_name=resource_group,
-                                    network_interface_name=nic_name).result()
-        except Exception as e:
+                                      network_interface_name=nic_name).result()
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nic: {}'.format(e))
 
     for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
         try:
             delete_public_ip_addresses(resource_group_name=resource_group,
-                                    public_ip_address_name=public_ip_name)
-        except Exception as e:
+                                       public_ip_address_name=public_ip_name)
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete public ip: {}'.format(e))
-    
+
     for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
         try:
             delete_virtual_networks(resource_group_name=resource_group,
                                     virtual_network_name=vnet_name)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete vnet: {}'.format(e))
-    
+
     for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
         user_assigned_identities = (
             msi_client.user_assigned_identities.list_by_resource_group(
@@ -827,23 +825,23 @@ def delete_vm_and_attached_resources(
                             delete_role_assignment(
                                 scope=scope,
                                 role_assignment_name=guid_role_assignment_name)
-                        except Exception as e:
+                        except Exception as e:  # pylint: disable=broad-except
                             logger.warning('Failed to delete role '
                                            'assignment: {}'.format(e))
                         break
         try:
             delete_managed_identity(resource_group_name=resource_group,
                                     resource_name=msi_name)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete msi: {}'.format(e))
-    
+
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
         try:
             delete_network_security_group(resource_group_name=resource_group,
-                                        network_security_group_name=nsg_name)
-        except Exception as e:
+                                          network_security_group_name=nsg_name)
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nsg: {}'.format(e))
-            
+
     delete_deployment = _get_azure_sdk_function(
         client=resource_client.deployments, function_name='begin_delete')
     deployment_names = [
@@ -855,8 +853,8 @@ def delete_vm_and_attached_resources(
     for deployment_name in deployment_names:
         try:
             delete_deployment(resource_group_name=resource_group,
-                            deployment_name=deployment_name)
-        except Exception as e:
+                              deployment_name=deployment_name)
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete deployment: {}'.format(e))
 
 

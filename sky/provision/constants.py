@@ -20,5 +20,6 @@ WORKER_NODE_TAGS = {
 # Names for Azure Deployments.
 DEPLOYMENT_NAME = 'skypilot-config'
 LEGACY_DEPLOYMENT_NAME = 'ray-config'
-EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME = 'skypilot-bootstrap-config-{cluster_name_on_cloud}'
+EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME = (
+    'skypilot-bootstrap-config-{cluster_name_on_cloud}')
 EXTERNAL_RG_VM_DEPLOYMENT_NAME = 'skypilot-vm-config-{cluster_name_on_cloud}'

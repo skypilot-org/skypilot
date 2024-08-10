@@ -61,7 +61,7 @@ def bootstrap_instances(
     assert ('location'
             in provider_config), 'Provider config must include location field'
     params = {'location': provider_config['location']}
-    
+
     assert ('use_external_resource_group'
             in provider_config), ('Provider config must include '
                                   'use_external_resource_group field')
@@ -80,7 +80,7 @@ def bootstrap_instances(
         rg_creation_start = time.time()
         retry = 0
         while (time.time() - rg_creation_start <
-            _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT):
+               _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT):
             try:
                 rg_create_or_update(resource_group_name=resource_group,
                                     parameters=params)
@@ -147,13 +147,13 @@ def bootstrap_instances(
     if use_external_resource_group:
         deployment_name = (
             constants.EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME.format(
-                cluster_name_on_cloud=cluster_name_on_cloud
-        ))
+                cluster_name_on_cloud=cluster_name_on_cloud))
         deployment_list = [deployment_name]
     else:
         deployment_name = constants.DEPLOYMENT_NAME
-        deployment_list = [constants.DEPLOYMENT_NAME,
-                           constants.LEGACY_DEPLOYMENT_NAME]
+        deployment_list = [
+            constants.DEPLOYMENT_NAME, constants.LEGACY_DEPLOYMENT_NAME
+        ]
 
     for deploy_name in deployment_list:
         try:

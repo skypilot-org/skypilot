@@ -12,11 +12,10 @@ import colorama
 
 from sky import clouds
 from sky import exceptions
-from sky import skypilot_config
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds import service_catalog
-from sky.provision import constants as provision_constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
