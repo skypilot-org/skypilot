@@ -51,7 +51,7 @@ def is_api_server_running() -> bool:
     return response.status_code == 200
 
 
-def start_uvicorn_in_background(reload: bool = False):
+def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     # The command to run uvicorn. Adjust the app:app to your application's
@@ -59,6 +59,8 @@ def start_uvicorn_in_background(reload: bool = False):
     api_server_cmd = API_SERVER_CMD
     if reload:
         api_server_cmd += ' --reload'
+    if deploy:
+        api_server_cmd += ' --deploy'
     cmd = f'{api_server_cmd} > {log_path} 2>&1'
 
     # Start the uvicorn process in the background and don't wait for it.
@@ -94,7 +96,7 @@ def get_request_id(response) -> str:
 def check_health(func):
 
     @functools.wraps(func)
-    def wrapper(*args, api_server_reload: bool = False, **kwargs):
+    def wrapper(*args, api_server_reload: bool = False, deploy: bool = False, **kwargs):
         if is_api_server_running():
             return func(*args, **kwargs)
         server_url = get_server_url()
@@ -108,7 +110,7 @@ def check_health(func):
                 if server_url == DEFAULT_SERVER_URL:
                     logger.info('Failed to connect to SkyPilot API server at '
                                 f'{server_url}. Starting a local server.')
-                    start_uvicorn_in_background(reload=api_server_reload)
+                    start_uvicorn_in_background(reload=api_server_reload, deploy=deploy)
                     logger.info(
                         f'{colorama.Fore.GREEN}SkyPilot API server started.'
                         f'{colorama.Style.RESET_ALL}')

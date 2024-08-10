@@ -73,7 +73,7 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
                 request_task.status = tasks.RequestStatus.FAILED
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
-            logger.info(f'Task {request_id} failed')
+            logger.info(f'Task {request_id} failed due to {e}')
             return None
         else:
             with tasks.update_rest_task(request_id) as request_task:

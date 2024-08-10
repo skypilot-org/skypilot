@@ -463,6 +463,20 @@ async def storage_delete(request: fastapi.Request,
         name=storage_body.name,
     )
 
+def long_running_request_inner():
+    while True:
+        print('long_running_request is running ...')
+        time.sleep(5)
+
+@app.get('/long_running_request')
+async def long_running_request(request: fastapi.Request):
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='long_running_request',
+        request_body={},
+        func=long_running_request_inner,
+    )
+
 
 @app.get('/get')
 async def get(get_body: payloads.RequestIdBody) -> tasks.RequestTaskPayload:
@@ -508,7 +522,7 @@ async def stream(
 
 
 @app.post('/abort')
-async def abort(abort_body: payloads.RequestIdBody):
+async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
     with tasks.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:
@@ -522,9 +536,13 @@ async def abort(abort_body: payloads.RequestIdBody):
         rest_task.status = tasks.RequestStatus.ABORTED
         print(f'Killing request process {rest_task.pid}', flush=True)
         if rest_task.pid is not None:
-            subprocess_utils.kill_children_processes(
-                parent_pids=[rest_task.pid])
-    print(f'Killed request: {abort_body.request_id}')
+            executor.start_background_request(
+                request_id=request.state.request_id,
+                request_name='kill_children_processes',
+                request_body={},
+                func=subprocess_utils.kill_children_processes,
+                parent_pids=[rest_task.pid],
+                force=True)
 
 
 @app.get('/requests')
@@ -557,8 +575,13 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', default=8000, type=int)
     parser.add_argument('--reload', action='store_true')
+    parser.add_argument('--deploy', action='store_true')
     cmd_args = parser.parse_args()
+    workers = None
+    if cmd_args.deploy:
+        workers = os.cpu_count()
     uvicorn.run('sky.api.rest:app',
                 host=cmd_args.host,
                 port=cmd_args.port,
-                reload=cmd_args.reload)
+                reload=cmd_args.reload,
+                workers=workers)

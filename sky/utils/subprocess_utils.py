@@ -124,10 +124,18 @@ def kill_children_processes(parent_pids: Optional[Union[
                 proc.kill()
             else:
                 proc.terminate()
-            proc.wait()
+            proc.wait(timeout=10)
         except psutil.NoSuchProcess:
             # The child process may have already been terminated.
             pass
+        except psutil.TimeoutExpired:
+            print(f'Process {proc.pid} did not terminate after 10 seconds',
+                  flush=True)
+            # Attempt to force kill if the normal termination fails
+            if not force:
+                print(f"Force killing process {proc.pid}", flush=True)
+                proc.kill()
+                proc.wait(timeout=5)  # Shorter timeout after force kill
 
     parent_processes = []
     if parent_pids is None:
