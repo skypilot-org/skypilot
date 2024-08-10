@@ -650,7 +650,8 @@ class Task:
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in [storage_lib.StorageMode.MOUNT,
+                                    storage_lib.StorageMode.MOUNT_CACHED]:
                 for r in self.resources:
                     r.requires_fuse = True
                 break
