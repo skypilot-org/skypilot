@@ -96,7 +96,10 @@ def get_request_id(response) -> str:
 def check_health(func):
 
     @functools.wraps(func)
-    def wrapper(*args, api_server_reload: bool = False, deploy: bool = False, **kwargs):
+    def wrapper(*args,
+                api_server_reload: bool = False,
+                deploy: bool = False,
+                **kwargs):
         if is_api_server_running():
             return func(*args, **kwargs)
         server_url = get_server_url()
@@ -110,7 +113,8 @@ def check_health(func):
                 if server_url == DEFAULT_SERVER_URL:
                     logger.info('Failed to connect to SkyPilot API server at '
                                 f'{server_url}. Starting a local server.')
-                    start_uvicorn_in_background(reload=api_server_reload, deploy=deploy)
+                    start_uvicorn_in_background(reload=api_server_reload,
+                                                deploy=deploy)
                     logger.info(
                         f'{colorama.Fore.GREEN}SkyPilot API server started.'
                         f'{colorama.Style.RESET_ALL}')

@@ -463,10 +463,12 @@ async def storage_delete(request: fastapi.Request,
         name=storage_body.name,
     )
 
+
 def long_running_request_inner():
     while True:
         print('long_running_request is running ...')
         time.sleep(5)
+
 
 @app.get('/long_running_request')
 async def long_running_request(request: fastapi.Request):
