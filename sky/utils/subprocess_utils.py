@@ -133,7 +133,7 @@ def kill_children_processes(parent_pids: Optional[Union[
                   flush=True)
             # Attempt to force kill if the normal termination fails
             if not force:
-                print(f"Force killing process {proc.pid}", flush=True)
+                print(f'Force killing process {proc.pid}', flush=True)
                 proc.kill()
                 proc.wait(timeout=5)  # Shorter timeout after force kill
 

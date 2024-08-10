@@ -5222,10 +5222,16 @@ def api():
               default=False,
               required=False,
               help='Automatically reload the API server when code changes.')
+@click.option('--deploy',
+              type=bool,
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Deploy the API server as a service.')
 @usage_lib.entrypoint
-def api_start(reload: bool):
+def api_start(reload: bool, deploy: bool):
     """Starts the API server locally."""
-    sdk.api_start(api_server_reload=reload)
+    sdk.api_start(api_server_reload=reload, deploy=deploy)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
