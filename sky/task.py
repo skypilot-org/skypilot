@@ -868,7 +868,8 @@ class Task:
                         'Storage mount destination path cannot be cloud storage'
                     )
 
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in [storage_lib.StorageMode.MOUNT,
+                                    storage_lib.StorageMode.MOUNT_CACHED]:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:
