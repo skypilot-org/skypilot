@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import dataclasses
 import json
 import math
 import os
@@ -350,7 +351,8 @@ def get_kubernetes_nodes() -> List[Any]:
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get node info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry.') from None
+            'Please check if the cluster is healthy and retry. To debug, run: '
+            'kubectl get nodes') from None
     return nodes
 
 
@@ -362,7 +364,8 @@ def get_kubernetes_pods() -> List[Any]:
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get pod info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry.') from None
+            'Please check if the cluster is healthy and retry. To debug, run: '
+            'kubectl get pods') from None
     return pods
 
 
@@ -1652,3 +1655,70 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
 
     fake_kube_response = FakeKubeResponse(object_dict)
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
+
+
+@dataclasses.dataclass
+class KubernetesNodeInfo:
+    """Dataclass to store Kubernetes node information."""
+    name: str
+    gpu_type: Optional[str]
+    # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
+    total: Dict[str, int]
+    free: Dict[str, int]
+
+
+def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
+    """Gets the resource information for all the nodes in the cluster.
+
+    Currently only GPU resources are supported. The function returns the total
+    number of GPUs available on the node and the number of free GPUs on the
+    node.
+
+    Returns:
+        Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
+            key and the KubernetesNodeInfo object as value
+    """
+    nodes = get_kubernetes_nodes()
+    # Get the pods to get the real-time resource usage
+    pods = get_kubernetes_pods()
+
+    label_formatter, _ = detect_gpu_label_formatter()
+    if not label_formatter:
+        label_key = None
+    else:
+        label_key = label_formatter.get_label_key()
+
+    node_info_dict: Dict[str, KubernetesNodeInfo] = {}
+
+    for node in nodes:
+        allocated_qty = 0
+        if label_formatter is not None and label_key in node.metadata.labels:
+            accelerator_name = label_formatter.get_accelerator_from_label_value(
+                node.metadata.labels.get(label_key))
+        else:
+            accelerator_name = None
+
+        accelerator_count = int(node.status.allocatable.get(
+            'nvidia.com/gpu', 0))
+
+        for pod in pods:
+            # Get all the pods running on the node
+            if (pod.spec.node_name == node.metadata.name and
+                    pod.status.phase in ['Running', 'Pending']):
+                # Iterate over all the containers in the pod and sum the
+                # GPU requests
+                for container in pod.spec.containers:
+                    if container.resources.requests:
+                        allocated_qty += int(
+                            container.resources.requests.get(
+                                'nvidia.com/gpu', 0))
+
+        accelerators_available = accelerator_count - allocated_qty
+
+        node_info_dict[node.metadata.name] = KubernetesNodeInfo(
+            name=node.metadata.name,
+            gpu_type=accelerator_name,
+            total={'nvidia.com/gpu': int(accelerator_count)},
+            free={'nvidia.com/gpu': int(accelerators_available)})
+
+    return node_info_dict
