@@ -7,6 +7,7 @@ from sky import status_lib
 from sky.provision import common
 from sky.provision.runpod import utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
@@ -15,12 +16,13 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
+                      status_filters: Optional[List[str]],
+                      head_only: bool = False) -> Dict[str, Any]:
 
     instances = utils.list_instances()
-    possible_names = [
-        f'{cluster_name_on_cloud}-head', f'{cluster_name_on_cloud}-worker'
-    ]
+    possible_names = [f'{cluster_name_on_cloud}-head']
+    if not head_only:
+        possible_names.append(f'{cluster_name_on_cloud}-worker')
 
     filtered_instances = {}
     for instance_id, instance in instances.items():
@@ -83,7 +85,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 name=f'{cluster_name_on_cloud}-{node_type}',
                 instance_type=config.node_config['InstanceType'],
                 region=region,
-                disk_size=config.node_config['DiskSize'])
+                disk_size=config.node_config['DiskSize'],
+                ports=config.ports_to_open_on_launch)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -205,6 +208,25 @@ def query_instances(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    del cluster_name_on_cloud, provider_config
+    del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    head_ip: Optional[str] = None,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[common.Endpoint]]:
+    """See sky/provision/__init__.py"""
+    del head_ip, provider_config  # Unused.
+    instances = _filter_instances(cluster_name_on_cloud, None, head_only=True)
+    assert len(instances) == 1
+    head_inst = list(instances.values())[0]
+    return {
+        port: [common.SocketEndpoint(**endpoint)]
+        for port, endpoint in head_inst['port2endpoint'].items()
+        if port in resources_utils.port_ranges_to_set(ports)
+    }
