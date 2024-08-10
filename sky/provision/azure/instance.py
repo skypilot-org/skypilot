@@ -770,27 +770,39 @@ def delete_vm_and_attached_resources(
         function_name='delete')
 
     for vm_name in filtered_resources[_RESOURCE_VIRTUAL_MACHINE_TYPE]:
-        # Before removing Network Interface, we need to wait for the VM to be 
-        # completely removed with .result() so the dependency of VM on
-        # Network Interface is disassociated. This takes abour ~30s.
-        delete_virtual_machine(resource_group_name=resource_group,
-                               vm_name=vm_name).result()
+        try:
+            # Before removing Network Interface, we need to wait for the VM to
+            # be completely removed with .result() so the dependency of VM on
+            # Network Interface is disassociated. This takes abour ~30s.
+            delete_virtual_machine(resource_group_name=resource_group,
+                                vm_name=vm_name).result()
+        except Exception as e:
+            logger.warning('Failed to delete VM: {}'.format(e))
 
     for nic_name in filtered_resources[_RESOURCE_NETWORK_INTERFACE_TYPE]:
-        # Before removing Public IP Address, we need to wait for the
-        # Network Interface to be completely removed with .result() so the
-        # dependency of Network Interface on Public IP Address is
-        # disassociated. This takes about ~1s.
-        delete_network_interfaces(resource_group_name=resource_group,
-                                  network_interface_name=nic_name).result()
+        try:
+            # Before removing Public IP Address, we need to wait for the
+            # Network Interface to be completely removed with .result() so the
+            # dependency of Network Interface on Public IP Address is
+            # disassociated. This takes about ~1s.
+            delete_network_interfaces(resource_group_name=resource_group,
+                                    network_interface_name=nic_name).result()
+        except Exception as e:
+            logger.warning('Failed to delete nic: {}'.format(e))
 
     for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
-        delete_public_ip_addresses(resource_group_name=resource_group,
-                                   public_ip_address_name=public_ip_name)
+        try:
+            delete_public_ip_addresses(resource_group_name=resource_group,
+                                    public_ip_address_name=public_ip_name)
+        except Exception as e:
+            logger.warning('Failed to delete public ip: {}'.format(e))
     
     for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
-        delete_virtual_networks(resource_group_name=resource_group,
-                                virtual_network_name=vnet_name)
+        try:
+            delete_virtual_networks(resource_group_name=resource_group,
+                                    virtual_network_name=vnet_name)
+        except Exception as e:
+            logger.warning('Failed to delete vnet: {}'.format(e))
     
     for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
         user_assigned_identities = (
@@ -811,17 +823,27 @@ def delete_vm_and_attached_resources(
                 for assignment in role_assignments:
                     if target_principal_id == assignment.principal_id:
                         guid_role_assignment_name = assignment.name
-                        delete_role_assignment(
-                            scope=scope,
-                            role_assignment_name=guid_role_assignment_name)
+                        try:
+                            delete_role_assignment(
+                                scope=scope,
+                                role_assignment_name=guid_role_assignment_name)
+                        except Exception as e:
+                            logger.warning('Failed to delete role '
+                                           'assignment: {}'.format(e))
                         break
-        delete_managed_identity(resource_group_name=resource_group,
-                                resource_name=msi_name)
+        try:
+            delete_managed_identity(resource_group_name=resource_group,
+                                    resource_name=msi_name)
+        except Exception as e:
+            logger.warning('Failed to delete msi: {}'.format(e))
     
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
-        delete_network_security_group(resource_group_name=resource_group,
-                                      network_security_group_name=nsg_name)
-
+        try:
+            delete_network_security_group(resource_group_name=resource_group,
+                                        network_security_group_name=nsg_name)
+        except Exception as e:
+            logger.warning('Failed to delete nsg: {}'.format(e))
+            
     delete_deployment = _get_azure_sdk_function(
         client=resource_client.deployments, function_name='begin_delete')
     deployment_names = [
@@ -831,8 +853,11 @@ def delete_vm_and_attached_resources(
             cluster_name_on_cloud=cluster_name_on_cloud)
     ]
     for deployment_name in deployment_names:
-        delete_deployment(resource_group_name=resource_group,
-                          deployment_name=deployment_name)  
+        try:
+            delete_deployment(resource_group_name=resource_group,
+                            deployment_name=deployment_name)
+        except Exception as e:
+            logger.warning('Failed to delete deployment: {}'.format(e))
 
 
 @common_utils.retry
