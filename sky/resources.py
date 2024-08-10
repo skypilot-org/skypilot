@@ -44,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -220,6 +220,7 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
+        self._cached_repr = None
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -263,6 +264,8 @@ class Resources:
             >>> sky.Resources(disk_size=100)
             <Cloud>(disk_size=100)
         """
+        if self._cached_repr is not None:
+            return self._cached_repr
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -322,7 +325,8 @@ class Resources:
         if self.cloud is not None:
             cloud_str = f'{self.cloud}'
 
-        return f'{cloud_str}({hardware_str})'
+        self._cached_repr = f'{cloud_str}({hardware_str})'
+        return self._cached_repr
 
     @property
     def repr_with_region_zone(self) -> str:
@@ -1561,5 +1565,8 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+            
+        if version < 20:
+            self._cached_repr = None
 
         self.__dict__.update(state)

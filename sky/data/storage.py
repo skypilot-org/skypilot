@@ -98,8 +98,7 @@ def _is_storage_cloud_enabled(cloud_name: str,
     if cloud_name in enabled_storage_clouds:
         return True
     if try_fix_with_sky_check:
-        # TODO(zhwu): Only check the specified cloud to speed up.
-        sky_check.check(quiet=True)
+        sky_check.check(quiet=True, clouds=[cloud_name])
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
@@ -1135,14 +1134,14 @@ class S3Store(AbstractStore):
         self.name = self.validate_name(self.name)
 
         # Check if the storage is enabled
-        if not _is_storage_cloud_enabled(str(clouds.AWS())):
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: s3\' specified, but ' \
-                    'AWS access is disabled. To fix, enable '\
-                    'AWS by running `sky check`. More info: '\
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+        # if not _is_storage_cloud_enabled(str(clouds.AWS())):
+        #     with ux_utils.print_exception_no_traceback():
+        #         raise exceptions.ResourcesUnavailableError(
+        #             'Storage \'store: s3\' specified, but ' \
+        #             'AWS access is disabled. To fix, enable '\
+        #             'AWS by running `sky check`. More info: '\
+        #             'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+        #             )
 
     @classmethod
     def validate_name(cls, name: str) -> str:
