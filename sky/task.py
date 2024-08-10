@@ -14,6 +14,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -282,10 +283,17 @@ class Task:
         self.best_resources = None
         # Check if the task is legal.
         self._validate()
+        self._add_global_file_mounts()
 
         dag = sky.dag.get_current_dag()
+
         if dag is not None:
             dag.add(self)
+
+    def _add_global_file_mounts(self):
+        """Adds global file_mounts defined in ~/.sky/config.yaml to the task."""
+        global_file_mounts = skypilot_config.get_nested(['global_file_mounts'], None)
+        self.configure_file_mounts(global_file_mounts)
 
     def _validate(self):
         """Checks if the Task fields are valid."""
@@ -408,41 +416,7 @@ class Task:
             event_callback=config.pop('event_callback', None),
         )
 
-        # Create lists to store storage objects inlined in file_mounts.
-        # These are retained in dicts in the YAML schema and later parsed to
-        # storage objects with the storage/storage_mount objects.
-        fm_storages = []
-        file_mounts = config.pop('file_mounts', None)
-        if file_mounts is not None:
-            copy_mounts = {}
-            for dst_path, src in file_mounts.items():
-                # Check if it is str path
-                if isinstance(src, str):
-                    copy_mounts[dst_path] = src
-                # If the src is not a str path, it is likely a dict. Try to
-                # parse storage object.
-                elif isinstance(src, dict):
-                    fm_storages.append((dst_path, src))
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Unable to parse file_mount '
-                                         f'{dst_path}:{src}')
-            task.set_file_mounts(copy_mounts)
-
-        task_storage_mounts: Dict[str, storage_lib.Storage] = {}
-        all_storages = fm_storages
-        for storage in all_storages:
-            mount_path = storage[0]
-            assert mount_path, 'Storage mount path cannot be empty.'
-            try:
-                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
-            except exceptions.StorageSourceError as e:
-                # Patch the error message to include the mount path, if included
-                e.args = (e.args[0].replace('<destination_path>',
-                                            mount_path),) + e.args[1:]
-                raise e
-            task_storage_mounts[mount_path] = storage_obj
-        task.set_storage_mounts(task_storage_mounts)
+        task.configure_file_mounts(config.pop('file_mounts', None))
 
         if config.get('inputs') is not None:
             inputs_dict = config.pop('inputs')
@@ -489,6 +463,42 @@ class Task:
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task
+
+    def configure_file_mounts(self, file_mounts_config: Optional[Dict[str, Any]]) -> None:
+        # Create lists to store storage objects inlined in file_mounts.
+        # These are retained in dicts in the YAML schema and later parsed to
+        # storage objects with the storage/storage_mount objects.
+        fm_storages = []
+        file_mounts = file_mounts_config
+        if file_mounts is not None:
+            copy_mounts = {}
+            for dst_path, src in file_mounts.items():
+                # Check if it is str path
+                if isinstance(src, str):
+                    copy_mounts[dst_path] = src
+                # If the src is not a str path, it is likely a dict. Try to
+                # parse storage object.
+                elif isinstance(src, dict):
+                    fm_storages.append((dst_path, src))
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unable to parse file_mount '
+                                         f'{dst_path}:{src}')
+            self.update_file_mounts(copy_mounts)
+        task_storage_mounts: Dict[str, storage_lib.Storage] = {}
+        all_storages = fm_storages
+        for storage in all_storages:
+            mount_path = storage[0]
+            assert mount_path, 'Storage mount path cannot be empty.'
+            try:
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+            except exceptions.StorageSourceError as e:
+                # Patch the error message to include the mount path, if included
+                e.args = (e.args[0].replace('<destination_path>',
+                                            mount_path),) + e.args[1:]
+                raise e
+            task_storage_mounts[mount_path] = storage_obj
+        self.update_storage_mounts(task_storage_mounts)
 
     @staticmethod
     def from_yaml(yaml_path: str) -> 'Task':

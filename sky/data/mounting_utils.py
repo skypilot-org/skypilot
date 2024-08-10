@@ -212,12 +212,12 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         #f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
         # '--dir-cache-time' specifies the frequency of how often rclone should
         # check the backend storage for an update when there is a discrepancy.
-        '--allow-other --vfs-cache-mode writes --dir-cache-time 30s '
+        '--allow-other --vfs-cache-mode writes --dir-cache-time 5s '
         # '--transfers 1' guarantees the files written at the local mount point
         # to be  uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point to upload newly written files.
-        '--transfers 1 --vfs-cache-poll-interval 5s')
+        '--poll-interval 5s --transfers 1 --vfs-cache-poll-interval 5s')
     return mount_cmd
 
 
