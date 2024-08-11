@@ -11,26 +11,30 @@ class TestStorageSpecLocalSource:
     """Tests for local sources"""
 
     def test_nonexist_local_source(self):
+        storage_obj = storage_lib.Storage(
+            name='test', source=f'/tmp/test-{int(time.time())}')
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test',
-                                source=f'/tmp/test-{int(time.time())}')
+            storage_obj.construct()
+
         assert 'Local source path does not exist' in str(e)
 
     def test_source_trailing_slashes(self):
+        storage_obj = storage_lib.Storage(name='test', source='/bin/')
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test', source='/bin/')
+            storage_obj.construct()
         assert 'Storage source paths cannot end with a slash' in str(e)
 
     def test_source_single_file(self):
+        storage_obj = storage_lib.Storage(name='test', source=f.name)
         with pytest.raises(exceptions.StorageSourceError) as e:
-            with tempfile.NamedTemporaryFile() as f:
-                storage_lib.Storage(name='test', source=f.name)
+            storage_obj.construct()
         assert 'Storage source path cannot be a file' in str(e)
 
     def test_source_multifile_conflict(self):
+        storage_obj = storage_lib.Storage(
+            name='test', source=['/myfile.txt', '/a/myfile.txt'])
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test',
-                                source=['/myfile.txt', '/a/myfile.txt'])
+            storage_obj.construct()
         assert 'Cannot have multiple files or directories' in str(e)
 
 
@@ -40,12 +44,14 @@ class TestStorageSpecValidation:
     # These tests do not create any buckets and can be run offline
     def test_source_and_name(self):
         """Tests when both name and source are specified"""
-        # When source is local and name is also specified - valid spec
-        storage_lib.Storage(name='test', source='/bin')
+        storage_obj = storage_lib.Storage(name='test', source='/bin')
+        storage_obj.construct()
 
         # When source is bucket URL and name is specified - invalid spec
+        storage_obj = storage_lib.Storage(name='test',
+                                          source='s3://tcga-2-open')
         with pytest.raises(exceptions.StorageSpecError) as e:
-            storage_lib.Storage(name='test', source='s3://tcga-2-open')
+            storage_obj.construct()
 
         assert 'Storage name should not be specified if the source is a ' \
                'remote URI.' in str(e)
@@ -53,8 +59,9 @@ class TestStorageSpecValidation:
     def test_source_and_noname(self):
         """Tests when only source is specified"""
         # When source is local, name must be specified
+        storage_obj = storage_lib.Storage(source='/bin')
         with pytest.raises(exceptions.StorageNameError) as e:
-            storage_lib.Storage(source='/bin')
+            storage_obj.construct()
 
         assert 'Storage name must be specified if the source is local' in str(e)
 
@@ -66,21 +73,24 @@ class TestStorageSpecValidation:
     def test_name_and_nosource(self):
         """Tests when only name is specified"""
         # When mode is COPY and the storage object doesn't exist - error out
+        storage_obj = storage_lib.Storage(name='sky-test-bucket',
+                                          mode=storage_lib.StorageMode.COPY)
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='sky-test-bucket',
-                                mode=storage_lib.StorageMode.COPY)
+            storage_obj.construct()
 
         assert 'source must be specified when using COPY mode' in str(e)
 
         # When mode is MOUNT - valid spec (e.g., use for scratch space)
-        storage_lib.Storage(name='sky-test-bucket',
-                            mode=storage_lib.StorageMode.MOUNT)
+        storage_obj = storage_lib.Storage(name='sky-test-bucket',
+                                          mode=storage_lib.StorageMode.MOUNT)
+        storage_obj.construct()
 
     def test_noname_and_nosource(self):
         """Tests when neither name nor source is specified"""
         # Storage cannot be specified without name or source - invalid spec
+        storage_obj = storage_lib.Storage()
         with pytest.raises(exceptions.StorageSpecError) as e:
-            storage_lib.Storage()
+            storage_obj.construct()
 
         assert 'Storage source or storage name must be specified' in str(e)
 
@@ -96,7 +106,8 @@ class TestStorageSpecValidation:
         ]
 
         for n in invalid_names:
+            storage_obj = storage_lib.Storage(name=n)
             with pytest.raises(exceptions.StorageNameError) as e:
-                storage_lib.Storage(name=n)
+                storage_obj.construct()
 
             assert 'Prefix detected' in str(e)

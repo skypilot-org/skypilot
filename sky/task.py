@@ -971,6 +971,7 @@ class Task:
         }``.
         """
         for storage in self.storage_mounts.values():
+            storage.construct()
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type

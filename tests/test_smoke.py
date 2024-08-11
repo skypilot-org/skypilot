@@ -4470,6 +4470,7 @@ class TestStorageWithCredentials:
                                           stores=stores,
                                           persistent=persistent,
                                           mode=mode)
+        storage_obj.construct()
         yield storage_obj
         handle = global_user_state.get_handle_from_storage_name(
             storage_obj.name)
@@ -4496,6 +4497,7 @@ class TestStorageWithCredentials:
         for _ in range(5):
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
+            store_obj.construct()
             storage_mult_obj.append(store_obj)
         yield storage_mult_obj
         for storage_obj in storage_mult_obj:
@@ -4522,6 +4524,7 @@ class TestStorageWithCredentials:
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=src_path)
+            store_obj.construct()
             storage_mult_obj.append(store_obj)
         yield storage_mult_obj
         for storage_obj in storage_mult_obj:
@@ -4665,6 +4668,7 @@ class TestStorageWithCredentials:
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
         storage_obj = storage_lib.Storage(source=request.param)
+        storage_obj.construct()
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
@@ -4915,6 +4919,7 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(
                     source=nonexist_bucket_url.format(
                         random_name=nonexist_bucket_name))
+            storage_obj.construct()
 
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
@@ -4945,6 +4950,7 @@ class TestStorageWithCredentials:
         with pytest.raises(sky.exceptions.StorageBucketGetError,
                            match=match_str):
             storage_obj = storage_lib.Storage(source=private_bucket)
+            storage_obj.construct()
 
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
@@ -4965,6 +4971,7 @@ class TestStorageWithCredentials:
         # sky) and verifies that files are written.
         bucket_name, _ = request.getfixturevalue(ext_bucket_fixture)
         storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
+        storage_obj.construct()
         storage_obj.add_store(store_type)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
@@ -5046,6 +5053,7 @@ class TestStorageWithCredentials:
         for name in invalid_name_list:
             with pytest.raises(sky.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
+                storage_obj.construct()
                 storage_obj.add_store(store_type)
 
     @pytest.mark.no_fluidstack
@@ -5114,6 +5122,7 @@ class TestStorageWithCredentials:
         with pytest.raises(sky.exceptions.StorageSpecError) as e:
             storage_obj = storage_lib.Storage(
                 name=ext_bucket_name, mode=storage_lib.StorageMode.MOUNT)
+            storage_obj.construct()
             storage_obj.add_store(store_type)
 
         assert 'Attempted to mount a non-sky managed bucket' in str(e)
@@ -5121,6 +5130,7 @@ class TestStorageWithCredentials:
         # valid spec
         storage_obj = storage_lib.Storage(source=ext_bucket_uri,
                                           mode=storage_lib.StorageMode.MOUNT)
+        storage_obj.construct()
         handle = global_user_state.get_handle_from_storage_name(
             storage_obj.name)
         if handle:

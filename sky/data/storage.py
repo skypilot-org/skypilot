@@ -255,6 +255,7 @@ class AbstractStore:
         self.region = region
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
+        self.initialize()
 
     @classmethod
     def from_metadata(cls, metadata: StoreMetadata, **override_args):
@@ -455,7 +456,7 @@ class Storage(object):
     def __init__(self,
                  name: Optional[str] = None,
                  source: Optional[SourceType] = None,
-                 stores: Optional[Dict[StoreType, AbstractStore]] = None,
+                 stores: Optional[List[StoreType]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: bool = True) -> None:
@@ -497,12 +498,23 @@ class Storage(object):
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
         """
-        self.name: str
+        self.name = name
         self.source = source
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
+        self.stores: Dict[StoreType, Optional[AbstractStore]] = {}
+        if stores is not None:
+            for store in stores:
+                self.stores[store] = None
         self.sync_on_reconstruction = sync_on_reconstruction
+
+        self._constructed = False
+
+    def construct(self):
+        if self._constructed:
+            return
+        self._constructed = True
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
         # for spot. Once sky storage supports forced management for external
@@ -510,11 +522,13 @@ class Storage(object):
         self.force_delete = False
 
         # Validate and correct inputs if necessary
-        self._validate_storage_spec(name)
+        self._validate_storage_spec(self.name)
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
-        self.stores = {} if stores is None else stores
+        self.stores = {}
+        for store in self.stores:
+            self.add_store(store)
 
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
@@ -1044,12 +1058,15 @@ class Storage(object):
         assert not config, f'Invalid storage args: {config.keys()}'
 
         # Validation of the config object happens on instantiation.
+        if store is not None:
+            stores = [StoreType(store.upper())]
+        else:
+            stores = None
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
-                          mode=mode)
-        if store is not None:
-            storage_obj.add_store(StoreType(store.upper()))
+                          mode=mode,
+                          stores=stores)
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
