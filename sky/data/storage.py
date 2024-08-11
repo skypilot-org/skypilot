@@ -255,9 +255,6 @@ class AbstractStore:
         self.region = region
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
-        # Whether sky is responsible for the lifecycle of the Store.
-        self._validate()
-        self.initialize()
 
     @classmethod
     def from_metadata(cls, metadata: StoreMetadata, **override_args):
@@ -281,6 +278,11 @@ class AbstractStore:
                                   is_sky_managed=self.is_sky_managed)
 
     def initialize(self):
+        """Validates and initializes the Store object on the cloud."""
+        self._validate()
+        self._initialize()
+
+    def _initialize(self):
         """Initializes the Store object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
@@ -920,7 +922,7 @@ class Storage(object):
         self._add_store(store)
 
         # Upload source to store
-        self._sync_store(store)
+        # self._sync_store(store)
 
         return store
 
@@ -978,6 +980,10 @@ class Storage(object):
             self.stores = {}
             # Remove storage from global_user_state if present
             global_user_state.remove_storage(self.name)
+
+    def initialize_all_stores(self):
+        for _, store in self.stores.items():
+            store.initialize()
 
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""
@@ -1088,8 +1094,8 @@ class S3Store(AbstractStore):
                  region: Optional[str] = 'us-east-2',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
-        self.client: 'boto3.client.Client'
-        self.bucket: 'StorageHandle'
+        self._client: Optional['boto3.client.Client'] = None
+        self._bucket: Optional['StorageHandle'] = None
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -1134,14 +1140,26 @@ class S3Store(AbstractStore):
         self.name = self.validate_name(self.name)
 
         # Check if the storage is enabled
-        # if not _is_storage_cloud_enabled(str(clouds.AWS())):
-        #     with ux_utils.print_exception_no_traceback():
-        #         raise exceptions.ResourcesUnavailableError(
-        #             'Storage \'store: s3\' specified, but ' \
-        #             'AWS access is disabled. To fix, enable '\
-        #             'AWS by running `sky check`. More info: '\
-        #             'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-        #             )
+        if not _is_storage_cloud_enabled(str(clouds.AWS())):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    'Storage \'store: s3\' specified, but ' \
+                    'AWS access is disabled. To fix, enable '\
+                    'AWS by running `sky check`. More info: '\
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    )
+
+    @property
+    def client(self) -> 'boto3.client.Client':
+        if self._client is None:
+            self.initialize()
+        return self._client
+
+    @property
+    def bucket(self) -> 'StorageHandle':
+        if self._bucket is None:
+            self.initialize()
+        return self._bucket
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -1202,7 +1220,7 @@ class S3Store(AbstractStore):
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
 
-    def initialize(self):
+    def _initialize(self):
         """Initializes the S3 store object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
@@ -1213,8 +1231,8 @@ class S3Store(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.client = data_utils.create_s3_client(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
+        self._client = data_utils.create_s3_client(self.region)
+        self._bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
             # object (i.e., did not exist in global_user_state) and we should
@@ -1505,10 +1523,22 @@ class GcsStore(AbstractStore):
                  region: Optional[str] = 'us-central1',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True):
-        self.client: 'storage.Client'
-        self.bucket: StorageHandle
+        self._client: Optional['storage.Client'] = None
+        self._bucket: Optional[StorageHandle] = None
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
+
+    @property
+    def client(self) -> 'storage.Client':
+        if self._client is None:
+            self.initialize()
+        return self._client
+
+    @property
+    def bucket(self) -> 'StorageHandle':
+        if self._bucket is None:
+            self.initialize()
+        return self._bucket
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1616,7 +1646,7 @@ class GcsStore(AbstractStore):
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
 
-    def initialize(self):
+    def _initialize(self):
         """Initializes the GCS store object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
@@ -1627,8 +1657,8 @@ class GcsStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.client = gcp.storage_client()
-        self.bucket, is_new_bucket = self._get_bucket()
+        self._client = gcp.storage_client()
+        self._bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
             # object (i.e., did not exist in global_user_state) and we should
@@ -1979,8 +2009,8 @@ class AzureBlobStore(AbstractStore):
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
-        self.storage_client: 'storage.Client'
-        self.resource_client: 'storage.Client'
+        self._storage_client: Optional['storage.Client'] = None
+        self._resource_client: Optional['storage.Client'] = None
         self.container_name: str
         # storage_account_name is not None when initializing only
         # when it is being reconstructed from the handle(metadata).
@@ -2073,6 +2103,18 @@ class AzureBlobStore(AbstractStore):
                     'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
                 )
 
+    @property
+    def storage_client(self) -> 'storage.Client':
+        if self._storage_client is None:
+            self.initialize()
+        return self._storage_client
+
+    @property
+    def resource_client(self) -> 'storage.Client':
+        if self._resource_client is None:
+            self.initialize()
+        return self._resource_client
+
     @classmethod
     def validate_name(cls, name: str) -> str:
         """Validates the name of the AZ Container.
@@ -2118,7 +2160,7 @@ class AzureBlobStore(AbstractStore):
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
 
-    def initialize(self):
+    def _initialize(self):
         """Initializes the AZ Container object on the cloud.
 
         Initialization involves fetching container if exists, or creating it if
@@ -2135,8 +2177,8 @@ class AzureBlobStore(AbstractStore):
                 either through config.yaml or local db does not exist under
                 user's subscription ID.
         """
-        self.storage_client = data_utils.create_az_client('storage')
-        self.resource_client = data_utils.create_az_client('resource')
+        self._storage_client = data_utils.create_az_client('storage')
+        self._resource_client = data_utils.create_az_client('resource')
         self.storage_account_name, self.resource_group_name = (
             self._get_storage_account_and_resource_group())
 
@@ -2675,10 +2717,22 @@ class R2Store(AbstractStore):
                  region: Optional[str] = 'auto',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True):
-        self.client: 'boto3.client.Client'
-        self.bucket: 'StorageHandle'
+        self._client: Optional['boto3.client.Client'] = None
+        self._bucket: Optional['StorageHandle'] = None
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
+
+    @property
+    def client(self) -> 'boto3.client.Client':
+        if self._client is None:
+            self.initialize()
+        return self._client
+
+    @property
+    def bucket(self) -> 'StorageHandle':
+        if self._bucket is None:
+            self.initialize()
+        return self._bucket
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2729,7 +2783,7 @@ class R2Store(AbstractStore):
                     'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
                     )
 
-    def initialize(self):
+    def _initialize(self):
         """Initializes the R2 store object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
@@ -2740,8 +2794,8 @@ class R2Store(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.client = data_utils.create_r2_client(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
+        self._client = data_utils.create_r2_client(self.region)
+        self._bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
             # object (i.e., did not exist in global_user_state) and we should
@@ -3058,13 +3112,25 @@ class IBMCosStore(AbstractStore):
                  region: Optional[str] = 'us-east',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
-        self.client: 'storage.Client'
-        self.bucket: 'StorageHandle'
+        self._client: Optional['storage.Client'] = None
+        self._bucket: Optional['StorageHandle'] = None
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
         self.bucket_rclone_profile = \
           Rclone.generate_rclone_bucket_profile_name(
             self.name, Rclone.RcloneClouds.IBM)
+
+    @property
+    def client(self) -> 'storage.Client':
+        if self._client is None:
+            self.initialize()
+        return self._client
+
+    @property
+    def bucket(self) -> 'StorageHandle':
+        if self._bucket is None:
+            self.initialize()
+        return self._bucket
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3152,7 +3218,7 @@ class IBMCosStore(AbstractStore):
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
 
-    def initialize(self):
+    def _initialize(self):
         """Initializes the cos store object on the cloud.
 
         Initialization involves fetching bucket if exists, or creating it if
@@ -3163,9 +3229,9 @@ class IBMCosStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.client = ibm.get_cos_client(self.region)
+        self._client = ibm.get_cos_client(self.region)
         self.s3_resource = ibm.get_cos_resource(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
+        self._bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
             # object (i.e., did not exist in global_user_state) and we should
@@ -3429,7 +3495,7 @@ class IBMCosStore(AbstractStore):
                 })
             logger.info(f'Created IBM COS bucket {bucket_name} in {region} '
                         f'with storage class smart tier')
-            self.bucket = self.s3_resource.Bucket(bucket_name)
+            self._bucket = self.s3_resource.Bucket(bucket_name)
 
         except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
             with ux_utils.print_exception_no_traceback():

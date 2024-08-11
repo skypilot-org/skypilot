@@ -959,6 +959,10 @@ class Task:
         store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
+    # def initialize_all_storage_stores(self):
+    #     for _, storage in self.storage_mounts.items():
+    #         storage.initialize_all_stores()
+
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
@@ -971,6 +975,7 @@ class Task:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
+                storage.sync_all_stores()
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]

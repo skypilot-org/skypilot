@@ -1565,7 +1565,7 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
-            
+
         if version < 20:
             self._cached_repr = None
 

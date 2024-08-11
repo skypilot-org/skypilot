@@ -2231,7 +2231,7 @@ def get_clusters(
         records = new_records
     # Add auth_config to the records
     for record in records:
-        record = _update_record_with_credentials(record)
+        _update_record_with_credentials(record)
 
     if refresh == common.StatusRefreshMode.NONE:
         return records

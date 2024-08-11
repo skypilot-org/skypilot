@@ -9,7 +9,6 @@ from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import filelock
 import requests
-import traceback
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -131,7 +130,8 @@ class LazyDataFrame:
         self._update_func = update_func
 
     def _load_df(self) -> 'pd.DataFrame':
-        print(f'Loading {self._filename} - Traceback: {traceback.format_stack()}')
+        # print(f'Loading {self._filename} - Traceback: '
+        #       f'{traceback.format_stack()}')
         if self._df is None:
             try:
                 self._update_func()
@@ -145,12 +145,12 @@ class LazyDataFrame:
         return self._df
 
     def __getattr__(self, name: str):
-        print(f'Getting attribute - Traceback: {traceback.format_stack()}')
+        # print(f'Getting attribute - Traceback: {traceback.format_stack()}')
         return getattr(self._load_df(), name)
 
     def __getitem__(self, key):
         # Delegate the indexing operation to the underlying DataFrame
-        print(f'Getting item  - Traceback: {traceback.format_stack()}')
+        # print(f'Getting item  - Traceback: {traceback.format_stack()}')
         return self._load_df()[key]
 
     def __setitem__(self, key, value):

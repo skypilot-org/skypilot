@@ -6,8 +6,8 @@ from sky import sky_logging
 from sky.provision import common
 from sky.provision.runpod import utils
 from sky.utils import common_utils
-from sky.utils import status_lib
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 5

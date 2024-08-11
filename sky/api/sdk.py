@@ -13,7 +13,6 @@ import json
 import os
 import subprocess
 import tempfile
-import time
 import typing
 from typing import Any, List, Optional, Tuple, Union
 
@@ -35,6 +34,7 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -578,15 +578,7 @@ def api_stop():
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and api_common.API_SERVER_CMD in ' '.join(cmdline):
-            process.terminate()
-            cnt = 0
-            while cnt < 5:
-                if not process.is_running():
-                    break
-                cnt += 1
-                time.sleep(1)
-            else:
-                process.kill()
+            subprocess_utils.kill_children_processes(parent_pids=[process.pid])
             found = True
 
     # Remove the database for requests including any files starting with
