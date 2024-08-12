@@ -193,6 +193,9 @@ def read_catalog(filename: str,
 
     def _update_catalog():
         # Atomic check, to avoid conflicts with other processes.
+        print(f'zhwu Debug: Updating {cloud} catalog: {filename}')
+        import traceback
+        print(traceback.format_stack())
         with filelock.FileLock(meta_path + '.lock'):
             if _need_update():
                 url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long

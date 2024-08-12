@@ -411,6 +411,8 @@ def queue(cluster_name: List[str],
 @usage_lib.entrypoint
 @api_common.check_health
 def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
+    # TODO: merge this into the queue endpoint, i.e., let the queue endpoint
+    # take job_ids to filter the returned jobs.
     body = payloads.JobStatusBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
