@@ -167,19 +167,20 @@ def launch(
 
     dag = api_common.upload_mounts_to_api_server(task)
 
-    cluster_status = None
-    request_id = status([cluster_name])
-    clusters = get(request_id)
-    if not clusters:
-        # Show the optimize log before the prompt if the cluster does not exist.
-        request_id = optimize(dag)
-        stream_and_get(request_id)
-    else:
-        cluster_record = clusters[0]
-        cluster_status = cluster_record['status']
-
     confirm_shown = False
+
     if need_confirmation:
+        cluster_status = None
+        request_id = status([cluster_name])
+        clusters = get(request_id)
+        if not clusters:
+            # Show the optimize log before the prompt if the cluster does not exist.
+            request_id = optimize(dag)
+            stream_and_get(request_id)
+        else:
+            cluster_record = clusters[0]
+            cluster_status = cluster_record['status']
+
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
         prompt = None

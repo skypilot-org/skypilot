@@ -34,9 +34,9 @@ def launch(
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
-    request_id = sdk.optimize(dag)
-    sdk.stream_and_get(request_id)
     if need_confirmation:
+        request_id = sdk.optimize(dag)
+        sdk.stream_and_get(request_id)
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)

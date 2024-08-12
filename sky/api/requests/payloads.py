@@ -135,7 +135,7 @@ class JobStatusBody(RequestBody):
 
 class JobsLaunchBody(RequestBody):
     task: str
-    name: str
+    name: Optional[str]
     detach_run: bool
     retry_until_up: bool
 
