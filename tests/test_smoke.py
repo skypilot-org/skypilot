@@ -3991,12 +3991,9 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     before_content = before_template.render(generic_cloud=generic_cloud)
     after_content = after_template.render(generic_cloud=generic_cloud)
     with tempfile.NamedTemporaryFile(
-        suffix='.yaml',
-        mode='w'
-    ) as before_file, tempfile.NamedTemporaryFile(
-        suffix='.yaml',
-        mode='w'
-    ) as after_file:
+            suffix='.yaml',
+            mode='w') as before_file, tempfile.NamedTemporaryFile(
+                suffix='.yaml', mode='w') as after_file:
         before_file.write(before_content)
         before_file.flush()
         before_file_path = before_file.name
@@ -4015,10 +4012,11 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                 # Wait for update to be registered
                 f'sleep 90',
                 wait_until_no_pending,
-                _check_replica_in_status(
-                    name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                        (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                        (2, False, 'READY')]),
+                _check_replica_in_status(name, [
+                    (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                    (2, False, 'READY')
+                ]),
                 *update_check,
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
