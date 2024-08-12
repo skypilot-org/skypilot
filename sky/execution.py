@@ -161,6 +161,11 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    for task in dag.tasks:
+        if task.storage_mounts is not None:
+            for storage in task.storage_mounts.values():
+                # Ensure the storage is constructed.
+                storage.construct()
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 

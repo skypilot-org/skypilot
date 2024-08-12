@@ -239,8 +239,4 @@ def process_mounts_in_task(task: str, env_vars: Dict[str,
     common_utils.dump_yaml(translated_client_task_path, task_configs)
 
     dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
-    for task in dag.tasks:
-        if task.storage_mounts is not None:
-            for storage in task.storage_mounts.values():
-                storage.construct()
     return dag
