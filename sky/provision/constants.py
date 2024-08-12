@@ -21,5 +21,5 @@ WORKER_NODE_TAGS = {
 DEPLOYMENT_NAME = 'skypilot-config'
 LEGACY_DEPLOYMENT_NAME = 'ray-config'
 EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME = (
-    'skypilot-bootstrap-config-{cluster_name_on_cloud}')
-EXTERNAL_RG_VM_DEPLOYMENT_NAME = 'skypilot-vm-config-{cluster_name_on_cloud}'
+    'sky-bootstrap-{cluster_name_on_cloud}')
+EXTERNAL_RG_VM_DEPLOYMENT_NAME = 'sky-vm-{cluster_name_on_cloud}'
