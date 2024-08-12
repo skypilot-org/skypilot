@@ -142,9 +142,11 @@ def decode_storage_ls(
         ]
     return return_value
 
+
 @register_handler('job_status')
 def decode_job_status(
         return_value: Dict[int, str]) -> Dict[int, 'job_lib.JobStatus']:
+    job_statuses = {}
     for job_id in return_value.keys():
-        return_value[job_id] = job_lib.JobStatus(return_value[job_id])
-    return return_value
+        job_statuses[job_id] = job_lib.JobStatus(return_value[job_id])
+    return job_statuses

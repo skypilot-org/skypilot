@@ -119,9 +119,9 @@ def encode_storage_ls(
         storage_info['store'] = [store.value for store in storage_info['store']]
     return return_value
 
+
 @register_handler('job_status')
-def encode_job_status(
-        return_value: Dict[int, Any]) -> Dict[int, str]:
+def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
     for job_id in return_value.keys():
         return_value[job_id] = return_value[job_id].value
     return return_value
