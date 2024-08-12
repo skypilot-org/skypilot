@@ -2323,9 +2323,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             zip(cluster_internal_ips, cluster_feasible_ips))
 
         # Ensure head node is the first element, then sort based on the
-        # external IPs for stableness
-        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
-            internal_external_ips[1:], key=lambda x: x[1])
+        # external IPs for stableness. Skip for k8s nodes since pods
+        # worker ids are already mapped.
+        if cluster_info is not None and cluster_info.provider_name == 'kubernetes':
+            stable_internal_external_ips = internal_external_ips
+        else:
+            stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+                internal_external_ips[1:], key=lambda x: x[1])
         self.stable_internal_external_ips = stable_internal_external_ips
 
     @functools.lru_cache()
