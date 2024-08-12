@@ -871,6 +871,9 @@ class Storage(object):
           region: str; Region to place the bucket in. Caller must ensure that
             the region is valid for the chosen store_type.
         """
+        assert self._constructed, self
+        assert self.name is not None, self
+
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
 
@@ -883,7 +886,9 @@ class Storage(object):
                             f'storage account {storage_account_name!r}.')
             else:
                 logger.info(f'Storage type {store_type} already exist.')
-            return self.stores[store_type]
+            store = self.stores[store_type]
+            assert store is not None, self
+            return store
 
         store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:
@@ -946,6 +951,7 @@ class Storage(object):
         if store.is_sky_managed:
             self.handle.add_store(store)
             if not is_reconstructed:
+                assert self.name is not None, self
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
 
@@ -959,11 +965,13 @@ class Storage(object):
             store_type: StoreType; Specific cloud store to remove from the list
               of backing stores.
         """
+        assert self.name is not None, self
         if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
             global_user_state.remove_storage(self.name)
         if store_type:
             store = self.stores[store_type]
+            assert store is not None, self
             is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
@@ -972,8 +980,12 @@ class Storage(object):
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
-                delete = all(
-                    s.is_sky_managed is False for s in self.stores.values())
+                delete = True
+                for store in self.stores.values():
+                    assert store is not None, self
+                    if store.is_sky_managed:
+                        delete = False
+                        break
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
@@ -984,6 +996,7 @@ class Storage(object):
             del self.stores[store_type]
         else:
             for _, store in self.stores.items():
+                assert store is not None, self
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
                     store.delete()
@@ -1000,6 +1013,8 @@ class Storage(object):
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
+        assert self._constructed, self
+        assert self.name is not None, self
 
         def warn_for_git_dir(source: str):
             if os.path.isdir(os.path.join(source, '.git')):

@@ -972,6 +972,7 @@ class Task:
         """
         for storage in self.storage_mounts.values():
             storage.construct()
+            assert storage.name is not None, storage
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
@@ -984,6 +985,8 @@ class Task:
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
+            assert storage.name is not None, storage
+
             if storage.mode == storage_lib.StorageMode.COPY:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:

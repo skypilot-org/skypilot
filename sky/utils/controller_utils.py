@@ -728,6 +728,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
         store_type = list(storage_obj.stores.keys())[0]
         store_object = storage_obj.stores[store_type]
+        assert store_object is not None, storage_obj
         bucket_url = storage_lib.StoreType.get_endpoint_url(
             store_object, file_bucket_name)
         for dst, src in copy_mounts_with_file_in_src.items():
@@ -748,6 +749,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
             store_object = storage_obj.stores[store_type]
+            assert store_object is not None, storage_obj
+            assert storage_obj.name is not None, storage_obj
             storage_obj.source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             storage_obj.force_delete = True
@@ -766,6 +769,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
             store_object = storage_obj.stores[store_type]
+            assert store_object is not None, storage_obj
+            assert storage_obj.name is not None, storage_obj
             source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({

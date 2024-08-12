@@ -4539,6 +4539,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():
+            storage_obj.construct()
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Raised when the bucket is externall removed before re-mounting
@@ -4552,6 +4553,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'successfully without mounting the bucket.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
+            assert store is not None, storage_obj
             mount_cmd = store.mount_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
