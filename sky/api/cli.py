@@ -1096,8 +1096,9 @@ def launch(
         clone_disk_from=clone_disk_from,
         need_confirmation=not yes,
     )
-    _, handle = _async_call_or_wait(request_id, async_call, 'Launch')
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'Launch')
     if not async_call:
+        handle = job_id_handle[1]
         # Add ssh config for the cluster
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])
