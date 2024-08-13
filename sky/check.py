@@ -167,8 +167,6 @@ def check(
                 click.style(f'\n{PARTY_POPPER_EMOJI} Enabled clouds '
                             f'{PARTY_POPPER_EMOJI}' + enabled_clouds_str,
                             fg='green'))
-            api_server_url = api_common.get_server_url()
-            echo(click.style(f'Using API server: {api_server_url}', fg='blue'))
     return enabled_clouds
 
 
