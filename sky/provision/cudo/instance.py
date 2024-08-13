@@ -79,9 +79,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     gpu_count = int(float(spec['gpu_count']))
     vcpu_count = int(spec['vcpu_count'])
     memory_gib = int(spec['mem_gb'])
-    gpu_model = spec['gpu_model']
+    gpu_model_id = spec['gpu_model_id']
     try:
-        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model, region,
+        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model_id, region,
                                   memory_gib, vcpu_count)
     except Exception as e:
         logger.warning(f'run_instances: {e}')

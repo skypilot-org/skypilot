@@ -106,14 +106,11 @@ def list_instances():
         for vm in vms.to_dict()['vms']:
             ex_ip = vm['external_ip_address']
             in_ip = vm['internal_ip_address']
-            if not in_ip:
-                in_ip = ex_ip
             instance = {
                 # active_state, init_state, lcm_state, short_state
                 'status': vm['short_state'],
                 'tags': vm['metadata'],
                 'name': vm['id'],
-                'ip': ex_ip,
                 'external_ip': ex_ip,
                 'internal_ip': in_ip
             }
@@ -123,10 +120,10 @@ def list_instances():
         raise e
 
 
-def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
+def vm_available(to_start_count, gpu_count, gpu_model_id, data_center_id, mem,
                  cpus):
     try:
-        gpu_model = utils.skypilot_gpu_to_cudo_gpu(gpu_model)
+        gpu_model_id = utils.skypilot_gpu_to_cudo_gpu(gpu_model_id)
         api = cudo.cudo.cudo_api.virtual_machines()
         types = api.list_vm_machine_types2()
         types_dict = types.to_dict()
@@ -137,7 +134,7 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
         cpu_count_okay = False
 
         for type in types_dict['machine_types']:
-            if type['data_center_id'] == data_center_id and type['gpu_model'] == gpu_model:
+            if type['data_center_id'] == data_center_id and type['gpu_model_id'] == gpu_model_id:
                 exists = True
 
                 if (type['max_gpu_free'] > gpu_count and type['total_gpu_free'] > (

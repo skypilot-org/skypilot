@@ -16,7 +16,7 @@ def get_spec_from_instance(instance_type, data_center_id):
                 spec = row
                 break
     return {
-        'gpu_model': spec[1],
+        'gpu_model_id': spec[1],
         'vcpu_count': spec[3],
         'mem_gb': spec[4],
         'gpu_count': spec[2],

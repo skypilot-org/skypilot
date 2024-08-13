@@ -61,9 +61,9 @@ def update_prices():
     for spec in utils.machine_specs:
         mts = machine_types()
         for mt in mts:
-            if not utils.gpu_exists(mt['gpu_model']):
+            if not utils.gpu_exists(mt['gpu_model_id']):
                 continue
-            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(mt['gpu_model'])
+            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(mt['gpu_model_id'])
             gpu_count = spec['gpu']
             if not accelerator_name:
                 gpu_count = 0
