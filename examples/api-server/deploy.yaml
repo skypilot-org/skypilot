@@ -11,7 +11,7 @@ setup: |
 
 
 run: |
-  sky api start
+  sky api start --deploy
 
 
 envs:
