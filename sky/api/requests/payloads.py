@@ -200,3 +200,7 @@ class ListAcceleratorsBody(RequestBody):
     all_regions: bool = False
     require_price: bool = True
     case_sensitive: bool = True
+
+
+class LocalUpBody(RequestBody):
+    gpus: bool = True

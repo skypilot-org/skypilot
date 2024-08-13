@@ -505,6 +505,22 @@ def storage_delete(name: str) -> str:
     return api_common.get_request_id(response)
 
 
+@usage_lib.entrypoint
+@api_common.check_health
+def local_up(gpus: bool) -> str:
+    body = payloads.LocalUpBody(gpus=gpus)
+    response = requests.post(f'{api_common.get_server_url()}/local_up',
+                             json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def local_down() -> str:
+    response = requests.post(f'{api_common.get_server_url()}/local_down')
+    return api_common.get_request_id(response)
+
+
 # === API request API ===
 
 

@@ -178,8 +178,11 @@ class Resources:
         # The key is None if the same image_id applies for all regions.
         # TODO(zhwu): if region/zone is not valid, this dict will have wrong
         # keys.
-        assert image_id is None or (self._region is not None or self._zone is not None), (
-            f'image_id {image_id} specified when region and zone are set, which is not supported yet.')
+        assert image_id is None or (
+            self._region is not None or self._zone is not None
+        ), (f'image_id {image_id} specified when region and zone are set, which '
+        'is not supported yet.'
+           )
         self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
@@ -649,14 +652,14 @@ class Resources:
                             table.add_row([str(cloud), reason_str])
                         hint = table.get_string()
                     raise ValueError(
-                        f'Invalid (region {self._region!r}, zone {self._zone!r}) '
-                        f'{cloud_str}. Details:\n{hint}')
+                        f'Invalid (region {self._region!r}, zone '
+                        f'{self._zone!r}) {cloud_str}. Details:\n{hint}')
             elif len(valid_clouds) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Cannot infer cloud from (region {self._region!r}, zone '
-                        f'{self._zone!r}). Multiple enabled clouds have region/zone '
-                        f'of the same names: {valid_clouds}. '
+                        f'Cannot infer cloud from (region {self._region!r}, '
+                        f'zone {self._zone!r}). Multiple enabled clouds '
+                        f'have region/zone of the same names: {valid_clouds}. '
                         f'To fix: explicitly specify `cloud`.')
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
                          f'inferred from region {self._region!r} and zone '

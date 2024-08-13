@@ -462,6 +462,29 @@ async def storage_delete(request: fastapi.Request,
     )
 
 
+@app.post('/local_up')
+async def local_up(request: fastapi.Request,
+                   local_up_body: payloads.LocalUpBody):
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='local_up',
+        request_body=json.loads(local_up_body.model_dump_json()),
+        func=core.local_up,
+        gpus=local_up_body.gpus,
+    )
+
+
+@app.post('/local_down')
+async def local_down(request: fastapi.Request):
+    executor.start_background_request(
+        request_id=request.state.request_id,
+        request_name='local_down',
+        request_body={},
+        func=core.local_down,
+    )
+
+
+# TODO(zhwu): remove this after debugging
 def long_running_request_inner():
     while True:
         print('long_running_request is running ...')
