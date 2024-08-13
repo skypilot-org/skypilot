@@ -1,5 +1,6 @@
 resources:
   cpus: 4+
+  ports: 46580
 
 
 setup: |
