@@ -46,7 +46,6 @@ import yaml
 
 import sky
 from sky import backends
-from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
@@ -63,7 +62,6 @@ from sky.data import storage_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import common

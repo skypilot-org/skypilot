@@ -180,8 +180,8 @@ class Resources:
         # keys.
         assert image_id is None or (
             self._region is not None or self._zone is not None
-        ), (f'image_id {image_id} specified when region and zone are set, which '
-            'is not supported yet.')
+        ), (f'image_id {image_id} specified when region and zone are set, '
+            'which is not supported yet.')
         self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
