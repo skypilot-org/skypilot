@@ -226,6 +226,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
+    def validate(self):
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_managed_job_attributes()

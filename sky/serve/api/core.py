@@ -110,6 +110,7 @@ def up(
             argument.
         endpoint: str; The service endpoint.
     """
+    task.validate()
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 
@@ -313,6 +314,7 @@ def update(
         task: sky.Task to update.
         service_name: Name of the service.
     """
+    task.validate()
     _validate_service_task(task)
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,

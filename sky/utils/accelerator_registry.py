@@ -62,9 +62,8 @@ def canonicalize_accelerator_name(accelerator: str,
         return accelerator.lower()
 
     # Common case: do not read the catalog files.
-    df = _accelertor_df[_accelertor_df['AcceleratorName'].str.contains(accelerator,
-                                                                case=False,
-                                                                regex=True)]
+    df = _accelertor_df[_accelertor_df['AcceleratorName'].str.contains(
+        accelerator, case=False, regex=True)]
     names = []
     for name, clouds in df[['AcceleratorName', 'Clouds']].values:
         if accelerator.lower() == name.lower():

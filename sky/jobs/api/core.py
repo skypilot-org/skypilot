@@ -65,6 +65,7 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
+    dag.validate()
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 

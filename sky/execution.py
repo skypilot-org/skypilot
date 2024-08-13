@@ -161,6 +161,7 @@ def _execute(
         if dryrun.
     """
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag.validate()
     for task in dag.tasks:
         if task.storage_mounts is not None:
             for storage in task.storage_mounts.values():

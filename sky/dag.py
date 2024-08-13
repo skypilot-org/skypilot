@@ -67,6 +67,10 @@ class Dag:
                     visited_zero_out_degree = True
         return is_chain
 
+    def validate(self):
+        for task in self.tasks:
+            task.validate()
+
 
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""

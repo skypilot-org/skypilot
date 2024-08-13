@@ -1214,3 +1214,7 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
+
+    def validate(self):
+        for r in self.resources:
+            r.validate()

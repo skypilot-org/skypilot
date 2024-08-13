@@ -114,6 +114,7 @@ class Optimizer:
                 for a task.
             exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
+        dag.validate()
         _check_specified_clouds(dag)
 
         # This function is effectful: mutates every node in 'dag' by setting
