@@ -176,6 +176,10 @@ class Resources:
 
         # self._image_id is a dict of {region: image_id}.
         # The key is None if the same image_id applies for all regions.
+        # TODO(zhwu): if region/zone is not valid, this dict will have wrong
+        # keys.
+        assert image_id is None or (self._region is not None or self._zone is not None), (
+            f'image_id {image_id} specified when region and zone are set, which is not supported yet.')
         self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
