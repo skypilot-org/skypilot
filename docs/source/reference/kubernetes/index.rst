@@ -21,10 +21,7 @@ Why use SkyPilot on Kubernetes?
             .. grid-item-card::  ✅ Ease of use
                 :text-align: center
 
-                ..
-                    TODO(romilb): We should have a comparison of a popular Kubernetes manifest vs a SkyPilot YAML in terms of LoC in a mini blog and link it here.
-
-                No complex kubernetes manifests - write a simple SkyPilot YAML and run with one command ``sky launch``.
+                No complex kubernetes manifests - write a :ref:`simple SkyPilot YAML <sky-compare-k8s-simpler-yamls>` and run with one command ``sky launch``.
 
             .. grid-item-card::  📋 Interactive development on Kubernetes
                 :text-align: center
@@ -68,6 +65,8 @@ Why use SkyPilot on Kubernetes?
 
                 Reduce operational overhead by letting your teams provision their own resources, while you retain control over the Kubernetes cluster.
 
+
+For a detailed comparison against vanilla Kubernetes, refer to :ref:`sky-compare`.
 
 Table of Contents
 -----------------
