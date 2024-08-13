@@ -81,7 +81,7 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
 .. _kubernetes-optimizer-table:
 
-4. You can now run any SkyPilot task on your Kubernetes cluster.
+3. You can now run any SkyPilot task on your Kubernetes cluster.
 
    .. code-block:: console
 
@@ -117,6 +117,29 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
     $ # Set a specific namespace to be used in the current-context
     $ kubectl config set-context --current --namespace=mynamespace
+
+
+.. tip::
+
+  You can list the GPUs available on your cluster with :code:`sky show-gpus --cloud kubernetes`.
+
+  .. code-block:: console
+
+    $ sky show-gpus --cloud kubernetes
+    Kubernetes GPUs
+    GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+    L4    1, 2, 4       12          2
+    H100  1, 2, 4, 8    16          12
+
+    Kubernetes per node GPU availability
+    NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+    gke-inference-pool         L4        4           2
+    gke-inference-pool         L4        4           0
+    gke-inference-pool         L4        2           0
+    gke-inference-pool         L4        2           0
+    gke-training-pool          H100      8           8
+    gke-training-pool          H100      8           4
+
 
 
 Using Custom Images
