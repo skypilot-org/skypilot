@@ -2587,8 +2587,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
-            managed_jobs_ = managed_jobs.queue(refresh=False,
+            request_id = managed_jobs.queue(refresh=False,
                                                skip_finished=True)
+            managed_jobs_ = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
