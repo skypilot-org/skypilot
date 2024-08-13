@@ -174,7 +174,8 @@ def launch(
         request_id = status([cluster_name])
         clusters = get(request_id)
         if not clusters:
-            # Show the optimize log before the prompt if the cluster does not exist.
+            # Show the optimize log before the prompt if the cluster does not
+            # exist.
             request_id = optimize(dag)
             stream_and_get(request_id)
         else:
@@ -581,7 +582,8 @@ def api_stop():
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
         if cmdline and api_common.API_SERVER_CMD in ' '.join(cmdline):
-            subprocess_utils.kill_children_processes(parent_pids=[process.pid])
+            subprocess_utils.kill_children_processes(parent_pids=[process.pid],
+                                                     force=True)
             found = True
 
     # Remove the database for requests including any files starting with

@@ -186,8 +186,7 @@ def upload_mounts_to_api_server(
     return dag
 
 
-def process_mounts_in_task(task: str, env_vars: Dict[str,
-                                                     str], cluster_name: str,
+def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                            workdir_only: bool) -> 'dag_lib.Dag':
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
 
@@ -198,7 +197,7 @@ def process_mounts_in_task(task: str, env_vars: Dict[str,
     client_task_dir = client_dir / 'tasks'
     client_task_dir.mkdir(parents=True, exist_ok=True)
 
-    client_task_path = client_task_dir / f'{cluster_name}-{timestamp}.yaml'
+    client_task_path = client_task_dir / f'{timestamp}.yaml'
     client_task_path.write_text(task)
 
     client_file_mounts_dir = client_dir / 'file_mounts'

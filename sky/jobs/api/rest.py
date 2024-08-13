@@ -16,7 +16,6 @@ async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
     dag = common.process_mounts_in_task(jobs_launch_body.task,
                                         jobs_launch_body.env_vars,
-                                        jobs_launch_body.name,
                                         workdir_only=False)
 
     executor.start_background_request(

@@ -1082,6 +1082,9 @@ def launch(
             f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
             f'{colorama.Style.RESET_ALL}')
 
+    detach_setup = detach_setup or async_call
+    detach_run = detach_run or async_call
+
     request_id = sdk.launch(
         task,
         dryrun=dryrun,

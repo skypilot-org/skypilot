@@ -220,7 +220,6 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     """
     dag = common.process_mounts_in_task(launch_body.task,
                                         launch_body.env_vars,
-                                        launch_body.cluster_name,
                                         workdir_only=False)
 
     backend = registry.BACKEND_REGISTRY.from_str(launch_body.backend)
@@ -256,7 +255,6 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
     dag = common.process_mounts_in_task(exec_body.task,
                                         exec_body.env_vars,
-                                        exec_body.cluster_name,
                                         workdir_only=True)
     if len(dag.tasks) != 1:
         raise fastapi.HTTPException(

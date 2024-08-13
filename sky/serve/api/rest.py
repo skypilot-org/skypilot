@@ -19,7 +19,6 @@ async def up(
 ) -> None:
     dag = common.process_mounts_in_task(up_body.task,
                                         up_body.env_vars,
-                                        up_body.service_name,
                                         workdir_only=False)
     assert len(dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                  'a service.', dag)
@@ -40,7 +39,6 @@ async def update(
 ) -> None:
     dag = common.process_mounts_in_task(update_body.task,
                                         update_body.env_vars,
-                                        update_body.service_name,
                                         workdir_only=False)
     assert len(dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                  'a service.', dag)
