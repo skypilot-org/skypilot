@@ -153,9 +153,8 @@ class Resources:
         """
         self._version = self._VERSION
         self._cloud = cloud
-        self._region: Optional[str] = None
-        self._zone: Optional[str] = None
-        self._validate_and_set_region_zone(region, zone)
+        self._region: Optional[str] = region
+        self._zone: Optional[str] = zone
 
         self._instance_type = instance_type
 
@@ -227,6 +226,7 @@ class Resources:
         self._set_accelerators(accelerators, accelerator_args)
 
     def validate(self):
+        self._try_validate_and_set_region_zone()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_managed_job_attributes()
@@ -602,15 +602,14 @@ class Resources:
         assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
-    def _validate_and_set_region_zone(self, region: Optional[str],
-                                      zone: Optional[str]) -> None:
+    def _try_validate_and_set_region_zone(self) -> None:
         """Try to validate and set the region and zone attribute.
 
         Raises:
             ValueError: if the attributes are invalid.
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
-        if region is None and zone is None:
+        if self._region is None and self._zone is None:
             return
 
         if self._cloud is None:
@@ -622,7 +621,7 @@ class Resources:
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
-                    cloud.validate_region_zone(region, zone)
+                    cloud.validate_region_zone(self._region, self._zone)
                 except ValueError as e:
                     cloud_to_errors[repr(cloud)] = e
                     continue
@@ -646,23 +645,24 @@ class Resources:
                             table.add_row([str(cloud), reason_str])
                         hint = table.get_string()
                     raise ValueError(
-                        f'Invalid (region {region!r}, zone {zone!r}) '
+                        f'Invalid (region {self._region!r}, zone {self._zone!r}) '
                         f'{cloud_str}. Details:\n{hint}')
             elif len(valid_clouds) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Cannot infer cloud from (region {region!r}, zone '
-                        f'{zone!r}). Multiple enabled clouds have region/zone '
+                        f'Cannot infer cloud from (region {self._region!r}, zone '
+                        f'{self._zone!r}). Multiple enabled clouds have region/zone '
                         f'of the same names: {valid_clouds}. '
                         f'To fix: explicitly specify `cloud`.')
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
-                         f'inferred from region {region!r} and zone {zone!r}')
+                         f'inferred from region {self._region!r} and zone '
+                         f'{self._zone!r}')
             self._cloud = valid_clouds[0]
 
         # Validate if region and zone exist in the catalog, and set the region
         # if zone is specified.
         self._region, self._zone = self._cloud.validate_region_zone(
-            region, zone)
+            self._region, self._zone)
 
     def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
