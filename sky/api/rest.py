@@ -565,15 +565,13 @@ async def health() -> str:
 
 # @app.get('/version', response_class=fastapi.responses.PlainTextResponse)
 
-app.include_router(core.app_router)
-
 if __name__ == '__main__':
     import uvicorn
     tasks.reset_db()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='0.0.0.0')
-    parser.add_argument('--port', default=8000, type=int)
+    parser.add_argument('--port', default=46580, type=int)
     parser.add_argument('--reload', action='store_true')
     parser.add_argument('--deploy', action='store_true')
     cmd_args = parser.parse_args()

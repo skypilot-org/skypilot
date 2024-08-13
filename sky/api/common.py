@@ -23,7 +23,7 @@ if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
 
 API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/tasks.db'
-DEFAULT_SERVER_URL = 'http://0.0.0.0:8000'
+DEFAULT_SERVER_URL = 'http://0.0.0.0:46580'
 API_SERVER_CMD = 'python -m sky.api.rest'
 CLIENT_DIR = pathlib.Path('~/.sky/clients')
 

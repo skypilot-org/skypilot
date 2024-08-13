@@ -101,7 +101,10 @@ def start_background_request(
                                      entrypoint=func.__module__,
                                      request_body=request_body,
                                      status=tasks.RequestStatus.PENDING)
-    tasks.dump_reqest(request_task)
+    if not tasks.create_if_not_exists(request_task):
+        logger.debug(f'Request {request_id} already exists.')
+        return
+
     request_task.log_path.touch()
     kwargs['env_vars'] = request_body.get('env_vars', {})
     kwargs['ignore_return_value'] = ignore_return_value

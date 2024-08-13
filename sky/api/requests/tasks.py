@@ -247,6 +247,16 @@ def get_request(request_id: str) -> Optional[RequestTask]:
 
 
 @init_db
+def create_if_not_exists(request: RequestTask) -> bool:
+    """Create a REST task if it does not exist."""
+    with filelock.FileLock(request_lock_path(request.request_id)):
+        if _get_rest_task_no_lock(request.request_id) is not None:
+            return False
+        _dump_request_no_lock(request)
+        return True
+
+
+@init_db
 def get_request_tasks() -> List[RequestTask]:
     """Get a REST task."""
     assert _DB is not None
