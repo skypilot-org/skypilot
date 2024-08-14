@@ -32,6 +32,7 @@ __all__ = [
     'Azure',
     'Cloud',
     'Cudo',
+    'DigitalOcean'
     'GCP',
     'Lambda',
     'Paperspace',
