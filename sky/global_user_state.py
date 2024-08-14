@@ -65,7 +65,8 @@ def create_table(cursor, conn):
         cluster_hash TEXT DEFAULT null,
         storage_mounts_metadata BLOB DEFAULT null,
         cluster_ever_up INTEGER DEFAULT 0,
-        transaction_id INTEGER DEFAULT 0)""")
+        transaction_id INTEGER DEFAULT 0,
+        user_hash TEXT DEFAULT null)""")
 
     # Table for Cluster History
     # usage_intervals: List[Tuple[int, int]]
@@ -141,6 +142,11 @@ def create_table(cursor, conn):
                                  'transaction_id',
                                  'INTEGER DEFAULT 0',
                                  value_to_replace_existing_entries=0)
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'clusters',
+                                 'user_hash',
+                                 'TEXT DEFAULT null')
     conn.commit()
 
 
@@ -210,6 +216,8 @@ def add_or_update_cluster(cluster_name: str,
             cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
+    user_hash = common_utils.get_user_hash()
+
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         # All the fields need to exist here, even if they don't need
@@ -218,7 +226,7 @@ def add_or_update_cluster(cluster_name: str,
         # specified.
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner, cluster_hash, '
-        'storage_mounts_metadata, cluster_ever_up, transaction_id) '
+        'storage_mounts_metadata, cluster_ever_up, transaction_id, user_hash) '
         'VALUES ('
         # name
         '?, '
@@ -257,6 +265,8 @@ def add_or_update_cluster(cluster_name: str,
         # cluster_ever_up
         '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?), '
         # transaction_id
+        '?,'
+        # user_hash
         '?'
         ')',
         (
@@ -291,6 +301,8 @@ def add_or_update_cluster(cluster_name: str,
             int(ready),
             # transaction_id
             transaction_id + 1,
+            # user_hash
+            user_hash,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -619,7 +631,7 @@ def get_cluster_from_name(
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata,
-         cluster_ever_up) = row[:12]
+         cluster_ever_up, _, user_hash) = row[:14]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -635,6 +647,7 @@ def get_cluster_from_name(
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
+            'user_hash': user_hash,
         }
         return record
     return None
@@ -647,7 +660,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata,
-         cluster_ever_up) = row[:12]
+         cluster_ever_up, _, user_hash) = row[:14]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -663,6 +676,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
+            'user_hash': user_hash,
         }
 
         records.append(record)

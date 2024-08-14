@@ -405,7 +405,7 @@ def queue(cluster_name: List[str],
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = requests.get(f'{api_common.get_server_url()}/queue',
+    response = requests.post(f'{api_common.get_server_url()}/queue',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -464,7 +464,7 @@ def status(
         cluster_names=cluster_names,
         refresh=refresh,
     )
-    response = requests.get(f'{api_common.get_server_url()}/status',
+    response = requests.post(f'{api_common.get_server_url()}/status',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -536,8 +536,9 @@ def get(request_id: str) -> Any:
     if error is not None:
         error_obj = error['object']
         if env_options.Options.SHOW_DEBUG_INFO.get():
+            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
             logger.error('=== Traceback on SkyPilot API Server ===\n'
-                         f'{error_obj.stacktrace}')
+                         f'{stacktrace}')
         with ux_utils.print_exception_no_traceback():
             raise error_obj
     return request_task.get_return_value()

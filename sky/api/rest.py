@@ -298,7 +298,7 @@ async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
     )
 
 
-@app.get('/status')
+@app.post('/status')
 async def status(
     request: fastapi.Request,
     status_body: payloads.StatusBody = payloads.StatusBody()
@@ -369,7 +369,7 @@ async def autostop(request: fastapi.Request,
     )
 
 
-@app.get('/queue')
+@app.post('/queue')
 async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     """Get the queue of tasks for a cluster."""
     executor.start_background_request(
