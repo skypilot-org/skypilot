@@ -84,7 +84,7 @@ def bootstrap_instances(
                     logger.info(
                         f'Azure resource group {resource_group} of a recent '
                         f'terminated cluster {cluster_name_on_cloud} is being '
-                        'deleted. It can only be provisioned after it is fully'
+                        'deleted. It can only be provisioned after it is fully '
                         'deleted. Waiting...')
                 time.sleep(1)
                 retry += 1
