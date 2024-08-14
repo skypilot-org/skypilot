@@ -115,9 +115,18 @@ def status(
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    return backend_utils.get_clusters(include_controller=True,
-                                      refresh=refresh,
-                                      cluster_names=cluster_names)
+    clusters = backend_utils.get_clusters(include_controller=True,
+                                          refresh=refresh,
+                                          cluster_names=cluster_names)
+    # Extract additional fields from resource handle to cluster records so that
+    # dashboard can use the fields to render the UI.
+    for record in clusters:
+        handle = record['handle']
+        if handle is None:
+            continue
+        record['accelerators'] = handle.launched_resources.accelerators
+        record['cloud'] = str(handle.launched_resources.cloud)
+    return clusters
 
 
 def endpoints(cluster_name: str,

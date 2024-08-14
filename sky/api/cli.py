@@ -52,8 +52,8 @@ from sky import global_user_state
 from sky import jobs as managed_jobs
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky.api import common as api_common
 from sky.adaptors import common as adaptors_common
+from sky.api import common as api_common
 from sky.api import sdk as sdk_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
@@ -2489,6 +2489,10 @@ def start(
     for name, request_id in zip(to_start, request_ids):
         try:
             _async_call_or_wait(request_id, async_call, 'Start')
+            if not async_call:
+                # Add ssh config for the cluster
+                _get_cluster_records_and_set_ssh_config(
+                clusters=[name])
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))

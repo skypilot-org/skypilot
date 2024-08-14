@@ -13,6 +13,7 @@ import zipfile
 
 import colorama
 import fastapi
+from fastapi.middleware import cors
 import starlette.middleware.base
 
 from sky import check as sky_check
@@ -54,6 +55,14 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True)
+
+app.add_middleware(
+    cors.CORSMiddleware,
+    allow_origins=['*'],  # Specify the correct domains for production
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+    expose_headers=['X-Request-ID'])
 app.add_middleware(RequestIDMiddleware)
 app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
 app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
@@ -502,14 +511,13 @@ async def long_running_request(request: fastapi.Request):
 
 
 @app.get('/get')
-async def get(get_body: payloads.RequestIdBody) -> tasks.RequestTaskPayload:
+async def get(request_id: str) -> tasks.RequestTaskPayload:
     while True:
-        request_task = tasks.get_request(get_body.request_id)
+        request_task = tasks.get_request(request_id)
         if request_task is None:
-            print(f'No task with request ID {get_body.request_id}')
+            print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
-                status_code=404,
-                detail=f'Request {get_body.request_id} not found')
+                status_code=404, detail=f'Request {request_id} not found')
         if request_task.status > tasks.RequestStatus.RUNNING:
             return request_task.encode()
         await asyncio.sleep(1)
@@ -529,10 +537,7 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
 
 
 @app.get('/stream')
-async def stream(
-        stream_body: payloads.RequestIdBody
-) -> fastapi.responses.StreamingResponse:
-    request_id = stream_body.request_id
+async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
     request_task = tasks.get_request(request_id)
     if request_task is None:
         print(f'No task with request ID {request_id}')

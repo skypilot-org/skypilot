@@ -11,7 +11,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
-from sky.api import common as api_common
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils

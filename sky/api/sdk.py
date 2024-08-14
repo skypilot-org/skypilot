@@ -527,10 +527,9 @@ def local_down() -> str:
 @usage_lib.entrypoint
 @api_common.check_health
 def get(request_id: str) -> Any:
-    body = payloads.RequestIdBody(request_id=request_id)
-    response = requests.get(f'{api_common.get_server_url()}/get',
-                            json=json.loads(body.model_dump_json()),
-                            timeout=(5, None))
+    response = requests.get(
+        f'{api_common.get_server_url()}/get?request_id={request_id}',
+        timeout=(5, None))
     request_task = tasks.RequestTask.decode(
         tasks.RequestTaskPayload(**response.json()))
     error = request_task.get_error()
@@ -552,10 +551,8 @@ def stream_and_get(request_id: str) -> Any:
     This will block until the request is finished. The request id can be a
     prefix of the full request id.
     """
-    body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(
-        f'{api_common.get_server_url()}/stream',
-        json=json.loads(body.model_dump_json()),
+        f'{api_common.get_server_url()}/stream?request_id={request_id}',
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)
