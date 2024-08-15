@@ -15,11 +15,11 @@ resources:
 
 workdir: examples/serve/http_server
 
+# Sleep for the last replica in the test_skyserve_new_autoscaler_update
+# so that we can check the behavior difference between rolling and
+# blue-green update.
 run: |
   if [ $SKYPILOT_SERVE_REPLICA_ID -eq 7 ]; then
-    # Sleep for the last replica in the test_skyserve_new_autoscaler_update
-    # so that we can check the behavior difference between rolling and
-    # blue-green update.
     sleep 120
   fi
   python3 server.py --port 8081
