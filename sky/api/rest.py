@@ -439,7 +439,7 @@ async def logs(request: fastapi.Request,
 #     return log_dirs
 
 
-@app.get('/cost_report')
+@app.post('/cost_report')
 async def cost_report(request: fastapi.Request) -> None:
     executor.start_background_request(
         request_id=request.state.request_id,

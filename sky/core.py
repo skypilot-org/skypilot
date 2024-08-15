@@ -195,6 +195,9 @@ def cost_report() -> List[Dict[str, Any]]:
 
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = get_total_cost(cluster_report)
+        cluster_report['cloud'] = str(cluster_report['resources'].cloud)
+        cluster_report['accelerators'] = cluster_report['resources'].accelerators
+        
 
     return cluster_reports
 

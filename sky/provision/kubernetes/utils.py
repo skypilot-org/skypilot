@@ -946,12 +946,14 @@ def construct_ssh_jump_command(
     if ssh_jump_port is not None:
         ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
+        original_proxy_cmd_path = proxy_cmd_path
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
         kube_context_flag = f' {current_kube_context}' if (current_kube_context
                                                            is not None) else ''
-        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
+        # Use the original path without expanding the user home directory.
+        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{original_proxy_cmd_path} '
                                    f'{proxy_cmd_target_pod}'
                                    f'{kube_context_flag}\'')
     return ssh_jump_proxy_command
@@ -1051,7 +1053,10 @@ def create_proxy_command_script() -> str:
     # Set the permissions to 700 to ensure only the owner can read, write,
     # and execute the file.
     os.chmod(port_fwd_proxy_cmd_path, 0o700)
-    return port_fwd_proxy_cmd_path
+    # Return the path to the proxy command script without expanding the user
+    # home directory to be compatible when a SSH is called from a client in
+    # client-server mode.
+    return PORT_FORWARD_PROXY_CMD_PATH
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,

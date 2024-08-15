@@ -89,7 +89,8 @@ def create_table(cursor, conn):
         num_nodes int,
         requested_resources BLOB,
         launched_resources BLOB,
-        usage_intervals BLOB)""")
+        usage_intervals BLOB,
+        user_hash TEXT)""")
     # Table for configs (e.g. enabled clouds)
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS config (
@@ -145,6 +146,11 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor,
                                  conn,
                                  'clusters',
+                                 'user_hash',
+                                 'TEXT DEFAULT null')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'cluster_history',
                                  'user_hash',
                                  'TEXT DEFAULT null')
     conn.commit()
@@ -310,7 +316,7 @@ def add_or_update_cluster(cluster_name: str,
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
         '(cluster_hash, name, num_nodes, requested_resources, '
-        'launched_resources, usage_intervals) '
+        'launched_resources, usage_intervals, user_hash) '
         'VALUES ('
         # hash
         '?, '
@@ -323,7 +329,10 @@ def add_or_update_cluster(cluster_name: str,
         # number of nodes
         '?, '
         # usage intervals
-        '?)',
+        '?, '
+        # user_hash
+        '?'
+        ')',
         (
             # hash
             cluster_hash,
@@ -337,6 +346,8 @@ def add_or_update_cluster(cluster_name: str,
             pickle.dumps(launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
+            # user_hash
+            user_hash,
         ))
 
     _DB.conn.commit()
@@ -686,7 +697,7 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_clusters_from_history() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
-        'ch.launched_resources, ch.usage_intervals, clusters.status  '
+        'ch.launched_resources, ch.usage_intervals, clusters.status, ch.user_hash  '
         'FROM cluster_history ch '
         'LEFT OUTER JOIN clusters '
         'ON ch.cluster_hash=clusters.cluster_hash ').fetchall()
@@ -705,7 +716,8 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             launched_resources,
             usage_intervals,
             status,
-        ) = row[:6]
+            user_hash,
+        ) = row[:7]
 
         if status is not None:
             status = status_lib.ClusterStatus[status]
@@ -719,6 +731,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
             'status': status,
+            'user_hash': user_hash,
         }
 
         records.append(record)

@@ -126,6 +126,9 @@ def _get_cluster_records_and_set_ssh_config(
     for record in cluster_records:
         handle = record['handle']
         if handle is not None and handle.cached_external_ips is not None:
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                from sky.provision.kubernetes import utils as kubernetes_utils
+                kubernetes_utils.create_proxy_command_script()
             crednetials = record['credentials']
             cluster_utils.SSHConfigHelper.add_cluster(
                 handle.cluster_name,
