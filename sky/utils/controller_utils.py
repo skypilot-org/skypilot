@@ -261,6 +261,10 @@ def _get_cloud_dependencies_installation_commands(
                 'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+        elif isinstance(cloud, clouds.RunPod):
+            commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
+                            'pip list | grep runpod > /dev/null 2>&1 || '
+                            'pip install "runpod>=1.5.1" > /dev/null 2>&1')
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -272,11 +276,6 @@ def _get_cloud_dependencies_installation_commands(
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.RunPod):
-                commands.append(
-                    f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
-                    'pip list | grep runpod > /dev/null 2>&1 || '
-                    'pip install "runpod>=1.5.1" > /dev/null 2>&1')
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +

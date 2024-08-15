@@ -274,7 +274,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     assert 'n2-highcpu-4' in stdout  # GCP, 4 vCPUs, 4 GB memory
     assert 'c6i.xlarge' in stdout  # AWS, 4 vCPUs, 8 GB memory
     assert 'Standard_F4s_v2' in stdout  # Azure, 4 vCPUs, 8 GB memory
-    assert 'gpu_1x_rtx6000' in stdout  # Lambda, 14 vCPUs, 46 GB memory
+    assert 'cpu_4x_general' in stdout  # Lambda, 4 vCPUs, 16 GB memory
 
     _test_resources_launch(monkeypatch, accelerators='T4')
     stdout, _ = capfd.readouterr()

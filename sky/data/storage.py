@@ -869,7 +869,7 @@ class Storage(object):
                 logger.info(f'Storage type {store_type} already exists under '
                             f'storage account {storage_account_name!r}.')
             else:
-                logger.info(f'Storage type {store_type} already exist.')
+                logger.info(f'Storage type {store_type} already exists.')
             return self.stores[store_type]
 
         store_cls: Type[AbstractStore]
@@ -2121,7 +2121,7 @@ class AzureBlobStore(AbstractStore):
         """Initializes the AZ Container object on the cloud.
 
         Initialization involves fetching container if exists, or creating it if
-        it does not. Also, it checks for the existance of the storage account
+        it does not. Also, it checks for the existence of the storage account
         if provided by the user and the resource group is inferred from it.
         If not provided, both are created with a default naming conventions.
 
@@ -2184,7 +2184,7 @@ class AzureBlobStore(AbstractStore):
 
         Raises:
             StorageBucketCreateError: If storage account attempted to be
-                created already exists
+                created already exists.
             NonExistentStorageAccountError: When storage account provided
                 either through config.yaml or local db does not exist under
                 user's subscription ID.

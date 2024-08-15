@@ -85,6 +85,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Lambda: 150,
     clouds.IBM: 160,
     clouds.OCI: 300,
+    clouds.Paperspace: 600,
     clouds.Kubernetes: 300,
     clouds.Vsphere: 240,
 }
@@ -1468,6 +1469,16 @@ class RetryingVmProvisioner(object):
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
                 num_nodes = handle.launched_nodes
+                # Some clouds, like RunPod, only support exposing ports during
+                # launch. For those clouds, we pass the ports to open in the
+                # `bulk_provision` to expose the ports during provisioning.
+                # If the `bulk_provision` is to apply on an existing cluster,
+                # it should be ignored by the underlying provisioner impl
+                # as it will only apply to newly-created instances.
+                ports_to_open_on_launch = (
+                    list(resources_utils.port_ranges_to_set(to_provision.ports))
+                    if to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
@@ -1478,7 +1489,8 @@ class RetryingVmProvisioner(object):
                         num_nodes=num_nodes,
                         cluster_yaml=handle.cluster_yaml,
                         prev_cluster_ever_up=prev_cluster_ever_up,
-                        log_dir=self.log_dir)
+                        log_dir=self.log_dir,
+                        ports_to_open_on_launch=ports_to_open_on_launch)
                     # NOTE: We will handle the logic of '_ensure_cluster_ray_started' #pylint: disable=line-too-long
                     # in 'provision_utils.post_provision_runtime_setup()' in the
                     # caller.
@@ -1936,8 +1948,9 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
 
                 requested_features = self._requested_features.copy()
-                # Skip stop feature for Kubernetes controllers.
-                if (isinstance(to_provision.cloud, clouds.Kubernetes) and
+                # Skip stop feature for Kubernetes and RunPod controllers.
+                if (isinstance(to_provision.cloud,
+                               (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
@@ -2247,9 +2260,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
-            use_internal_ips = self._use_internal_ips()
-            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips(
-                use_internal_ips)
+            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
             cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
                 force_internal_ips=True)
         else:
@@ -2976,9 +2987,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
-            with rich_utils.safe_status(
-                    '[bold cyan]Launching - Opening new ports'):
-                self._open_ports(handle)
+            cloud = handle.launched_resources.cloud
+            if not (cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+                with rich_utils.safe_status(
+                        '[bold cyan]Launching - Opening new ports'):
+                    self._open_ports(handle)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -4084,15 +4098,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
-            # Skip auto-stop for Kubernetes clusters.
-            if (isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
-                    and not down and idle_minutes_to_autostop >= 0):
+            # Skip auto-stop for Kubernetes and RunPod clusters.
+            if (isinstance(handle.launched_resources.cloud,
+                           (clouds.Kubernetes, clouds.RunPod)) and not down and
+                    idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
-                # Kubernetes clusters.
+                # Kubernetes and RunPod clusters.
                 assert (controller_utils.Controllers.from_name(
                     handle.cluster_name) is not None), handle.cluster_name
                 logger.info('Auto-stop is not supported for Kubernetes '
-                            'clusters. Skipping.')
+                            'and RunPod clusters. Skipping.')
                 return
 
             # Check if we're stopping spot
@@ -4275,12 +4290,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Assume resources share the same ports.
             for resource in task.resources:
                 assert resource.ports == list(task.resources)[0].ports
-            all_ports = resources_utils.port_set_to_ranges(
-                resources_utils.port_ranges_to_set(
-                    handle.launched_resources.ports) |
-                resources_utils.port_ranges_to_set(
-                    list(task.resources)[0].ports))
+            requested_ports_set = resources_utils.port_ranges_to_set(
+                list(task.resources)[0].ports)
+            current_ports_set = resources_utils.port_ranges_to_set(
+                handle.launched_resources.ports)
+            all_ports = resources_utils.port_set_to_ranges(current_ports_set |
+                                                           requested_ports_set)
             to_provision = handle.launched_resources
+            if (to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+                if not requested_ports_set <= current_ports_set:
+                    current_cloud = to_provision.cloud
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            'Failed to open new ports on an existing cluster '
+                            f'with the current cloud {current_cloud} as it only'
+                            ' supports opening ports on launch of the cluster. '
+                            'Please terminate the existing cluster and launch '
+                            'a new cluster with the desired ports open.')
             if all_ports:
                 to_provision = to_provision.copy(ports=all_ports)
             return RetryingVmProvisioner.ToProvisionConfig(

@@ -1,7 +1,7 @@
 """RunPod library wrapper for SkyPilot."""
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -74,13 +74,19 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
         info['status'] = instance['desiredStatus']
         info['name'] = instance['name']
+        info['port2endpoint'] = {}
 
         if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime'):
             for port in instance['runtime']['ports']:
-                if port['privatePort'] == 22 and port['isIpPublic']:
-                    info['external_ip'] = port['ip']
-                    info['ssh_port'] = port['publicPort']
-                elif not port['isIpPublic']:
+                if port['isIpPublic']:
+                    if port['privatePort'] == 22:
+                        info['external_ip'] = port['ip']
+                        info['ssh_port'] = port['publicPort']
+                    info['port2endpoint'][port['privatePort']] = {
+                        'host': port['ip'],
+                        'port': port['publicPort']
+                    }
+                else:
                     info['internal_ip'] = port['ip']
 
         instance_dict[instance['id']] = info
@@ -88,7 +94,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
     return instance_dict
 
 
-def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
+def launch(name: str, instance_type: str, region: str, disk_size: int,
+           ports: Optional[List[int]]) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -99,6 +106,11 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
     cloud_type = instance_type.split('_')[2]
 
     gpu_specs = runpod.runpod.get_gpu(gpu_type)
+
+    # Port 8081 is occupied for nginx in the base image.
+    custom_ports_str = ''
+    if ports is not None:
+        custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
 
     new_instance = runpod.runpod.create_pod(
         name=name,
@@ -111,6 +123,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
         gpu_count=gpu_quantity,
         country_code=region,
         ports=(f'22/tcp,'
+               f'{custom_ports_str}'
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
