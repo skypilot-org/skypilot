@@ -352,7 +352,17 @@ def get_hourly_cost_impl(
         price_str = 'Price'
         # For AWS/Azure/GCP on-demand instances, the price is the same across
         # all the zones in the same region.
-        assert region is None or len(set(df[price_str])) == 1, df
+        # We do not assert this as for Azure, it seems we can have different
+        # prices for specific instance types in the same region. This is to
+        # unblock our users from using those specific instance types:
+        #    Standard_D2as_v5, Standard_D2ads_v5
+        # TODO(Tian): investigate this.
+        if region is not None and len(set(df[price_str])) > 1:
+            logger.debug(f'Found multiple prices for instance type '
+                         f'{instance_type!r} in region {region!r}. '
+                         'This is unexpected. Please report this to the '
+                         'SkyPilot team.')
+        # assert region is None or len(set(df[price_str])) == 1, df
 
     if pd.isna(df[price_str]).all():
         with ux_utils.print_exception_no_traceback():
