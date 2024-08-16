@@ -147,10 +147,6 @@ class Paperspace(clouds.Cloud):
     def __repr__(self):
         return self._REPR
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Paperspace)
-
     @classmethod
     def get_default_instance_type(
         cls,
@@ -177,11 +173,11 @@ class Paperspace(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun
+        del zones, dryrun, cluster_name
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -200,11 +196,13 @@ class Paperspace(clouds.Cloud):
             self, resources: 'resources_lib.Resources'):
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
-            return ([], [])
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -227,9 +225,10 @@ class Paperspace(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -245,8 +244,10 @@ class Paperspace(clouds.Cloud):
                 clouds='paperspace',
             ))
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

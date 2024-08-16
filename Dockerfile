@@ -8,4 +8,4 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     rm -rf /var/lib/apt/lists/*
 
 # Install sky
-RUN pip install --no-cache-dir "skypilot[all]==0.5.0"
+RUN pip install --no-cache-dir "skypilot[all]==0.6.0"

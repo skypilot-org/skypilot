@@ -146,6 +146,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Clouds with new provisioner has docker_login_config in the
     # docker field, instead of the provider field.
     ('docker', 'docker_login_config'),
+    ('docker', 'run_options'),
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
@@ -154,8 +155,11 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # we need to take this field from the new yaml.
     ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
+    ('available_node_types', 'ray.head.default', 'node_config',
+     'IamInstanceProfile'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
-    ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
+    ('available_node_types', 'ray.head.default', 'node_config',
+     'azure_arm_parameters', 'cloudInitSetupCommands'),
 ]
 
 
@@ -792,8 +796,11 @@ def write_cluster_config(
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
-    resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
-                                                        region, zones, dryrun)
+    resources_vars = to_provision.make_deploy_variables(
+        resources_utils.ClusterName(
+            cluster_name,
+            cluster_name_on_cloud,
+        ), region, zones, dryrun)
     config_dict = {}
 
     specific_reservations = set(
@@ -802,11 +809,13 @@ def write_cluster_config(
 
     assert cluster_name is not None
     excluded_clouds = []
-    remote_identity = skypilot_config.get_nested(
-        (str(cloud).lower(), 'remote_identity'),
-        schemas.get_default_remote_identity(str(cloud).lower()))
-    if remote_identity is not None and not isinstance(remote_identity, str):
-        for profile in remote_identity:
+    remote_identity_config = skypilot_config.get_nested(
+        (str(cloud).lower(), 'remote_identity'), None)
+    remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
+    if isinstance(remote_identity_config, str):
+        remote_identity = remote_identity_config
+    if isinstance(remote_identity_config, list):
+        for profile in remote_identity_config:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
@@ -925,7 +934,14 @@ def write_cluster_config(
                 'dump_port_command': dump_port_command,
                 # Sky-internal constants.
                 'sky_ray_cmd': constants.SKY_RAY_CMD,
-                'sky_pip_cmd': constants.SKY_PIP_CMD,
+                # pip install needs to have python env activated to make sure
+                # installed packages are within the env path.
+                'sky_pip_cmd': f'{constants.SKY_PIP_CMD}',
+                # Activate the SkyPilot runtime environment when starting ray
+                # cluster, so that ray autoscaler can access cloud SDK and CLIs
+                # on remote
+                'sky_activate_python_env':
+                    constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Command for waiting ray cluster to be ready on head.
                 'ray_head_wait_initialized_command':
@@ -948,16 +964,19 @@ def write_cluster_config(
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
+
+    # Add kubernetes config fields from ~/.sky/config
+    if isinstance(cloud, clouds.Kubernetes):
+        kubernetes_utils.combine_pod_config_fields(
+            tmp_yaml_path,
+            cluster_config_overrides=to_provision.cluster_config_overrides)
+        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
-
-    # Add kubernetes config fields from ~/.sky/config
-    if isinstance(cloud, clouds.Kubernetes):
-        kubernetes_utils.combine_pod_config_fields(tmp_yaml_path)
-        kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
@@ -972,7 +991,11 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
-    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
+    # Read the cluster name from the tmp yaml file, to take the backward
+    # compatbility restortion above into account.
+    # TODO: remove this after 2 minor releases, 0.8.0.
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay
@@ -997,13 +1020,18 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP, clouds.Vsphere,
-                          clouds.Cudo, clouds.Paperspace)):
+    if isinstance(cloud, (
+            clouds.AWS,
+            clouds.OCI,
+            clouds.SCP,
+            clouds.Vsphere,
+            clouds.Cudo,
+            clouds.Paperspace,
+            clouds.Azure,
+    )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    elif isinstance(cloud, clouds.Azure):
-        config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.Kubernetes):
@@ -1219,6 +1247,12 @@ def ssh_credential_from_yaml(
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
+
+    # Update the ssh_user placeholder in proxy command, if required
+    if (ssh_proxy_command is not None and
+            constants.SKY_SSH_USER_PLACEHOLDER in ssh_proxy_command):
+        ssh_proxy_command = ssh_proxy_command.replace(
+            constants.SKY_SSH_USER_PLACEHOLDER, ssh_user)
     credentials = {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,
@@ -2643,27 +2677,6 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
-                                       command: str,
-                                       failure_message: str) -> str:
-    """Runs command remotely and returns output with proper error handling."""
-    rc, stdout, stderr = runner.run(command,
-                                    require_outputs=True,
-                                    stream_logs=False)
-    if rc == 255:
-        # SSH failed
-        raise RuntimeError(
-            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
-            f'to {runner.ip} failed. This is most likely due to incorrect '
-            'credentials or incorrect permissions for the key file. Check '
-            'your credentials and try again.')
-    subprocess_utils.handle_returncode(rc,
-                                       command,
-                                       failure_message,
-                                       stderr=stderr)
-    return stdout
-
-
 def check_rsync_installed() -> None:
     """Checks if rsync is installed.
 
@@ -2744,6 +2757,7 @@ def get_endpoints(cluster: str,
     cluster_records = get_clusters(include_controller=True,
                                    refresh=False,
                                    cluster_names=[cluster])
+    assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]
     if (not skip_status_check and
             cluster_record['status'] != status_lib.ClusterStatus.UP):

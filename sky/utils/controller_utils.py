@@ -191,7 +191,7 @@ def _get_cloud_dependencies_installation_commands(
     prefix_str = 'Check & install cloud dependencies on controller: '
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
-    empty_str = ' ' * 5
+    empty_str = ' ' * 10
     aws_dependencies_installation = (
         'pip list | grep boto3 > /dev/null 2>&1 || pip install '
         'botocore>=1.29.10 boto3>=1.26.1; '
@@ -207,7 +207,7 @@ def _get_cloud_dependencies_installation_commands(
             # fluidstack and paperspace
             continue
         if isinstance(cloud, clouds.AWS):
-            commands.append(f'echo -n "{prefix_str}AWS{empty_str}" && ' +
+            commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
         elif isinstance(cloud, clouds.Azure):
             commands.append(
@@ -215,6 +215,12 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep azure-cli > /dev/null 2>&1 || '
                 'pip install "azure-cli>=2.31.0" azure-core '
                 '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
+            # Have to separate this installation of az blob storage from above
+            # because this is newly-introduced and not part of azure-cli. We
+            # need a separate installed check for this.
+            commands.append(
+                'pip list | grep azure-storage-blob > /dev/null 2>&1 || '
+                'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
         elif isinstance(cloud, clouds.GCP):
             commands.append(
                 f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
@@ -238,7 +244,8 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y; '
+                'then apt update && apt install curl socat netcat -y '
+                '&> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '
@@ -247,6 +254,17 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
+        elif isinstance(cloud, clouds.Cudo):
+            commands.append(
+                f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
+                'pip list | grep cudo-compute > /dev/null 2>&1 || '
+                'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
+                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
+                'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+        elif isinstance(cloud, clouds.RunPod):
+            commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
+                            'pip list | grep runpod > /dev/null 2>&1 || '
+                            'pip install "runpod>=1.5.1" > /dev/null 2>&1')
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -258,17 +276,6 @@ def _get_cloud_dependencies_installation_commands(
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.RunPod):
-                commands.append(
-                    f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
-                    'pip list | grep runpod > /dev/null 2>&1 || '
-                    'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.Cudo):
-                # cudo doesn't support open port
-                commands.append(
-                    f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
-                    'pip list | grep cudo-compute > /dev/null 2>&1 || '
-                    'pip install "cudo-compute>=0.1.8" > /dev/null 2>&1')
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
@@ -347,7 +354,12 @@ def shared_controller_vars_to_fill(
         remote_user_config_path: str) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(controller)
+            _get_cloud_dependencies_installation_commands(controller),
+        # We need to activate the python environment on the controller to ensure
+        # cloud SDKs are installed in SkyPilot runtime environment and can be
+        # accessed.
+        'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+        'sky_python_cmd': constants.SKY_PYTHON_CMD,
     }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
@@ -714,10 +726,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     if copy_mounts_with_file_in_src:
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
-        storage = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage.stores.keys())[0]
-        store_prefix = store_type.store_prefix()
-        bucket_url = store_prefix + file_bucket_name
+        storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
+        store_type = list(storage_obj.stores.keys())[0]
+        store_object = storage_obj.stores[store_type]
+        bucket_url = storage_lib.StoreType.get_endpoint_url(
+            store_object, file_bucket_name)
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -735,6 +748,34 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
-            store_prefix = store_type.store_prefix()
-            storage_obj.source = f'{store_prefix}{storage_obj.name}'
+            store_object = storage_obj.stores[store_type]
+            storage_obj.source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
             storage_obj.force_delete = True
+
+    # Step 7: Convert all `MOUNT` mode storages which don't specify a source
+    # to specifying a source. If the source is specified with a local path,
+    # it was handled in step 6.
+    updated_mount_storages = {}
+    for storage_path, storage_obj in task.storage_mounts.items():
+        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+                not storage_obj.source):
+            # Construct source URL with first store type and storage name
+            # E.g., s3://my-storage-name
+            store_types = list(storage_obj.stores.keys())
+            assert len(store_types) == 1, (
+                'We only support one store type for now.', storage_obj.stores)
+            store_type = store_types[0]
+            store_object = storage_obj.stores[store_type]
+            source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
+            new_storage = storage_lib.Storage.from_yaml_config({
+                'source': source,
+                'persistent': storage_obj.persistent,
+                'mode': storage_lib.StorageMode.MOUNT.value,
+                # We enable force delete to allow the controller to delete
+                # the object store in case persistent is set to False.
+                '_force_delete': True
+            })
+            updated_mount_storages[storage_path] = new_storage
+    task.update_storage_mounts(updated_mount_storages)

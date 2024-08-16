@@ -47,7 +47,7 @@ import yaml
 import sky
 from sky import backends
 from sky import check as sky_check
-from sky import clouds
+from sky import clouds as sky_clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
@@ -479,7 +479,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -565,9 +565,10 @@ def _launch_with_confirm(
                 raise_if_no_cloud_access=True)
         except exceptions.NoCloudAccessError as e:
             # Catch the exception where the public cloud is not enabled, and
-            # only print the error message without the error type.
-            click.secho(e, fg='yellow')
-            sys.exit(1)
+            # make it yellow for better visibility.
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
+                                   f'{colorama.Style.RESET_ALL}') from e
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -687,7 +688,7 @@ def _pop_and_ignore_fields_in_override_params(
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     *,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
@@ -771,6 +772,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
+        # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
+        task.update_envs(env)
 
     # Override.
     if workdir is not None:
@@ -786,7 +789,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    task.update_envs(env)
     return task
 
 
@@ -1028,7 +1030,7 @@ def cli():
           'the same data on the boot disk as an existing cluster.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     cluster: Optional[str],
     dryrun: bool,
     detach_setup: bool,
@@ -1130,11 +1132,19 @@ def launch(
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('cluster',
-                required=True,
+                required=False,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
+@click.option(
+    '--cluster',
+    '-c',
+    'cluster_option',
+    hidden=True,
+    type=str,
+    help='This is the same as the positional argument, just for consistency.',
+    **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
@@ -1149,8 +1159,9 @@ def launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
-    cluster: str,
-    entrypoint: List[str],
+    cluster: Optional[str],
+    cluster_option: Optional[str],
+    entrypoint: Tuple[str, ...],
     detach_run: bool,
     name: Optional[str],
     cloud: Optional[str],
@@ -1228,6 +1239,17 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
+    if cluster_option is None and cluster is None:
+        raise click.UsageError('Missing argument \'[CLUSTER]\' and '
+                               '\'[ENTRYPOINT]...\'')
+    if cluster_option is not None:
+        if cluster is not None:
+            entrypoint = (cluster,) + entrypoint
+        cluster = cluster_option
+    if not entrypoint:
+        raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
+    assert cluster is not None, (cluster, cluster_option, entrypoint)
+
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
@@ -2074,16 +2096,16 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
 
     try:
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
-    except exceptions.NotSupportedError:
+    except exceptions.NotSupportedError as e:
         controller = controller_utils.Controllers.from_name(cluster)
         assert controller is not None, cluster
-        click.echo(controller.value.decline_cancel_hint)
-        sys.exit(1)
+        with ux_utils.print_exception_no_traceback():
+            raise click.UsageError(controller.value.decline_cancel_hint) from e
     except ValueError as e:
         raise click.UsageError(str(e))
-    except exceptions.ClusterNotUpError as e:
-        click.echo(str(e))
-        sys.exit(1)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2862,24 +2884,38 @@ def _down_or_stop_clusters(
         progress.refresh()
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
+@click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
               is_flag=True,
               default=False,
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
-def check(verbose: bool):
+def check(clouds: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
     cloud is detected to be inaccessible, the reason and correction steps will
     be shown.
 
+    If CLOUDS are specified, checks credentials for only those clouds.
+
     The enabled clouds are cached and form the "search space" to be considered
     for each task.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # Check credentials for all supported clouds.
+      sky check
+      \b
+      # Check only specific clouds - AWS and GCP.
+      sky check aws gcp
     """
-    sky_check.check(verbose=verbose)
+    clouds_arg = clouds if len(clouds) > 0 else None
+    sky_check.check(verbose=verbose, clouds=clouds_arg)
 
 
 @cli.command()
@@ -2931,6 +2967,15 @@ def show_gpus(
     To show all regions for a specified accelerator, use
     ``sky show-gpus <accelerator> --all-regions``.
 
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
+
+    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
+    of the GPU available on a single node and the real-time availability of
+    the GPU across all nodes in the Kubernetes cluster.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -2938,10 +2983,15 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` or ``--all-regions`` is not specified, the price displayed
-    for each instance type is the lowest across all regions for both on-demand
-    and spot instances. There may be multiple regions with the same lowest
-    price.
+    * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
+      on a single node.
+
+    * ``TOTAL_GPUS`` (Kubernetes only): Total number of GPUs available in the
+      Kubernetes cluster.
+
+    * ``TOTAL_FREE_GPUS`` (Kubernetes only): Number of currently free GPUs
+      in the Kubernetes cluster. This is fetched in real-time and may change
+      when other users are using the cluster.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
@@ -2958,14 +3008,82 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
+    # Kubernetes specific bools
+    cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
+    kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
+    kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
+        sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+
+    if cloud_is_kubernetes and region is not None:
+        raise click.UsageError(
+            'The --region flag cannot be set with --cloud kubernetes.')
+
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
+
+    def _get_kubernetes_realtime_gpu_table(
+            name_filter: Optional[str] = None,
+            quantity_filter: Optional[int] = None):
+        if quantity_filter:
+            qty_header = 'QTY_FILTER'
+            free_header = 'FILTERED_FREE_GPUS'
+        else:
+            qty_header = 'QTY_PER_NODE'
+            free_header = 'TOTAL_FREE_GPUS'
+        realtime_gpu_table = log_utils.create_table(
+            ['GPU', qty_header, 'TOTAL_GPUS', free_header])
+        counts, capacity, available = service_catalog.list_accelerator_realtime(
+            gpus_only=True,
+            clouds='kubernetes',
+            name_filter=name_filter,
+            region_filter=region,
+            quantity_filter=quantity_filter,
+            case_sensitive=False)
+        assert (set(counts.keys()) == set(capacity.keys()) == set(
+            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
+                                 f'capacity ({list(capacity.keys())}), '
+                                 f'and available ({list(available.keys())}) '
+                                 'must be same.')
+        if len(counts) == 0:
+            err_msg = 'No GPUs found in Kubernetes cluster. '
+            debug_msg = 'To further debug, run: sky check '
+            if name_filter is not None:
+                gpu_info_msg = f' {name_filter!r}'
+                if quantity_filter is not None:
+                    gpu_info_msg += (' with requested quantity'
+                                     f' {quantity_filter}')
+                err_msg = (f'Resources{gpu_info_msg} not found '
+                           'in Kubernetes cluster. ')
+                debug_msg = ('To show available accelerators on kubernetes,'
+                             ' run: sky show-gpus --cloud kubernetes ')
+            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+                            debug_msg)
+            raise ValueError(full_err_msg)
+        for gpu, _ in sorted(counts.items()):
+            realtime_gpu_table.add_row([
+                gpu,
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+            ])
+        return realtime_gpu_table
+
+    def _get_kubernetes_node_info_table():
+        node_table = log_utils.create_table(
+            ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+
+        node_info_dict = kubernetes_utils.get_kubernetes_node_info()
+        for node_name, node_info in node_info_dict.items():
+            node_table.add_row([
+                node_name, node_info.gpu_type,
+                node_info.total['nvidia.com/gpu'],
+                node_info.free['nvidia.com/gpu']
+            ])
+        return node_table
 
     def _output():
         gpu_table = log_utils.create_table(
@@ -2977,35 +3095,75 @@ def show_gpus(
 
         name, quantity = None, None
 
-        # Kubernetes specific bools
-        cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
-        kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type(
-        ) is not None
+        # Optimization - do not poll for Kubernetes API for fetching
+        # common GPUs because that will be fetched later for the table after
+        # common GPUs.
+        clouds_to_list = cloud
+        if cloud is None:
+            clouds_to_list = [
+                c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
+            ]
 
+        k8s_messages = ''
         if accelerator_str is None:
+            # Collect k8s related messages in k8s_messages and print them at end
+            print_section_titles = False
+            # If cloud is kubernetes, we want to show real-time capacity
+            if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+                try:
+                    # If --cloud kubernetes is not specified, we want to catch
+                    # the case where no GPUs are available on the cluster and
+                    # print the warning at the end.
+                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table()
+                except ValueError as e:
+                    if not cloud_is_kubernetes:
+                        # Make it a note if cloud is not kubernetes
+                        k8s_messages += 'Note: '
+                    k8s_messages += str(e)
+                else:
+                    print_section_titles = True
+                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
+                    yield from k8s_realtime_table.get_string()
+                    k8s_node_table = _get_kubernetes_node_info_table()
+                    yield '\n\n'
+                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Kubernetes per node GPU availability'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    yield from k8s_node_table.get_string()
+                if kubernetes_autoscaling:
+                    k8s_messages += (
+                        '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            if cloud_is_kubernetes:
+                # Do not show clouds if --cloud kubernetes is specified
+                if not kubernetes_is_enabled:
+                    yield ('Kubernetes is not enabled. To fix, run: '
+                           'sky check kubernetes ')
+                yield k8s_messages
+                return
+
+            # For show_all, show the k8s message at the start since output is
+            # long and the user may not scroll to the end.
+            if show_all and k8s_messages:
+                yield k8s_messages
+                yield '\n\n'
+
             result = service_catalog.list_accelerator_counts(
                 gpus_only=True,
-                clouds=cloud,
+                clouds=clouds_to_list,
                 region_filter=region,
             )
 
-            if len(result) == 0 and cloud_is_kubernetes:
-                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
-                if kubernetes_autoscaling:
-                    yield '\n'
-                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
-                return
+            if print_section_titles:
+                # If section titles were printed above, print again here
+                yield '\n\n'
+                yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
             # "Common" GPUs
-            # If cloud is kubernetes, we want to show all GPUs here, even if
-            # they are not listed as common in SkyPilot.
-            if cloud_is_kubernetes:
-                for gpu, _ in sorted(result.items()):
+            for gpu in service_catalog.get_common_gpus():
+                if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-            else:
-                for gpu in service_catalog.get_common_gpus():
-                    if gpu in result:
-                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
 
             # Google TPUs
@@ -3023,16 +3181,12 @@ def show_gpus(
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-                if (cloud_is_kubernetes or
-                        cloud is None) and kubernetes_autoscaling:
-                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
-                    yield '\n\n'
             else:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if (cloud_is_kubernetes or
-                        cloud is None) and kubernetes_autoscaling:
-                    yield kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE
+                if k8s_messages:
+                    yield '\n'
+                    yield k8s_messages
                 return
         else:
             # Parse accelerator string
@@ -3056,12 +3210,41 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
+        print_section_titles = False
+        if (kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and
+                not show_all):
+            # Print section title if not showing all and instead a specific
+            # accelerator is requested
+            print_section_titles = True
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
+            # TODO(romilb): Show filtered per node GPU availability here as well
+            try:
+                k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
+                    name_filter=name, quantity_filter=quantity)
+                yield from k8s_realtime_table.get_string()
+            except ValueError as e:
+                # In the case of a specific accelerator, show the error message
+                # immediately (e.g., "Resources H100 not found ...")
+                yield str(e)
+            if kubernetes_autoscaling:
+                k8s_messages += ('\n' +
+                                 kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
+            yield k8s_messages
+        if cloud_is_kubernetes:
+            # Do not show clouds if --cloud kubernetes is specified
+            if not kubernetes_is_enabled:
+                yield ('Kubernetes is not enabled. To fix, run: '
+                       'sky check kubernetes ')
+            return
+
+        # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud,
+                                                   clouds=clouds_to_list,
                                                    case_sensitive=False,
                                                    all_regions=all_regions)
         # Import here to save module load speed.
@@ -3093,16 +3276,17 @@ def show_gpus(
             new_result[gpu] = sorted_dataclasses
         result = new_result
 
-        if len(result) == 0:
-            if cloud == 'kubernetes':
-                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
-                return
+        if print_section_titles and not show_all:
+            yield '\n\n'
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
+        if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            yield f'Resources \'{name}\'{quantity_str} not found. '
-            yield 'Try \'sky show-gpus --all\' '
-            yield 'to show available accelerators.'
+            cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
+            yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
+            yield 'To show available accelerators, run: sky show-gpus --all'
             return
 
         for i, (gpu, items) in enumerate(result.items()):
@@ -3270,6 +3454,12 @@ def jobs():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              hidden=True,
+              help=('Alias for --name, the name of the spot job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -3302,8 +3492,9 @@ def jobs():
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
-    entrypoint: List[str],
+    entrypoint: Tuple[str, ...],
     name: Optional[str],
+    cluster: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3339,6 +3530,11 @@ def jobs_launch(
 
       sky jobs launch 'echo hello!'
     """
+    if cluster is not None:
+        if name is not None and name != cluster:
+            raise click.UsageError('Cannot specify both --name and --cluster. '
+                                   'Use one of the flags as they are alias.')
+        name = cluster
     env = _merge_env_vars(env_file, env)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
@@ -3585,16 +3781,13 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
     """Tail the log of a managed job."""
     try:
-        if controller:
-            core.tail_logs(
-                controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name,
-                job_id=job_id,
-                follow=follow)
-        else:
-            managed_jobs.tail_logs(name=name, job_id=job_id, follow=follow)
-    except exceptions.ClusterNotUpError as e:
-        click.echo(e)
-        sys.exit(1)
+        managed_jobs.tail_logs(name=name,
+                               job_id=job_id,
+                               follow=follow,
+                               controller=controller)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
@@ -3683,7 +3876,7 @@ def serve():
 
 def _generate_task_with_service(
     service_name: str,
-    service_yaml_args: List[str],
+    service_yaml_args: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -3695,7 +3888,7 @@ def _generate_task_with_service(
     env: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
-    ports: Tuple[str],
+    ports: Optional[Tuple[str]],
     cpus: Optional[str],
     memory: Optional[str],
     disk_size: Optional[int],
@@ -3788,7 +3981,7 @@ def _generate_task_with_service(
 @timeline.event
 @usage_lib.entrypoint
 def serve_up(
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     service_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -3906,7 +4099,7 @@ def serve_up(
 @usage_lib.entrypoint
 def serve_update(
     service_name: str,
-    service_yaml: List[str],
+    service_yaml: Tuple[str, ...],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
@@ -4252,9 +4445,9 @@ def serve_logs(
                             target=target_component,
                             replica_id=replica_id,
                             follow=follow)
-    except exceptions.ClusterNotUpError as e:
-        click.echo(e)
-        sys.exit(1)
+    except exceptions.ClusterNotUpError:
+        with ux_utils.print_exception_no_traceback():
+            raise
 
 
 # ==============================
@@ -4941,13 +5134,14 @@ def local_up(gpus: bool):
                    f'exists.{style.RESET_ALL}\n'
                    'If you want to delete it instead, run: sky local down')
     else:
-        click.echo('Failed to create local cluster. '
-                   f'Full log: {log_path}'
-                   f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-        sys.exit(1)
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to create local cluster. '
+                f'Full log: {log_path}'
+                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check(quiet=True)
+        sky_check.check(clouds=['kubernetes'], quiet=True)
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs
@@ -5041,14 +5235,15 @@ def local_down():
         elif returncode == 100:
             click.echo('\nLocal cluster does not exist.')
         else:
-            click.echo('Failed to create local cluster. '
-                       f'Stdout: {stdout}'
-                       f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-            sys.exit(1)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to create local cluster. '
+                    f'Stdout: {stdout}'
+                    f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     if cluster_removed:
         # Run sky check
         with rich_utils.safe_status('[bold cyan]Running sky check...'):
-            sky_check.check(quiet=True)
+            sky_check.check(clouds=['kubernetes'], quiet=True)
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
 

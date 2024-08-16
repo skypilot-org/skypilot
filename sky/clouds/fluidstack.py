@@ -10,6 +10,7 @@ from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
+from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
 
 _CREDENTIAL_FILES = [
@@ -140,10 +141,6 @@ class Fluidstack(clouds.Cloud):
     def __repr__(self):
         return 'Fluidstack'
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, Fluidstack)
-
     @classmethod
     def get_default_instance_type(
             cls,
@@ -178,7 +175,7 @@ class Fluidstack(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: clouds.Region,
         zones: Optional[List[clouds.Zone]],
         dryrun: bool = False,
@@ -193,7 +190,7 @@ class Fluidstack(clouds.Cloud):
         else:
             custom_resources = None
         cuda_installation_commands = """
-        sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb; 
+        sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb;
         sudo dpkg -i /usr/local/cuda-keyring_1.1-1_all.deb;
         sudo apt-get update;
         sudo apt-get -y install cuda-toolkit-12-3;
@@ -214,7 +211,9 @@ class Fluidstack(clouds.Cloud):
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Fluidstack Cloud
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -242,9 +241,10 @@ class Fluidstack(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -259,8 +259,10 @@ class Fluidstack(clouds.Cloud):
             zone=resources.zone,
             clouds='fluidstack')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

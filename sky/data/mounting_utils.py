@@ -1,5 +1,6 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
+import shlex
 import textwrap
 from typing import Optional
 
@@ -12,7 +13,12 @@ _STAT_CACHE_CAPACITY = 4096
 _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-GCSFUSE_VERSION = '1.3.0'
+GCSFUSE_VERSION = '2.2.0'
+# https://github.com/Azure/azure-storage-fuse/releases
+BLOBFUSE2_VERSION = '2.2.0'
+_BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
+_BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
+                       '{storage_account_name}_{container_name}')
 
 
 def get_s3_mount_install_cmd() -> str:
@@ -45,6 +51,7 @@ def get_gcs_mount_install_cmd() -> str:
 
 def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
+
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
@@ -52,6 +59,59 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--rename-dir-limit {_RENAME_DIR_LIMIT} '
                  f'{bucket_name} {mount_path}')
+    return mount_cmd
+
+
+def get_az_mount_install_cmd() -> str:
+    """Returns a command to install AZ Container mount utility blobfuse2."""
+    install_cmd = ('sudo apt-get update; '
+                   'sudo apt-get install -y '
+                   '-o Dpkg::Options::="--force-confdef" '
+                   'fuse3 libfuse3-dev && '
+                   'wget -nc https://github.com/Azure/azure-storage-fuse'
+                   f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
+                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
+                   '-O /tmp/blobfuse2.deb && '
+                   'sudo dpkg --install /tmp/blobfuse2.deb && '
+                   f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
+
+    return install_cmd
+
+
+def get_az_mount_cmd(container_name: str,
+                     storage_account_name: str,
+                     mount_path: str,
+                     storage_account_key: Optional[str] = None) -> str:
+    """Returns a command to mount an AZ Container using blobfuse2.
+
+    Args:
+        container_name: Name of the mounting container.
+        storage_account_name: Name of the storage account the given container
+            belongs to.
+        mount_path: Path where the container will be mounting.
+        storage_account_key: Access key for the given storage account.
+
+    Returns:
+        str: Command used to mount AZ container with blobfuse2.
+    """
+    # Storage_account_key is set to None when mounting public container, and
+    # mounting public containers are not officially supported by blobfuse2 yet.
+    # Setting an empty SAS token value is a suggested workaround.
+    # https://github.com/Azure/azure-storage-fuse/issues/1338
+    if storage_account_key is None:
+        key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
+    else:
+        key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
+
+    cache_path = _BLOBFUSE_CACHE_DIR.format(
+        storage_account_name=storage_account_name,
+        container_name=container_name)
+    mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
+                 f'{key_env_var} '
+                 f'blobfuse2 {mount_path} --allow-other --no-symlinks '
+                 '-o umask=022 -o default_permissions '
+                 f'--tmp-path {cache_path} '
+                 f'--container-name {container_name}')
     return mount_cmd
 
 
@@ -98,6 +158,26 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
     return mount_cmd
 
 
+def _get_mount_binary(mount_cmd: str) -> str:
+    """Returns mounting binary in string given as the mount command.
+
+    Args:
+        mount_cmd: Command used to mount a cloud storage.
+
+    Returns:
+        str: Name of the binary used to mount a cloud storage.
+    """
+    if 'goofys' in mount_cmd:
+        return 'goofys'
+    elif 'gcsfuse' in mount_cmd:
+        return 'gcsfuse'
+    elif 'blobfuse2' in mount_cmd:
+        return 'blobfuse2'
+    else:
+        assert 'rclone' in mount_cmd
+        return 'rclone'
+
+
 def get_mounting_script(
     mount_path: str,
     mount_cmd: str,
@@ -121,8 +201,7 @@ def get_mounting_script(
     Returns:
         str: Mounting script as a str.
     """
-
-    mount_binary = mount_cmd.split()[0]
+    mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
         installed_check += f' && {version_check_cmd}'

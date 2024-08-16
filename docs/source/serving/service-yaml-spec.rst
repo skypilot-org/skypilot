@@ -27,6 +27,13 @@ Available fields:
         # highly related to your service, so it is recommended to set this value
         # based on your service's startup time.
         initial_delay_seconds: 1200
+        # The Timeout in seconds for a readiness probe request (optional).
+        # Defaults to 15 seconds. If the readiness probe takes longer than this
+        # time to respond, the probe will be considered as failed. This is
+        # useful when your service is slow to respond to readiness probe
+        # requests. Note, having a too high timeout will delay the detection
+        # of a real failure of your service replica.
+        timeout_seconds: 15
 
       # Simplified version of readiness probe that only contains the readiness
       # probe path. If you want to use GET method for readiness probe and the

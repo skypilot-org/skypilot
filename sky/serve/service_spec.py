@@ -19,10 +19,12 @@ class SkyServiceSpec:
         self,
         readiness_path: str,
         initial_delay_seconds: int,
+        readiness_timeout_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        readiness_headers: Optional[Dict[str, str]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
@@ -77,10 +79,12 @@ class SkyServiceSpec:
 
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
+        self._readiness_timeout_seconds: int = readiness_timeout_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
+        self._readiness_headers: Optional[Dict[str, str]] = readiness_headers
         self._dynamic_ondemand_fallback: Optional[
             bool] = dynamic_ondemand_fallback
         self._base_ondemand_fallback_replicas: Optional[
@@ -111,14 +115,23 @@ class SkyServiceSpec:
             service_config['readiness_path'] = readiness_section
             initial_delay_seconds = None
             post_data = None
+            readiness_timeout_seconds = None
+            readiness_headers = None
         else:
             service_config['readiness_path'] = readiness_section['path']
             initial_delay_seconds = readiness_section.get(
                 'initial_delay_seconds', None)
             post_data = readiness_section.get('post_data', None)
+            readiness_timeout_seconds = readiness_section.get(
+                'timeout_seconds', None)
+            readiness_headers = readiness_section.get('headers', None)
         if initial_delay_seconds is None:
             initial_delay_seconds = constants.DEFAULT_INITIAL_DELAY_SECONDS
         service_config['initial_delay_seconds'] = initial_delay_seconds
+        if readiness_timeout_seconds is None:
+            readiness_timeout_seconds = (
+                constants.DEFAULT_READINESS_PROBE_TIMEOUT_SECONDS)
+        service_config['readiness_timeout_seconds'] = readiness_timeout_seconds
         if isinstance(post_data, str):
             try:
                 post_data = json.loads(post_data)
@@ -129,6 +142,7 @@ class SkyServiceSpec:
                         '`readiness_probe` section of your service YAML.'
                     ) from e
         service_config['post_data'] = post_data
+        service_config['readiness_headers'] = readiness_headers
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
@@ -204,6 +218,9 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
+        add_if_not_none('readiness_probe', 'timeout_seconds',
+                        self.readiness_timeout_seconds)
+        add_if_not_none('readiness_probe', 'headers', self._readiness_headers)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
@@ -220,8 +237,12 @@ class SkyServiceSpec:
 
     def probe_str(self):
         if self.post_data is None:
-            return f'GET {self.readiness_path}'
-        return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
+            method = f'GET {self.readiness_path}'
+        else:
+            method = f'POST {self.readiness_path} {json.dumps(self.post_data)}'
+        headers = ('' if self.readiness_headers is None else
+                   ' with custom headers')
+        return f'{method}{headers}'
 
     def spot_policy_str(self):
         policy_strs = []
@@ -239,7 +260,9 @@ class SkyServiceSpec:
                 policy_strs.append('Static spot mixture with '
                                    f'{self.base_ondemand_fallback_replicas} '
                                    f'base on-demand replica{plural}')
-        return ' '.join(policy_strs) if policy_strs else 'No spot policy'
+        if not policy_strs:
+            return 'No spot fallback policy'
+        return ' '.join(policy_strs)
 
     def autoscaling_policy_str(self):
         # TODO(MaoZiming): Update policy_str
@@ -258,6 +281,7 @@ class SkyServiceSpec:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
+            Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
             Spot Policy:                      {self.spot_policy_str()}
         """)
@@ -269,6 +293,10 @@ class SkyServiceSpec:
     @property
     def initial_delay_seconds(self) -> int:
         return self._initial_delay_seconds
+
+    @property
+    def readiness_timeout_seconds(self) -> int:
+        return self._readiness_timeout_seconds
 
     @property
     def min_replicas(self) -> int:
@@ -286,6 +314,10 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+
+    @property
+    def readiness_headers(self) -> Optional[Dict[str, str]]:
+        return self._readiness_headers
 
     @property
     def base_ondemand_fallback_replicas(self) -> Optional[int]:

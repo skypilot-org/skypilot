@@ -3,6 +3,11 @@
 name: {{service_name}}
 
 setup: |
+  {{ sky_activate_python_env }}
+  # Disable the pip version check to avoid the warning message, which makes the
+  # output hard to read.
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+
   # Install all cloud dependencies.
   # This is for multicloud support. To allow controller launch on all clouds,
   # we need to install all cloud dependencies.
@@ -24,6 +29,9 @@ file_mounts:
   {%- endfor %}
 
 run: |
+  # Activate the Python environment, so that cloud SDKs can be found in the
+  # PATH.
+  {{ sky_activate_python_env }}
   # Start sky serve service.
   python -u -m sky.serve.service \
     --service-name {{service_name}} \

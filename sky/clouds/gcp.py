@@ -14,6 +14,7 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
@@ -179,20 +180,33 @@ class GCP(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
-            return {
+            unsupported = {
                 clouds.CloudImplementationFeatures.STOP: (
-                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                    'TPU VM pods cannot be stopped. Please refer to: '
+                    'https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             # TPU node does not support multi-node.
-            return {
-                clouds.CloudImplementationFeatures.MULTI_NODE:
-                    ('TPU node does not support multi-node. Please set '
-                     'num_nodes to 1.')
-            }
-        return {}
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
+                'TPU node does not support multi-node. Please set '
+                'num_nodes to 1.')
+        # TODO(zhwu): We probably need to store the MIG requirement in resources
+        # because `skypilot_config` may change for an existing cluster.
+        # Clusters created with MIG (only GPU clusters) cannot be stopped.
+        if (skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'),
+                None,
+                override_configs=resources.cluster_config_overrides) is not None
+                and resources.accelerators):
+            unsupported[clouds.CloudImplementationFeatures.STOP] = (
+                'Managed Instance Group (MIG) does not support stopping yet.')
+            unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
+                'Managed Instance Group with DWS does not support '
+                'spot instances.')
+        return unsupported
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -315,9 +329,6 @@ class GCP(clouds.Cloud):
         else:
             return 0.08 * num_gigabytes
 
-    def is_same_cloud(self, other):
-        return isinstance(other, GCP)
-
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
         find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
@@ -393,7 +404,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
@@ -484,26 +495,41 @@ class GCP(clouds.Cloud):
 
         firewall_rule = None
         if resources.ports is not None:
-            firewall_rule = (
-                USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
+            firewall_rule = (USER_PORTS_FIREWALL_RULE_NAME.format(
+                cluster_name.name_on_cloud))
         resources_vars['firewall_rule'] = firewall_rule
 
         # For TPU nodes. TPU VMs do not need TPU_NAME.
         tpu_node_name = resources_vars.get('tpu_node_name')
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             if tpu_node_name is None:
-                tpu_node_name = cluster_name_on_cloud
+                tpu_node_name = cluster_name.name_on_cloud
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
+        managed_instance_group_config = skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+        use_mig = managed_instance_group_config is not None
+        resources_vars['gcp_use_managed_instance_group'] = use_mig
+        # Convert boolean to 0 or 1 in string, as GCP does not support boolean
+        # value in labels for TPU VM APIs.
+        resources_vars['gcp_use_managed_instance_group_value'] = str(
+            int(use_mig))
+        if use_mig:
+            resources_vars.update(managed_instance_group_config)
+        resources_vars[
+            'force_enable_external_ips'] = skypilot_config.get_nested(
+                ('gcp', 'force_enable_external_ips'), False)
         return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
-    ) -> Tuple[List['resources.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
@@ -512,7 +538,9 @@ class GCP(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if host_vm_type is None:
-                return ([], [])
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
             else:
                 r = resources.copy(
                     cloud=GCP(),
@@ -521,7 +549,7 @@ class GCP(clouds.Cloud):
                     cpus=None,
                     memory=None,
                 )
-                return ([r], [])
+                return resources_utils.FeasibleResources([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -543,7 +571,8 @@ class GCP(clouds.Cloud):
             clouds='gcp')
 
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
         assert len(
             instance_list
         ) == 1, f'More than one instance type matched, {instance_list}'
@@ -558,11 +587,13 @@ class GCP(clouds.Cloud):
                 if resources.cpus.endswith('+'):
                     cpus = float(resources.cpus[:-1])
                     if cpus > num_cpus_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
                 else:
                     cpus = float(resources.cpus)
                     if cpus != num_cpus_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
             # FIXME(woosuk, wei-lin): This leverages the fact that TPU VMs
             # have 334 GB RAM, and 400 GB RAM for tpu-v4. We need to move
             # this to service catalog, instead.
@@ -571,11 +602,13 @@ class GCP(clouds.Cloud):
                 if resources.memory.endswith('+'):
                     memory = float(resources.memory[:-1])
                     if memory > memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
                 else:
                     memory = float(resources.memory)
                     if memory != memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
         else:
             host_vm_type = instance_list[0]
 
@@ -587,7 +620,8 @@ class GCP(clouds.Cloud):
             cpus=None,
             memory=None,
         )
-        return ([r], fuzzy_candidate_list)
+        return resources_utils.FeasibleResources([r], fuzzy_candidate_list,
+                                                 None)
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -739,13 +773,13 @@ class GCP(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel,unused-import
         import google.auth
-        import googleapiclient.discovery
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
-        crm = googleapiclient.discovery.build('cloudresourcemanager',
-                                              'v1',
-                                              credentials=credentials)
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
         request = crm.projects().testIamPermissions(resource=project,
@@ -979,8 +1013,8 @@ class GCP(clouds.Cloud):
         assert False, 'This code path should not be used.'
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
         del region  # unused
@@ -989,7 +1023,7 @@ class GCP(clouds.Cloud):
         # `ray-cluster-name` tag, which is guaranteed by the current `ray`
         # backend. Once the `provision.query_instances` is implemented for GCP,
         # we should be able to get rid of this assumption.
-        tag_filters = {'ray-cluster-name': cluster_name_on_cloud}
+        tag_filters = {'ray-cluster-name': cluster_name.name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '
@@ -1001,7 +1035,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             instance_name_cmd,
-            error_msg=f'Failed to get instance name for {cluster_name!r}',
+            error_msg=
+            f'Failed to get instance name for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
         instance_names = json.loads(stdout)
@@ -1012,7 +1047,7 @@ class GCP(clouds.Cloud):
                     f'instance, but got: {instance_names}')
         instance_name = instance_names[0]['name']
 
-        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
         create_image_cmd = (f'gcloud compute images create {image_name} '
                             f'--source-disk  {instance_name} '
                             f'--source-disk-zone {zone}')
@@ -1024,7 +1059,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             create_image_cmd,
-            error_msg=f'Failed to create image for {cluster_name!r}',
+            error_msg=
+            f'Failed to create image for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
 
@@ -1038,7 +1074,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             image_uri_cmd,
-            error_msg=f'Failed to get image uri for {cluster_name!r}',
+            error_msg=
+            f'Failed to get image uri for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
 

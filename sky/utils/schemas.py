@@ -4,6 +4,9 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 import enum
+from typing import Any, Dict, List, Tuple
+
+from sky.skylet import constants
 
 
 def _check_not_both_fields_present(field1: str, field2: str):
@@ -111,6 +114,8 @@ def _get_single_resources_schema():
                             'type': 'integer',
                         }]
                     }
+                }, {
+                    'type': 'null',
                 }],
             },
             'labels': {
@@ -141,9 +146,12 @@ def _get_single_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
+                }, {
+                    'type': 'null',
                 }]
             },
-            # The following fields are for internal use only.
+            # The following fields are for internal use only. Should not be
+            # specified in the task config.
             '_docker_login_config': {
                 'type': 'object',
                 'required': ['username', 'password', 'server'],
@@ -165,6 +173,9 @@ def _get_single_resources_schema():
             },
             '_requires_fuse': {
                 'type': 'boolean',
+            },
+            '_cluster_config_overrides': {
+                'type': 'object',
             },
         }
     }
@@ -297,13 +308,22 @@ def get_service_schema():
                         'initial_delay_seconds': {
                             'type': 'number',
                         },
+                        'timeout_seconds': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
                             }, {
                                 'type': 'object',
                             }]
-                        }
+                        },
+                        'headers': {
+                            'type': 'object',
+                            'additionalProperties': {
+                                'type': 'string'
+                            }
+                        },
                     }
                 }]
             },
@@ -359,6 +379,74 @@ def get_service_schema():
     }
 
 
+def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
+    """Recursively filter a schema to include only certain keys.
+
+    Args:
+        schema: The original schema dictionary.
+        keys_to_keep: List of tuples with the path of keys to retain.
+
+    Returns:
+        The filtered schema.
+    """
+    # Convert list of tuples to a dictionary for easier access
+    paths_dict: Dict[str, Any] = {}
+    for path in keys_to_keep:
+        current = paths_dict
+        for step in path:
+            if step not in current:
+                current[step] = {}
+            current = current[step]
+
+    def keep_keys(current_schema: dict, current_path_dict: dict,
+                  new_schema: dict) -> dict:
+        # Base case: if we reach a leaf in the path_dict, we stop.
+        if (not current_path_dict or not isinstance(current_schema, dict) or
+                not current_schema.get('properties')):
+            return current_schema
+
+        if 'properties' not in new_schema:
+            new_schema = {
+                key: current_schema[key]
+                for key in current_schema
+                # We do not support the handling of `oneOf`, `anyOf`, `allOf`,
+                # `required` for now.
+                if key not in
+                {'properties', 'oneOf', 'anyOf', 'allOf', 'required'}
+            }
+            new_schema['properties'] = {}
+        for key, sub_schema in current_schema['properties'].items():
+            if key in current_path_dict:
+                # Recursively keep keys if further path dict exists
+                new_schema['properties'][key] = {}
+                current_path_value = current_path_dict.pop(key)
+                new_schema['properties'][key] = keep_keys(
+                    sub_schema, current_path_value,
+                    new_schema['properties'][key])
+
+        return new_schema
+
+    # Start the recursive filtering
+    new_schema = keep_keys(schema, paths_dict, {})
+    assert not paths_dict, f'Unprocessed keys: {paths_dict}'
+    return new_schema
+
+
+def _experimental_task_schema() -> dict:
+    config_override_schema = _filter_schema(get_config_schema(),
+                                            constants.OVERRIDEABLE_CONFIG_KEYS)
+    return {
+        'experimental': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'config_overrides': config_override_schema,
+            }
+        }
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -402,7 +490,7 @@ def get_task_schema():
                 'patternProperties': {
                     # Checks env keys are valid env var names.
                     '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': 'string'
+                        'type': ['string', 'null']
                     }
                 },
                 'additionalProperties': False,
@@ -424,6 +512,7 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            **_experimental_task_schema(),
         }
     }
 
@@ -523,6 +612,32 @@ _LABELS_SCHEMA = {
     }
 }
 
+_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+    'oneOf': [
+        {
+            'type': 'string'
+        },
+        {
+            # A list of single-element dict to pretain the
+            # order.
+            # Example:
+            #  property_name:
+            #    - my-cluster1-*: my-property-1
+            #    - my-cluster2-*: my-property-2
+            #    - "*"": my-property-3
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+                'maxProperties': 1,
+                'minProperties': 1,
+            },
+        }
+    ]
+}
+
 
 class RemoteIdentityOptions(enum.Enum):
     """Enum for remote identity types.
@@ -551,33 +666,6 @@ _REMOTE_IDENTITY_SCHEMA = {
     }
 }
 
-_REMOTE_IDENTITY_SCHEMA_AWS = {
-    'remote_identity': {
-        'oneOf': [
-            {
-                'type': 'string'
-            },
-            {
-                # A list of single-element dict to pretain the order.
-                # Example:
-                #  remote_identity:
-                #    - my-cluster1-*: my-iam-role-1
-                #    - my-cluster2-*: my-iam-role-2
-                #    - "*"": my-iam-role-3
-                'type': 'array',
-                'items': {
-                    'type': 'object',
-                    'additionalProperties': {
-                        'type': 'string'
-                    },
-                    'maxProperties': 1,
-                    'minProperties': 1,
-                },
-            }
-        ]
-    }
-}
-
 _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     'remote_identity': {
         'type': 'string'
@@ -587,6 +675,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.clouds import service_catalog
     from sky.utils import kubernetes_enums
 
     resources_schema = {
@@ -617,9 +706,11 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'security_group_name': {
-                    'type': 'string'
+                'disk_encrypted': {
+                    'type': 'boolean',
                 },
+                'security_group_name':
+                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -639,10 +730,36 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                'managed_instance_group': {
+                    'type': 'object',
+                    'required': ['run_duration'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run_duration': {
+                            'type': 'integer',
+                        },
+                        'provision_timeout': {
+                            'type': 'integer',
+                        }
+                    }
+                },
+                'force_enable_external_ips': {
+                    'type': 'boolean'
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
             **_check_not_both_fields_present('instance_tags', 'labels')
+        },
+        'azure': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'storage_account': {
+                    'type': 'string',
+                },
+            }
         },
         'kubernetes': {
             'type': 'object',
@@ -722,9 +839,49 @@ def get_config_schema():
         },
     }
 
+    allowed_clouds = {
+        # A list of cloud names that are allowed to be used
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum':
+                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+        }
+    }
+
+    docker_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'run_options': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    }
+                }]
+            }
+        }
+    }
+    gpu_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'disable_ecc': {
+                'type': 'boolean',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
-            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_AWS)
+            config['properties'].update({
+                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
+            })
         elif cloud == 'kubernetes':
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
         else:
@@ -738,6 +895,9 @@ def get_config_schema():
             'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
+            'allowed_clouds': allowed_clouds,
+            'docker': docker_configs,
+            'nvidia_gpus': gpu_configs,
             **cloud_configs,
         },
         # Avoid spot and jobs being present at the same time.

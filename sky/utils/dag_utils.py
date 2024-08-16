@@ -70,9 +70,9 @@ def load_chain_dag_from_yaml(
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
 
-    'env_overrides' is in effect only when there's exactly one task. It is a
-    list of (key, value) pairs that will be used to update the task's 'envs'
-    section.
+    'env_overrides' is a list of (key, value) pairs that will be used to update
+    the task's 'envs' section. If it is a chain dag, the envs will be updated
+    for all tasks in the chain.
 
     Returns:
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
@@ -89,12 +89,6 @@ def load_chain_dag_from_yaml(
     if len(configs) == 0:
         # YAML has only `name: xxx`. Still instantiate a task.
         configs = [{'name': dag_name}]
-
-    if len(configs) > 1:
-        # TODO(zongheng): in a chain DAG of N tasks, cli.py currently makes the
-        # decision to not apply overrides. Here we maintain this behavior. We
-        # can listen to user feedback to change this.
-        env_overrides = None
 
     current_task = None
     with dag_lib.Dag() as dag:

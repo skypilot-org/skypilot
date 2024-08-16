@@ -9,7 +9,9 @@ import yaml
 
 from sky.adaptors import kubernetes
 from sky.provision import common
+from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import kubernetes_enums
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,10 @@ def bootstrap_instances(
 
     _configure_services(namespace, config.provider_config)
 
-    config = _configure_ssh_jump(namespace, config)
+    networking_mode = network_utils.get_networking_mode(
+        config.provider_config.get('networking_mode'))
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        config = _configure_ssh_jump(namespace, config)
 
     requested_service_account = config.node_config['spec']['serviceAccountName']
     if (requested_service_account ==
@@ -46,6 +51,21 @@ def bootstrap_instances(
         _configure_autoscaler_cluster_role(namespace, config.provider_config)
         _configure_autoscaler_cluster_role_binding(namespace,
                                                    config.provider_config)
+        # SkyPilot system namespace is required for FUSE mounting. Here we just
+        # create the namespace and set up the necessary permissions.
+        #
+        # We need to setup the namespace outside the
+        # if config.provider_config.get('fuse_device_required') block below
+        # because if we put in the if block, the following happens:
+        # 1. User launches job controller on Kubernetes with SERVICE_ACCOUNT. No
+        #    namespace is created at this point since the controller does not
+        #    require FUSE.
+        # 2. User submits a job requiring FUSE.
+        # 3. The namespace is created here, but since the job controller is
+        #    using DEFAULT_SERVICE_ACCOUNT_NAME, it does not have the necessary
+        #    permissions to create a role for itself to create the FUSE manager.
+        # 4. The job fails to launch.
+        _configure_skypilot_system_namespace(config.provider_config)
         if config.provider_config.get('port_mode', 'loadbalancer') == 'ingress':
             logger.info('Port mode is set to ingress, setting up ingress role '
                         'and role binding.')
@@ -69,26 +89,8 @@ def bootstrap_instances(
     elif requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
                     'skipping role and role binding setup.')
-
-    # SkyPilot system namespace is required for FUSE mounting. Here we just
-    # create the namespace and set up the necessary permissions.
-    #
-    # We need to setup the namespace outside the if block below because if
-    # we put in the if block, the following happens:
-    # 1. User launches job controller on Kubernetes with SERVICE_ACCOUNT. No
-    #    namespace is created at this point since the controller does not
-    #    require FUSE.
-    # 2. User submits a job requiring FUSE.
-    # 3. The namespace is created here, but since the job controller is using
-    #    SERVICE_ACCOUNT, it does not have the necessary permissions to create
-    #    a role for itself to create the FUSE device manager.
-    # 4. The job fails to launch.
-    _configure_skypilot_system_namespace(config.provider_config,
-                                         requested_service_account)
-
     if config.provider_config.get('fuse_device_required', False):
         _configure_fuse_mounting(config.provider_config)
-
     return config
 
 
@@ -502,8 +504,7 @@ def _configure_ssh_jump(namespace, config: common.ProvisionConfig):
 
 
 def _configure_skypilot_system_namespace(
-        provider_config: Dict[str,
-                              Any], service_account: Optional[str]) -> None:
+        provider_config: Dict[str, Any]) -> None:
     """Creates the namespace for skypilot-system mounting if it does not exist.
 
     Also patches the SkyPilot service account to have the necessary permissions
@@ -513,34 +514,28 @@ def _configure_skypilot_system_namespace(
     skypilot_system_namespace = provider_config['skypilot_system_namespace']
     kubernetes_utils.create_namespace(skypilot_system_namespace)
 
-    # Setup permissions if using the default service account.
-    # If the user has requested a different service account (via
-    # remote_identity in ~/.sky/config.yaml), we assume they have already set
-    # up the necessary roles and role bindings.
-    if service_account == kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME:
-        # Note - this must be run only after the service account has been
-        # created in the cluster (in bootstrap_instances).
-        # Create the role in the skypilot-system namespace if it does not exist.
-        _configure_autoscaler_role(skypilot_system_namespace,
-                                   provider_config,
-                                   role_field='autoscaler_skypilot_system_role')
-        # We must create a unique role binding per-namespace that SkyPilot is
-        # running in, so we override the name with a unique name identifying
-        # the namespace. This is required for multi-tenant setups where
-        # different SkyPilot instances may be running in different namespaces.
-        override_name = provider_config[
-            'autoscaler_skypilot_system_role_binding']['metadata'][
-                'name'] + '-' + svc_account_namespace
+    # Note - this must be run only after the service account has been
+    # created in the cluster (in bootstrap_instances).
+    # Create the role in the skypilot-system namespace if it does not exist.
+    _configure_autoscaler_role(skypilot_system_namespace,
+                               provider_config,
+                               role_field='autoscaler_skypilot_system_role')
+    # We must create a unique role binding per-namespace that SkyPilot is
+    # running in, so we override the name with a unique name identifying
+    # the namespace. This is required for multi-tenant setups where
+    # different SkyPilot instances may be running in different namespaces.
+    override_name = provider_config['autoscaler_skypilot_system_role_binding'][
+        'metadata']['name'] + '-' + svc_account_namespace
 
-        # Create the role binding in the skypilot-system namespace, and have
-        # the subject namespace be the namespace that the SkyPilot service
-        # account is created in.
-        _configure_autoscaler_role_binding(
-            skypilot_system_namespace,
-            provider_config,
-            binding_field='autoscaler_skypilot_system_role_binding',
-            override_name=override_name,
-            override_subject_namespace=svc_account_namespace)
+    # Create the role binding in the skypilot-system namespace, and have
+    # the subject namespace be the namespace that the SkyPilot service
+    # account is created in.
+    _configure_autoscaler_role_binding(
+        skypilot_system_namespace,
+        provider_config,
+        binding_field='autoscaler_skypilot_system_role_binding',
+        override_name=override_name,
+        override_subject_namespace=svc_account_namespace)
 
 
 def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:

@@ -300,8 +300,8 @@ Available fields:
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
         name: sky-dataset  # Name of storage, optional when source is bucket URI
-        source: /local/path/datasets  # Source path, can be local or s3/gcs URL. Optional, do not specify to create an empty bucket.
-        store: s3  # Could be either 's3', 'gcs' or 'r2'; default: None. Optional.
+        source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
+        store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', or 'ibm'; default: None. Optional.
         persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
         mode: MOUNT  # Either MOUNT or COPY. Defaults to MOUNT. Optional.
 
@@ -331,3 +331,34 @@ Available fields:
 
       # Demoing env var usage.
       echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
+
+.. _task-yaml-experimental:
+
+Experimental
+------------
+
+.. note::
+
+  Experimental features and APIs may be changed or removed without any notice.
+
+In additional to the above fields, SkyPilot also supports the following experimental fields in the task YAML:
+
+.. code-block:: yaml
+
+  experimental:
+    # Override the configs in ~/.sky/config.yaml from a task level.
+    #
+    # The following fields can be overridden. Please refer to docs of Advanced
+    # Configuration for more details of those fields:
+    # https://skypilot.readthedocs.io/en/latest/reference/config.html
+    config_overrides:
+        docker:
+            run_options: ...
+        kubernetes:
+            pod_config: ...
+            provision_timeout: ...
+        gcp:
+            managed_instance_group: ...
+        nvidia_gpus:
+            disable_ecc: ...

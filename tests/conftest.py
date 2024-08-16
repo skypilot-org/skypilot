@@ -160,7 +160,7 @@ def pytest_collection_modifyitems(config, items):
     serial_mark = pytest.mark.xdist_group(
         name=f'serial_{generic_cloud_keyword}')
     # Handle generic tests
-    if generic_cloud in ['lambda', 'kubernetes']:
+    if generic_cloud in ['lambda']:
         for item in items:
             if (_is_generic_test(item) and
                     f'no_{generic_cloud_keyword}' not in item.keywords):
@@ -199,7 +199,7 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch: pytest.MonkeyPatch):
+def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
     common.enable_all_clouds_in_monkeypatch(monkeypatch)
 
 

@@ -13,7 +13,12 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('lambda/vms.csv')
+# Keep it synced with the frequency in
+# skypilot-catalog/.github/workflows/update-lambda-catalog.yml
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('lambda/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 # Number of vCPUS for gpu_1x_a10
 _DEFAULT_NUM_VCPUS = 30
