@@ -129,10 +129,14 @@ DISABLE_GPU_ECC_COMMAND = (
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
-    'bash Miniconda3-Linux-x86_64.sh -b; '
+    # We do not use && for installation of conda and the following init commands
+    # because for some images, conda is already installed, but not initialized.
+    # In this case, we need to initialize conda and set auto_activate_base to
+    # true.
+    '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     'conda config --set auto_activate_base true && '
-    f'conda activate base; }}; '
+    f'conda activate base; }}; }}; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
     # If Python version is larger then equal to 3.12, create a new conda env
