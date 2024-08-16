@@ -799,7 +799,7 @@ class AWS(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
-            resources_utils.DiskTier.HIGH: 7000,
+            resources_utils.DiskTier.HIGH: 16000,
             resources_utils.DiskTier.MEDIUM: 3500,
             resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
         }
