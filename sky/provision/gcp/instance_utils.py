@@ -1081,6 +1081,9 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
                 run_duration=managed_instance_group_config['run_duration'])
             cls.wait_for_operation(operation, project_id, zone=zone)
 
+        provision_timeout = managed_instance_group_config.get('provision_timeout')
+        if provision_timeout is None:
+            provision_timeout = constants.DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT
         # This will block the provisioning until the nodes are ready, which
         # makes the failover not effective. We rely on the request timeout set
         # by user to trigger failover.
@@ -1088,9 +1091,7 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
             project_id,
             zone,
             managed_instance_group_name,
-            timeout=managed_instance_group_config.get(
-                'provision_timeout',
-                constants.DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT))
+            timeout=provision_timeout)
 
         pending_running_instance_names = cls._add_labels_and_find_head(
             cluster_name, project_id, zone, labels, potential_head_instances)
