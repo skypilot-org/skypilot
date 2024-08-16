@@ -171,10 +171,12 @@ class RunPod(clouds.Cloud):
         else:
             custom_resources = None
 
-        if r.extract_docker_image() is not None:
+        if r.image_id is None:
+            image_id = 'runpod/base:0.0.2'
+        elif r.extract_docker_image() is not None:
             image_id = r.extract_docker_image()
         else:
-            image_id = r.image_id
+            image_id = r.image_id[r.region]
 
         return {
             'instance_type': resources.instance_type,
