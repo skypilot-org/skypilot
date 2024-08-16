@@ -10,7 +10,8 @@ SkyPilot can run a container either as a task, or as the runtime environment of 
 
 .. note::
 
-    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
+    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, either use your docker image (the username should be ``root`` for RunPod) :ref:`as a runtime environment <docker-containers-as-runtime-environments>` or use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
+
 
 .. _docker-containers-as-tasks:
 
