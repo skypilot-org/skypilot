@@ -3325,9 +3325,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str) -> int:
-        username = getpass.getuser()
-        code = job_lib.JobLibCodeGen.add_job(job_name, username,
-                                             self.run_timestamp, resources_str)
+        code = job_lib.JobLibCodeGen.add_job(
+            job_name=job_name,
+            username=common_utils.get_user_hash(),
+            run_timestamp=self.run_timestamp,
+            resources_str=resources_str)
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,

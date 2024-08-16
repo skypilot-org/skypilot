@@ -411,7 +411,7 @@ async def cancel(request: fastapi.Request,
     )
 
 
-@app.get('/logs')
+@app.post('/logs')
 async def logs(request: fastapi.Request,
                cluster_job_body: payloads.ClusterJobBody) -> None:
     executor.start_background_request(
