@@ -2165,7 +2165,7 @@ class AzureBlobStore(AbstractStore):
             self.is_sky_managed = is_new_bucket
 
     @staticmethod
-    def get_default_storage_account_name(region) -> str:
+    def get_default_storage_account_name(region: str) -> str:
         """Generates a default storage account name.
         
         The subscription ID is included to avoid conflicts when user switches
