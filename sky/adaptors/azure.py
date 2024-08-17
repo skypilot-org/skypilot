@@ -28,7 +28,6 @@ _LAZY_MODULES = (azure,)
 
 _session_creation_lock = threading.RLock()
 _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
-_SUBSCRIPTION_HASH_LENGTH = 4
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
