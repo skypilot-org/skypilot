@@ -2188,7 +2188,7 @@ class AzureBlobStore(AbstractStore):
         )[:AzureBlobStore._SUBSCRIPTION_HASH_LENGTH]
         region_hash_obj = hashlib.md5(region.encode('utf-8'))
         region_hash = region_hash_obj.hexdigest()[:AzureBlobStore.
-                                                  _SUBSCRIPTION_HASH_LENGTH]
+                                                  _REGION_HASH_LENGTH]
 
         storage_account_name = (
             AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
