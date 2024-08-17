@@ -150,9 +150,9 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # If the command is too long, we instead write it to a file, rsync and execute
 # it.
 #
-# We use 110KB as a threshold to be safe for other arguments that
+# We use 120KB as a threshold to be safe for other arguments that
 # might be added during ssh.
-_MAX_INLINE_SCRIPT_LENGTH = 110 * 1024
+_MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 
 
 def _is_command_length_over_limit(command: str) -> bool:
