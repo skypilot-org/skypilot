@@ -3982,52 +3982,33 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
 
-    before_template_str = pathlib.Path(
-        'tests/skyserve/update/new_autoscaler_before.yaml.j2').read_text()
-    after_template_str = pathlib.Path(
-        'tests/skyserve/update/new_autoscaler_after.yaml.j2').read_text()
-    before_template = jinja2.Template(before_template_str)
-    after_template = jinja2.Template(after_template_str)
-    before_content = before_template.render(generic_cloud=generic_cloud)
-    after_content = after_template.render(generic_cloud=generic_cloud)
-    with tempfile.NamedTemporaryFile(
-            suffix='.yaml',
-            mode='w') as before_file, tempfile.NamedTemporaryFile(
-                suffix='.yaml', mode='w') as after_file:
-        before_file.write(before_content)
-        before_file.flush()
-        before_file_path = before_file.name
-        after_file.write(after_content)
-        after_file.flush()
-        after_file_path = after_file.name
-        test = Test(
-            'test-skyserve-new-autoscaler-update',
-            [
-                f'sky serve up -n {name} --cloud {generic_cloud} -y {before_file_path}',
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
-                _check_service_version(name, "1"),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                's=$(curl http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
-                f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y {after_file_path}',
-                # Wait for update to be registered
-                f'sleep 90',
-                wait_until_no_pending,
-                _check_replica_in_status(name, [
-                    (4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
-                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-                    (2, False, 'READY')
-                ]),
-                *update_check,
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl http://$endpoint | grep "Hi, SkyPilot here"',
-                _check_replica_in_status(name, [(4, True, 'READY'),
-                                                (1, False, 'READY')]),
-            ],
-            _TEARDOWN_SERVICE.format(name=name),
-            timeout=20 * 60,
-        )
-        run_one_test(test)
+    test = Test(
+        'test-skyserve-new-autoscaler-update',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _check_service_version(name, "1"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            's=$(curl http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
+            # Wait for update to be registered
+            f'sleep 90',
+            wait_until_no_pending,
+            _check_replica_in_status(
+                name, [(4, True, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY'),
+                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
+                       (2, False, 'READY')]),
+            *update_check,
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            _check_replica_in_status(name, [(4, True, 'READY'),
+                                            (1, False, 'READY')]),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
 
 
 @pytest.mark.serve
