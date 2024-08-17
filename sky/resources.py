@@ -583,7 +583,7 @@ class Resources:
                         if not use_tpu_vm:
                             return '2.12.0'
                         # TPU V5 requires a newer runtime version.
-                        if acc.strip('tpu-').startswith('v5'):
+                        if acc.startswith('tpu-v5'):
                             return 'v2-alpha-tpuv5'
                         return 'tpu-vm-base'
 

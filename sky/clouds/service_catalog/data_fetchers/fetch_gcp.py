@@ -58,10 +58,10 @@ HIDDEN_TPU_DF = pd.read_csv(
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
 # TODO(tian): Double check if the price is correct.
-TPU_V5_MISSING_ZONES = ['europe-west4-b']
-HIDDEN_V5P_TPU_DF = pd.read_csv(
-    io.StringIO(
-        textwrap.dedent("""\
+TPU_V5_MISSING_ZONES_DF = {
+    'europe-west4-b': pd.read_csv(
+        io.StringIO(
+            textwrap.dedent("""\
  AcceleratorName,AcceleratorCount,Region,AvailabilityZone
  tpu-v5p-8,1,europe-west4,europe-west4-b
  tpu-v5p-16,1,europe-west4,europe-west4-b
@@ -158,6 +158,7 @@ HIDDEN_V5P_TPU_DF = pd.read_csv(
  tpu-v5p-12160,1,europe-west4,europe-west4-b
  tpu-v5p-12288,1,europe-west4,europe-west4-b
  """)))
+}
 # FIXME(woosuk): Remove this once the bug is fixed.
 # See https://github.com/skypilot-org/skypilot/issues/1759#issue-1619614345
 TPU_V4_HOST_DF = pd.read_csv(
@@ -520,8 +521,8 @@ def get_gpu_df(skus: List[Dict[str, Any]],
 
 def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     # Use hardcoded TPU V5 data as it is invisible in some zones.
-    if zone in TPU_V5_MISSING_ZONES:
-        return HIDDEN_V5P_TPU_DF[HIDDEN_V5P_TPU_DF['AvailabilityZone'] == zone]
+    if zone in TPU_V5_MISSING_ZONES_DF:
+        return TPU_V5_MISSING_ZONES_DF[zone]
     tpus = []
     parent = f'projects/{project_id}/locations/{zone}'
     tpus_request = tpu_client.projects().locations().acceleratorTypes().list(
@@ -671,6 +672,7 @@ def get_catalog_df(region_prefix: str) -> 'pd.DataFrame':
         region_prefix)] if not gpu_df.empty else gpu_df
 
     gcp_tpu_skus = get_skus(TPU_SERVICE_ID)
+    # TPU V5 SKU is not included in the TPU SKUs but in the GCE SKUs.
     tpu_df = get_tpu_df(gcp_skus, gcp_tpu_skus)
 
     # Merge the dataframes.
