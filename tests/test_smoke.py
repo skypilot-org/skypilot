@@ -1105,10 +1105,7 @@ def test_azure_storage_mounts_with_stop():
     storage_name = f'sky-test-{int(time.time())}'
     default_region = 'eastus'
     storage_account_name = (
-        storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-            region=default_region,
-            user_hash=common_utils.get_user_hash(),
-            subscription_hash=azure.get_subscription_hash()))
+        storage_lib.AzureBlobStore.get_default_storage_account_name(default_region))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     template_str = pathlib.Path(
@@ -2976,8 +2973,8 @@ def test_managed_jobs_storage(generic_cloud: str):
         region = 'westus2'
         region_flag = f' --region {region}'
         storage_account_name = (
-            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=region, user_hash=common_utils.get_user_hash()))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(
+                region))
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
@@ -4273,10 +4270,8 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash(),
-                    subscription_hash=azure.get_subscription_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage container delete '
@@ -4313,10 +4308,8 @@ class TestStorageWithCredentials:
             storage_account_name = config_storage_account if (
                 config_storage_account is not None
             ) else (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash(),
-                    subscription_hash=azure.get_subscription_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
@@ -4378,10 +4371,8 @@ class TestStorageWithCredentials:
             if storage_account_name is None:
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
-                    format(region=default_region,
-                           user_hash=common_utils.get_user_hash(),
-                           subscription_hash=azure.get_subscription_hash()))
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4407,10 +4398,8 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash(),
-                    subscription_hash=azure.get_subscription_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4612,10 +4601,8 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using gsutil
         default_region = 'eastus'
         storage_account_name = (
-            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=default_region,
-                user_hash=common_utils.get_user_hash(),
-                subscription_hash=azure.get_subscription_hash()))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(
+                default_region))
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
@@ -4851,10 +4838,8 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('https'):
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
-                    format(region=default_region,
-                           user_hash=common_utils.get_user_hash(),
-                           subscription_hash=azure.get_subscription_hash()))
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'

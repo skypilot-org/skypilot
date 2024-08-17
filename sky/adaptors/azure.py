@@ -4,7 +4,6 @@
 import asyncio
 import datetime
 import functools
-import hashlib
 import logging
 import threading
 import time
@@ -461,11 +460,3 @@ def deployment_mode():
     """Azure deployment mode."""
     from azure.mgmt.resource.resources.models import DeploymentMode
     return DeploymentMode
-
-
-def get_subscription_hash() -> str:
-    """Returns user's subsciprion ID specific hash."""
-    subscription_id = get_subscription_id()
-    hash_obj = hashlib.md5(subscription_id.encode('utf-8'))
-    subscription_hash = hash_obj.hexdigest()[:_SUBSCRIPTION_HASH_LENGTH]
-    return subscription_hash
