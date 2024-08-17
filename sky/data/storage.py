@@ -2166,12 +2166,13 @@ class AzureBlobStore(AbstractStore):
 
     @staticmethod
     def get_default_storage_account_name(region: Optional[str]) -> str:
-        """Generates a default storage account name.
+        """Generates a unique default storage account name.
 
         The subscription ID is included to avoid conflicts when user switches
-        subscriptions. The region value is hashed to ensure the storage account
-        name adheres to the 24-character limit, as some region names can be
-        very long. Using a 4-character hash for the region helps keep the name
+        subscriptions. The length of region_hash, user_hash, and
+        subscription_hash are adjusted to ensure the storage account name
+        adheres to the 24-character limit, as some region names can be very
+        long. Using a 4-character hash for the region helps keep the name
         concise and prevents potential conflicts.
         Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
 
@@ -2281,10 +2282,6 @@ class AzureBlobStore(AbstractStore):
             else:
                 # If storage account name is not provided from config, then
                 # use default resource group and storage account names.
-                # To ensure uniqueness, we must take the subscription ID into
-                # account. This is necessary because the user may switch
-                # between different subscription IDs while using the same
-                # machine.
                 storage_account_name = self.get_default_storage_account_name(
                     self.region)
                 resource_group_name = (self.DEFAULT_RESOURCE_GROUP_NAME.format(
