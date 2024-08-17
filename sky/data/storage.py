@@ -1985,7 +1985,7 @@ class AzureBlobStore(AbstractStore):
                  name: str,
                  source: str,
                  storage_account_name: str = '',
-                 region: Optional[str] = None,
+                 region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         self.storage_client: 'storage.Client'
@@ -2165,9 +2165,9 @@ class AzureBlobStore(AbstractStore):
             self.is_sky_managed = is_new_bucket
 
     @staticmethod
-    def get_default_storage_account_name(region: str) -> str:
+    def get_default_storage_account_name(region: Optional[str]) -> str:
         """Generates a default storage account name.
-        
+
         The subscription ID is included to avoid conflicts when user switches
         subscriptions. The region value is hashed to ensure the storage account
         name adheres to the 24-character limit, as some region names can be
@@ -2181,18 +2181,21 @@ class AzureBlobStore(AbstractStore):
         Returns:
             Name of the default storage account.
         """
+        assert region is not None
         subscription_id = azure.get_subscription_id()
         subscription_hash_obj = hashlib.md5(subscription_id.encode('utf-8'))
-        subscription_hash = subscription_hash_obj.hexdigest()[:AzureBlobStore._SUBSCRIPTION_HASH_LENGTH]
+        subscription_hash = subscription_hash_obj.hexdigest(
+        )[:AzureBlobStore._SUBSCRIPTION_HASH_LENGTH]
         region_hash_obj = hashlib.md5(region.encode('utf-8'))
-        region_hash = region_hash_obj.hexdigest()[:AzureBlobStore._SUBSCRIPTION_HASH_LENGTH]
-        
+        region_hash = region_hash_obj.hexdigest()[:AzureBlobStore.
+                                                  _SUBSCRIPTION_HASH_LENGTH]
+
         storage_account_name = (
             AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
                 region_hash=region_hash,
                 user_hash=common_utils.get_user_hash(),
                 subscription_hash=subscription_hash))
-        
+
         return storage_account_name
 
     def _get_storage_account_and_resource_group(

@@ -1104,8 +1104,8 @@ def test_azure_storage_mounts_with_stop():
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
     default_region = 'eastus'
-    storage_account_name = (
-        storage_lib.AzureBlobStore.get_default_storage_account_name(default_region))
+    storage_account_name = (storage_lib.AzureBlobStore.
+                            get_default_storage_account_name(default_region))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     template_str = pathlib.Path(
@@ -2973,8 +2973,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region = 'westus2'
         region_flag = f' --region {region}'
         storage_account_name = (
-            storage_lib.AzureBlobStore.get_default_storage_account_name(
-                region))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(region))
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
@@ -4306,10 +4305,9 @@ class TestStorageWithCredentials:
             config_storage_account = skypilot_config.get_nested(
                 ('azure', 'storage_account'), None)
             storage_account_name = config_storage_account if (
-                config_storage_account is not None
-            ) else (
-                storage_lib.AzureBlobStore.get_default_storage_account_name(
-                    default_region))
+                config_storage_account is not None) else (
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
