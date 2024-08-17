@@ -1,5 +1,6 @@
 """RunPod library wrapper for SkyPilot."""
 
+import base64
 import time
 from typing import Any, Dict, List, Optional
 
@@ -95,7 +96,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           ports: Optional[List[int]]) -> str:
+           image_name: str, ports: Optional[List[int]], public_key: str) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -106,6 +107,31 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     cloud_type = instance_type.split('_')[2]
 
     gpu_specs = runpod.runpod.get_gpu(gpu_type)
+    # TODO(zhwu): keep this align with setups in
+    # `provision.kuberunetes.instance.py`
+    setup_cmd = (
+        'prefix_cmd() '
+        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+        '$(prefix_cmd) apt update;'
+        'export DEBIAN_FRONTEND=noninteractive;'
+        '$(prefix_cmd) apt install openssh-server rsync curl patch -y;'
+        '$(prefix_cmd) mkdir -p /var/run/sshd; '
+        '$(prefix_cmd) '
+        'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
+        '/etc/ssh/sshd_config; '
+        '$(prefix_cmd) sed '
+        '"s@session\\s*required\\s*pam_loginuid.so@session optional '
+        'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+        'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+        '$(prefix_cmd) mkdir -p ~/.ssh; '
+        '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
+        '$(prefix_cmd) chmod 700 ~/.ssh; '
+        f'$(prefix_cmd) echo "{public_key}" >> ~/.ssh/authorized_keys; '
+        '$(prefix_cmd) chmod 644 ~/.ssh/authorized_keys; '
+        '$(prefix_cmd) service ssh restart; '
+        '[ $(id -u) -eq 0 ] && echo alias sudo="" >> ~/.bashrc;sleep infinity')
+    # Use base64 to deal with the tricky quoting issues caused by runpod API.
+    encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
 
     # Port 8081 is occupied for nginx in the base image.
     custom_ports_str = ''
@@ -114,7 +140,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     new_instance = runpod.runpod.create_pod(
         name=name,
-        image_name='runpod/base:0.0.2',
+        image_name=image_name,
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
         container_disk_in_gb=disk_size,
@@ -127,7 +153,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
-    )
+        docker_args=
+        f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'')
 
     return new_instance['id']
 

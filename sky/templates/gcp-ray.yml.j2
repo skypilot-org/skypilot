@@ -88,7 +88,9 @@ available_node_types:
       {%- if gcp_use_managed_instance_group %}
       managed-instance-group:
         run_duration: {{ run_duration }}
+        {%- if provision_timeout is defined and provision_timeout is not none %}
         provision_timeout: {{ provision_timeout }}
+        {%- endif %}
       {%- endif %}
       {%- if specific_reservations %}
       reservationAffinity:
