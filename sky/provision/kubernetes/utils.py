@@ -953,9 +953,10 @@ def construct_ssh_jump_command(
         kube_context_flag = f' {current_kube_context}' if (current_kube_context
                                                            is not None) else ''
         # Use the original path without expanding the user home directory.
-        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{original_proxy_cmd_path} '
-                                   f'{proxy_cmd_target_pod}'
-                                   f'{kube_context_flag}\'')
+        ssh_jump_proxy_command += (
+            f' -o ProxyCommand=\'{original_proxy_cmd_path} '
+            f'{proxy_cmd_target_pod}'
+            f'{kube_context_flag}\'')
     return ssh_jump_proxy_command
 
 

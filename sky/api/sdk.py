@@ -406,7 +406,7 @@ def queue(cluster_name: List[str],
         all_users=all_users,
     )
     response = requests.post(f'{api_common.get_server_url()}/queue',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -465,7 +465,7 @@ def status(
         refresh=refresh,
     )
     response = requests.post(f'{api_common.get_server_url()}/status',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 

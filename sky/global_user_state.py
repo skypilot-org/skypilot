@@ -143,15 +143,9 @@ def create_table(cursor, conn):
                                  'transaction_id',
                                  'INTEGER DEFAULT 0',
                                  value_to_replace_existing_entries=0)
-    db_utils.add_column_to_table(cursor,
-                                 conn,
-                                 'clusters',
-                                 'user_hash',
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'user_hash',
                                  'TEXT DEFAULT null')
-    db_utils.add_column_to_table(cursor,
-                                 conn,
-                                 'cluster_history',
-                                 'user_hash',
+    db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'user_hash',
                                  'TEXT DEFAULT null')
     conn.commit()
 
@@ -641,8 +635,8 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash, storage_mounts_metadata,
-         cluster_ever_up, _, user_hash) = row[:14]
+         to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
+         _, user_hash) = row[:14]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -670,8 +664,8 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash, storage_mounts_metadata,
-         cluster_ever_up, _, user_hash) = row[:14]
+         to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
+         _, user_hash) = row[:14]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -697,7 +691,8 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_clusters_from_history() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
-        'ch.launched_resources, ch.usage_intervals, clusters.status, ch.user_hash  '
+        'ch.launched_resources, ch.usage_intervals, clusters.status, '
+        'ch.user_hash  '
         'FROM cluster_history ch '
         'LEFT OUTER JOIN clusters '
         'ON ch.cluster_hash=clusters.cluster_hash ').fetchall()

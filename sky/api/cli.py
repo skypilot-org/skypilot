@@ -28,6 +28,7 @@ import datetime
 import functools
 import multiprocessing
 import os
+import pathlib
 import shlex
 import signal
 import subprocess
@@ -41,6 +42,7 @@ import webbrowser
 import click
 import colorama
 import dotenv
+import filelock
 from rich import progress as rich_progress
 import yaml
 
@@ -52,6 +54,7 @@ from sky import global_user_state
 from sky import jobs as managed_jobs
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.api import common as api_common
 from sky.api import sdk as sdk_lib
@@ -127,6 +130,7 @@ def _get_cluster_records_and_set_ssh_config(
         handle = record['handle']
         if handle is not None and handle.cached_external_ips is not None:
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                # pylint: disable=import-outside-toplevel
                 from sky.provision.kubernetes import utils as kubernetes_utils
                 kubernetes_utils.create_proxy_command_script()
             crednetials = record['credentials']
@@ -2494,8 +2498,7 @@ def start(
             _async_call_or_wait(request_id, async_call, 'Start')
             if not async_call:
                 # Add ssh config for the cluster
-                _get_cluster_records_and_set_ssh_config(
-                clusters=[name])
+                _get_cluster_records_and_set_ssh_config(clusters=[name])
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
@@ -2595,8 +2598,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
-            request_id = managed_jobs.queue(refresh=False,
-                                               skip_finished=True)
+            request_id = managed_jobs.queue(refresh=False, skip_finished=True)
             managed_jobs_ = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
@@ -5152,6 +5154,34 @@ def api_abort(request_id: str):
 def api_server_logs(follow: bool, tail: str):
     """Shows the API server logs."""
     sdk.api_logs(follow, tail)
+
+
+@api.command('login', cls=_DocumentedCodeCommand)
+@click.option('--endpoint',
+              '-e',
+              required=False,
+              help='The API server endpoint.')
+@usage_lib.entrypoint
+def api_login(endpoint: Optional[str]):
+    if endpoint is None:
+        endpoint = click.prompt('Enter your API server endpoint')
+    # Check endpoint is a valid URL
+    if endpoint and not endpoint.startswith(
+            'http://') and not endpoint.startswith('https://'):
+        raise click.BadParameter('Endpoint must be a valid URL.')
+    if not endpoint:
+        endpoint = None
+
+    # Set the endpoint in the config file
+    config_path = pathlib.Path(skypilot_config.CONFIG_PATH).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not skypilot_config.loaded():
+            config_path.touch()
+            config = {'api_server': {'endpoint': endpoint}}
+        else:
+            config = skypilot_config.set_nested(('api_server', 'endpoint'),
+                                                endpoint)
+        common_utils.dump_yaml(config_path, config)
 
 
 def main():
