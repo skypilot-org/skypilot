@@ -352,7 +352,7 @@ class Task:
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.
 
-        resources = config.get('resources', {})
+        resources = config.get('resources') or {}
         # Used for adding store if store type is provided
         region = resources.get('region')
         envs = config.get('envs')
