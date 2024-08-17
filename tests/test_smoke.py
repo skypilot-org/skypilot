@@ -3952,7 +3952,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
-    name = _get_service_name() + mode
+    name = f'{_get_service_name()}-{mode}'
 
     wait_until_no_pending = (
         f's=$(sky serve status {name}); echo "$s"; '
