@@ -837,8 +837,9 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
 
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
         try:
-            delete_network_security_group(resource_group_name=resource_group,
-                                          network_security_group_name=nsg_name).result()
+            delete_network_security_group(
+                resource_group_name=resource_group,
+                network_security_group_name=nsg_name).result()
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nsg: {}'.format(e))
 
@@ -913,31 +914,33 @@ def open_ports(
         # completion of nsg relevant to the VM being provisioned.
         if cluster_name_on_cloud in nsg.name:
             try:
-                # Wait the NSG creation to be finished before opening a port. The
-                # cluster provisioning triggers the NSG creation, but it may not be
-                # finished yet.
+                # Wait the NSG creation to be finished before opening a port.
+                # The cluster provisioning triggers the NSG creation, but it
+                # may not be finished yet.
                 backoff = common_utils.Backoff(max_backoff_factor=1)
                 start_time = time.time()
                 while True:
                     if nsg.provisioning_state not in ['Creating', 'Updating']:
                         break
-                    if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
+                    if time.time(
+                    ) - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
                         logger.warning(
-                            f'Fails to wait for the creation of NSG {nsg.name} in '
-                            f'{resource_group} within '
+                            f'Fails to wait for the creation of NSG {nsg.name}'
+                            f' in {resource_group} within '
                             f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
                             'Skip this NSG.')
                     backoff_time = backoff.current_backoff()
-                    logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
-                                f'{backoff_time} seconds before checking again.')
+                    logger.info(
+                        f'NSG {nsg.name} is not created yet. Waiting for '
+                        f'{backoff_time} seconds before checking again.')
                     time.sleep(backoff_time)
 
-                # Azure NSG rules have a priority field that determines the order
-                # in which they are applied. The priority must be unique across
-                # all inbound rules in one NSG.
+                # Azure NSG rules have a priority field that determines the
+                # order in which they are applied. The priority must be unique
+                # across all inbound rules in one NSG.
                 priority = max(rule.priority
-                            for rule in nsg.security_rules
-                            if rule.direction == 'Inbound') + 1
+                               for rule in nsg.security_rules
+                               if rule.direction == 'Inbound') + 1
                 nsg.security_rules.append(
                     azure.create_security_rule(
                         name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
@@ -950,17 +953,18 @@ def open_ports(
                         destination_address_prefix='*',
                         destination_port_ranges=ports,
                     ))
-                poller = update_network_security_groups(resource_group, nsg.name,
-                                                        nsg)
+                poller = update_network_security_groups(resource_group,
+                                                        nsg.name, nsg)
                 poller.wait()
                 if poller.status() != 'Succeeded':
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Failed to open ports {ports} in NSG '
-                                        f'{nsg.name}: {poller.status()}')
+                                         f'{nsg.name}: {poller.status()}')
             except azure.exceptions().HttpResponseError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Failed to open ports {ports} in NSG {nsg.name}.') from e
+                        f'Failed to open ports {ports} in NSG {nsg.name}.'
+                    ) from e
 
 
 def cleanup_ports(
