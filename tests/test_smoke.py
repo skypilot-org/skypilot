@@ -3981,7 +3981,6 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                        (2, False, 'READY')]) +
             _check_service_version(name, "1"),
         ]
-
     test = Test(
         'test-skyserve-new-autoscaler-update',
         [
