@@ -63,14 +63,15 @@ def update_prices():
         for mt in mts:
             if not utils.gpu_exists(mt['gpu_model_id']):
                 continue
-            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(mt['gpu_model_id'])
+            accelerator_name = utils.cudo_gpu_to_skypilot_gpu(
+                mt['gpu_model_id'])
             gpu_count = spec['gpu']
             if not accelerator_name:
                 gpu_count = 0
 
-            price = ((float(mt['vcpu_price_hr']['value']) * spec['vcpu'])
-                     + (float(mt['memory_gib_price_hr']['value']) * spec['mem'])
-                     + (float(mt['gpu_price_hr']['value']) * gpu_count))
+            price = ((float(mt['vcpu_price_hr']['value']) * spec['vcpu']) +
+                     (float(mt['memory_gib_price_hr']['value']) * spec['mem']) +
+                     (float(mt['gpu_price_hr']['value']) * gpu_count))
             row = {
                 'instance_type': get_instance_type(mt['machine_type'],
                                                    spec['vcpu'], spec['mem'],

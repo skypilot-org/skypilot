@@ -1,8 +1,8 @@
 """Cudo Compute instance provisioning."""
 
 import time
-import uuid
 from typing import Any, Dict, List, Optional
+import uuid
 
 from sky import sky_logging
 from sky import status_lib
@@ -81,8 +81,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     memory_gib = int(spec['mem_gb'])
     gpu_model_id = spec['gpu_model_id']
     try:
-        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model_id, region,
-                                  memory_gib, vcpu_count)
+        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model_id,
+                                  region, memory_gib, vcpu_count)
     except Exception as e:
         logger.warning(f'run_instances: {e}')
         raise
