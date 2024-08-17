@@ -130,8 +130,6 @@ def _get_cluster_records_and_set_ssh_config(
         handle = record['handle']
         if handle is not None and handle.cached_external_ips is not None:
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                # pylint: disable=import-outside-toplevel
-                from sky.provision.kubernetes import utils as kubernetes_utils
                 kubernetes_utils.create_proxy_command_script()
             crednetials = record['credentials']
             cluster_utils.SSHConfigHelper.add_cluster(
@@ -5182,6 +5180,7 @@ def api_login(endpoint: Optional[str]):
             config = skypilot_config.set_nested(('api_server', 'endpoint'),
                                                 endpoint)
         common_utils.dump_yaml(config_path, config)
+        click.secho(f'Logged in to API server at {endpoint}', fg='green')
 
 
 def main():
