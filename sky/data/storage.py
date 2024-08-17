@@ -2517,6 +2517,16 @@ class AzureBlobStore(AbstractStore):
                                     name=self.name))
                 raise
             if container_client.exists():
+                is_private = (True if
+                              container_client.get_container_properties().get(
+                                  'public_access', None) is None else False)
+                # when user attempts to use private container without
+                # access rights
+                if self.resource_group_name is None and is_private:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageBucketGetError(
+                            _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                                name=self.name))
                 self._validate_existing_bucket()
                 return container_client.container_name, False
             # when the container name does not exist under the provided
