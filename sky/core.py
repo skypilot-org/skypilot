@@ -25,6 +25,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -571,7 +572,7 @@ def queue(cluster_name: str,
         exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
-    username: Optional[str] = getpass.getuser()
+    username: Optional[str] = common_utils.get_user_hash()
     if all_users:
         username = None
     code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
