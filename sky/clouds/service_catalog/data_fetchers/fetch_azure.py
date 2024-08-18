@@ -140,8 +140,12 @@ def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
     print(f'Done fetching pricing {region}')
     df = pd.DataFrame(all_items)
     assert 'productName' in df.columns, (region, df.columns)
-    return df[(~df['productName'].str.contains(' Windows')) &
-              (df['unitPrice'] > 0)]
+    # Filter out the cloud services and windows products.
+    # Some H100 series use ' Win' instead of ' Windows', e.g.
+    # Virtual Machines NCCadsv5 Srs Win
+    return df[
+        (~df['productName'].str.contains(' Win| Cloud Services| CloudServices'))
+        & (df['unitPrice'] > 0)]
 
 
 def get_sku_df(region_set: Set[str]) -> 'pd.DataFrame':
