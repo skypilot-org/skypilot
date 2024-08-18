@@ -794,61 +794,6 @@ def open_ports(
                 f'{resource_group!r}.') from e
 
 
-
-
-    # for nsg in list_network_security_groups(resource_group):
-    #     try:
-    #         # Wait the NSG creation to be finished before opening a port. The
-    #         # cluster provisioning triggers the NSG creation, but it may not be
-    #         # finished yet.
-    #         backoff = common_utils.Backoff(max_backoff_factor=1)
-    #         start_time = time.time()
-    #         while True:
-    #             if nsg.provisioning_state not in ['Creating', 'Updating']:
-    #                 break
-    #             if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
-    #                 logger.warning(
-    #                     f'Fails to wait for the creation of NSG {nsg.name} in '
-    #                     f'{resource_group} within '
-    #                     f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
-    #                     'Skip this NSG.')
-    #                 break
-    #             backoff_time = backoff.current_backoff()
-    #             logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
-    #                         f'{backoff_time} seconds before checking again.')
-    #             time.sleep(backoff_time)
-
-    #         # Azure NSG rules have a priority field that determines the order
-    #         # in which they are applied. The priority must be unique across
-    #         # all inbound rules in one NSG.
-    #         priority = max(rule.priority
-    #                        for rule in nsg.security_rules
-    #                        if rule.direction == 'Inbound') + 1
-    #         nsg.security_rules.append(
-    #             azure.create_security_rule(
-    #                 name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
-    #                 priority=priority,
-    #                 protocol='Tcp',
-    #                 access='Allow',
-    #                 direction='Inbound',
-    #                 source_address_prefix='*',
-    #                 source_port_range='*',
-    #                 destination_address_prefix='*',
-    #                 destination_port_ranges=ports,
-    #             ))
-    #         poller = update_network_security_groups(resource_group, nsg.name,
-    #                                                 nsg)
-    #         poller.wait()
-    #         if poller.status() != 'Succeeded':
-    #             with ux_utils.print_exception_no_traceback():
-    #                 raise ValueError(f'Failed to open ports {ports} in NSG '
-    #                                  f'{nsg.name}: {poller.status()}')
-    #     except azure.exceptions().HttpResponseError as e:
-    #         with ux_utils.print_exception_no_traceback():
-    #             raise ValueError(
-    #                 f'Failed to open ports {ports} in NSG {nsg.name}.') from e
-
-
 def cleanup_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
