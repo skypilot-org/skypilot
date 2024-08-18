@@ -162,7 +162,8 @@ def upload_mounts_to_api_server(
         if task_.storage_mounts is not None:
             for storage in task_.storage_mounts.values():
                 storage_source = storage.source
-                if not data_utils.is_cloud_store_url(storage_source):
+                if (storage_source is not None and
+                    not data_utils.is_cloud_store_url(storage_source)):
                     upload_list.append(_full_path(storage_source))
                     file_mounts_mapping[storage_source] = _full_path(
                         storage_source)
