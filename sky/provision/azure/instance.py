@@ -756,16 +756,18 @@ def open_ports(
                         break
 
                     backoff_time = backoff.current_backoff()
-                    logger.info(f'NSG {nsg_name} is not created yet. Waiting for '
-                                f'{backoff_time} seconds before checking again.')
+                    logger.info(
+                        f'NSG {nsg_name} is not created yet. Waiting for '
+                        f'{backoff_time} seconds before checking again.')
                     time.sleep(backoff_time)
 
         # Azure NSG rules have a priority field that determines the order
         # in which they are applied. The priority must be unique across
         # all inbound rules in one NSG.
+        assert nsg_to_open_ports is not None
         priority = max(rule.priority
-                        for rule in nsg_to_open_ports.security_rules
-                        if rule.direction == 'Inbound') + 1
+                       for rule in nsg_to_open_ports.security_rules
+                       if rule.direction == 'Inbound') + 1
         nsg_to_open_ports.security_rules.append(
             azure.create_security_rule(
                 name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
@@ -778,20 +780,20 @@ def open_ports(
                 destination_address_prefix='*',
                 destination_port_ranges=ports,
             ))
-        poller = update_network_security_groups(resource_group, nsg_to_open_ports.name,
+        poller = update_network_security_groups(resource_group,
+                                                nsg_to_open_ports.name,
                                                 nsg_to_open_ports)
         poller.wait()
         if poller.status() != 'Succeeded':
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Failed to open ports {ports} in NSG '
-                                    f'{nsg_to_open_ports.name}: {poller.status()}')
-    
+                                 f'{nsg_to_open_ports.name}: {poller.status()}')
+
     except azure.exceptions().HttpResponseError as e:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Failed to open ports {ports} in NSG for cluster '
-                f'{cluster_name_on_cloud!r} within resource group '
-                f'{resource_group!r}.') from e
+            raise ValueError(f'Failed to open ports {ports} in NSG for cluster '
+                             f'{cluster_name_on_cloud!r} within resource group '
+                             f'{resource_group!r}.') from e
 
 
 def cleanup_ports(
