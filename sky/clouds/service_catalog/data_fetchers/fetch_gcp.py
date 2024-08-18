@@ -620,10 +620,12 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
 
             unit_price = _get_unit_price(sku)
             tpu_device_price = unit_price
-            # V5 price is shown as per chip price, which is 2 cores
-            # for v5p and 1 core for v5e. Reference here:
-            # https://cloud.google.com/tpu/docs/v5p
-            # https://cloud.google.com/tpu/docs/v5e
+            # v5p naming convention is v$VERSION_NUMBERp-$CORES_COUNT, while
+            # v5e is v$VERSION_NUMBER-$CHIP_COUNT. In the same time, V5 price
+            # is shown as per chip price, which is 2 cores for v5p and 1 core
+            # for v5e. Reference here:
+            # https://cloud.google.com/tpu/docs/v5p#using-accelerator-type
+            # https://cloud.google.com/tpu/docs/v5e#tpu-v5e-config
             core_per_sku = (1 if tpu_version == 'v5litepod' else
                             2 if tpu_version == 'v5p' else 8)
             tpu_core_price = tpu_device_price / core_per_sku
