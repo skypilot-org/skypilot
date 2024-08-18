@@ -1892,8 +1892,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
         job_tables[cluster] = job_lib.format_job_queue(job_table)
 
     subprocess_utils.run_in_parallel(_get_job_queue, clusters)
+    user_str = 'all users' if all_users else 'current user'
     for cluster, job_table in job_tables.items():
-        click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
+        click.echo(f'\nJob queue of {user_str} on cluster {cluster}\n'
+        f'{job_table}')
 
     if unsupported_clusters:
         click.secho(
