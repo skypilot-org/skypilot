@@ -1730,6 +1730,9 @@ def is_inside_kubernetes() -> bool:
 
 def is_kind_cluster() -> bool:
     """Returns whether the caller is running on or in a local KinD cluster"""
+    k8s_enabled, _ = check_credentials()
+    if not k8s_enabled:
+        return False
     curr_kube_config = get_current_kube_config_context_name()
     if curr_kube_config is None:
         # If kubeconfig is not present, we could be inside a KinD cluster
