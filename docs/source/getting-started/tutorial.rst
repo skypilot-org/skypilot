@@ -1,20 +1,20 @@
 .. _dnn-training:
 
-Tutorial: DNN Training
-======================
-This example uses SkyPilot to train a Transformer-based language model from HuggingFace.
+Tutorial: Finetune an AI Model
+===============================
+This example uses SkyPilot to finetune a HuggingFace model.
 
 First, define a :ref:`task YAML <yaml-spec>` with the resource requirements, the setup commands,
 and the commands to run:
 
 .. code-block:: yaml
 
-  # dnn.yaml
+  # llm.yaml
 
-  name: huggingface
+  name: finetune-llm
 
   resources:
-    accelerators: V100:4
+    accelerators: A100:8
 
   # Optional: upload a working directory to remote ~/sky_workdir.
   # Commands in "setup" and "run" will be executed under it.

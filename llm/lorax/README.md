@@ -4,7 +4,7 @@
 <!-- $UNCOMMENT# LoRAX: Multi-LoRA Inference Server -->
 
 <p align="center">
-    <img src="https://imgur.com/OUapRYC.png" alt="LoRAX" style="width:200px;" />
+    <img src="https://i.imgur.com/OUapRYC.png" alt="LoRAX" style="width:200px;" />
 </p>
 
 [LoRAX](https://github.com/predibase/lorax) (LoRA eXchange) is a framework that allows users to serve thousands of fine-tuned LLMs on a single GPU, dramatically reducing the cost of serving without compromising on throughput or latency. It works by dynamically loading multiple fine-tuned "adapters" (LoRAs, etc.) on top of a single base model at runtime. Concurrent requests for different adapters can be processed together in a single batch, allowing LoRAX to maintain near linear throughput scaling as the number of adapters increases.
