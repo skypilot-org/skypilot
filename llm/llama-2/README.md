@@ -94,6 +94,6 @@ You can also host the official FAIR model without using huggingface and gradio.
     ```
 
 3. Open http://localhost:7681 in your browser and start chatting!
-<img src="https://imgur.com/Ay8sDhG.png" alt="LLaMA chatbot running on the cloud via SkyPilot"/>
+<img src="https://i.imgur.com/Ay8sDhG.png" alt="LLaMA chatbot running on the cloud via SkyPilot"/>
 
 
