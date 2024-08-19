@@ -594,9 +594,8 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         # whether the TPU is a single device or a pod.
         # For TPU-v4, the pricing is uniform, and thus the pricing API
         # only provides the price of TPU-v4 pods.
-        # TODO(tian): Seems like there is no 'Pod' kw in the v5 description.
-        # Does that means v5 only have TPU Node (instead of VM)? Another
-        # possibility is that the price shown for v5 TPU is for one core.
+        # The price shown for v5 TPU is per chip hour, so there is no 'Pod'
+        # keyword in the description.
         is_pod = ((num_cores > 8 or tpu_version == 'v4') and
                   not tpu_version.startswith('v5'))
 
