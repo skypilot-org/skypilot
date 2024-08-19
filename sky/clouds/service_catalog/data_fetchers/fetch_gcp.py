@@ -57,7 +57,6 @@ HIDDEN_TPU_DF = pd.read_csv(
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
-# TODO(tian): Double check if the price is correct.
 TPU_V5_MISSING_ZONES_DF = {
     'europe-west4-b': pd.read_csv(
         io.StringIO(
@@ -521,8 +520,11 @@ def get_gpu_df(skus: List[Dict[str, Any]],
 
 def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     # Use hardcoded TPU V5 data as it is invisible in some zones.
+    missing_tpus_df = pd.DataFrame(columns=[
+        'AcceleratorName', 'AcceleratorCount', 'Region', 'AvailabilityZone'
+    ])
     if zone in TPU_V5_MISSING_ZONES_DF:
-        return TPU_V5_MISSING_ZONES_DF[zone]
+        missing_tpus_df = TPU_V5_MISSING_ZONES_DF[zone]
     tpus = []
     parent = f'projects/{project_id}/locations/{zone}'
     tpus_request = tpu_client.projects().locations().acceleratorTypes().list(
@@ -546,7 +548,8 @@ def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
             'Region': zone.rpartition('-')[0],
             'AvailabilityZone': zone,
         })
-    return pd.DataFrame(new_tpus).reset_index(drop=True)
+    new_tpu_df = pd.DataFrame(new_tpus).reset_index(drop=True)
+    return pd.concat([new_tpu_df, missing_tpus_df])
 
 
 def _get_tpus() -> 'pd.DataFrame':
@@ -569,7 +572,7 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
     if df.empty:
         return df
 
-    def _get_tpu_str(tpu_version: str) -> str:
+    def _get_tpu_description_str(tpu_version: str) -> str:
         # TPU V5 has a different naming convention since it is contained in
         # the GCE SKUs. v5p -> TpuV5p, v5litepod -> TpuV5e.
         if tpu_version.startswith('v5'):
@@ -609,7 +612,7 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
                 if 'Preemptible' in description:
                     continue
 
-            if _get_tpu_str(tpu_version) not in description:
+            if _get_tpu_description_str(tpu_version) not in description:
                 continue
             if is_pod:
                 if 'Pod' not in description:
