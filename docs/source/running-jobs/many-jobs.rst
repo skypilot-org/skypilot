@@ -264,9 +264,10 @@ All job statuses can be checked with the following command.
 
   Fetching managed job statuses...
   Managed jobs
-  In progress tasks: 2 RUNNING, 1 STARTING
-  ID  TASK  NAME      RESOURCES  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS    
-  4   -     dnn-job3  1x[V100:4]   3 mins ago  3m 50s         -             0            STARTING  
-  3   -     dnn-job2  1x[V100:4]   4 mins ago  4m 55s         58s           0            RUNNING   
-  2   -     dnn-job1  1x[V100:4]   6 mins ago  6m             2m 9s         0            RUNNING 
+  In progress tasks: 3 RUNNING
+  ID  TASK  NAME      RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS   
+  10  -     dnn-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
+  9   -     dnn-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
+  8   -     dnn-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
+  ...
 
