@@ -323,7 +323,7 @@ available_node_types:
               # open file handlers with write access
               # closes if none exist
               monitor_file() {
-                tail -n 0 -f $file &
+                tail -f $file &
                 TAIL_PID=$!
                 while kill -0 $TAIL_PID 2> /dev/null; do
                   # only two PIDs should be accessing the file
@@ -332,14 +332,17 @@ available_node_types:
                     kill $TAIL_PID
                     break
                   fi
-                  sleep 30
+                  # Sleep for 5 seconds before checking again. Do not make this
+                  # too short as it will consume CPU, and too long will cause
+                  # the file to be closed too late keeping the pod alive.
+                  sleep 5
                 done
               }
 
               log_tail() {
                 FILE_PATTERN="~/sky_logs/*/tasks/*.log"
                 while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
-                  sleep 0.1
+                  sleep 1
                 done
 
                 # Keep track of already monitored files
