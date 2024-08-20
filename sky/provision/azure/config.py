@@ -105,13 +105,13 @@ def bootstrap_instances(
 
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
+    hasher = hashlib.md5(provider_config['resource_group'].encode('utf-8'))
+    unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
-        random.seed(cluster_name_on_cloud)
+        random.seed(unique_id)
         subnet_mask = f'10.{random.randint(1, 254)}.0.0/16'
-    hasher = hashlib.md5(provider_config['resource_group'].encode('utf-8'))
-    unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     logger.info(f'Using subnet mask: {subnet_mask}')
 
     parameters = {
