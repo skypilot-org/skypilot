@@ -2192,7 +2192,9 @@ def get_clusters(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
-    def _update_record_with_credentials(record: Dict[str, Any]) -> None:
+    def _update_record_with_credentials(record: Optional[Dict[str, Any]]) -> None:
+        if record is None:
+            return
         handle = record['handle']
         if handle is None:
             return
