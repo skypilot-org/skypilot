@@ -1,5 +1,6 @@
 """DigitalOcean instance provisioning."""
 
+import pydo
 import time
 from typing import Any, Dict, List, Optional
 
@@ -21,14 +22,13 @@ logger = sky_logging.init_logger(__name__)
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    client = utils.DigitalOceanCloudClient()
-    instances = client.list_instances()
+    response = utils.client.droplets.list()
     possible_names = [
         f'{cluster_name_on_cloud}-head',
         f'{cluster_name_on_cloud}-worker',
     ]
 
-    filtered_instances = {}
+    filtered_instances: Dict[str, Any] = {}
     for instance in instances:
         instance_id = instance['id']
         if status_filters is not None and instance[

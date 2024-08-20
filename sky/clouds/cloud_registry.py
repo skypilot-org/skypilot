@@ -23,6 +23,7 @@ class _CloudRegistry(dict):
 
     def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
         name = cloud_cls.__name__.lower()
+        # import pdb; pdb.set_trace()
         assert name not in self, f'{name} already registered'
         self[name] = cloud_cls()
         return cloud_cls
