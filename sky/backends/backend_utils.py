@@ -1026,6 +1026,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.SCP,
             clouds.Vsphere,
             clouds.Cudo,
+            clouds.DigitalOcean,
             clouds.Paperspace,
             clouds.Azure,
     )):

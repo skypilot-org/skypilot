@@ -16,15 +16,15 @@ if typing.TYPE_CHECKING:
 
 _CREDENTIAL_FILES = [
     # credential files for DigitalOcean,
-    'config.json',
+    'config.yaml',
 ]
 
 
 @clouds.CLOUD_REGISTRY.register
-class DigitalOcean(clouds.Cloud):
+class DO(clouds.Cloud):
     """DigitalOcean GPU Cloud"""
 
-    _REPR = 'DigitalOcean'
+    _REPR = 'DO'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             'Migrating '

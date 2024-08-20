@@ -2,23 +2,28 @@
 
 import json
 import os
+import requests
 import time
+import yaml
 from typing import Any, Dict, List, Optional, Union
 
-import requests
+
 
 from sky import sky_logging
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIALS_PATH = '~/.do/config.json'
-API_ENDPOINT = 'https://api.digitalocean.com/v1'
+API_ENDPOINT = 'https://api.digitalocean.com/v2'
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
-ADD_KEY_SCRIPT = 'sky-add-key'
 
+POSSIBLE_CREDENTIALS = [
+    '~/Library/Application Support/doctl/config.yaml', # Mac OS
+    os.path.join(os.getenv('XDG_CONFIG_HOME', '~/.config'), 'doctl/config.yaml'), # Linux
+    os.path.join(os.getenv('APPDATA', ''), '\doctl\config.yaml'), # Windows
+]
 
 class DigitalOceanCloudError(Exception):
     pass
@@ -77,10 +82,17 @@ class DigitalOceanCloudClient:
     """Wrapper functions for DigitalOcean and Machine Core API."""
 
     def __init__(self) -> None:
-        self.credentials = os.path.expanduser(CREDENTIALS_PATH)
-        assert os.path.exists(self.credentials), 'Credentials not found'
-        with open(self.credentials, 'r', encoding='utf-8') as f:
-            self._credentials = json.load(f)
+        self._credentials = None
+        for path in POSSIBLE_CREDENTIALS:
+            credentials = os.path.expanduser(path)
+            if os.path.exists(credentials):
+                self._credentials = credentials
+        if self._credentials is None:
+            raise ValueError(f'no valid DigitalOcean config found from {POSSIBLE_CREDENTIALS}')
+        logger.debug(f"using digital config {self._credentials}")
+        with open(self._credentials, 'r', encoding='utf-8') as f:
+            self._credentials = yaml.load(f)
+        import pdb; pdb.set_trace()
         self.api_key = self._credentials['apiKey']
         self.headers = {
             'Authorization': f'Bearer {self.api_key}',
