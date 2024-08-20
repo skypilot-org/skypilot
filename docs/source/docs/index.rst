@@ -129,8 +129,8 @@ Read the research:
 
    ../getting-started/installation
    ../getting-started/quickstart
-   ../getting-started/tutorial
    ../examples/interactive-development
+   ../getting-started/tutorial
 
 
 .. toctree::
@@ -143,6 +143,7 @@ Read the research:
    ../examples/auto-failover
    ../reference/kubernetes/index
    ../running-jobs/distributed-jobs
+   ../running-jobs/many-jobs
 
 .. toctree::
    :hidden:
