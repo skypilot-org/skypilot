@@ -137,21 +137,20 @@ def vm_available(to_start_count, gpu_count, gpu_model_id, data_center_id, mem,
         mem_size_okay = False
         cpu_count_okay = False
 
-        for type in types_dict['machine_types']:
-            if type['data_center_id'] == data_center_id and type[
+        for mt in types_dict['machine_types']:
+            if mt['data_center_id'] == data_center_id and mt[
                     'gpu_model_id'] == gpu_model_id:
                 exists = True
 
-                if (type['max_gpu_free'] > gpu_count and
-                        type['total_gpu_free'] >
+                if (mt['max_gpu_free'] > gpu_count and mt['total_gpu_free'] >
                     (gpu_count * to_start_count)) or gpu_count == 0:
                     gpu_count_okay = True
 
-                if type['max_memory_gib_free'] > mem and type[
+                if mt['max_memory_gib_free'] > mem and mt[
                         'total_memory_gib_free'] > (mem * to_start_count):
                     mem_size_okay = True
 
-                if type['max_vcpu_free'] > cpus and type['total_vcpu_free'] > (
+                if mt['max_vcpu_free'] > cpus and mt['total_vcpu_free'] > (
                         cpus * to_start_count):
                     cpu_count_okay = True
 
@@ -215,7 +214,7 @@ def delete_network(network_id):
             api = cudo.cudo.cudo_api.networks()
             api.delete_network(project_id, id=network_id)
             break
-        except cudo.cudo.rest.ApiException as e:
+        except cudo.cudo.rest.ApiException:
             pass
 
         retry_count += 1
