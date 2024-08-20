@@ -272,7 +272,7 @@ def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
         job_id=job_id,
         follow=follow,
     )
-    response = requests.get(f'{api_common.get_server_url()}/logs',
+    response = requests.post(f'{api_common.get_server_url()}/logs',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
