@@ -5,8 +5,8 @@ Guide: Run Many Jobs
 ====================
 
 Hyperparameter tuning, data processing, etc, are common cases where many jobs are run in parallel.
-However, managing all those jobs can be a pain. SkyPilot's allows us to run many jobs in parallel and manage them in
-a single pane of glass.
+However, managing all those jobs can be a pain. SkyPilot's allows us to **run many jobs in parallel** and **manage them in
+a single pane of glass**.
 
 We show a typical workflow for running many jobs with SkyPilot.
 
@@ -84,7 +84,7 @@ Sometimes, we may find it more efficient to interactively log into the cluster a
 
 
 
-After confirming the job is working correctly, we now start adding additional fields to make the job more scalable.
+After confirming the job is working correctly, we now start **adding additional fields** to make the job YAML more configurable.
 
 1. Add Hyperparameters
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -170,7 +170,7 @@ When running many jobs, it is useful to track live outputs of each job. We recom
     <summary>SkyPilot YAML with WandB: <code>dnn-template.yaml</code></summary>
 
 .. code-block:: yaml
-  :emphasize-lines: 7-7,33-33
+  :emphasize-lines: 7-7,19-19,34-34
 
   # dnn-template.yaml
   name: huggingface
@@ -190,6 +190,7 @@ When running many jobs, it is useful to track live outputs of each job. We recom
     pip install .
     cd examples/pytorch/text-classification
     pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    pip install wandb
 
   run: |
     set -e  # Exit if any command failed.
@@ -223,18 +224,49 @@ We can now launch the job with the following command (``WANDB_API_KEY`` should e
 Scale up the Job
 -----------------
 
-With the above setup, we can now scale up a job to many in-parallel jobs by submitting them with SkyPilot managed jobs.
+With the above setup, we can now scale up a job to many in-parallel jobs by creating multiple config files and
+submitting them with SkyPilot managed jobs.
+
+We create a config file for each job in the ``configs`` directory.
 
 .. code-block:: bash
 
-    for config_file in configs/*.env; do
-        sky jobs launch -n dnn-$(basename $config_file) dnn-template.yaml \
-            --env-file $config_file \
-            --env WANDB_API_KEY
-    done
+  # configs/job1.env
+  LR=1e-5
+  MAX_STEPS=100
 
-We can check the status of all jobs with the following command.
+  # configs/job2.env
+  LR=2e-5
+  MAX_STEPS=200
+
+  ...
+
+We can then submit all jobs by iterating over the config files.
 
 .. code-block:: bash
 
-    sky jobs queue
+  for config_file in configs/*.env; do
+    job_name=$(basename ${config_file%.env})
+    # -y means yes to all prompts.
+    # -d means detach from the job's logging, so the next job can be submitted
+    # without waiting for the previous job to finish.
+    sky jobs launch -n dnn-$job_name -y -d dnn-template.yaml \
+      --env-file $config_file \
+      --env WANDB_API_KEY
+  done
+
+
+All job statuses can be checked with the following command.
+
+.. code-block:: console
+
+  $ sky jobs queue
+
+  Fetching managed job statuses...
+  Managed jobs
+  In progress tasks: 2 RUNNING, 1 STARTING
+  ID  TASK  NAME      RESOURCES  SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS    
+  4   -     dnn-job3  1x[V100:4]   3 mins ago  3m 50s         -             0            STARTING  
+  3   -     dnn-job2  1x[V100:4]   4 mins ago  4m 55s         58s           0            RUNNING   
+  2   -     dnn-job1  1x[V100:4]   6 mins ago  6m             2m 9s         0            RUNNING 
+
