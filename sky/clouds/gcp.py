@@ -261,6 +261,10 @@ class GCP(clouds.Cloud):
         return regions
 
     @classmethod
+    def optimize_by_zone(cls) -> bool:
+        return True
+
+    @classmethod
     def zones_provision_loop(
         cls,
         *,

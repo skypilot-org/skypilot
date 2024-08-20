@@ -178,6 +178,11 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def optimize_by_zone(cls) -> bool:
+        """Returns whether the optimizer by zone."""
+        return False
+
+    @classmethod
     def zones_provision_loop(
         cls,
         *,

@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -17,6 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -174,6 +175,10 @@ class AWS(clouds.Cloud):
         return regions
 
     @classmethod
+    def optimize_by_zone(cls) -> bool:
+        return aws_utils.use_reservations()
+
+    @classmethod
     def zones_provision_loop(
         cls,
         *,
@@ -197,11 +202,13 @@ class AWS(clouds.Cloud):
                                             zone=None)
         for r in regions:
             assert r.zones is not None, r
-            if num_nodes > 1:
+            if num_nodes > 1 or aws_utils.use_reservations():
                 # When num_nodes > 1, we shouldn't pass a list of zones to the
                 # AWS NodeProvider to try, because it may then place the nodes of
                 # the same cluster in different zones. This is an artifact of the
                 # current AWS NodeProvider implementation.
+                # Also, when using reservations, they are zone-specific, so we
+                # should return one zone at a time.
                 for z in r.zones:
                     yield [z]
             else:
@@ -855,6 +862,37 @@ class AWS(clouds.Cloud):
 
         # Quota found to be greater than zero, try provisioning
         return True
+
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = aws_utils.list_reservations_for_instance_type(
+            instance_type, region)
+
+        filtered_reservations = []
+        for r in reservations:
+            if zone != r.zone:
+                continue
+            if r.targeted:
+                if r.name in specific_reservations:
+                    filtered_reservations.append(r)
+            else:
+                filtered_reservations.append(r)
+        reservation_available_resources = {
+            r.name: r.available_resources for r in filtered_reservations
+        }
+        logger.debug('Get AWS reservations available resources:'
+                     f'{reservation_available_resources}')
+        return reservation_available_resources
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

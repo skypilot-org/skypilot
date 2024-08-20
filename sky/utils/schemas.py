@@ -706,6 +706,9 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
                 'disk_encrypted': {
                     'type': 'boolean',
                 },

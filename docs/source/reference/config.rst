@@ -193,6 +193,21 @@ Available fields and semantics:
     # Default: false.
     disk_encrypted: false
 
+    # Reserved capacity (optional).
+    #
+    # Whether to prioritize capacity reservations (considered as 0 cost) in the
+    # optimizer.
+    #
+    # If you have capacity reservations in your AWS project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation within all regions and AWS will auto consume your reservations
+    # with instance match criteria to "open", and setting to false means
+    # optimizer uses regular, non-zero pricing in optimization (if by chance any
+    # matching reservation exists, AWS does NOT consume the reservation).
+    #
+    # Default: false.
+    prioritize_reservations: false
+
     # Identity to use for AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
@@ -307,8 +322,8 @@ Available fields and semantics:
     # Setting this to true guarantees the optimizer will pick any matching
     # reservation and GCP will auto consume your reservation, and setting to
     # false means optimizer uses regular, non-zero pricing in optimization (if
-    # by chance any matching reservation is selected, GCP still auto consumes
-    # the reservation).
+    # by chance any matching reservation exists, GCP still auto consumes the
+    # reservation).
     #
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
