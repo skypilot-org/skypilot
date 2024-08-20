@@ -23,7 +23,9 @@ class AWSReservation:
 def use_reservations() -> bool:
     prioritize_reservations = skypilot_config.get_nested(
         ('aws', 'prioritize_reservations'), False)
-    return prioritize_reservations
+    specific_reservations = skypilot_config.get_nested(
+        ('aws', 'specific_reservations'), set())
+    return prioritize_reservations or specific_reservations
 
 
 @cachetools.cached(cache=cachetools.TTLCache(maxsize=10,

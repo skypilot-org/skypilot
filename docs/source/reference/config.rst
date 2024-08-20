@@ -207,6 +207,17 @@ Available fields and semantics:
     #
     # Default: false.
     prioritize_reservations: false
+    #
+    # The targeted capacity reservations to be considered when provisioning
+    # clusters on AWS. SkyPilot will automatically prioritize this reserved
+    # capacity (considered as zero cost) if the requested resources matches the
+    # reservation.
+    #
+    # Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-reservations-launch.html
+    specific_reservations:
+      - cr-a1234567
+      - cr-b2345678
+
 
     # Identity to use for AWS instances (optional).
     #
