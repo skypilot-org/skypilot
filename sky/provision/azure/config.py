@@ -129,8 +129,9 @@ def bootstrap_instances(
 
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
-    cluster_id = get_cluster_id(resource_group=provider_config['resource_group'],
-                                cluster_name_on_cloud=cluster_name_on_cloud)
+    cluster_id = get_cluster_id(
+        resource_group=provider_config['resource_group'],
+        cluster_name_on_cloud=cluster_name_on_cloud)
     subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0

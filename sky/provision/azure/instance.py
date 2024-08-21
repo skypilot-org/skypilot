@@ -709,8 +709,7 @@ def query_instances(
     return statuses
 
 
-def _get_cluster_nsg(network_client: Client,
-                     resource_group: str,
+def _get_cluster_nsg(network_client: Client, resource_group: str,
                      cluster_name_on_cloud: str) -> NetworkSecurityGroup:
     """Retrieve the NSG associated with the given name of the cluster."""
     list_network_security_groups = _get_azure_sdk_function(
@@ -756,7 +755,8 @@ def open_ports(
         backoff = common_utils.Backoff(max_backoff_factor=1)
         start_time = time.time()
         while True:
-            nsg = _get_cluster_nsg(network_client, resource_group, cluster_name_on_cloud)
+            nsg = _get_cluster_nsg(network_client, resource_group,
+                                   cluster_name_on_cloud)
             if nsg.provisioning_state not in ['Creating', 'Updating']:
                 break
             if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
@@ -773,9 +773,8 @@ def open_ports(
                         f'{ports} failed.')
 
             backoff_time = backoff.current_backoff()
-            logger.info(
-                f'NSG {nsg.name} is not created yet. Waiting for '
-                f'{backoff_time} seconds before checking again.')
+            logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
+                        f'{backoff_time} seconds before checking again.')
             time.sleep(backoff_time)
 
         # Azure NSG rules have a priority field that determines the order
@@ -796,9 +795,7 @@ def open_ports(
                 destination_address_prefix='*',
                 destination_port_ranges=ports,
             ))
-        poller = update_network_security_groups(resource_group,
-                                                nsg.name,
-                                                nsg)
+        poller = update_network_security_groups(resource_group, nsg.name, nsg)
         poller.wait()
         if poller.status() != 'Succeeded':
             with ux_utils.print_exception_no_traceback():
