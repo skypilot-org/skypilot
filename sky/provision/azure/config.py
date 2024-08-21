@@ -20,6 +20,7 @@ UNIQUE_ID_LEN = 4
 _DEPLOYMENT_NAME = 'skypilot-config'
 _LEGACY_DEPLOYMENT_NAME = 'ray-config'
 _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT = 480  # 8 minutes
+_CLUSTER_ID = '{cluster_name_on_cloud}-{unique_id}'
 
 
 def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
@@ -46,7 +47,9 @@ def get_cluster_id(resource_group: str, cluster_name_on_cloud: str):
     # We use the cluster name + resource group hash as the
     # unique ID for the cluster, as we need to make sure that
     # the deployments have unique names during failover.
-    cluster_id = f'{cluster_name_on_cloud}-{unique_id}'
+    cluster_id = _CLUSTER_ID.format(
+        cluster_name_on_cloud=cluster_name_on_cloud,
+        unique_id=unique_id)
     return cluster_id
 
 
