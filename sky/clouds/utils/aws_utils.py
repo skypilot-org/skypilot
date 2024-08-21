@@ -28,7 +28,7 @@ def use_reservations() -> bool:
     return prioritize_reservations or specific_reservations
 
 
-@cachetools.cached(cache=cachetools.TTLCache(maxsize=10,
+@cachetools.cached(cache=cachetools.TTLCache(maxsize=100,
                                              ttl=300,
                                              timer=time.time))
 def list_reservations_for_instance_type(

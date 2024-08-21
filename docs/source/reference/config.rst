@@ -3,7 +3,7 @@
 Advanced Configurations
 ===========================
 
-You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuraitions** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
 Such configurations apply to all new clusters and do not affect existing clusters.
 
@@ -203,15 +203,15 @@ Available fields and semantics:
     # reservation within all regions and AWS will auto consume your reservations
     # with instance match criteria to "open", and setting to false means
     # optimizer uses regular, non-zero pricing in optimization (if by chance any
-    # matching reservation exists, AWS does NOT consume the reservation).
+    # matching reservation exists, AWS will still consume the reservation).
     #
     # Default: false.
     prioritize_reservations: false
     #
-    # The targeted capacity reservations to be considered when provisioning
-    # clusters on AWS. SkyPilot will automatically prioritize this reserved
-    # capacity (considered as zero cost) if the requested resources matches the
-    # reservation.
+    # The targeted capacity reservations (CapacityReservationId) to be
+    # considered when provisioning clusters on AWS. SkyPilot will automatically
+    # prioritize this reserved capacity (considered as zero cost) if the
+    # requested resources matches the reservation.
     #
     # Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-reservations-launch.html
     specific_reservations:

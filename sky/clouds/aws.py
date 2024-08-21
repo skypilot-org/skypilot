@@ -891,7 +891,7 @@ class AWS(clouds.Cloud):
             r.name: r.available_resources for r in filtered_reservations
         }
         logger.debug('Get AWS reservations available resources:'
-                     f'{reservation_available_resources}')
+                     f'{region}-{zone}: {reservation_available_resources}')
         return reservation_available_resources
 
     @classmethod
