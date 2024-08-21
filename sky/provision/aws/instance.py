@@ -462,9 +462,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 reverse=True)
             for reservation, reservation_count in target_reservations_list:
                 if reservation_count <= 0:
-                    # We have sorted the reservations by the available resources,
-                    # so if the reservation is not available, the following
-                    # reservations are not available either.
+                    # We have sorted the reservations by the available
+                    # resources, so if the reservation is not available, the
+                    # following reservations are not available either.
                     break
                 reservation_count = min(reservation_count, to_start_count)
                 logger.debug(f'Creating {reservation_count} instances '
