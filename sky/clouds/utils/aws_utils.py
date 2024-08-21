@@ -56,12 +56,11 @@ def list_reservations_for_instance_type(
     }])
     reservations = response['CapacityReservations']
     return [
-        AWSReservation(
-            name=r['CapacityReservationId'],
-            instance_type=r['InstanceType'],
-            zone=r['AvailabilityZone'],
-            available_resources=r['AvailableInstanceCount'],
-            targeted=r['InstanceMatchCriteria'] == 'targeted',
-            type=ReservationType(r['ReservationType'])
-        ) for r in reservations
+        AWSReservation(name=r['CapacityReservationId'],
+                       instance_type=r['InstanceType'],
+                       zone=r['AvailabilityZone'],
+                       available_resources=r['AvailableInstanceCount'],
+                       targeted=r['InstanceMatchCriteria'] == 'targeted',
+                       type=ReservationType(r['ReservationType']))
+        for r in reservations
     ]
