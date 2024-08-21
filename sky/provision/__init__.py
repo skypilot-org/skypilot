@@ -19,6 +19,7 @@ from sky.provision import cudo
 from sky.provision import fluidstack
 from sky.provision import gcp
 from sky.provision import kubernetes
+from sky.provision import lambda_cloud
 from sky.provision import runpod
 from sky.provision import vsphere
 from sky.utils import command_runner
