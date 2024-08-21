@@ -47,9 +47,8 @@ def get_cluster_id(resource_group: str, cluster_name_on_cloud: str):
     # We use the cluster name + resource group hash as the
     # unique ID for the cluster, as we need to make sure that
     # the deployments have unique names during failover.
-    cluster_id = _CLUSTER_ID.format(
-        cluster_name_on_cloud=cluster_name_on_cloud,
-        unique_id=unique_id)
+    cluster_id = _CLUSTER_ID.format(cluster_name_on_cloud=cluster_name_on_cloud,
+                                    unique_id=unique_id)
     return cluster_id
 
 
