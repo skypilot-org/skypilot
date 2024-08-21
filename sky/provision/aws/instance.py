@@ -209,6 +209,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
     assert 'NetworkInterfaces' not in conf, conf
     assert security_group_ids is not None, conf
 
+    logger.debug(f'Creating {count} instances with config: \n{conf}')
+
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
     num_subnets = len(subnet_ids)
@@ -430,12 +432,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = _create_node_tag(resumed_instances[0])
 
     if to_start_count > 0:
-        target_reservations = (config.node_config.get(
+        target_reservation_names = (config.node_config.get(
             'CapacityReservationSpecification',
             {}).get('CapacityReservationTarget',
                     {}).get('CapacityReservationId', []))
         created_instances = []
-        if target_reservations:
+        if target_reservation_names:
             node_config = copy.deepcopy(config.node_config)
             node_config['CapacityReservationSpecification'] = {
                 'CapacityReservationTarget': {}
@@ -448,8 +450,10 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             # need to explicitly specify in the config for creating instances.
             target_reservations = []
             for r in reservations:
-                if (r.targeted and r.name in target_reservations):
+                if (r.targeted and r.name in target_reservation_names):
                     target_reservations.append(r)
+            logger.debug(f'Reservations: {reservations}')
+            logger.debug(f'Target reservations: {target_reservations}')
 
             target_reservations_list = sorted(
                 target_reservations,
