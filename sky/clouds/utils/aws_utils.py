@@ -61,6 +61,6 @@ def list_reservations_for_instance_type(
                        zone=r['AvailabilityZone'],
                        available_resources=r['AvailableInstanceCount'],
                        targeted=r['InstanceMatchCriteria'] == 'targeted',
-                       type=ReservationType(r['ReservationType']))
+                       type=ReservationType(r.get('ReservationType', 'default')))
         for r in reservations
     ]
