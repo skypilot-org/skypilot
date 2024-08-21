@@ -205,6 +205,9 @@ Available fields and semantics:
     # optimizer uses regular, non-zero pricing in optimization (if by chance any
     # matching reservation exists, AWS will still consume the reservation).
     #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from AWS when set to true.
+    #
     # Default: false.
     prioritize_reservations: false
     #
@@ -339,6 +342,9 @@ Available fields and semantics:
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
     # to true.
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from GCP when set to true.
     #
     # Default: false.
     prioritize_reservations: false
