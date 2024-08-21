@@ -8,7 +8,6 @@ service:
     base_ondemand_fallback_replicas: 1
 
 resources:
-  cloud: gcp
   ports: 8081
   use_spot: true
   cpus: 2+
@@ -22,4 +21,4 @@ run: |
     # blue-green update.
     sleep 120
   fi
-  python3 server.py
+  python3 server.py --port 8081
