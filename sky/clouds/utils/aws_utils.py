@@ -1,5 +1,6 @@
 """Utilities for AWS."""
 import dataclasses
+import enum
 import time
 from typing import List
 
@@ -7,6 +8,11 @@ import cachetools
 
 from sky import skypilot_config
 from sky.adaptors import aws
+
+
+class ReservationType(str, enum.Enum):
+    DEFAULT = 'default'
+    BLOCK = 'capacity-block'
 
 
 @dataclasses.dataclass
@@ -18,6 +24,7 @@ class AWSReservation:
     # Whether the reservation is targeted, i.e. can only be consumed when
     # the reservation name is specified.
     targeted: bool
+    type: ReservationType
 
 
 def use_reservations() -> bool:
@@ -55,5 +62,6 @@ def list_reservations_for_instance_type(
             zone=r['AvailabilityZone'],
             available_resources=r['AvailableInstanceCount'],
             targeted=r['InstanceMatchCriteria'] == 'targeted',
+            type=ReservationType(r['ReservationType'])
         ) for r in reservations
     ]

@@ -446,26 +446,30 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             # Filter the reservations by the user-specified ones, because
             # reservations contain 'open' reservations as well, which do not
             # need to explicitly specify in the config for creating instances.
-            target_reservations_to_count = {}
-            for reservation in reservations:
-                if (reservation.targeted and
-                        reservation.name in target_reservations):
-                    target_reservations_to_count[
-                        reservation.name] = reservation.available_resources
+            target_reservations = []
+            for r in reservations:
+                if (r.targeted and r.name in target_reservations):
+                    target_reservations.append(r)
 
             target_reservations_list = sorted(
-                target_reservations_to_count.items(),
-                key=lambda x: x[1],
+                target_reservations,
+                key=lambda x: x.available_resources,
                 reverse=True)
-            for reservation, reservation_count in target_reservations_list:
-                if reservation_count <= 0:
+            for r in target_reservations_list:
+                if r.available_resources <= 0:
                     break
-                reservation_count = min(reservation_count, to_start_count)
+                reservation_count = min(r.available_resources, to_start_count)
                 logger.debug(f'Creating {reservation_count} instances '
-                             f'with reservation {reservation}')
+                             f'with reservation {r.name}')
                 node_config['CapacityReservationSpecification'][
                     'CapacityReservationTarget'] = {
-                        'CapacityReservationId': reservation
+                        'CapacityReservationId': r.name
+                    }
+                if r.type == aws_utils.ReservationType.BLOCK:
+                    # Capacity block reservations needs to specify the market
+                    # type during instance creation.
+                    node_config['InstanceMarketOptions'] = {
+                        'MarketType': aws_utils.ReservationType.BLOCK.value
                     }
                 created_reserved_instances = _create_instances(
                     ec2_fail_fast,
