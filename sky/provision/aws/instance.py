@@ -324,9 +324,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-worker'
             })
+        # Remove AWS internal tags, as they are not allowed to be set by users.
+        target_instance_tags = [
+            tag for tag in target_instance.tags if not tag['Key'].startswith('aws:')
+        ]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
-            Tags=target_instance.tags + node_tag,
+            Tags=target_instance_tags + node_tag,
         )
         return target_instance.id
 
