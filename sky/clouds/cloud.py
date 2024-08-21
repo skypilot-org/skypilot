@@ -179,7 +179,7 @@ class Cloud:
 
     @classmethod
     def optimize_by_zone(cls) -> bool:
-        """Returns whether the optimizer by zone."""
+        """Returns whether to optimize this cloud by zone (default: region)."""
         return False
 
     @classmethod

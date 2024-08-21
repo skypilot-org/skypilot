@@ -439,6 +439,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         created_instances = []
         if target_reservation_names:
             node_config = copy.deepcopy(config.node_config)
+            # Clear the capacity reservation specification settings in the
+            # original node config, as we will create instances with
+            # reservations with specific settings for each reservation.
             node_config['CapacityReservationSpecification'] = {
                 'CapacityReservationTarget': {}
             }
@@ -461,6 +464,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 reverse=True)
             for r in target_reservations_list:
                 if r.available_resources <= 0:
+                    # We have sorted the reservations by the available resources,
+                    # so if the reservation is not available, the following
+                    # reservations are not available either.
                     break
                 reservation_count = min(r.available_resources, to_start_count)
                 logger.debug(f'Creating {reservation_count} instances '

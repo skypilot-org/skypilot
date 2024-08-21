@@ -45,8 +45,6 @@ def list_reservations_for_instance_type(
     if not use_reservations():
         return []
     ec2 = aws.client('ec2', region_name=region)
-    # TODO(zhwu): We need to test the tenancy to make sure the current active
-    # user can consume the reservations.
     response = ec2.describe_capacity_reservations(Filters=[{
         'Name': 'instance-type',
         'Values': [instance_type]
