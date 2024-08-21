@@ -172,6 +172,7 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
+    _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -492,6 +493,8 @@ class GCP(clouds.Cloud):
             resources_vars['image_id'] = None
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
+        if resources_vars['disk_tier'] == 'pd-extreme':
+            resources_vars['disk_iops'] = 20000
 
         firewall_rule = None
         if resources.ports is not None:
@@ -913,6 +916,7 @@ class GCP(clouds.Cloud):
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls._translate_disk_tier(disk_tier)
         tier2name = {
+            resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',

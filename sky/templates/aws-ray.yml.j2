@@ -75,7 +75,9 @@ available_node_types:
             Encrypted: {{disk_encrypted}}
             {% if custom_disk_perf %}
             Iops: {{disk_iops}}
+            {% if disk_throughput %}
             Throughput: {{disk_throughput}}
+            {% endif %}
             {% endif %}
       {% if use_spot %}
       InstanceMarketOptions:

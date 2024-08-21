@@ -119,6 +119,7 @@ class AWS(clouds.Cloud):
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -791,7 +792,11 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
-        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
+        if disk_tier == resources_utils.DiskTier.LOW:
+            return 'standard'
+        elif disk_tier == resources_utils.DiskTier.ULTRA:
+            return 'io2'
+        return 'gp3'
 
     @classmethod
     def _get_disk_specs(
@@ -799,6 +804,7 @@ class AWS(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
+            resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
             resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
@@ -806,7 +812,7 @@ class AWS(clouds.Cloud):
         return {
             'disk_tier': cls._get_disk_type(tier),
             'disk_iops': tier2iops[tier],
-            'disk_throughput': tier2iops[tier] // 16,
+            'disk_throughput': tier2iops[tier] // 16 if tier != resources_utils.DiskTier.ULTRA else None,
             'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
         }
 
