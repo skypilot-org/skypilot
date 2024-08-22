@@ -16,18 +16,20 @@
 
 name: storage-demo
 
-resources:
-  cloud: aws
-  instance_type: m5.8xlarge
-
-file_mounts:
-  /skystorage-mount:
-    name: sky-romil-benchmark # Make sure this name is unique.
-    mode: MOUNT
-
-setup: |
-  sudo apt update
-  sudo apt install -y fio
+#resources:
+#  cloud: aws
+#  instance_type: m5.8xlarge
+#
+#file_mounts:
+#  /skystorage-mount:
+#    name: sky-romil-benchmark # Make sure this name is unique.
+#    mode: MOUNT
+#
+#setup: |
+#sudo apt update
+#sudo apt install -y fio
+#sudo mkdir -p /skystorage-mount
+#sudo chown -R $USER:$USER /skystorage-mount
 
 run: |
   purge_io () { echo "Purging I/O caches..."; sync && echo 3 > sudo tee /proc/sys/vm/drop_caches; }

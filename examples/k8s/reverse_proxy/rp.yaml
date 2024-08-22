@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ssh-reverse-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ssh-reverse-proxy
+  template:
+    metadata:
+      labels:
+        app: ssh-reverse-proxy
+    spec:
+      containers:
+      - name: ssh-client
+        image: ubuntu:20.04
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            apt update && \
+            apt install -y openssh-client autossh && \
+            mkdir -p /root/.ssh && \
+            echo "$SSH_PRIVATE_KEY" > /root/.ssh/id_rsa && \
+            echo "$SSH_PUBLIC_KEY" > /root/.ssh/id_rsa.pub && \
+            chmod 600 /root/.ssh/id_rsa && \
+            chmod 644 /root/.ssh/id_rsa.pub && \
+            echo "Running autossh -M 0 -N -o \"StrictHostKeyChecking=no\" -R 6443:kubernetes.default.svc:443 $SSH_USER@$SSH_HOST" && \
+            autossh -M 0 -N -o "StrictHostKeyChecking=no" -R 6443:kubernetes.default.svc:443 $SSH_USER@$SSH_HOST
+        env:
+          - name: SSH_USER
+            value: "gcpuser"  # Replace with your SSH username
+          - name: SSH_HOST
+            value: "34.45.42.204"  # Replace with SSH host
+          - name: SSH_PRIVATE_KEY
+            valueFrom:
+              secretKeyRef:
+                name: ssh-key-secret
+                key: id_rsa
+          - name: SSH_PUBLIC_KEY
+            valueFrom:
+              secretKeyRef:
+                name: ssh-key-secret
+                key: id_rsa.pub

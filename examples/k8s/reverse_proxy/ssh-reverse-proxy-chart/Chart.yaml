@@ -1,0 +1,4 @@
+apiVersion: v2
+name: ssh-reverse-proxy
+description: A Helm chart for deploying an SSH reverse proxy
+version: 0.1.0

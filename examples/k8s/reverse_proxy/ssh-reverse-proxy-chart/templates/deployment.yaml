@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.service.name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.service.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.service.name }}
+    spec:
+      containers:
+      - name: ssh-client
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            apt update && \
+            apt install -y openssh-client autossh && \
+            mkdir -p /root/.ssh && \
+            echo "$SSH_PRIVATE_KEY" > /root/.ssh/id_rsa && \
+            echo "$SSH_PUBLIC_KEY" > /root/.ssh/id_rsa.pub && \
+            chmod 600 /root/.ssh/id_rsa && \
+            chmod 644 /root/.ssh/id_rsa.pub && \
+            echo "Running autossh -M 0 -N -o \"StrictHostKeyChecking=no\" -R {{ .Values.service.port }}:kubernetes.default.svc:443 $SSH_USER@$SSH_HOST" && \
+            autossh -M 0 -N -o "StrictHostKeyChecking=no" -R {{ .Values.service.port }}:kubernetes.default.svc:443 $SSH_USER@$SSH_HOST
+        env:
+          - name: SSH_USER
+            value: "{{ .Values.ssh.user }}"
+          - name: SSH_HOST
+            value: "{{ .Values.ssh.host }}"
+          - name: SSH_PRIVATE_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.secret.name }}
+                key: id_rsa
+          - name: SSH_PUBLIC_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.secret.name }}
+                key: id_rsa.pub

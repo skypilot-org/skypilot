@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  repository: ubuntu
+  tag: "20.04"
+  pullPolicy: IfNotPresent
+
+ssh:
+  user: "gcpuser"
+  host: "34.45.42.204"
+
+secret:
+  name: ssh-key-secret
+  id_rsa: "dummy"
+  id_rsa_pub: "dummy"
+
+service:
+  name: ssh-reverse-proxy
+  port: 6443
