@@ -2111,8 +2111,8 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
             [
                 f'sky launch -y -c {name}',
                 f'sky exec -c {name} -d {task_yaml}',
-                f'sky exec -c {name} -d {task_yaml}',
-                'sleep 5',
+                f'sky exec -c {name} -d {task_yaml}', 
+                'sleep 30', 
                 f'{pod_logs} | wc -l | grep 18',
                 f'{pod_logs} | grep 1 | wc -l | grep 2',
                 f'{pod_logs} | grep 2 | wc -l | grep 2',
