@@ -35,7 +35,7 @@ Contents
    :caption: LLM Models
 
    Mixtral (Mistral AI) <llms/mixtral>
-   MiniCPM (openbmb) <llms/minicpm>
+   MiniCPM (openbmb) <llms/minicpm/README.md>
    Mistral 7B (Mistral AI) <https://docs.mistral.ai/self-deployment/skypilot/>
    DBRX (Databricks) <llms/dbrx>
    Llama-2 (Meta) <llms/llama-2>

@@ -1,6 +1,6 @@
 
 
-📰 **Update (26 April 2024) -** SkyPilot now also supports the [**MiniCPM-2B**](https://openbmb.vercel.app/?category=Chinese+Blog/) model! Use [serve-2b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/minicpm/serve-2b.yaml) to serve the 110B model.
+📰 **Update (26 April 2024) -** SkyPilot now also supports the [**MiniCPM-2B**](https://openbmb.vercel.app/?category=Chinese+Blog/) model! Use [serve-2b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/minicpm/serve-2b.yaml) to serve the 2B model.
 
 📰 **Update (6 Jun 2024) -** SkyPilot now also supports the [**MiniCPM-1B**](https://openbmb.vercel.app/?category=Chinese+Blog/) model! 
 
@@ -63,7 +63,7 @@ curl http://$IP:8000/v1/chat/completions \
 ```
 
 
-## **Optional:** Accessing Qwen with Chat GUI
+## **Optional:** Accessing Cpm with Chat GUI
 
 It is also possible to access the Qwen service with a GUI using [vLLM](https://github.com/vllm-project/vllm).
 
@@ -76,4 +76,3 @@ sky launch -c cpm-gui ./gui.yaml --env MODEL_NAME='openbmb/MiniCPM-2B-sft-bf16' 
 ```
 | INFO | stdout | Running on public URL: https://6141e84201ce0bb4ed.gradio.live
 ```
-
