@@ -112,7 +112,8 @@ def get_default_instance_type(
         memory_gb_or_ratio = memory
 
     def _filter_disk_type(instance_type: str) -> bool:
-        return OCI.check_disk_tier(instance_type, disk_tier)[0]
+        valid, _ = OCI.check_disk_tier(instance_type, disk_tier)
+        return valid
 
     instance_type_prefix = tuple(
         f'{family}' for family in oci_utils.oci_config.DEFAULT_INSTANCE_FAMILY)

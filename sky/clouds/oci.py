@@ -425,7 +425,8 @@ class OCI(clouds.Cloud):
             return True, ''
         if disk_tier == resources_utils.DiskTier.ULTRA:
             return False, ('OCI disk_tier=ultra is not supported now. '
-                           'Please use disk_tier={low, medium, high} instead.')
+                           'Please use disk_tier={low, medium, high, best} '
+                           'instead.')
         return True, ''
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

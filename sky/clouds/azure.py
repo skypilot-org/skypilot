@@ -603,7 +603,7 @@ class Azure(clouds.Cloud):
         if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
             return False, (
                 'Azure disk_tier={high, ultra} is not supported now. '
-                'Please use disk_tier={low, medium} instead.')
+                'Please use disk_tier={low, medium, best} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         if cls._get_disk_type(

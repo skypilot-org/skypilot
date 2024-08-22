@@ -924,14 +924,15 @@ class GCP(clouds.Cloud):
                 'For more information, see: https://cloud.google.com/compute/disks-image-pricing#disk.'
             )
         return tier2name[tier]
-    
+
     @classmethod
     def _get_disk_specs(
             cls,
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         return {
             'disk_tier': cls._get_disk_type(disk_tier),
-            'disk_iops': 20000 if disk_tier == resources_utils.DiskTier.ULTRA else None,
+            'disk_iops': 20000 if disk_tier == resources_utils.DiskTier.ULTRA
+                         else None,
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
         }
