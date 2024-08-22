@@ -42,7 +42,8 @@ class OCI(clouds.Cloud):
 
     _INDENT_PREFIX = '    '
 
-    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier) - {resources_utils.DiskTier.ULTRA}
+    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
+                             {resources_utils.DiskTier.ULTRA})
 
     @classmethod
     def _unsupported_features_for_resources(
