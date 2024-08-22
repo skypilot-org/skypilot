@@ -169,6 +169,9 @@ roleRef:
   kind: Role
   name: skypilot-system-service-account-role
   apiGroup: rbac.authorization.k8s.io
+EOF
+# Apply optional ingress-related roles, but don't make the script fail if it fails
+kubectl apply -f - <<EOF || true
 ---
 # Optional: Role for accessing ingress resources
 apiVersion: rbac.authorization.k8s.io/v1
