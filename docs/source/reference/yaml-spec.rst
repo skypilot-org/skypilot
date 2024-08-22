@@ -118,7 +118,7 @@ Available fields:
       # Rough performance estimate:
       #   low: 1000 IOPS; read 90 MB/s; write 90 MB/s
       #   medium: 3000 IOPS; read 220 MB/s; write 220 MB/s
-      #   high: 6000 IOPS; read 300 MB/s; write 300 MB/s
+      #   high: 6000 IOPS; read 400 MB/s; write 400 MB/s
       #   ultra: 60000 IOPS;  read 4000 MB/s; write 3000 MB/s
       # Measured by examples/perf/storage_rawperf.yaml
       disk_tier: medium
