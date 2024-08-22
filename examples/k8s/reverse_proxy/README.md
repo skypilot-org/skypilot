@@ -3,6 +3,10 @@
 The Sky Reverse Proxy is a simple reverse proxy that allows the Sky Control Plane
 to access your Kubernetes cluster from anywhere.
 
+## Prerequisites
+* Sky Control Plane instance running SSH server
+* Access to Kubernetes cluster to install the reverse proxy
+
 ## Installation 
 ### Step 1 - Generate Kubeconfig for the Control Plane
 On a machine that has access to the Kubernetes cluster, generate a kubeconfig file for the control plane.
