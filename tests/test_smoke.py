@@ -48,6 +48,7 @@ from sky import global_user_state
 from sky import jobs
 from sky import serve
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -839,6 +840,7 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
@@ -1103,9 +1105,8 @@ def test_azure_storage_mounts_with_stop():
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
     default_region = 'eastus'
-    storage_account_name = (
-        storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-            region=default_region, user_hash=common_utils.get_user_hash()))
+    storage_account_name = (storage_lib.AzureBlobStore.
+                            get_default_storage_account_name(default_region))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     template_str = pathlib.Path(
@@ -1549,6 +1550,7 @@ def test_job_queue_multinode(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
@@ -1592,6 +1594,7 @@ def test_large_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
@@ -1699,6 +1702,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
@@ -2325,6 +2329,7 @@ def test_cancel_azure():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support V100 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
@@ -2990,8 +2995,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region = 'westus2'
         region_flag = f' --region {region}'
         storage_account_name = (
-            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=region, user_hash=common_utils.get_user_hash()))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(region))
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
@@ -3501,6 +3505,7 @@ def test_skyserve_kubernetes_http():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
@@ -3558,6 +3563,7 @@ def test_skyserve_spot_recovery():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
@@ -3622,6 +3628,8 @@ def test_skyserve_dynamic_ondemand_fallback():
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -3806,6 +3814,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -3834,6 +3844,8 @@ def test_skyserve_update(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -3870,6 +3882,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -3947,12 +3960,13 @@ def test_skyserve_update_autoscale(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
-    name = _get_service_name() + mode
+    name = f'{_get_service_name()}-{mode}'
 
     wait_until_no_pending = (
         f's=$(sky serve status {name}); echo "$s"; '
@@ -3982,7 +3996,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
     test = Test(
-        'test-skyserve-new-autoscaler-update',
+        f'test-skyserve-new-autoscaler-update-{mode}',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
@@ -4010,6 +4024,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
@@ -4287,9 +4303,8 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage container delete '
@@ -4324,11 +4339,9 @@ class TestStorageWithCredentials:
             config_storage_account = skypilot_config.get_nested(
                 ('azure', 'storage_account'), None)
             storage_account_name = config_storage_account if (
-                config_storage_account is not None
-            ) else (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                config_storage_account is not None) else (
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
@@ -4390,9 +4403,8 @@ class TestStorageWithCredentials:
             if storage_account_name is None:
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
-                    format(region=default_region,
-                           user_hash=common_utils.get_user_hash()))
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4418,9 +4430,8 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4622,8 +4633,8 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using gsutil
         default_region = 'eastus'
         storage_account_name = (
-            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=default_region, user_hash=common_utils.get_user_hash()))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(
+                default_region))
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
@@ -4859,9 +4870,8 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('https'):
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
-                    format(region=default_region,
-                           user_hash=common_utils.get_user_hash()))
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'

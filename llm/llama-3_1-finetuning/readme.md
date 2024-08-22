@@ -135,7 +135,7 @@ sky launch -c llama31 lora.yaml \
 
 <figure>
 <center>
-<img src="https://imgur.com/B7Ib4Ii.png" width="60%" />
+<img src="https://i.imgur.com/B7Ib4Ii.png" width="60%" />
 
      
 <figcaption>Training Loss of LoRA finetuning Llama 3.1</figcaption>
@@ -218,10 +218,10 @@ run: |
 
 ## Appendix: Preparation
 1. Request the access to [Llama 3.1 weights on huggingface](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) (Click on the blue box and follow the steps):
-![](https://imgur.com/snIQhr9.png)
+![](https://i.imgur.com/snIQhr9.png)
 
 2. Get your [huggingface access token](https://huggingface.co/settings/tokens):
-![](https://imgur.com/3idBgHn.png)
+![](https://i.imgur.com/3idBgHn.png)
 
 
 3. Add huggingface token to your environment variable:
