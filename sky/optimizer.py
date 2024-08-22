@@ -19,6 +19,8 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -252,6 +254,26 @@ class Optimizer:
         # node -> cloud -> list of resources that satisfy user's requirements.
         node_to_candidate_map: _TaskToPerCloudCandidates = {}
 
+        def get_available_reservations(
+            launchable_resources: Dict[resources_lib.Resources,
+                                       List[resources_lib.Resources]]
+        ) -> Dict[resources_lib.Resources, int]:
+            num_available_reserved_nodes_per_resource = {}
+
+            def get_reservations_available_resources(
+                    resources: resources_lib.Resources):
+                num_available_reserved_nodes_per_resource[resources] = sum(
+                    resources.get_reservations_available_resources().values())
+
+            launchable_resources_list: List[resources_lib.Resources] = sum(
+                launchable_resources.values(), [])
+            with rich_utils.safe_status(
+                    '[cyan]Checking reserved resources...[/]'):
+                subprocess_utils.run_in_parallel(
+                    get_reservations_available_resources,
+                    launchable_resources_list)
+            return num_available_reserved_nodes_per_resource
+
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
@@ -279,7 +301,11 @@ class Optimizer:
                     list(node.resources)[0]: list(node.resources)
                 }
 
+            # Fetch reservations in advance and in parallel to speed up the
+            # reservation info fetching.
             num_resources = len(list(node.resources))
+            num_available_reserved_nodes_per_resource = (
+                get_available_reservations(launchable_resources))
 
             for orig_resources, launchable_list in launchable_resources.items():
                 if num_resources == 1 and node.time_estimator_func is None:
@@ -302,15 +328,16 @@ class Optimizer:
                     else:
                         estimated_runtime = node.estimate_runtime(
                             orig_resources)
+
                 for resources in launchable_list:
                     if do_print:
                         logger.debug(f'resources: {resources}')
 
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
-                        num_available_reserved_nodes = sum(
-                            resources.get_reservations_available_resources(
-                            ).values())
+                        num_available_reserved_nodes = (
+                            num_available_reserved_nodes_per_resource[resources]
+                        )
 
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for
@@ -1116,7 +1143,7 @@ def _make_launchables_for_valid_region_zones(
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
         if (launchable_resources.use_spot and region.zones is not None or
-                isinstance(launchable_resources.cloud, clouds.GCP)):
+                launchable_resources.cloud.optimize_by_zone()):
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:

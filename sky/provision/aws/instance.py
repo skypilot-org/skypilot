@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
+from sky.clouds.utils import aws_utils
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.aws import utils
@@ -429,19 +430,81 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = _create_node_tag(resumed_instances[0])
 
     if to_start_count > 0:
+        target_reservations = (config.node_config.get(
+            'CapacityReservationSpecification',
+            {}).get('CapacityReservationTarget',
+                    {}).get('CapacityReservationId', []))
+        created_instances = []
+        if target_reservations:
+            node_config = copy.deepcopy(config.node_config)
+            # Clear the capacity reservation specification settings in the
+            # original node config, as we will create instances with
+            # reservations with specific settings for each reservation.
+            node_config['CapacityReservationSpecification'] = {
+                'CapacityReservationTarget': {}
+            }
+
+            reservations = aws_utils.list_reservations_for_instance_type(
+                node_config['InstanceType'], region=region)
+            # Filter the reservations by the user-specified ones, because
+            # reservations contain 'open' reservations as well, which do not
+            # need to explicitly specify in the config for creating instances.
+            target_reservations_to_count = {}
+            for reservation in reservations:
+                if (reservation.targeted and
+                        reservation.name in target_reservations):
+                    target_reservations_to_count[
+                        reservation.name] = reservation.available_resources
+
+            target_reservations_list = sorted(
+                target_reservations_to_count.items(),
+                key=lambda x: x[1],
+                reverse=True)
+            for reservation, reservation_count in target_reservations_list:
+                if reservation_count <= 0:
+                    # We have sorted the reservations by the available
+                    # resources, so if the reservation is not available, the
+                    # following reservations are not available either.
+                    break
+                reservation_count = min(reservation_count, to_start_count)
+                logger.debug(f'Creating {reservation_count} instances '
+                             f'with reservation {reservation}')
+                node_config['CapacityReservationSpecification'][
+                    'CapacityReservationTarget'] = {
+                        'CapacityReservationId': reservation
+                    }
+                created_reserved_instances = _create_instances(
+                    ec2_fail_fast,
+                    cluster_name_on_cloud,
+                    node_config,
+                    tags,
+                    reservation_count,
+                    associate_public_ip_address=(
+                        not config.provider_config['use_internal_ips']))
+                created_instances.extend(created_reserved_instances)
+                to_start_count -= reservation_count
+                if to_start_count <= 0:
+                    break
+
         # TODO(suquark): If there are existing instances (already running or
         #  resumed), then we cannot guarantee that they will be in the same
         #  availability zone (when there are multiple zones specified).
         #  This is a known issue before.
 
-        created_instances = _create_instances(
-            ec2_fail_fast,
-            cluster_name_on_cloud,
-            config.node_config,
-            tags,
-            to_start_count,
-            associate_public_ip_address=(
-                not config.provider_config['use_internal_ips']))
+        if to_start_count > 0:
+            # Remove the capacity reservation specification from the node config
+            # as we have already created the instances with the reservations.
+            config.node_config.get('CapacityReservationSpecification',
+                                   {}).pop('CapacityReservationTarget', None)
+            created_remaining_instances = _create_instances(
+                ec2_fail_fast,
+                cluster_name_on_cloud,
+                config.node_config,
+                tags,
+                to_start_count,
+                associate_public_ip_address=(
+                    not config.provider_config['use_internal_ips']))
+            created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
         created_instance_ids = [n.id for n in created_instances]
