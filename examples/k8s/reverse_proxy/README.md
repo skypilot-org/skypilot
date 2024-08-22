@@ -20,6 +20,13 @@ Copy over the generated kubeconfig file to the control plane instance:
 rsync -avz kubeconfig.yaml <control-plane>:~/.kube/config
 ```
 
+On the control plane, configure it to use the `sky-sa` service account by adding this to ~/.sky/config.yaml:
+```yaml
+kubernetes:
+  remote_identity: sky-sa
+```
+
+
 ### Step 2 - Install the Reverse Proxy
 #### Installation with helm
 Install the helm chart with the control plane credentials configured in the `CP_*` environment variables:
