@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import colorama
 
@@ -433,6 +433,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
+            **GCP._get_disk_specs(r.disk_tier),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -490,10 +491,6 @@ class GCP(clouds.Cloud):
         if self._is_machine_image(image_id):
             resources_vars['machine_image'] = image_id
             resources_vars['image_id'] = None
-
-        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
-        if resources_vars['disk_tier'] == 'pd-extreme':
-            resources_vars['disk_iops'] = 20000
 
         firewall_rule = None
         if resources.ports is not None:
@@ -923,10 +920,21 @@ class GCP(clouds.Cloud):
         if tier == resources_utils.DiskTier.ULTRA:
             logger.warning(
                 'Using disk_tier=ultra on GCP will utilize extreme persistent disks, '
-                'which can lead to significant higher costs. '
+                'which can lead to significant higher costs (~$2.2/h). '
                 'For more information, see: https://cloud.google.com/compute/disks-image-pricing#disk.'
             )
         return tier2name[tier]
+    
+    @classmethod
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        return {
+            'disk_tier': cls._get_disk_type(disk_tier),
+            'disk_iops': 20000 if disk_tier == resources_utils.DiskTier.ULTRA else None,
+            # Only pd-extreme supports custom iops.
+            # see https://cloud.google.com/compute/docs/disks#disk-types
+        }
 
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:

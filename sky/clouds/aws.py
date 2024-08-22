@@ -796,7 +796,7 @@ class AWS(clouds.Cloud):
         elif disk_tier == resources_utils.DiskTier.ULTRA:
             logger.warning(
                 'Using disk_tier=ultra on AWS will utilize io2 Block Express, '
-                'which can lead to significant higher costs. '
+                'which can lead to significant higher costs (~$1.8/h). '
                 'For more information, see: https://aws.amazon.com/ebs/pricing.'
             )
             return 'io2'
@@ -818,6 +818,8 @@ class AWS(clouds.Cloud):
             'disk_iops': tier2iops[tier],
             'disk_throughput': tier2iops[tier] // 16 if
                                tier != resources_utils.DiskTier.ULTRA else None,
+            # Custom disk throughput is only available for gp3
+            # see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-ebs.html
             'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
         }
 
