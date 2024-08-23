@@ -130,10 +130,10 @@ class RequestTask:
             )
         except TypeError as e:
             print('Error encoding.\n'
-                    f'{self.request_id}\n'
-                    f'{self.name}\n'
-                        f'{self.request_body}\n'
-                        f'{self.return_value}\n')
+                  f'{self.request_id}\n'
+                  f'{self.name}\n'
+                  f'{self.request_body}\n'
+                  f'{self.return_value}\n')
             raise
 
     @classmethod

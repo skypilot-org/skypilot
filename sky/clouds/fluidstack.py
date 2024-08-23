@@ -11,7 +11,6 @@ from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
 from sky.utils import registry
 from sky.utils import resources_utils
-from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils.resources_utils import DiskTier
 

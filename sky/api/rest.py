@@ -63,9 +63,7 @@ def refresh_cluster_status_event():
 
 
 # Register the events to run in the background.
-events = {
-    'status': refresh_cluster_status_event
-}
+events = {'status': refresh_cluster_status_event}
 
 
 class RequestBody(pydantic.BaseModel):
@@ -162,11 +160,10 @@ def _start_background_request(request_id: str,
 @app.on_event('startup')
 async def startup():
     for event_id, (event_name, event) in enumerate(events.items()):
-        _start_background_request(
-            request_id=str(event_id),
-            request_name=event_name,
-            request_body={},
-            func=event)
+        _start_background_request(request_id=str(event_id),
+                                  request_name=event_name,
+                                  request_body={},
+                                  func=event)
 
 
 class OptimizeBody(pydantic.BaseModel):
@@ -269,7 +266,6 @@ async def stop(request: fastapi.Request, stop_body: StopBody):
         cluster_name=stop_body.cluster_name,
         purge=stop_body.purge,
     )
-
 
 
 class StatusBody(pydantic.BaseModel):

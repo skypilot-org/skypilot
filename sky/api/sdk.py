@@ -127,6 +127,7 @@ def optimize(dag: 'sky.Dag') -> str:
     }
     _add_env_vars_to_body(body)
     response = requests.get(f'{_get_server_url()}/optimize', json=body)
+    print(response.content)
     return response.headers['X-Request-ID']
 
 
