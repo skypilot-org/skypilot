@@ -246,8 +246,8 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
         _is_launched_by_jobs_controller=launch_body.
         _is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=launch_body.
-        is_launched_by_sky_serve_controller,
-        _disable_controller_check=launch_body.disable_controller_check,
+        _is_launched_by_sky_serve_controller,
+        _disable_controller_check=launch_body._disable_controller_check,
     )
 
 
