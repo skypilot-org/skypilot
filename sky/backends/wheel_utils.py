@@ -161,12 +161,19 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
-        # only build wheels if the wheel is outdated
-        if last_wheel_modification_time < last_modification_time:
+        # Only build wheels if the wheel is outdated or wheel does not exist
+        # for the requested version.
+        if (last_wheel_modification_time < last_modification_time) or not any(
+                WHEEL_DIR.glob(_WHEEL_PATTERN)):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
+        # We remove all wheels except the latest one for garbage collection.
+        # Otherwise stale wheels will accumulate over time.
+        # TODO(romilb): If the user switches versions every alternate launch,
+        #  the wheel will be rebuilt every time. At the risk of adding
+        #  complexity, we can consider TTL caching wheels by version here.
         latest_wheel = _get_latest_wheel_and_remove_all_others()
 
         wheel_hash = latest_wheel.parent.name
