@@ -164,7 +164,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # Only build wheels if the wheel is outdated or wheel does not exist
         # for the requested version.
         if (last_wheel_modification_time < last_modification_time) or not any(
-                WHEEL_DIR.glob(_WHEEL_PATTERN)):
+                WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
