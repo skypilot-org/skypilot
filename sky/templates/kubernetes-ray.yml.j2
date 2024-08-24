@@ -317,7 +317,54 @@ available_node_types:
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
-          args: ['trap : TERM INT; sleep infinity & wait;']
+          args: 
+            - |
+              # Tails file and checks every 5 sec for
+              # open file handlers with write access
+              # closes if none exist
+              monitor_file() {
+                tail -f $file &
+                TAIL_PID=$!
+                while kill -0 $TAIL_PID 2> /dev/null; do
+                  # only two PIDs should be accessing the file
+                  # the log appender and log tailer
+                  if [ $(lsof -w $file | wc -l) -lt 3 ]; then
+                    kill $TAIL_PID
+                    break
+                  fi
+                  # Sleep for 5 seconds before checking again. Do not make this
+                  # too short as it will consume CPU, and too long will cause
+                  # the file to be closed too late keeping the pod alive.
+                  sleep 5
+                done
+              }
+
+              log_tail() {
+                FILE_PATTERN="~/sky_logs/*/tasks/*.log"
+                while ! ls $(eval echo $FILE_PATTERN) 1> /dev/null 2>&1; do
+                  sleep 1
+                done
+
+                # Keep track of already monitored files
+                already_monitored=""
+
+                # Infinite loop to continuously check for new files
+                while true; do
+                  for file in $(eval echo $FILE_PATTERN); do
+                    if echo $already_monitored | grep -q $file; then
+                      # File is already being monitored
+                      continue
+                    fi
+                    
+                    # Monitor the new file
+                    monitor_file $file &
+                    already_monitored="${already_monitored} ${file}"
+                  done
+                  sleep 0.1
+                done
+              }
+              trap : TERM INT; log_tail || sleep infinity & wait
+
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port
@@ -365,7 +412,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo DEBIAN_FRONTEND=noninteractive apt install gcc patch pciutils rsync fuse curl -y;
+  - sudo DEBIAN_FRONTEND=noninteractive apt install lsof gcc patch pciutils rsync fuse curl -y;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
