@@ -60,9 +60,9 @@ def _get_latest_wheel() -> pathlib.Path:
 
 def _build_sky_wheel() -> pathlib.Path:
     """Build a wheel for SkyPilot and return the path to the wheel."""
-    with tempfile.TemporaryDirectory() as tmp_dir:
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
         # prepare files
-        tmp_dir = pathlib.Path(tmp_dir)
+        tmp_dir = pathlib.Path(tmp_dir_str)
         sky_tmp_dir = tmp_dir / 'sky'
         sky_tmp_dir.mkdir()
         for item in SKY_PACKAGE_PATH.iterdir():
