@@ -266,15 +266,11 @@ available_node_types:
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
+        {% if k8s_fuse_device_required %}
         annotations:
-            skypilot.co/autodown: "{{ down }}"
-            {% if idle_minutes_to_autostop %}
-            skypilot.co/idle_minutes_to_autostop: "{{ idle_minutes_to_autostop }}"
-            {% endif %}
-            {% if k8s_fuse_device_required %}
             # Required for FUSE mounting to access /dev/fuse
             container.apparmor.security.beta.kubernetes.io/ray-node: unconfined
-            {% endif %}
+        {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
