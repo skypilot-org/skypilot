@@ -914,6 +914,7 @@ def write_cluster_config(
                 # The reservation pools that specified by the user. This is
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
+
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
