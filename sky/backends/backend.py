@@ -48,8 +48,6 @@ class Backend(Generic[_ResourceHandleType]):
             to_provision: Optional['resources.Resources'],
             dryrun: bool,
             stream_logs: bool,
-            down: bool = False,
-            idle_minutes_to_autostop: Optional[int] = None,
             cluster_name: Optional[str] = None,
             retry_until_up: bool = False) -> Optional[_ResourceHandleType]:
         if cluster_name is None:
@@ -57,8 +55,7 @@ class Backend(Generic[_ResourceHandleType]):
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
         return self._provision(task, to_provision, dryrun, stream_logs,
-                               cluster_name, down, idle_minutes_to_autostop,
-                               retry_until_up)
+                               cluster_name, retry_until_up)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')

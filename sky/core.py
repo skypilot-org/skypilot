@@ -229,9 +229,7 @@ def _start(
                                dryrun=False,
                                stream_logs=True,
                                cluster_name=cluster_name,
-                               retry_until_up=retry_until_up,
-                               down=down,
-                               idle_minutes_to_autostop=idle_minutes_to_autostop)
+                               retry_until_up=retry_until_up)
     storage_mounts = backend.get_storage_mounts_metadata(handle.cluster_name)
     # Passing all_file_mounts as None ensures the local source set in Storage
     # to not redundantly sync source to the bucket.
