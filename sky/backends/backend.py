@@ -127,9 +127,7 @@ class Backend(Generic[_ResourceHandleType]):
             dryrun: bool,
             stream_logs: bool,
             cluster_name: str,
-            retry_until_up: bool = False,
-            down: bool = False,
-            idle_minutes_to_autostop: Optional[int] = None) -> Optional[_ResourceHandleType]:
+            retry_until_up: bool = False) -> Optional[_ResourceHandleType]:
         raise NotImplementedError
 
     def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:

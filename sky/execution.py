@@ -273,8 +273,6 @@ def _execute(
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
-                                           down=down,
-                                           idle_minutes_to_autostop=idle_minutes_to_autostop,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
