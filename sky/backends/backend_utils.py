@@ -758,7 +758,9 @@ def write_cluster_config(
         region: clouds.Region,
         zones: Optional[List[clouds.Zone]] = None,
         dryrun: bool = False,
-        keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
+        keep_launch_fields_in_existing_config: bool = True,
+        down: bool = False,
+        idle_minutes_to_autostop: Optional[int] = None,) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -914,7 +916,10 @@ def write_cluster_config(
                 # The reservation pools that specified by the user. This is
                 # currently only used by GCP.
                 'specific_reservations': specific_reservations,
-
+                # These two are currently only used by Kubernetes to create
+                # annotations for the pod.
+                'down': down,
+                'idle_minutes_to_autostop' : idle_minutes_to_autostop,
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,

@@ -136,14 +136,16 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             dryrun: bool,
             stream_logs: bool,
             cluster_name: str,
-            retry_until_up: bool = False
+            retry_until_up: bool = False,
+            down: bool = False,
+            idle_minutes_to_autostop: Optional[int] = None
     ) -> Optional[LocalDockerResourceHandle]:
         """Builds docker image for the task and returns cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        del to_provision  # Unused
+        del to_provision, down, idle_minutes_to_autostop  # Unused
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
         if dryrun:
