@@ -48,6 +48,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1300,8 +1301,6 @@ class RetryingVmProvisioner(object):
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
-        down: bool = False,
-        idle_minutes_to_autostop: Optional[int] = None,
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
@@ -1397,9 +1396,7 @@ class RetryingVmProvisioner(object):
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists,
-                    down=down,
-                    idle_minutes_to_autostop=idle_minutes_to_autostop)
+                    keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -1918,8 +1915,6 @@ class RetryingVmProvisioner(object):
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
-        down: bool = False,
-        idle_minutes_to_autostop: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
@@ -1978,9 +1973,7 @@ class RetryingVmProvisioner(object):
                     cloud_user_identity=cloud_user,
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
-                    prev_cluster_ever_up=prev_cluster_ever_up,
-                    down=down,
-                    idle_minutes_to_autostop=idle_minutes_to_autostop)
+                    prev_cluster_ever_up=prev_cluster_ever_up)
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2693,9 +2686,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             dryrun: bool,
             stream_logs: bool,
             cluster_name: str,
-            retry_until_up: bool = False,
-            down: bool = False,
-            idle_minutes_to_autostop: Optional[int] = None) -> Optional[CloudVmRayResourceHandle]:
+            retry_until_up: bool = False) -> Optional[CloudVmRayResourceHandle]:
         """Provisions using 'ray up'.
 
         Raises:
@@ -2778,7 +2769,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         wheel_hash,
                         blocked_resources=task.blocked_resources)
                     config_dict = retry_provisioner.provision_with_retries(
-                        task, to_provision_config, dryrun, stream_logs, down, idle_minutes_to_autostop)
+                        task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state
@@ -4136,6 +4127,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
+
+        # Add/Remove autodown annotations from Kubernetes pods.
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            kubernetes_utils.set_autodown_annotations(
+                handle=handle,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down)
 
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,
