@@ -1804,7 +1804,7 @@ def _remove_pod_annotations(pod: V1Pod, annotation_key: str,
 
 def _add_pod_annotations(pod: V1Pod, annotation: Dict[str, str],
                          namespace: str) -> None:
-    """Adds Annotations on a specified Kubernetes pod."""
+    """Adds specified Annotations on a Kubernetes pod."""
     try:
         # Patch the pod with the updated metadata
         body = {'metadata': {'annotations': annotation}}
