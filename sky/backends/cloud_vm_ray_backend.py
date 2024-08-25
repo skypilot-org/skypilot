@@ -4128,7 +4128,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
-        # Add/Remove autodown annotations from Kubernetes pods.
+        # Add/Remove autodown annotations to/from Kubernetes pods.
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             kubernetes_utils.set_autodown_annotations(
                 handle=handle,
