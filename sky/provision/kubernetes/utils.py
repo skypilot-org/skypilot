@@ -1849,8 +1849,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
                                      annotation=annotation,
                                      namespace=namespace)
 
-        elif (idle_minutes_to_autostop is not None and
-              idle_minutes_to_autostop < 0):
+        elif (idle_minutes_to_autostop is not None and idle_minutes_to_autostop
+              == constants.IDLE_MINUTES_TO_AUTOSTOP_FOR_CANCEL):
             for annotation_key in annotation_keys:
                 _remove_pod_annotations(pod=pod,
                                         annotation_key=annotation_key,

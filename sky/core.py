@@ -453,7 +453,7 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    is_cancel = idle_minutes < 0
+    is_cancel = idle_minutes == constants.IDLE_MINUTES_TO_AUTOSTOP_FOR_CANCEL
     verb = 'Cancelling' if is_cancel else 'Scheduling'
     option_str = 'down' if down else 'stop'
     if is_cancel:

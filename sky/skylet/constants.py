@@ -248,7 +248,9 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
+# idle_minutes_to_autostop value used to indicate cancellation on registered
+# autostop/down.
+IDLE_MINUTES_TO_AUTOSTOP_FOR_CANCEL = -1
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each jobs/
 # serve controller process.
