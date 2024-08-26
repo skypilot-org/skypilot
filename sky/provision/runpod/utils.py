@@ -77,11 +77,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
         info['name'] = instance['name']
         info['port2endpoint'] = {}
 
-        # Sometimes when the cluster is in the process of being created,
-        # the `port` field in the runtime is None and we need to check for it.
-        if (instance['desiredStatus'] == 'RUNNING' and
-                instance.get('runtime') and
-                instance.get('runtime').get('ports')):
+        if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime'):
             for port in instance['runtime']['ports']:
                 if port['isIpPublic']:
                     if port['privatePort'] == 22:
@@ -142,7 +138,6 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
 
-
     new_instance = runpod.runpod.create_pod(
         name=name,
         image_name=image_name,
@@ -159,7 +154,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
         docker_args=
-        f'-c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'')
+        f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'')
 
     return new_instance['id']
 
