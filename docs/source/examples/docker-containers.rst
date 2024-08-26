@@ -161,6 +161,12 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 
     2. The container image must grant sudo permissions without requiring password authentication for the user. Having a root user is also acceptable.
 
+.. note::
+
+  When used as a runtime environment, the container's entrypoint will be
+  override by :code:`/bin/bash`. If you need to run a specific command, you can
+  do so in the :code:`setup` and :code:`run` sections of the task YAML file.
+
 Private Registries
 ^^^^^^^^^^^^^^^^^^
 
