@@ -42,6 +42,15 @@ _DEFAULT_INSTANCE_FAMILY = [
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
 
+# Some A10 instance types only contains a fractional of GPU. We temporarily
+# filter them out here to avoid using it as a whole A10 GPU.
+# TODO(zhwu,tian): support fractional GPUs, which can be done on
+# kubernetes as well.
+# Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
+_FILTERED_A10_INSTANCE_TYPES = [
+    f'Standard_NV{vcpu}ads_A10_v5' for vcpu in [6, 12, 18]
+]
+
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
@@ -138,7 +147,12 @@ def get_instance_type_for_accelerator(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
-    return common.get_instance_type_for_accelerator_impl(df=_df,
+
+    # Filter out instance types that only contain a fractional of GPU.
+    df_filtered = _df.loc[~_df['InstanceType'].isin(_FILTERED_A10_INSTANCE_TYPES
+                                                   )]
+
+    return common.get_instance_type_for_accelerator_impl(df=df_filtered,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
