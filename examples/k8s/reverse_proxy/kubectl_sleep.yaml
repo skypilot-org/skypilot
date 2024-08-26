@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubectl-sleep
+spec:
+  containers:
+  - name: kubectl-container
+    image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+    command: [ "sleep", "infinity" ]

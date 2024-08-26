@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-bastion-host
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bastion-host
+  template:
+    metadata:
+      labels:
+        app: bastion-host
+    spec:
+      containers:
+      - name: sshd
+        image: rastasheep/ubuntu-sshd:18.04
+        ports:
+        - containerPort: 22
+        volumeMounts:
+        - name: ssh-key
+          mountPath: /tmp/authorized_keys
+          subPath: authorized_keys
+          readOnly: true
+        # TODO: Setup SSH keys correctly for tunnel
+        # command: ["/bin/bash", "-c", "useradd -m tunnel && mkdir -p /home/tunnel/.ssh && cp /tmp/authorized_keys /home/tunnel/.ssh/authorized_keys && chmod 700 /home/tunnel && chmod 700 /home/tunnel/.ssh && chmod 600 /home/tunnel/.ssh/authorized_keys && chown -R tunnel:tunnel /home/tunnel/ && mkdir -p /home/root/.ssh && cp /tmp/authorized_keys /home/root/.ssh/authorized_keys && chmod 600 /home/root/.ssh/authorized_keys && chown -R root:root /home/root/ && ssh-keygen -A && exec /usr/sbin/sshd -D"]
+        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /tmp/authorized_keys ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && chown -R root:root ~/.ssh && echo 'GatewayPorts yes' >> /etc/ssh/sshd_config && ssh-keygen -A && exec /usr/sbin/sshd -D"]
+        securityContext:
+          runAsUser: 0
+      volumes:
+      - name: ssh-key
+        secret:
+          secretName: bastion-ssh-keys
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bastion-6443
+spec:
+  selector:
+    app: bastion-host
+  ports:
+  - protocol: TCP
+    port: 6443
+    targetPort: 6443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bastion-22
+spec:
+  type: LoadBalancer
+  selector:
+      app: bastion-host
+  ports:
+  - protocol: TCP
+    port: 22
+    targetPort: 22
