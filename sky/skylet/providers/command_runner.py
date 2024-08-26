@@ -65,8 +65,8 @@ def docker_start_cmds(
         '--cap-add=SYS_ADMIN',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
+        '--entrypoint=/bin/bash',
         image,
-        'bash',
     ]
     return ' '.join(docker_run)
 
