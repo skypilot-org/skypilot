@@ -80,7 +80,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
         # Sometimes when the cluster is in the process of being created,
         # the `port` field in the runtime is None and we need to check for it.
         if (instance['desiredStatus'] == 'RUNNING' and
-                instance.get('runtime', {}).get('ports')):
+                instance.get('runtime') and
+                instance.get('runtime').get('ports')):
             for port in instance['runtime']['ports']:
                 if port['isIpPublic']:
                     if port['privatePort'] == 22:
