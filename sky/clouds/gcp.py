@@ -929,13 +929,12 @@ class GCP(clouds.Cloud):
     def _get_disk_specs(
             cls,
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
-        return {
-            'disk_tier': cls._get_disk_type(disk_tier),
-            'disk_iops': 20000 if disk_tier == resources_utils.DiskTier.ULTRA
-                         else None,
+        specs: Dict[str, Any] = {'disk_tier': cls._get_disk_type(disk_tier)}
+        if disk_tier == resources_utils.DiskTier.ULTRA:
             # Only pd-extreme supports custom iops.
             # see https://cloud.google.com/compute/docs/disks#disk-types
-        }
+            specs['disk_iops'] = 20000
+        return specs
 
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:

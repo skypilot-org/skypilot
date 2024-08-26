@@ -811,16 +811,16 @@ class AWS(clouds.Cloud):
             resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
-            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
-            'disk_iops': tier2iops[tier],
-            'disk_throughput': tier2iops[tier] // 16 if
-                               tier != resources_utils.DiskTier.ULTRA else None,
+            'disk_iops': tier2iops[tier]
+                         if cls._get_disk_type(tier) != 'standard' else None,
+            'disk_throughput': tier2iops[tier] // 16
+                               if cls._get_disk_type(tier) == 'gp3' else None,
             # Custom disk throughput is only available for gp3
             # see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-ebs.html
-            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
         }
 
     @classmethod
