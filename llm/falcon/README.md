@@ -50,7 +50,7 @@ sky launch -c falcon -s falcon.yaml --no-use-spot
 
 For reference, below is a loss graph you may expect to see, and the amount of time and the approximate cost of fine-tuning each of the models over 500 epochs (assuming a spot instance A100 GPU rate at $1.1 / hour and a A100-80GB rate of $1.61 / hour):
 
-<img width="524" alt="image" src="https://imgur.com/BDlHink.png">
+<img width="524" alt="image" src="https://i.imgur.com/BDlHink.png">
 
 1. `ybelkada/falcon-7b-sharded-bf16`: 2.5 to 3 hours using 1 A100 spot GPU; total cost ≈ $3.3.
 

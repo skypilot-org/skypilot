@@ -589,10 +589,17 @@ class Resources:
                                 'Cannot specify instance type'
                                 f' (got "{self.instance_type}") for TPU VM.')
                 if 'runtime_version' not in accelerator_args:
-                    if use_tpu_vm:
-                        accelerator_args['runtime_version'] = 'tpu-vm-base'
-                    else:
-                        accelerator_args['runtime_version'] = '2.12.0'
+
+                    def _get_default_runtime_version() -> str:
+                        if not use_tpu_vm:
+                            return '2.12.0'
+                        # TPU V5 requires a newer runtime version.
+                        if acc.startswith('tpu-v5'):
+                            return 'v2-alpha-tpuv5'
+                        return 'tpu-vm-base'
+
+                    accelerator_args['runtime_version'] = (
+                        _get_default_runtime_version())
                     logger.info(
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')

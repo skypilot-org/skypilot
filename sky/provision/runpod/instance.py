@@ -86,7 +86,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 disk_size=config.node_config['DiskSize'],
-                ports=config.ports_to_open_on_launch)
+                image_name=config.node_config['ImageId'],
+                ports=config.ports_to_open_on_launch,
+                public_key=config.node_config['PublicKey'])
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise

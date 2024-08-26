@@ -1,5 +1,6 @@
 """Storage and Store Classes for Sky Data."""
 import enum
+import hashlib
 import os
 import re
 import shlex
@@ -885,10 +886,8 @@ class Storage(object):
                 logger.info(f'Storage type {store_type} already exists under '
                             f'storage account {storage_account_name!r}.')
             else:
-                logger.info(f'Storage type {store_type} already exist.')
-            store = self.stores[store_type]
-            assert store is not None, self
-            return store
+                logger.info(f'Storage type {store_type} already exists.')
+            return self.stores[store_type]
 
         store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:
@@ -1973,8 +1972,15 @@ class AzureBlobStore(AbstractStore):
     """Represents the backend for Azure Blob Storage Container."""
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
-    DEFAULT_STORAGE_ACCOUNT_NAME = 'sky{region}{user_hash}'
     DEFAULT_RESOURCE_GROUP_NAME = 'sky{user_hash}'
+    # Unlike resource group names, which only need to be unique within the
+    # subscription, storage account names must be globally unique across all of
+    # Azure users. Hence, the storage account name includes the subscription
+    # hash as well to ensure its uniqueness.
+    DEFAULT_STORAGE_ACCOUNT_NAME = (
+        'sky{region_hash}{user_hash}{subscription_hash}')
+    _SUBSCRIPTION_HASH_LENGTH = 4
+    _REGION_HASH_LENGTH = 4
 
     class AzureBlobStoreMetadata(AbstractStore.StoreMetadata):
         """A pickle-able representation of Azure Blob Store.
@@ -2008,7 +2014,7 @@ class AzureBlobStore(AbstractStore):
                  name: str,
                  source: str,
                  storage_account_name: str = '',
-                 region: Optional[str] = None,
+                 region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         self.storage_client: 'storage.Client'
@@ -2154,7 +2160,7 @@ class AzureBlobStore(AbstractStore):
         """Initializes the AZ Container object on the cloud.
 
         Initialization involves fetching container if exists, or creating it if
-        it does not. Also, it checks for the existance of the storage account
+        it does not. Also, it checks for the existence of the storage account
         if provided by the user and the resource group is inferred from it.
         If not provided, both are created with a default naming conventions.
 
@@ -2187,6 +2193,41 @@ class AzureBlobStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
+    @staticmethod
+    def get_default_storage_account_name(region: Optional[str]) -> str:
+        """Generates a unique default storage account name.
+
+        The subscription ID is included to avoid conflicts when user switches
+        subscriptions. The length of region_hash, user_hash, and
+        subscription_hash are adjusted to ensure the storage account name
+        adheres to the 24-character limit, as some region names can be very
+        long. Using a 4-character hash for the region helps keep the name
+        concise and prevents potential conflicts.
+        Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
+
+        Args:
+            region: Name of the region to create the storage account/container.
+
+        Returns:
+            Name of the default storage account.
+        """
+        assert region is not None
+        subscription_id = azure.get_subscription_id()
+        subscription_hash_obj = hashlib.md5(subscription_id.encode('utf-8'))
+        subscription_hash = subscription_hash_obj.hexdigest(
+        )[:AzureBlobStore._SUBSCRIPTION_HASH_LENGTH]
+        region_hash_obj = hashlib.md5(region.encode('utf-8'))
+        region_hash = region_hash_obj.hexdigest()[:AzureBlobStore.
+                                                  _REGION_HASH_LENGTH]
+
+        storage_account_name = (
+            AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
+                region_hash=region_hash,
+                user_hash=common_utils.get_user_hash(),
+                subscription_hash=subscription_hash))
+
+        return storage_account_name
+
     def _get_storage_account_and_resource_group(
             self) -> Tuple[str, Optional[str]]:
         """Get storage account and resource group to be used for AzureBlobStore
@@ -2217,7 +2258,7 @@ class AzureBlobStore(AbstractStore):
 
         Raises:
             StorageBucketCreateError: If storage account attempted to be
-                created already exists
+                created already exists.
             NonExistentStorageAccountError: When storage account provided
                 either through config.yaml or local db does not exist under
                 user's subscription ID.
@@ -2270,10 +2311,8 @@ class AzureBlobStore(AbstractStore):
             else:
                 # If storage account name is not provided from config, then
                 # use default resource group and storage account names.
-                storage_account_name = (
-                    self.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                        region=self.region,
-                        user_hash=common_utils.get_user_hash()))
+                storage_account_name = self.get_default_storage_account_name(
+                    self.region)
                 resource_group_name = (self.DEFAULT_RESOURCE_GROUP_NAME.format(
                     user_hash=common_utils.get_user_hash()))
                 try:

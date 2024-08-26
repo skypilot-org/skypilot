@@ -48,6 +48,7 @@ from sky import global_user_state
 from sky import jobs
 from sky import serve
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -1103,9 +1104,8 @@ def test_azure_storage_mounts_with_stop():
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
     default_region = 'eastus'
-    storage_account_name = (
-        storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-            region=default_region, user_hash=common_utils.get_user_hash()))
+    storage_account_name = (storage_lib.AzureBlobStore.
+                            get_default_storage_account_name(default_region))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     template_str = pathlib.Path(
@@ -2990,8 +2990,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region = 'westus2'
         region_flag = f' --region {region}'
         storage_account_name = (
-            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=region, user_hash=common_utils.get_user_hash()))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(region))
         region_cmd = TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
@@ -3952,7 +3951,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
-    name = _get_service_name() + mode
+    name = f'{_get_service_name()}-{mode}'
 
     wait_until_no_pending = (
         f's=$(sky serve status {name}); echo "$s"; '
@@ -3982,7 +3981,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _check_service_version(name, "1"),
         ]
     test = Test(
-        'test-skyserve-new-autoscaler-update',
+        f'test-skyserve-new-autoscaler-update-{mode}',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
@@ -4287,9 +4286,8 @@ class TestStorageWithCredentials:
         if store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage container delete '
@@ -4324,11 +4322,9 @@ class TestStorageWithCredentials:
             config_storage_account = skypilot_config.get_nested(
                 ('azure', 'storage_account'), None)
             storage_account_name = config_storage_account if (
-                config_storage_account is not None
-            ) else (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                config_storage_account is not None) else (
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
@@ -4390,9 +4386,8 @@ class TestStorageWithCredentials:
             if storage_account_name is None:
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
-                    format(region=default_region,
-                           user_hash=common_utils.get_user_hash()))
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4418,9 +4413,8 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.AZURE:
             default_region = 'eastus'
             storage_account_name = (
-                storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                    region=default_region,
-                    user_hash=common_utils.get_user_hash()))
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -4625,8 +4619,8 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using gsutil
         default_region = 'eastus'
         storage_account_name = (
-            storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.format(
-                region=default_region, user_hash=common_utils.get_user_hash()))
+            storage_lib.AzureBlobStore.get_default_storage_account_name(
+                default_region))
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
@@ -4863,9 +4857,8 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('https'):
                 default_region = 'eastus'
                 storage_account_name = (
-                    storage_lib.AzureBlobStore.DEFAULT_STORAGE_ACCOUNT_NAME.
-                    format(region=default_region,
-                           user_hash=common_utils.get_user_hash()))
+                    storage_lib.AzureBlobStore.get_default_storage_account_name(
+                        default_region))
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'

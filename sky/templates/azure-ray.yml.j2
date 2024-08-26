@@ -11,12 +11,18 @@ docker:
   container_name: {{docker_container_name}}
   run_options:
     - --ulimit nofile=1048576:1048576
-    {%- if custom_resources is not none %}
-      --gpus all
-    {%- endif %}
     {%- for run_option in docker_run_options %}
     - {{run_option}}
     {%- endfor %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
 {%- endif %}
 
 provider:
@@ -28,15 +34,6 @@ provider:
   # instead of the cluster_name. This ensures that ray creates new instances
   # for different cluster_name.
   resource_group: {{resource_group}}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True

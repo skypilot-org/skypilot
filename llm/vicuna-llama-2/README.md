@@ -1,6 +1,6 @@
 # Train Your Own Vicuna on Llama-2
 
-![Vicuna-Llama-2](https://imgur.com/McZWg6z.gif "Result model in action, trained using this guide. From the SkyPilot and Vicuna teams.")
+![Vicuna-Llama-2](https://i.imgur.com/McZWg6z.gif "Result model in action, trained using this guide. From the SkyPilot and Vicuna teams.")
 
 Meta released [Llama 2](https://ai.meta.com/llama/) two weeks ago and has made a big wave in the AI community. In our opinion, its biggest impact is that the model is now released under a [permissive license](https://github.com/facebookresearch/llama/blob/main/LICENSE) that **allows the model weights to be used commercially**[^1]. This differs from Llama 1 which cannot be used commercially.
 
@@ -106,7 +106,7 @@ sky launch --no-use-spot ...
 
 
 <p align="center">
-    <img src="https://imgur.com/yVIXfQo.gif" width="100%" alt="Optimizer"/>
+    <img src="https://i.imgur.com/yVIXfQo.gif" width="100%" alt="Optimizer"/>
 </p>
 
 **Optional**: Try out the training for the 13B model:
@@ -139,7 +139,7 @@ sky launch -c serve serve.yaml --env MODEL_CKPT=<your-model-checkpoint>/chatbot/
 ```
 In [serve.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna-llama-2/serve.yaml), we specified launching a Gradio server that serves the model checkpoint at `<your-model-checkpoint>/chatbot/7b`.
 
-![Vicuna-Llama-2](https://imgur.com/McZWg6z.gif "Serving the resulting model with Gradio.")
+![Vicuna-Llama-2](https://i.imgur.com/McZWg6z.gif "Serving the resulting model with Gradio.")
 
 
 > **Tip**: You can also switch to a cheaper accelerator, such as L4, to save costs, by adding `--gpus L4` to the above command.
