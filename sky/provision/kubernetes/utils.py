@@ -75,6 +75,9 @@ IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY = (
 KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS = [
     AUTODOWN_ANNOTATIONS_KEY, IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY
 ]
+ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
+                                       '{namespace} while trying to {action} '
+                                       'Annotations {annotations}.')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1778,15 +1781,15 @@ def filter_pods(namespace: str,
     return {pod.metadata.name: pod for pod in pods}
 
 
-def _remove_pod_annotations(pod: V1Pod, annotation_key: str,
+def _remove_pod_annotations(pod: V1Pod, annotations_key: str,
                             namespace: str) -> None:
-    """Removes specified Annotation from a Kubernetes pod."""
+    """Removes specified Annotations from a Kubernetes pod."""
     try:
         # Remove the specified annotations
         if pod.metadata.annotations:
-            if annotation_key in pod.metadata.annotations:
+            if annotations_key in pod.metadata.annotations:
                 # Patch the pod with the updated metadata
-                body = {'metadata': {'annotations': {annotation_key: None}}}
+                body = {'metadata': {'annotations': {annotations_key: None}}}
                 kubernetes.core_api().patch_namespaced_pod(
                     name=pod.metadata.name,
                     namespace=namespace,
@@ -1795,19 +1798,23 @@ def _remove_pod_annotations(pod: V1Pod, annotation_key: str,
 
     except kubernetes.api_exception() as e:
         if e.status == 404:
-            logger.warning(f'Pod {pod.metadata.name} not found in namespace '
-                           f'{namespace} while trying to remove Annotations '
-                           f'{annotation_key}.')
+            logger.warning(
+                ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG.format(
+                    pod_name=pod.metadata.name,
+                    namespace=namespace,
+                    action='remove',
+                    annotations=annotations_key))
         else:
-            raise
+            with ux_utils.print_exception_no_traceback():
+                raise
 
 
-def _add_pod_annotations(pod: V1Pod, annotation: Dict[str, str],
+def _add_pod_annotations(pod: V1Pod, annotations: Dict[str, str],
                          namespace: str) -> None:
     """Adds specified Annotations on a Kubernetes pod."""
     try:
         # Patch the pod with the updated metadata
-        body = {'metadata': {'annotations': annotation}}
+        body = {'metadata': {'annotations': annotations}}
         kubernetes.core_api().patch_namespaced_pod(
             name=pod.metadata.name,
             namespace=namespace,
@@ -1816,42 +1823,49 @@ def _add_pod_annotations(pod: V1Pod, annotation: Dict[str, str],
 
     except kubernetes.api_exception() as e:
         if e.status == 404:
-            logger.warning(f'Pod {pod.metadata.name} not found in namespace '
-                           f'{namespace} while trying to remove Annotations '
-                           f'{annotation}.')
+            logger.warning(
+                ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG.format(
+                    pod_name=pod.metadata.name,
+                    namespace=namespace,
+                    action='add',
+                    annotations=annotations))
         else:
-            raise
+            with ux_utils.print_exception_no_traceback():
+                raise
 
 
 def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
                              idle_minutes_to_autostop: Optional[int],
                              down: bool = False) -> None:
-    """Adds or removes Annotations of autodown on Kubernetes pods. """
-    annotation_keys = KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS
+    """Adds or removes Annotations of autodown on Kubernetes pods."""
+    annotations_keys = KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
     provider_config = ray_config['provider']
     namespace = get_namespace(provider_config)
-    # Pods are already in 'Running' status
     running_pods = filter_pods(namespace, tags)
+
     for _, pod in running_pods.items():
         if down:
-            for annotation_key in annotation_keys:
-                annotation: Dict[str, str] = {}
-                if annotation_key == IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY:
-                    annotation.update(
-                        {annotation_key: str(idle_minutes_to_autostop)})
+            for annotations_key in annotations_keys:
+                annotations: Dict[str, str] = {}
+                if annotations_key == IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY:
+                    annotations.update(
+                        {annotations_key: str(idle_minutes_to_autostop)})
                 else:  # annotation_key == AUTODOWN_ANNOTATIONS_KEY
-                    annotation.update({annotation_key: str(True)})
+                    annotations.update({annotations_key: str(True)})
                 _add_pod_annotations(pod=pod,
-                                     annotation=annotation,
+                                     annotations=annotations,
                                      namespace=namespace)
 
+        # If idle_minutes_to_autostop is negative, it indicates a request to
+        # cancel autostop using the --cancel flag with the `sky autostop`
+        # command.
         elif (idle_minutes_to_autostop is not None and
               idle_minutes_to_autostop < 0):
-            for annotation_key in annotation_keys:
+            for annotations_key in annotations_keys:
                 _remove_pod_annotations(pod=pod,
-                                        annotation_key=annotation_key,
+                                        annotations_key=annotations_key,
                                         namespace=namespace)
