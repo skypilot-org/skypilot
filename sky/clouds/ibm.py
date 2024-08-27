@@ -2,7 +2,7 @@
 import json
 import os
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -247,7 +247,7 @@ class IBM(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='ibm')

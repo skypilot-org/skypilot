@@ -5,7 +5,7 @@ import hashlib
 import os
 import time
 import typing
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 import requests
@@ -478,7 +478,7 @@ def get_instance_type_for_cpus_mem_impl(
 def get_accelerators_from_instance_type_impl(
     df: 'pd.DataFrame',
     instance_type: str,
-) -> Optional[Dict[str, int]]:
+) -> Optional[Dict[str, Union[int, float]]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
         with ux_utils.print_exception_no_traceback():
@@ -487,7 +487,9 @@ def get_accelerators_from_instance_type_impl(
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
         return None
-    return {acc_name: int(acc_count)}
+    # Should be guaranteed by the catalog fetcher.
+    assert isinstance(acc_count, (int, float)), acc_count
+    return {acc_name: acc_count}
 
 
 def get_instance_type_for_accelerator_impl(

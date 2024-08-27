@@ -2,7 +2,7 @@
 import json
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
@@ -155,7 +155,7 @@ class Fluidstack(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='fluidstack')
 
