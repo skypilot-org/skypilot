@@ -148,7 +148,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :align: center
     :alt: AWS Add Policy
 
-8. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
+8. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy. Note that enabling S3 access is required to use :ref:`managed-jobs` with `workdir` or `file_mounts` for now.
 
 .. image:: ../../images/screenshots/aws/aws-s3-policy.png
     :width: 80%

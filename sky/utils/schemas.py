@@ -706,6 +706,15 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
+                'specific_reservations': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'disk_encrypted': {
                     'type': 'boolean',
                 },

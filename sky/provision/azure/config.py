@@ -3,6 +3,7 @@
 Creates the resource group and deploys the configuration template to Azure for
 a cluster to be launched.
 """
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -16,6 +17,7 @@ from sky.provision import constants
 
 logger = logging.getLogger(__name__)
 
+UNIQUE_ID_LEN = 4
 _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT = 480  # 8 minutes
 
 
@@ -111,10 +113,12 @@ def bootstrap_instances(
 
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
+    hasher = hashlib.md5(provider_config['resource_group'].encode('utf-8'))
+    unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
-        random.seed(cluster_name_on_cloud)
+        random.seed(unique_id)
         subnet_mask = f'10.{random.randint(1, 254)}.0.0/16'
     logger.info(f'Using subnet mask: {subnet_mask}')
 
@@ -127,10 +131,10 @@ def bootstrap_instances(
                     'value': subnet_mask
                 },
                 'clusterId': {
-                    # We use the cluster name as the unique ID for the cluster,
-                    # as we have already appended the user hash to the cluster
-                    # name.
-                    'value': cluster_name_on_cloud
+                    # We use the cluster name + resource group hash as the
+                    # unique ID for the cluster, as we need to make sure that
+                    # the deployments have unique names during failover.
+                    'value': f'{cluster_name_on_cloud}-{unique_id}'
                 },
                 'location': {
                     'value': params['location']

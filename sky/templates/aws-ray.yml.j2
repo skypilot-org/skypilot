@@ -11,9 +11,6 @@ docker:
   container_name: {{docker_container_name}}
   run_options:
     - --ulimit nofile=1048576:1048576
-    {%- if custom_resources is not none %}
-      --gpus all
-    {%- endif %}
     {%- for run_option in docker_run_options %}
     - {{run_option}}
     {%- endfor %}
@@ -87,6 +84,12 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      CapacityReservationSpecification:
+        CapacityReservationPreference: open
+        {% if specific_reservations %}
+        CapacityReservationTarget:
+          CapacityReservationId: {{specific_reservations}}
+        {% endif %}
       # Use cloud init in UserData to set up the authorized_keys to get
       # around the number of keys limit and permission issues with
       # ec2.describe_key_pairs.
