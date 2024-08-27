@@ -126,6 +126,7 @@ def status(
             continue
         record['accelerators'] = handle.launched_resources.accelerators
         record['cloud'] = str(handle.launched_resources.cloud)
+        record['num_nodes'] = handle.launched_nodes
     return clusters
 
 
