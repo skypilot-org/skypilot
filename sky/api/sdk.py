@@ -47,7 +47,7 @@ logger = sky_logging.init_logger(__name__)
 @api_common.check_health
 def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
-    response = requests.get(f'{api_common.get_server_url()}/check',
+    response = requests.post(f'{api_common.get_server_url()}/check',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -555,7 +555,7 @@ def stream_and_get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/stream?request_id={request_id}',
         # 5 seconds to connect, no read timeout
-        timeout=(5, None),
+        timeout=5,
         stream=True)
 
     if response.status_code != 200:

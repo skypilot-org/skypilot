@@ -93,7 +93,7 @@ async def startup():
                                           func=event)
 
 
-@app.get('/check')
+@app.post('/check')
 async def check(request: fastapi.Request, check_body: payloads.CheckBody):
     """Check enabled clouds."""
     executor.start_background_request(
