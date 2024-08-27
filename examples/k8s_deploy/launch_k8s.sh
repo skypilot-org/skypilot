@@ -36,3 +36,4 @@ awk '
 mv "$TEMP_FILE" "$KUBECONFIG_FILE"
 
 echo "Updated kubeconfig file successfully."
+echo "You can now access your k8s cluster using kubectl."

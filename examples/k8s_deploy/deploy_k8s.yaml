@@ -84,6 +84,7 @@ run: |
   wait_for_gpu_operator_installation
 
   # Create RuntimeClass
+  sleep 5
   echo "Creating RuntimeClass"
   kubectl apply -f - <<EOF
   apiVersion: node.k8s.io/v1
