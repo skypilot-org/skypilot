@@ -67,7 +67,7 @@ def realtime_gpu_availability(name_filter: Optional[str] = None,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
     )
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/realtime_gpu_availability',
         json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
@@ -93,7 +93,7 @@ def list_accelerators(gpus_only: bool = True,
         require_price=require_price,
         case_sensitive=case_sensitive,
     )
-    response = requests.get(f'{api_common.get_server_url()}/list_accelerators',
+    response = requests.post(f'{api_common.get_server_url()}/list_accelerators',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -113,7 +113,7 @@ def list_accelerator_counts(
         quantity_filter=quantity_filter,
         clouds=clouds,
     )
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/list_accelerator_counts',
         json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
@@ -127,7 +127,7 @@ def optimize(dag: 'sky.Dag') -> str:
         dag_str = f.read()
 
     body = payloads.OptimizeBody(dag=dag_str)
-    response = requests.get(f'{api_common.get_server_url()}/optimize',
+    response = requests.post(f'{api_common.get_server_url()}/optimize',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -284,7 +284,7 @@ def download_logs(cluster_name: str, job_ids: Optional[int]) -> str:
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.get(f'{api_common.get_server_url()}/download_logs',
+    response = requests.post(f'{api_common.get_server_url()}/download_logs',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -419,7 +419,7 @@ def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.get(f'{api_common.get_server_url()}/job_status',
+    response = requests.post(f'{api_common.get_server_url()}/job_status',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
@@ -476,7 +476,7 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
         cluster_name=cluster_name,
         port=port,
     )
-    response = requests.get(f'{api_common.get_server_url()}/endpoints',
+    response = requests.post(f'{api_common.get_server_url()}/endpoints',
                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 

@@ -116,7 +116,7 @@ async def enabled_clouds(request: fastapi.Request) -> None:
     )
 
 
-@app.get('/realtime_gpu_availability')
+@app.post('/realtime_gpu_availability')
 async def realtime_gpu_availability(
     request: fastapi.Request,
     realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
@@ -132,7 +132,7 @@ async def realtime_gpu_availability(
     )
 
 
-@app.get('/list_accelerators')
+@app.post('/list_accelerators')
 async def list_accelerators(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
@@ -150,7 +150,7 @@ async def list_accelerators(
     )
 
 
-@app.get('/list_accelerator_counts')
+@app.post('/list_accelerator_counts')
 async def list_accelerator_counts(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
@@ -165,7 +165,7 @@ async def list_accelerator_counts(
     )
 
 
-@app.get('/optimize')
+@app.post('/optimize')
 async def optimize(optimize_body: payloads.OptimizeBody,
                    request: fastapi.Request):
     with tempfile.NamedTemporaryFile(mode='w') as f:
@@ -313,7 +313,7 @@ async def status(
     )
 
 
-@app.get('/endpoints')
+@app.post('/endpoints')
 async def endpoints(request: fastapi.Request,
                     endpoint_body: payloads.EndpointBody) -> None:
     executor.start_background_request(
@@ -383,7 +383,7 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     )
 
 
-@app.get('/job_status')
+@app.post('/job_status')
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody):
     """Get the status of a job."""
