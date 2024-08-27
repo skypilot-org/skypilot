@@ -487,9 +487,11 @@ def get_accelerators_from_instance_type_impl(
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
         return None
-    # Should be guaranteed by the catalog fetcher.
-    assert isinstance(acc_count, (int, float)), acc_count
-    return {acc_name: acc_count}
+    def _convert(value):
+        if int(value) == value:
+            return int(value)
+        return float(value)
+    return {acc_name: _convert(acc_count)}
 
 
 def get_instance_type_for_accelerator_impl(
