@@ -163,9 +163,12 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 
 .. note::
 
-  When used as a runtime environment, the container's entrypoint will be
-  override by :code:`/bin/bash`. If you need to run a specific command, you can
-  do so in the :code:`setup` and :code:`run` sections of the task YAML file.
+  Using a container with a customized entrypoint as a runtime environment is
+  supported, with the container's entrypoint being overridden by :code:`/bin/bash`.
+  Specific commands can be executed in the :code:`setup` and :code:`run` sections
+  of the task YAML file. However, this approach is not compatible with RunPod due
+  to limitations in the RunPod API, so ensure that you choose a container with a
+  default entrypoint (i.e. :code:`/bin/bash`).
 
 Private Registries
 ^^^^^^^^^^^^^^^^^^
