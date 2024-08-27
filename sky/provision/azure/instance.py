@@ -837,9 +837,8 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
 
     for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
         try:
-            delete_network_security_group(
-                resource_group_name=resource_group,
-                network_security_group_name=nsg_name)
+            delete_network_security_group(resource_group_name=resource_group,
+                                          network_security_group_name=nsg_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nsg: {}'.format(e))
 
