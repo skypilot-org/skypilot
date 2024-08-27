@@ -487,10 +487,12 @@ def get_accelerators_from_instance_type_impl(
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
         return None
+
     def _convert(value):
         if int(value) == value:
             return int(value)
         return float(value)
+
     return {acc_name: _convert(acc_count)}
 
 
