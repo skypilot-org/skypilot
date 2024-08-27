@@ -2257,7 +2257,7 @@ def autostop(
             'Only one of --idle-minutes and --cancel should be specified. '
             f'cancel: {cancel}, idle_minutes: {idle_minutes}')
     if cancel:
-        idle_minutes = constants.IDLE_MINUTES_TO_AUTOSTOP_FOR_CANCEL
+        idle_minutes = -1
     elif idle_minutes is None:
         idle_minutes = 5
     _down_or_stop_clusters(clusters,
@@ -2704,8 +2704,7 @@ def _down_or_stop_clusters(
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
-        is_cancel = (idle_minutes_to_autostop ==
-                     constants.IDLE_MINUTES_TO_AUTOSTOP_FOR_CANCEL)
+        is_cancel = idle_minutes_to_autostop < 0
         verb = 'Cancelling' if is_cancel else 'Scheduling'
         option_str = 'down' if down else 'stop'
         if is_cancel:
