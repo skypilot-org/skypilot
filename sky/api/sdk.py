@@ -187,7 +187,7 @@ def launch(
         prompt = None
         if cluster_status is None:
             prompt = (
-                f'Launching a new cluster{cluster_name!r}. '
+                f'Launching a new cluster {cluster_name!r}. '
                 # '{clone_source_str}. '
                 'Proceed?')
         elif cluster_status == status_lib.ClusterStatus.STOPPED:
