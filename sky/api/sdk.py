@@ -555,7 +555,7 @@ def stream_and_get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/stream?request_id={request_id}',
         # 5 seconds to connect, no read timeout
-        timeout=5,
+        timeout=(5, None),
         stream=True)
 
     if response.status_code != 200:
