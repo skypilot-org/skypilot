@@ -62,6 +62,8 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
             # Force color to be enabled.
             os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()
+            from sky import skypilot_config
+            logger.debug(f'skypilot_config: {skypilot_config._dict}')
             return_value = func(*args, **kwargs)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():

@@ -44,6 +44,7 @@ def reload():
     # set, it doesn't get updated. So we need to reload it here.
     # pylint: disable=import-outside-toplevel
     from sky.utils import controller_utils
+    from sky import skypilot_config
     global SKY_SERVE_CONTROLLER_NAME
     global JOB_CONTROLLER_NAME
     global LEGACY_JOB_CONTROLLER_NAME
@@ -54,6 +55,7 @@ def reload():
     LEGACY_JOB_CONTROLLER_NAME = (
         f'sky-spot-controller-{common_utils.get_user_hash()}')
     importlib.reload(controller_utils)
+    importlib.reload(skypilot_config)
 
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment
