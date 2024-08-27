@@ -5,7 +5,6 @@ History:
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
 """
-import json
 import logging
 import os
 import typing
@@ -196,10 +195,8 @@ class OCI(clouds.Cloud):
 
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         image_str = self._get_image_id(resources.image_id, region.name,
                                        resources.instance_type)

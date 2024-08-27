@@ -1,5 +1,4 @@
 """Lambda Cloud."""
-import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -165,10 +164,8 @@ class Lambda(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': resources.instance_type,
