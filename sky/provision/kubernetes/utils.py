@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 import jinja2
-from kubernetes.client import V1Pod
 import yaml
 
 import sky
@@ -78,6 +77,8 @@ KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS = [
 ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
                                        '{namespace} while trying to {action} '
                                        'Annotations {annotations}.')
+
+V1Pod = Any
 
 logger = sky_logging.init_logger(__name__)
 
