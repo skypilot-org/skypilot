@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from sky import clouds as cloud_lib
 from sky.clouds import Azure
 from sky.clouds.service_catalog import common
+from sky.clouds.service_catalog import constants
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -47,9 +48,8 @@ _DEFAULT_MEMORY_CPU_RATIO = 4
 # TODO(zhwu,tian): support fractional GPUs, which can be done on
 # kubernetes as well.
 # Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
-_FILTERED_A10_INSTANCE_TYPES = [
-    f'Standard_NV{vcpu}ads_A10_v5' for vcpu in [6, 12, 18]
-]
+_FILTERED_A10_INSTANCE_TYPES = list(
+    constants.AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS.keys())
 
 
 def instance_type_exists(instance_type: str) -> bool:
