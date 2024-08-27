@@ -794,11 +794,6 @@ class AWS(clouds.Cloud):
         if disk_tier == resources_utils.DiskTier.LOW:
             return 'standard'
         elif disk_tier == resources_utils.DiskTier.ULTRA:
-            logger.warning(
-                'Using disk_tier=ultra on AWS will utilize io2 Block Express, '
-                'which can lead to significant higher costs (~$1.8/h). '
-                'For more information, see: https://aws.amazon.com/ebs/pricing.'
-            )
             return 'io2'
         return 'gp3'
 

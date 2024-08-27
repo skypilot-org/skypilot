@@ -917,12 +917,6 @@ class GCP(clouds.Cloud):
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
-        if tier == resources_utils.DiskTier.ULTRA:
-            logger.warning(
-                'Using disk_tier=ultra on GCP will utilize extreme persistent disks, '
-                'which can lead to significant higher costs (~$2.2/h). '
-                'For more information, see: https://cloud.google.com/compute/disks-image-pricing#disk.'
-            )
         return tier2name[tier]
 
     @classmethod
