@@ -1,7 +1,6 @@
 """SkyServe core APIs."""
 import re
 import tempfile
-import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
@@ -259,23 +258,9 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-
-            def _get_endpoint() -> str:
-                start_time = time.time()
-                while True:
-                    lb_endpoint = backend_utils.get_endpoints(
-                        controller_handle.cluster_name,
-                        lb_port,
-                        skip_status_check=True).get(lb_port)
-                    if lb_endpoint is not None:
-                        return lb_endpoint
-                    if (time.time() - start_time > serve_constants.
-                            SERVICE_CONTROLLER_INGRESS_TIMEOUT_SECONDS):
-                        raise RuntimeError(
-                            'Failed to get ingress endpoint for controller.')
-                    time.sleep(1)
-
-            endpoint = _get_endpoint()
+            endpoint = backend_utils.get_endpoints(
+                controller_handle.cluster_name, lb_port,
+                skip_status_check=True).get(lb_port)
             assert endpoint is not None, 'Did not get endpoint for controller.'
 
         sky_logging.print(

@@ -15,9 +15,6 @@ SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 # Time to wait in seconds for service to register on the controller.
 SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 
-# Time to wait in seconds for service controller to open the ingress port.
-SERVICE_CONTROLLER_INGRESS_TIMEOUT_SECONDS = 30
-
 # The time interval in seconds for load balancer to sync with controller. Every
 # time the load balancer syncs with controller, it will update all available
 # replica ips for each service, also send the number of requests in last query
