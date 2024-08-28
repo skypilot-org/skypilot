@@ -15,7 +15,6 @@ import numpy as np
 import requests
 
 from sky.adaptors import common as adaptors_common
-from sky.clouds.service_catalog import constants
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -93,6 +92,14 @@ def get_regions() -> List[str]:
 # Azure secretly deprecated the M60 family which is still returned by its API.
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
+
+# Azure has those fractional A10 instance types, which still shows has 1 A10 GPU
+# in the API response. We manually changing the number of GPUs to a float here.
+# Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
+# TODO(zhwu,tian): Support fractional GPUs on k8s as well.
+AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS = {
+    f'Standard_NV{vcpu}ads_A10_v5': vcpu / 24 for vcpu in [6, 12, 18]
+}
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
@@ -267,7 +274,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     )
 
     def _upd_a10_gpu_count(row):
-        new_gpu_cnt = constants.AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS.get(
+        new_gpu_cnt = AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS.get(
             row['InstanceType'])
         if new_gpu_cnt is not None:
             return new_gpu_cnt

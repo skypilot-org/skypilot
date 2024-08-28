@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Tuple, Union
 from sky import clouds as cloud_lib
 from sky.clouds import Azure
 from sky.clouds.service_catalog import common
-from sky.clouds.service_catalog import constants
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -42,14 +41,6 @@ _DEFAULT_INSTANCE_FAMILY = [
 ]
 _DEFAULT_NUM_VCPUS = 8
 _DEFAULT_MEMORY_CPU_RATIO = 4
-
-# Some A10 instance types only contains a fractional of GPU. We temporarily
-# filter them out here to avoid using it as a whole A10 GPU.
-# TODO(zhwu,tian): support fractional GPUs, which can be done on
-# kubernetes as well.
-# Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
-_FILTERED_A10_INSTANCE_TYPES = list(
-    constants.AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS.keys())
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -148,11 +139,7 @@ def get_instance_type_for_accelerator(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
 
-    # Filter out instance types that only contain a fractional of GPU.
-    df_filtered = _df.loc[~_df['InstanceType'].isin(_FILTERED_A10_INSTANCE_TYPES
-                                                   )]
-
-    return common.get_instance_type_for_accelerator_impl(df=df_filtered,
+    return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
                                                          cpus=cpus,
