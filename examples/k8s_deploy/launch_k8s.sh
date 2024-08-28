@@ -45,6 +45,12 @@ rsync -av ${CLUSTER_NAME}:'~/.kube/config' ~/.kube/config
 
 KUBECONFIG_FILE="$HOME/.kube/config"
 
+# Back up the original kubeconfig file if it exists
+if [[ -f "$KUBECONFIG_FILE" ]]; then
+  echo "Backing up kubeconfig file to ${KUBECONFIG_FILE}.bak"
+  cp "$KUBECONFIG_FILE" "${KUBECONFIG_FILE}.bak"
+fi
+
 # Temporary file to hold the modified kubeconfig
 TEMP_FILE=$(mktemp)
 
@@ -66,4 +72,13 @@ awk '
 mv "$TEMP_FILE" "$KUBECONFIG_FILE"
 
 echo "Updated kubeconfig file successfully."
-echo "You can now access your k8s cluster using kubectl and skypilot."
+
+sleep 5 # Wait for the cluster to be ready
+sky check kubernetes
+
+set +x
+echo -e "\033[1m===== Kubernetes cluster deployment complete =====\033[0m"
+echo -e "You can now access your k8s cluster with kubectl and skypilot.\n"
+echo -e "• View the list of available GPUs on Kubernetes: \033[1msky show-gpus --cloud kubernetes\033[0m"
+echo -e "• To launch a SkyPilot job running nvidia-smi on this cluster: \033[1msky launch --cloud kubernetes --gpus <GPU> -- nvidia-smi\033[0m"
+
