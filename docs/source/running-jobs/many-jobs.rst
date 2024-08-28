@@ -254,7 +254,7 @@ Then, submit all jobs by iterating over the config files and calling `sky jobs l
   done
 
 
-All job statuses can be checked with the following command.
+Job statuses can be checked via `sky jobs queue`:
 
 .. code-block:: console
 
