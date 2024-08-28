@@ -4,7 +4,8 @@ set -ex
 # Read cluster name from environment variable if it exists, else use default value
 CLUSTER_NAME=${CLUSTER_NAME:-k8s}
 
-#sky launch -y -c ${CLUSTER_NAME} deploy_k8s.yaml
+# Deploy the k8s cluster
+sky launch -y -c ${CLUSTER_NAME} deploy_k8s.yaml
 
 # Get the endpoint of the k8s cluster
 # Attempt to get the primary endpoint and handle any errors

@@ -18,7 +18,7 @@ pip install -e .[lambda]
 
 ## Instructions
 
-1. Edit `deploy_k8s.yaml` to set the desired number of workers and GPUs.
+1. Edit `deploy_k8s.yaml` to set the desired number of workers and GPUs per node.
 ```yaml
 resources:
   cloud: lambda
@@ -29,11 +29,10 @@ num_nodes: 2
 
 2. Use the convenience script to launch the cluster:
 ```bash
-chmod +x launch_k8s.sh
 ./launch_k8s.sh
 ```
 
-SkyPilot will provision the k8s cluster, fetch the kubeconfig, and set up your local kubectl to connect to the cluster.
+SkyPilot will do all the heavy lifting for you: provision lambda VMs, deploy the k8s cluster, fetch the kubeconfig, and set up your local kubectl to connect to the cluster.
 
 3. You should now be able to run `kubectl` and `sky` commands to interact with the cluster:
 ```console
