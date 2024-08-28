@@ -11,7 +11,7 @@ This guide shows a typical workflow for running many jobs with SkyPilot.
 Develop a YAML for One Job
 -----------------------------------
 
-Before scaling up to many jobs, develeoping and debugging a SkyPilot YAML for a single job can save a lot of time by avoiding debugging many jobs at once.
+Before scaling up to many jobs, develop a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
 
 We use the same example of AI model training as in :ref:`Tutorial: DNN Training <dnn-training>`.
 
