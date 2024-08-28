@@ -54,9 +54,44 @@ NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
 150-230-191-161  A10       1           1
 ```
 
-To launch a job, run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`. Refer to [SkyPilot quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more information.
+## Run AI workloads on your Kubernetes cluster with SkyPilot
 
-4. To tear down the cluster, run:
+### Development clusters
+To launch a [GPU enabled development cluster](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html), run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`. 
+
+SkyPilot will setup SSH config for you.
+* [SSH access](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#ssh): `ssh mycluster`
+* [VSCode remote development](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/"`
+
+
+### Jobs
+To run jobs, use `sky jobs launch --gpus A10:1 --cloud kubernetes -- 'nvidia-smi; sleep 600'`
+
+You can submit multiple jobs and let SkyPilot handle queuing if the cluster runs out of resources:
+```bash
+$ sky jobs queue
+Fetching managed job statuses...
+Managed jobs
+In progress tasks: 2 RUNNING, 1 STARTING
+ID  TASK  NAME      RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+3   -     finetune  1x[A10:1]  24 secs ago  24s            -             0            STARTING
+2   -     qlora     1x[A10:1]  2 min ago    2m 18s         12s           0            RUNNING
+1   -     sky-cmd   1x[A10:1]  4 mins ago   4m 27s         3m 12s        0            RUNNING
+```
+
+You can also observe the pods created by SkyPilot with `kubectl get pods`:
+```bash
+$ kubectl get pods
+NAME                                     READY   STATUS    RESTARTS   AGE
+qlora-2-2ea4-head                        1/1     Running   0          5m31s
+sky-cmd-1-2ea4-head                      1/1     Running   0          8m36s
+sky-jobs-controller-2ea485ea-2ea4-head   1/1     Running   0          10m
+```
+
+Refer to [SkyPilot docs](https://skypilot.readthedocs.io/) for more.
+
+## Teardown
+To teardown the Kubernetes cluster, run:
 ```bash
 sky down k8s
 ```
