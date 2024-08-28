@@ -6,7 +6,7 @@ Guide: Run Many Jobs
 
 SkyPilot allows you to easily **run many jobs in parallel** and manage them in a single system. This is useful for hyperparameter tuning sweeps, data processing, and other batch jobs.
 
-We show a typical workflow for running many jobs with SkyPilot.
+This guide shows a typical workflow for running many jobs with SkyPilot.
 
 Develop a YAML for One Job
 -----------------------------------
