@@ -3113,7 +3113,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
 
-            def _dump_setup_script(setup_script: str, dump_script: bool) -> None:
+            def _dump_setup_script(setup_script: str) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
@@ -3134,7 +3134,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return
 
             setup_log_path = os.path.join(self.log_dir,
-                                            f'setup-{runner.node_id}.log')
+                                          f'setup-{runner.node_id}.log')
+
             def _run_setup(setup_cmd: str) -> Tuple[int, str, str]:
                 returncode, stdout, stderr = runner.run(
                     setup_cmd,
@@ -3152,8 +3153,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return returncode, stdout, stderr
 
             returncode, stdout, stderr = _run_setup(
-                f'{create_script_code} && {setup_cmd}',
-            )
+                f'{create_script_code} && {setup_cmd}',)
             if returncode == 255 and 'too long' in stdout + stderr:
                 # If the setup script is too long, we retry it with dumping
                 # the script to a file and running it with SSH. We use a general
@@ -3262,7 +3262,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
-                                  
+
         if _is_command_length_over_limit(job_submit_cmd):
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
