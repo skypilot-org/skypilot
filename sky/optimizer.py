@@ -19,8 +19,8 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
-from sky.utils.resources_utils import DiskTier
 
 if typing.TYPE_CHECKING:
     import networkx as nx
@@ -910,8 +910,9 @@ class Optimizer:
             logger.info(f'{table}\n')
 
             # Warning message for using disk_tier=ultra
-            # TODO(Conless): Consider price of disks in optimizer and move this warning there. # pylint: disable=line-too-long
-            if chosen_resources.disk_tier == DiskTier.ULTRA:
+            # TODO(Conless): Consider price of disks in optimizer and
+            # move this warning there.
+            if chosen_resources.disk_tier == resources_utils.DiskTier.ULTRA:
                 logger.warning(
                     'Using disk_tier=ultra will utilize more advanced disks '
                     '(io2 Block Express on AWS and extreme persistent disk on '

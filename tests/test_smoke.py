@@ -3255,7 +3255,7 @@ def test_gcp_disk_tier():
 def test_azure_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
         if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
-            # Azure does not support high disk tier.
+            # Azure does not support high and ultra disk tier.
             continue
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier.value
