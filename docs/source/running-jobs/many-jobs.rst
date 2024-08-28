@@ -208,7 +208,7 @@ When running many jobs, it is useful to log the outputs of all jobs. You can use
 
     </details>
 
-We can now launch the job with the following command (``WANDB_API_KEY`` should existing in your local environment variables).
+You can now launch the job with the following command (``WANDB_API_KEY`` should existing in your local environment variables).
 
 .. code-block:: bash
 
