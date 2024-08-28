@@ -1,12 +1,12 @@
 resources:
-  cloud: gcp
-  accelerators: T4:1
-  ports: 6443
+  cloud: lambda
+#  Uncomment the following line to expose ports on a different cloud
+#  ports: 6443
 
 num_nodes: 2
 
 envs:
-  SKY_K3S_TOKEN: mytoken
+  SKY_K3S_TOKEN: mytoken # Can be any string
 
 run: |
   wait_for_gpu_operator_installation() {
@@ -16,7 +16,7 @@ run: |
       TIMEOUT=600  # 10 minutes in seconds
   
       while true; do
-          if kubectl describe nodes | grep -q 'nvidia.com/gpu:'; then
+          if kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:'; then
               echo "GPU operator installed."
               break
           elif [ $SECONDS -ge $TIMEOUT ]; then
@@ -25,7 +25,7 @@ run: |
           else
               echo "Waiting for GPU operator installation..."
               echo "To check status, see Nvidia GPU operator pods:"
-              echo "kubectl get pods -n gpu-operator"
+              echo "kubectl get pods -n gpu-operator --kubeconfig ~/.kube/config"
               sleep 5
           fi
       done
@@ -51,7 +51,7 @@ run: |
   # Wait for k3s to be ready
   echo "Waiting for k3s to be ready"
   sleep 5
-  kubectl wait --for=condition=ready node --all --timeout=5m
+  kubectl wait --for=condition=ready node --all --timeout=5m --kubeconfig ~/.kube/config
 
   # =========== GPU support ===========
   # Install helm
@@ -64,7 +64,7 @@ run: |
 
   # Create namespace if it doesn't exist
   echo "Creating namespace gpu-operator"
-  kubectl create namespace gpu-operator || true
+  kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true
 
   # Patch ldconfig
   echo "Patching ldconfig"
@@ -86,7 +86,7 @@ run: |
   # Create RuntimeClass
   sleep 5
   echo "Creating RuntimeClass"
-  kubectl apply -f - <<EOF
+  kubectl apply --kubeconfig ~/.kube/config -f - <<EOF
   apiVersion: node.k8s.io/v1
   kind: RuntimeClass
   metadata:
