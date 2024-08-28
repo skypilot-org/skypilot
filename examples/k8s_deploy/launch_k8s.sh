@@ -1,4 +1,7 @@
 #!/bin/bash
+echo -e "\033[1m===== SkyPilot Kubernetes cluster deployment script =====\033[0m"
+echo -e "This script will deploy a Kubernetes cluster on the cloud and GPUs specified in deploy_k8s.yaml.\n"
+
 set -ex
 
 # Read cluster name from environment variable if it exists, else use default value

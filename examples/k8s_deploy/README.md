@@ -54,6 +54,8 @@ NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
 150-230-191-161  A10       1           1
 ```
 
+To launch a job, run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`. Refer to [SkyPilot quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more information.
+
 4. To tear down the cluster, run:
 ```bash
 sky down k8s
