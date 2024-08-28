@@ -87,8 +87,7 @@ Next, after confirming the job is working correctly, **add (hyper)parameters** t
 1. Add Hyperparameters
 ~~~~~~~~~~~~~~~~~~~~~~
 
-To launch many jobs with different hyperparameters, we turn the SkyPilot YAML into a template, by
-adding :ref:`environment variables <env-vars>` as arguments for the job.
+To launch jobs with different hyperparameters, add them as :ref:`environment variables <env-vars>` to the SkyPilot YAML, and make your main program read these environment variables:
 
 .. raw:: html
 
