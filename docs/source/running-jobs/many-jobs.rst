@@ -225,7 +225,7 @@ Scale up the Job
 With the above setup, we can now scale up a job to many in-parallel jobs by creating multiple config files and
 submitting them with :ref:`SkyPilot managed jobs <managed-jobs>`.
 
-We create a config file for each job in the ``configs`` directory.
+First, create a config file for each job (for example, in a ``configs`` directory):
 
 .. code-block:: bash
 
