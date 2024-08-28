@@ -2663,6 +2663,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'stores, but the existing cluster with '
                             f'{launched_resources!r} does not support FUSE '
                             f'mounting. Launch a new cluster to run this task.')
+                if (example_resource.accelerators is not None and
+                        launched_resources.accelerators is not None):
+                    for acc in example_resource.accelerators:
+                        if acc not in launched_resources.accelerators:
+                            continue
+                        self_count = example_resource.accelerators[acc]
+                        existing_count = launched_resources.accelerators[acc]
+                        if (isinstance(self_count, float) and
+                                isinstance(existing_count, float) and
+                                not math.isclose(self_count, existing_count)):
+                            with ux_utils.print_exception_no_traceback():
+                                raise exceptions.ResourcesMismatchError(
+                                    'Task requested resources with fractional '
+                                    'accelerator counts. For fractional '
+                                    'counts, the required count must match the '
+                                    'existing cluster. Got required accelerator'
+                                    f' {acc}:{self_count} but the existing '
+                                    f'cluster has {acc}:{existing_count}.')
             requested_resource_str = ', '.join(requested_resource_list)
             if isinstance(task.resources, list):
                 requested_resource_str = f'[{requested_resource_str}]'

@@ -1,6 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
 import functools
+import math
 import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -1141,6 +1142,16 @@ class Resources:
                     return False
                 if self.accelerators[acc] > other_accelerators[acc]:
                     return False
+                if isinstance(self.accelerators[acc], float) or isinstance(
+                        other_accelerators[acc], float):
+                    # If the requested accelerator count is a float, we only
+                    # allow strictly equal counts since all of the float point
+                    # accelerator counts are less than 1 (e.g., 0.1, 0.5), and
+                    # we want to avoid semantic ambiguity (e.g. launching
+                    # with --gpus A10:0.25 on a A10:0.75 cluster).
+                    if not math.isclose(self.accelerators[acc],
+                                        other_accelerators[acc]):
+                        return False
         # self.accelerators <= other.accelerators
 
         if (self.accelerator_args is not None and
