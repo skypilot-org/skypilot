@@ -245,9 +245,9 @@ Then, submit all jobs by iterating over the config files and calling `sky jobs l
 
   for config_file in configs/*.env; do
     job_name=$(basename ${config_file%.env})
-    # -y means yes to all prompts.
-    # -d means detach from the job's logging, so the next job can be submitted
-    # without waiting for the previous job to finish.
+    # -y: yes to all prompts.
+    # -d: detach from the job's logging, so the next job can be submitted
+    #      without waiting for the previous job to finish.
     sky jobs launch -n dnn-$job_name -y -d dnn-template.yaml \
       --env-file $config_file \
       --env WANDB_API_KEY
