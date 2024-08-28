@@ -63,7 +63,7 @@ First, launch the job to check it successfully launches and runs correctly:
   sky launch -c dnn dnn.yaml
 
 
-If there is any error, we can fix the YAML and launch the job again on the same cluster.
+If there is any error, you can fix the code and/or the YAML, and launch the job again on the same cluster:
 
 .. code-block:: bash
 
