@@ -159,7 +159,7 @@ Alternative, store the environment variable values in a dotenv file and use `--e
 2. Track Job Output
 ~~~~~~~~~~~~~~~~~~~
 
-When running many jobs, it is useful to track live outputs of each job. We recommend using WandB to track the outputs of all jobs.
+When running many jobs, it is useful to log the outputs of all jobs. You can use tools like W&B  (TODO link) for this purpose:
 
 .. raw:: html
 
