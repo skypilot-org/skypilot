@@ -14,7 +14,10 @@ pip install -e .[lambda]
 
 2. On your lambda cloud dashboard, configure the firewall to allow inbound connections on port 443 and 6443 (required to expose k8s API server).
 
-![firewall](https://i.imgur.com/uSA7BMH.png)
+Using image tags for the firewall image
+<p align="center">
+<img src="https://i.imgur.com/uSA7BMH.png" alt="firewall" width="400"/>
+</p>
 
 ## Instructions
 
