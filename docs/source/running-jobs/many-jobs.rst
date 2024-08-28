@@ -221,7 +221,7 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 Scale up the Job
 -----------------
 
-With the above setup, we can now scale up a job to many in-parallel jobs by creating multiple config files and
+With the above setup, you can now scale out to run many jobs in parallel by (1) creating multiple config files and (2)
 submitting them with :ref:`SkyPilot managed jobs <managed-jobs>`.
 
 First, create a config file for each job (for example, in a ``configs`` directory):
