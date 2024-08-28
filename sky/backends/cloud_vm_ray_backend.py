@@ -3112,7 +3112,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
-            if detach_setup or _is_command_length_over_limit(encoded_script):
+
+            def _dump_setup_script(setup_script: str, dump_script: bool) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
@@ -3121,6 +3122,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  target=remote_setup_file_name,
                                  up=True,
                                  stream_logs=False)
+
+            if detach_setup or _is_command_length_over_limit(encoded_script):
+                _dump_setup_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
@@ -3128,20 +3132,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             if detach_setup:
                 return
+
             setup_log_path = os.path.join(self.log_dir,
-                                          f'setup-{runner.node_id}.log')
-            returncode = runner.run(
+                                            f'setup-{runner.node_id}.log')
+            def _run_setup(setup_cmd: str) -> Tuple[int, str, str]:
+                returncode, stdout, stderr = runner.run(
+                    setup_cmd,
+                    log_path=setup_log_path,
+                    process_stream=False,
+                    # We do not source bashrc for setup, since bashrc is sourced
+                    # in the script already.
+                    # Skip an empty line and two lines due to the /bin/bash -i and
+                    # source ~/.bashrc in the setup_cmd.
+                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
+                    #   bash: no job control in this shell
+                    skip_lines=3,
+                    require_outputs=True,
+                )
+                return returncode, stdout, stderr
+
+            returncode, stdout, stderr = _run_setup(
                 f'{create_script_code} && {setup_cmd}',
-                log_path=setup_log_path,
-                process_stream=False,
-                # We do not source bashrc for setup, since bashrc is sourced
-                # in the script already.
-                # Skip an empty line and two lines due to the /bin/bash -i and
-                # source ~/.bashrc in the setup_cmd.
-                #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
-                #   bash: no job control in this shell
-                skip_lines=3,
             )
+            if returncode == 255 and 'too long' in stdout + stderr:
+                # If the setup script is too long, we retry it with dumping
+                # the script to a file and running it with SSH. We use a general
+                # length limit check before but it could be inaccurate on some
+                # systems.
+                logger.debug(f'Failed to run setup command inline due to '
+                             'command length limit. '
+                             'Dumping setup script to file and running it '
+                             f'with SSH.')
+                _dump_setup_script(setup_script, dump_script=True)
+                returncode, stdout, stderr = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case
@@ -3223,7 +3246,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-        if _is_command_length_over_limit(job_submit_cmd):
+
+        def _dump_code_to_file(codegen: str) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
@@ -3238,6 +3262,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+                                  
+        if _is_command_length_over_limit(job_submit_cmd):
+            _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
         if managed_job_dag is not None:
@@ -3263,6 +3290,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        if returncode == 255 and 'too long' in stdout + stderr:
+            # If the setup script is too long, we retry it with dumping
+            # the script to a file and running it with SSH. We use a general
+            # length limit check before but it could be inaccurate on some
+            # systems.
+            _dump_code_to_file(codegen)
+            returncode, stdout, stderr = self.run_on_head(handle,
+                                                          job_submit_cmd,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
 
         # Happens when someone calls `sky exec` but remote is outdated
         # necessitating calling `sky launch`.
