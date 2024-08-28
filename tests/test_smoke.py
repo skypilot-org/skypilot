@@ -840,6 +840,7 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
@@ -1549,6 +1550,7 @@ def test_job_queue_multinode(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
@@ -1592,6 +1594,7 @@ def test_large_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
@@ -1699,6 +1702,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
@@ -2119,6 +2123,91 @@ def test_add_and_remove_pod_annotations_with_autostop():
     run_one_test(test)
 
 
+# ---------- Container logs from task on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_container_logs_multinode_kubernetes():
+    name = _get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    head_logs = ('kubectl get pods '
+                 f' | grep {name} |  grep head | '
+                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    worker_logs = ('kubectl get pods '
+                   f' | grep {name} |  grep worker |'
+                   " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test = Test(
+            'container_logs_multinode_kubernetes',
+            [
+                f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
+                f'{head_logs} | wc -l | grep 9',
+                f'{worker_logs} | wc -l | grep 9',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_container_logs_two_jobs_kubernetes():
+    name = _get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    pod_logs = ('kubectl get pods '
+                f' | grep {name} |  grep head |'
+                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test = Test(
+            'test_container_logs_two_jobs_kubernetes',
+            [
+                f'sky launch -y -c {name} {task_yaml}',
+                f'{pod_logs} | wc -l | grep 9',
+                f'sky launch -y -c {name} {task_yaml}',
+                f'{pod_logs} | wc -l | grep 18',
+                f'{pod_logs} | grep 1 | wc -l | grep 2',
+                f'{pod_logs} | grep 2 | wc -l | grep 2',
+                f'{pod_logs} | grep 3 | wc -l | grep 2',
+                f'{pod_logs} | grep 4 | wc -l | grep 2',
+                f'{pod_logs} | grep 5 | wc -l | grep 2',
+                f'{pod_logs} | grep 6 | wc -l | grep 2',
+                f'{pod_logs} | grep 7 | wc -l | grep 2',
+                f'{pod_logs} | grep 8 | wc -l | grep 2',
+                f'{pod_logs} | grep 9 | wc -l | grep 2',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_container_logs_two_simultaneous_jobs_kubernetes():
+    name = _get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
+    pod_logs = ('kubectl get pods '
+                f' | grep {name} |  grep head |'
+                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test = Test(
+            'test_container_logs_two_simultaneous_jobs_kubernetes',
+            [
+                f'sky launch -y -c {name}',
+                f'sky exec -c {name} -d {task_yaml}',
+                f'sky exec -c {name} -d {task_yaml}',
+                'sleep 30',
+                f'{pod_logs} | wc -l | grep 18',
+                f'{pod_logs} | grep 1 | wc -l | grep 2',
+                f'{pod_logs} | grep 2 | wc -l | grep 2',
+                f'{pod_logs} | grep 3 | wc -l | grep 2',
+                f'{pod_logs} | grep 4 | wc -l | grep 2',
+                f'{pod_logs} | grep 5 | wc -l | grep 2',
+                f'{pod_logs} | grep 6 | wc -l | grep 2',
+                f'{pod_logs} | grep 7 | wc -l | grep 2',
+                f'{pod_logs} | grep 8 | wc -l | grep 2',
+                f'{pod_logs} | grep 9 | wc -l | grep 2',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
+
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
@@ -2383,6 +2472,7 @@ def test_cancel_azure():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support V100 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
@@ -3558,6 +3648,7 @@ def test_skyserve_kubernetes_http():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
@@ -3615,6 +3706,7 @@ def test_skyserve_spot_recovery():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
@@ -3679,6 +3771,8 @@ def test_skyserve_dynamic_ondemand_fallback():
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -3863,6 +3957,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -3891,6 +3987,8 @@ def test_skyserve_update(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -3927,6 +4025,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -4004,6 +4103,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
@@ -4067,6 +4167,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
