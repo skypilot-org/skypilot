@@ -58,5 +58,3 @@ NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
 ```bash
 sky down k8s
 ```
-
-

@@ -6,7 +6,7 @@ resources:
 num_nodes: 2
 
 envs:
-  SKY_K3S_TOKEN: mytoken # Can be any string
+  SKY_K3S_TOKEN: mytoken # Can be any string, used to join worker nodes to the cluster
 
 run: |
   wait_for_gpu_operator_installation() {
