@@ -73,7 +73,7 @@ If there is any error, you can fix the code and/or the YAML, and launch the job 
   sky launch -c dnn dnn.yaml
 
 
-Sometimes, we may find it more efficient to interactively log into the cluster and debug the job. We can do so by directly :ref:`ssh into the cluster or use VSCode's remote ssh <dev-connect>`.
+Sometimes, it may be more efficient to log into the cluster and interactively debug the job. You can do so by directly :ref:`ssh'ing into the cluster or using VSCode's remote ssh <dev-connect>`.
 
 .. code-block:: bash
 
