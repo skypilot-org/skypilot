@@ -3163,7 +3163,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                              'command length limit. '
                              'Dumping setup script to file and running it '
                              f'with SSH.')
-                _dump_setup_script(setup_script, dump_script=True)
+                _dump_setup_script(setup_script)
                 returncode, stdout, stderr = _run_setup(setup_cmd)
 
             def error_message() -> str:
