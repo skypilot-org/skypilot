@@ -13,16 +13,16 @@ Develop a YAML for One Job
 
 Before scaling up to many jobs, develop a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
 
-Here is the same example YAML as in :ref:`Tutorial: DNN Training <dnn-training>`:
+Here is the same example YAML as in :ref:`Tutorial: AI Training <ai-training>`:
 
 .. raw:: html
 
     <details>
-    <summary>Click to expand: <code>dnn.yaml</code></summary>
+    <summary>Click to expand: <code>train.yaml</code></summary>
 
 .. code-block:: yaml
 
-  # dnn.yaml
+  # train.yaml
   name: huggingface
 
   resources:
@@ -60,7 +60,7 @@ First, launch the job to check it successfully launches and runs correctly:
 
 .. code-block:: bash
 
-  sky launch -c dnn dnn.yaml
+  sky launch -c train train.yaml
 
 
 If there is any error, you can fix the code and/or the YAML, and launch the job again on the same cluster:
@@ -68,9 +68,9 @@ If there is any error, you can fix the code and/or the YAML, and launch the job 
 .. code-block:: bash
 
   # Cancel the latest job.
-  sky cancel dnn -y
+  sky cancel train -y
   # Run the job again on the same cluster.
-  sky launch -c dnn dnn.yaml
+  sky launch -c train train.yaml
 
 
 Sometimes, it may be more efficient to log into the cluster and interactively debug the job. You can do so by directly :ref:`ssh'ing into the cluster or using VSCode's remote ssh <dev-connect>`.
@@ -78,7 +78,7 @@ Sometimes, it may be more efficient to log into the cluster and interactively de
 .. code-block:: bash
 
   # Log into the cluster.
-  ssh dnn
+  ssh train
 
 
 
@@ -92,12 +92,12 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
 .. raw:: html
 
     <details>
-    <summary>Updated SkyPilot YAML: <code>dnn-template.yaml</code></summary>
+    <summary>Updated SkyPilot YAML: <code>train-template.yaml</code></summary>
 
 .. code-block:: yaml
   :emphasize-lines: 4-6,28-29
 
-  # dnn-template.yaml
+  # train-template.yaml
   name: huggingface
 
   envs:
@@ -137,7 +137,7 @@ You can now use `--env` to launch a job with different hyperparameters:
 
 .. code-block:: bash
 
-  sky launch -c dnn dnn-template.yaml \
+  sky launch -c train train-template.yaml \
     --env LR=1e-5 \
     --env MAX_STEPS=100
 
@@ -151,7 +151,7 @@ Alternative, store the environment variable values in a dotenv file and use `--e
 
 .. code-block:: bash
 
-  sky launch -c dnn dnn-template.yaml \
+  sky launch -c train train-template.yaml \
     --env-file configs/job1
 
 
@@ -164,12 +164,12 @@ When running many jobs, it is useful to log the outputs of all jobs. You can use
 .. raw:: html
 
     <details>
-    <summary>SkyPilot YAML with W&B: <code>dnn-template.yaml</code></summary>
+    <summary>SkyPilot YAML with W&B: <code>train-template.yaml</code></summary>
 
 .. code-block:: yaml
   :emphasize-lines: 7-7,19-19,34-34
 
-  # dnn-template.yaml
+  # train-template.yaml
   name: huggingface
 
   envs:
@@ -212,7 +212,7 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 
 .. code-block:: bash
 
-  sky launch -c dnn dnn-template.yaml \
+  sky launch -c train train-template.yaml \
     --env-file configs/job1 \
     --env WANDB_API_KEY
 
@@ -221,7 +221,13 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 Scale Out to Many Jobs
 ---------------------
 
-With the above setup, you can now scale out to run many jobs in parallel by (1) creating multiple config files and (2)
+With the above setup, you can now scale out to run many jobs in parallel. You
+can either use SkyPilot CLI with many config files or use SkyPilot Python API.
+
+1. With Config Files
+~~~~~~~~~~~~~~~~~~~~
+
+You can run many jobs in parallel by (1) creating multiple config files and (2)
 submitting them with :ref:`SkyPilot managed jobs <managed-jobs>`.
 
 First, create a config file for each job (for example, in a ``configs`` directory):
@@ -275,7 +281,7 @@ Then, submit all jobs by iterating over the config files and calling `sky jobs l
     # -y: yes to all prompts.
     # -d: detach from the job's logging, so the next job can be submitted
     #      without waiting for the previous job to finish.
-    sky jobs launch -n dnn-$job_name -y -d dnn-template.yaml \
+    sky jobs launch -n train-$job_name -y -d train-template.yaml \
       --env-file $config_file \
       --env WANDB_API_KEY
   done
@@ -290,9 +296,36 @@ Job statuses can be checked via `sky jobs queue`:
   Fetching managed job statuses...
   Managed jobs
   In progress tasks: 10 RUNNING
-  ID  TASK  NAME      RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS   
-  10  -     dnn-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
-  9   -     dnn-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
-  8   -     dnn-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
+  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS   
+  10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
+  9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
+  8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
   ...
 
+
+With Python API
+~~~~~~~~~~~~~~~
+
+To have more customized control over the jobs, you can also use SkyPilot Python
+API to launch the jobs.
+
+.. code-block:: python
+
+  import os
+  import sky
+
+  LR_CANDIDATES = [0.01, 0.03, 0.1, 0.3, 1.0]
+  MAX_STEPS_CANDIDATES = [100, 300, 1000]
+  task = sky.Task.from_yaml('train-template.yaml')
+
+  job_idx = 1
+  for lr in LR_CANDIDATES:
+    for max_steps in MAX_STEPS_CANDIDATES:
+      task.update_envs({'LR': lr, 'MAX_STEPS': max_steps})
+      sky.jobs.launch(
+        task,
+        name=f'train-job{job_idx}',
+        detach_run=True,
+        retry_until_up=True,
+      )
+      job_idx += 1
