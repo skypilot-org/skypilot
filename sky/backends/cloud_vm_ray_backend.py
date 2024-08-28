@@ -3143,8 +3143,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     process_stream=False,
                     # We do not source bashrc for setup, since bashrc is sourced
                     # in the script already.
-                    # Skip an empty line and two lines due to the /bin/bash -i and
-                    # source ~/.bashrc in the setup_cmd.
+                    # Skip an empty line and two lines due to the /bin/bash -i
+                    # and source ~/.bashrc in the setup_cmd.
                     #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                     #   bash: no job control in this shell
                     skip_lines=3,
@@ -3159,10 +3159,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # the script to a file and running it with SSH. We use a general
                 # length limit check before but it could be inaccurate on some
                 # systems.
-                logger.debug(f'Failed to run setup command inline due to '
-                             'command length limit. '
-                             'Dumping setup script to file and running it '
-                             f'with SSH.')
+                logger.debug('Failed to run setup command inline due to '
+                             'command length limit. Dumping setup script to '
+                             'file and running it with SSH.')
                 _dump_setup_script(setup_script)
                 returncode, stdout, stderr = _run_setup(setup_cmd)
 
