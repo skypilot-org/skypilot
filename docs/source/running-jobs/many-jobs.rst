@@ -56,7 +56,7 @@ Here is the same example YAML as in :ref:`Tutorial: DNN Training <dnn-training>`
     </details>
 
 
-We can launch the job with the following command to check the correctness of the YAML.
+First, launch the job to check it successfully launches and runs correctly:
 
 .. code-block:: bash
 
