@@ -133,7 +133,7 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
     
     </details>
 
-We can now launch a job with different hyperparameters by specifying the envs.
+You can now use `--env` to launch a job with different hyperparameters:
 
 .. code-block:: bash
 
