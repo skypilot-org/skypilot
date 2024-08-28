@@ -9,7 +9,7 @@ git clone https://github.com/skypilot-org/skypilot.git
 cd skypilot
 
 git checkout lambda_k8s
-pip install -e .[lambda]
+pip install -e ".[lambda,kubernetes]"
 ```
 
 2. On your lambda cloud dashboard, configure the firewall to allow inbound connections on port `443` and `6443` (required to expose k8s API server).
