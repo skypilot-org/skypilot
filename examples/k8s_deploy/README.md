@@ -53,5 +53,9 @@ NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
 150-230-191-161  A10       1           1
 ```
 
+4. To tear down the cluster, run:
+```bash
+sky down k8s
+```
 
 
