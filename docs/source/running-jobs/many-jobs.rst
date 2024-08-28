@@ -145,26 +145,26 @@ Alternative, store the environment variable values in a dotenv file and use `--e
 
 .. code-block:: bash
 
-  # configs/job1.env
+  # configs/job1
   LR=1e-5
   MAX_STEPS=100
 
 .. code-block:: bash
 
   sky launch -c dnn dnn-template.yaml \
-    --env-file configs/job1.env
+    --env-file configs/job1
 
 
 
-2. Track Job Output
-~~~~~~~~~~~~~~~~~~~
+2. Logging Job Outputs
+~~~~~~~~~~~~~~~~~~~~~~~
 
-When running many jobs, it is useful to log the outputs of all jobs. You can use tools like W&B  (TODO link) for this purpose:
+When running many jobs, it is useful to log the outputs of all jobs. You can use tools like [W&B](https://wandb.ai/) for this purpose:
 
 .. raw:: html
 
     <details>
-    <summary>SkyPilot YAML with WandB: <code>dnn-template.yaml</code></summary>
+    <summary>SkyPilot YAML with W&B: <code>dnn-template.yaml</code></summary>
 
 .. code-block:: yaml
   :emphasize-lines: 7-7,19-19,34-34
@@ -213,13 +213,13 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 .. code-block:: bash
 
   sky launch -c dnn dnn-template.yaml \
-    --env-file configs/job1.env \
+    --env-file configs/job1 \
     --env WANDB_API_KEY
 
 
 
-Scale up the Job
------------------
+Scale Out to Many Jobs
+---------------------
 
 With the above setup, you can now scale out to run many jobs in parallel by (1) creating multiple config files and (2)
 submitting them with :ref:`SkyPilot managed jobs <managed-jobs>`.
@@ -228,22 +228,50 @@ First, create a config file for each job (for example, in a ``configs`` director
 
 .. code-block:: bash
 
-  # configs/job1.env
+  # configs/job1
   LR=1e-5
   MAX_STEPS=100
 
-  # configs/job2.env
+  # configs/job2
   LR=2e-5
   MAX_STEPS=200
 
   ...
 
+.. code-block:: html
+
+  <details>
+  <summary>An example Python script to generate config files</summary>
+
+.. code-block:: python
+
+  import os
+
+  CONFIG_PATH = 'configs'
+  LR_CANDIDATES = [0.01, 0.03, 0.1, 0.3, 1.0]
+  MAX_STEPS_CANDIDATES = [100, 300, 1000]
+
+  os.makedirs(CONFIG_PATH, exist_ok=True)
+
+  job_idx = 1
+  for lr in LR_CANDIDATES:
+    for max_steps in MAX_STEPS_CANDIDATES:
+      config_file = f"{CONFIG_PATH}/job{job_idx}"
+      with open(config_file, "w") as f:
+        print(f'LR={lr}', file=f)
+        print(f'MAX_STEPS={max_steps}', file=f)
+      job_idx += 1
+
+.. raw:: html
+
+  </details>
+
 Then, submit all jobs by iterating over the config files and calling `sky jobs launch` on each:
 
 .. code-block:: bash
 
-  for config_file in configs/*.env; do
-    job_name=$(basename ${config_file%.env})
+  for config_file in configs/*; do
+    job_name=$(basename $config_file)
     # -y: yes to all prompts.
     # -d: detach from the job's logging, so the next job can be submitted
     #      without waiting for the previous job to finish.
@@ -261,7 +289,7 @@ Job statuses can be checked via `sky jobs queue`:
 
   Fetching managed job statuses...
   Managed jobs
-  In progress tasks: 3 RUNNING
+  In progress tasks: 10 RUNNING
   ID  TASK  NAME      RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS   
   10  -     dnn-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
   9   -     dnn-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
