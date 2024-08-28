@@ -4,9 +4,7 @@
 Guide: Run Many Jobs
 ====================
 
-Hyperparameter tuning, data processing, etc, are common cases where many jobs are run in parallel.
-However, managing all those jobs can be a pain. SkyPilot's allows us to **run many jobs in parallel** and **manage them in
-a single pane of glass**.
+SkyPilot allows you to easily **run many jobs in parallel** and manage them in a single system. This is useful for hyperparameter tuning sweeps, data processing, and other batch jobs.
 
 We show a typical workflow for running many jobs with SkyPilot.
 
