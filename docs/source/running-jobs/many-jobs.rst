@@ -82,7 +82,7 @@ Sometimes, it may be more efficient to log into the cluster and interactively de
 
 
 
-After confirming the job is working correctly, we now start **adding additional fields** to make the job YAML more configurable.
+Next, after confirming the job is working correctly, **add (hyper)parameters** to the job YAML so that all job variants can be specified.
 
 1. Add Hyperparameters
 ~~~~~~~~~~~~~~~~~~~~~~
