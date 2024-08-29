@@ -241,7 +241,7 @@ With the above setup, you can now scale out to run many jobs in parallel. You
 can either use SkyPilot CLI with many config files or use SkyPilot Python API.
 
 With CLI and Config Files
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can run many jobs in parallel by (1) creating multiple config files and (2)
 submitting them as :ref:`SkyPilot managed jobs <managed-jobs>`.
