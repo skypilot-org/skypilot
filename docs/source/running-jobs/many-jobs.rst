@@ -18,11 +18,11 @@ This guide shows a typical workflow for running many jobs with SkyPilot.
 Why Use SkyPilot to Run Many Jobs
 -------------------------------------
 
-- **Unified**: Utilize resources on any of your infrastructure (Kubernetes, cloud VMs, reservations, etc.).
+- **Unified**: Use any or multiple of your own infrastructure (Kubernetes, cloud VMs, reservations, etc.).
 - **Elastic**: Scale up and down based on demands.
 - **Cost-effective**: Only pay for the cheapest resources.
 - **Robust**: Automatically recover jobs from failures.
-- **Observable**: See and manage all jobs in a single pane of glass.
+- **Observable**: Monitor and manage all jobs in a single pane of glass.
 
 Write a YAML for One Job
 -----------------------------------
