@@ -303,7 +303,7 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
   done
 
 
-Job statuses can be checked via `sky jobs queue`:
+Job statuses can be checked via ``sky jobs queue``:
 
 .. code-block:: console
 
