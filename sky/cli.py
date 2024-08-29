@@ -28,8 +28,8 @@ import datetime
 import functools
 import multiprocessing
 import os
-import shutil
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
