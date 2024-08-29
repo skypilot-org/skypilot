@@ -213,20 +213,3 @@ To launch a VS Code tunnel using a SkyPilot task definition, you can use the fol
 
 Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
 
-PyTorch 2.2.0 failed on SkyPilot clusters. What should I do?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The latest PyTorch release (2.2.0) has a version conflict with the default cuDNN version on SkyPilot clusters, which may raise a segmentation fault when you run the job.
-
-To fix this, you can choose one of the following solutions:
-
-1. Use older version of PyTorch (like 2.1.0) instead of 2.2.0, i.e. :code:`pip install "torch<2.2"`;
-2. Remove the cuDNN from the cluster's :code:`LD_LIBRARY_PATH` by adding the following line to your task:
-
-.. code-block:: yaml
-
-  run: |
-    export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | sed 's|:/usr/local/cuda/lib64||g; s|/usr/local/cuda/lib64:||g; s|/usr/local/cuda/lib64||g')
-    # Other commands using PyTorch 2.2.0
-    ...
-
