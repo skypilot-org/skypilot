@@ -135,6 +135,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # true.
     '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
+    # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; }; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
