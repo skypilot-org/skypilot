@@ -14,18 +14,20 @@ This guide shows a typical workflow for running many jobs with SkyPilot.
   :align: center
 .. TODO: Show the components in a GIF.
 
-Reason for using SkyPilot to run many jobs:
 
-- **Seamless**: Utilize resources on any of your infrastructure (Kubernetes, cloud VMs, reservations, etc.)
-- **Observable**: See and manage all jobs in a single pane of glass
-- **Elastic**: Scale up and down based on demands
-- **Cost-effective**: Only pay for the cheapest resources
-- **Robust**: Automatically recover jobs from failures
+Why Use SkyPilot to Run Many Jobs
+-------------------------------------
 
-Develop a YAML for One Job
+- **Unified**: Utilize resources on any of your infrastructure (Kubernetes, cloud VMs, reservations, etc.).
+- **Elastic**: Scale up and down based on demands.
+- **Cost-effective**: Only pay for the cheapest resources.
+- **Robust**: Automatically recover jobs from failures.
+- **Observable**: See and manage all jobs in a single pane of glass.
+
+Write a YAML for One Job
 -----------------------------------
 
-Before scaling up to many jobs, develop a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
+Before scaling up to many jobs, write a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
 
 Here is the same example YAML as in :ref:`Tutorial: AI Training <ai-training>`:
 
@@ -147,7 +149,7 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
     
     </details>
 
-You can now use `--env` to launch a job with different hyperparameters:
+You can now use ``--env`` to launch a job with different hyperparameters:
 
 .. code-block:: bash
 
@@ -155,7 +157,7 @@ You can now use `--env` to launch a job with different hyperparameters:
     --env LR=1e-5 \
     --env MAX_STEPS=100
 
-Alternative, store the environment variable values in a dotenv file and use `--env-file` to launch:
+Alternative, store the environment variable values in a dotenv file and use ``--env-file`` to launch:
 
 .. code-block:: bash
 
@@ -238,11 +240,11 @@ Scale Out to Many Jobs
 With the above setup, you can now scale out to run many jobs in parallel. You
 can either use SkyPilot CLI with many config files or use SkyPilot Python API.
 
-With Config Files
+With CLI and Config Files
 ~~~~~~~~~~~~~~~~~~~~
 
 You can run many jobs in parallel by (1) creating multiple config files and (2)
-submitting them with :ref:`SkyPilot managed jobs <managed-jobs>`.
+submitting them as :ref:`SkyPilot managed jobs <managed-jobs>`.
 
 First, create a config file for each job (for example, in a ``configs`` directory):
 
@@ -286,7 +288,7 @@ First, create a config file for each job (for example, in a ``configs`` director
 
   </details>
 
-Then, submit all jobs by iterating over the config files and calling `sky jobs launch` on each:
+Then, submit all jobs by iterating over the config files and calling ``sky jobs launch`` on each:
 
 .. code-block:: bash
 
@@ -301,7 +303,7 @@ Then, submit all jobs by iterating over the config files and calling `sky jobs l
   done
 
 
-Job statuses can be checked via `sky jobs queue`:
+Job statuses can be checked via ``sky jobs queue``:
 
 .. code-block:: console
 
@@ -320,8 +322,7 @@ Job statuses can be checked via `sky jobs queue`:
 With Python API
 ~~~~~~~~~~~~~~~
 
-To have more customized control over the jobs, you can also use SkyPilot Python
-API to launch the jobs.
+To have more customized control over generation of job variants, you can also use SkyPilot Python API to launch the jobs.
 
 .. code-block:: python
 
