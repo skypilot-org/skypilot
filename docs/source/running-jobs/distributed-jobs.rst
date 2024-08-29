@@ -1,6 +1,6 @@
 .. _dist-jobs:
 
-Guide: Distributed Jobs
+Distributed Jobs on Multiple Nodes
 ================================================
 
 SkyPilot supports multi-node cluster
