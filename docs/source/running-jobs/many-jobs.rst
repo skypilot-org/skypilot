@@ -1,7 +1,7 @@
 
 .. _many-jobs:
 
-Run Many Parallel Jobs
+Many Parallel Jobs
 ======================
 
 SkyPilot allows you to easily **run many jobs in parallel** and manage them in a single system. This is useful for hyperparameter tuning sweeps, data processing, and other batch jobs.
