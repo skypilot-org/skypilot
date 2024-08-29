@@ -250,7 +250,7 @@ First, create a config file for each job (for example, in a ``configs`` director
 
   ...
 
-.. code-block:: html
+.. raw:: html
 
   <details>
   <summary>An example Python script to generate config files</summary>
