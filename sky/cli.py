@@ -371,7 +371,6 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                f'([[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd}) || '
                f'(echo "Bash must be version 4 or above." && exit 1))')
 
-               
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
