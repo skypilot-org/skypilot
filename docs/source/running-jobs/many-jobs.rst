@@ -14,6 +14,13 @@ This guide shows a typical workflow for running many jobs with SkyPilot.
   :align: center
 .. TODO: Show the components in a GIF.
 
+Reason for using SkyPilot to run many jobs:
+
+- **Seamless**: Utilize resources on any of your infrastructure (Kubernetes, cloud VMs, reservations, etc.)
+- **Observable**: See and manage all jobs in a single pane of glass
+- **Elastic**: Scale up and down based on demands
+- **Cost-effective**: Only pay for the cheapest resources
+- **Robust**: Automatically recover jobs from failures
 
 Develop a YAML for One Job
 -----------------------------------
