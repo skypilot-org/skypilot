@@ -244,7 +244,7 @@ With CLI and Config Files
 ~~~~~~~~~~~~~~~~~~~~
 
 You can run many jobs in parallel by (1) creating multiple config files and (2)
-submitting them with :ref:`SkyPilot managed jobs <managed-jobs>`.
+submitting them as :ref:`SkyPilot managed jobs <managed-jobs>`.
 
 First, create a config file for each job (for example, in a ``configs`` directory):
 
