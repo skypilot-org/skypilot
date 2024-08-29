@@ -322,8 +322,7 @@ Job statuses can be checked via ``sky jobs queue``:
 With Python API
 ~~~~~~~~~~~~~~~
 
-To have more customized control over the jobs, you can also use SkyPilot Python
-API to launch the jobs.
+To have more customized control over generation of job variants, you can also use SkyPilot Python API to launch the jobs.
 
 .. code-block:: python
 
