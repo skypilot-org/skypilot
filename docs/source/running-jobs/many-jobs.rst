@@ -157,7 +157,7 @@ You can now use ``--env`` to launch a job with different hyperparameters:
     --env LR=1e-5 \
     --env MAX_STEPS=100
 
-Alternative, store the environment variable values in a dotenv file and use `--env-file` to launch:
+Alternative, store the environment variable values in a dotenv file and use ``--env-file`` to launch:
 
 .. code-block:: bash
 
