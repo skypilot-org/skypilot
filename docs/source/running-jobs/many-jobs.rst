@@ -22,7 +22,7 @@ Why Use SkyPilot to Run Many Jobs
 - **Elastic**: Scale up and down based on demands.
 - **Cost-effective**: Only pay for the cheapest resources.
 - **Robust**: Automatically recover jobs from failures.
-- **Observable**: See and manage all jobs in a single pane of glass.
+- **Observable**: Monitor and manage all jobs in a single pane of glass.
 
 Write a YAML for One Job
 -----------------------------------
