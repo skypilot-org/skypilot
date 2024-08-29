@@ -8,6 +8,12 @@ SkyPilot allows you to easily **run many jobs in parallel** and manage them in a
 
 This guide shows a typical workflow for running many jobs with SkyPilot.
 
+
+.. image:: https://i.imgur.com/nIoOApY.png
+
+.. TODO: Show the components in a GIF.
+
+
 Develop a YAML for One Job
 -----------------------------------
 
@@ -224,7 +230,7 @@ Scale Out to Many Jobs
 With the above setup, you can now scale out to run many jobs in parallel. You
 can either use SkyPilot CLI with many config files or use SkyPilot Python API.
 
-1. With Config Files
+With Config Files
 ~~~~~~~~~~~~~~~~~~~~
 
 You can run many jobs in parallel by (1) creating multiple config files and (2)
