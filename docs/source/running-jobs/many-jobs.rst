@@ -9,8 +9,9 @@ SkyPilot allows you to easily **run many jobs in parallel** and manage them in a
 This guide shows a typical workflow for running many jobs with SkyPilot.
 
 
-.. image:: https://i.imgur.com/nIoOApY.png
-
+.. image:: https://i.imgur.com/VX2YKwR.png
+  :width: 80%
+  :align: center
 .. TODO: Show the components in a GIF.
 
 
