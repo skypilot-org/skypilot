@@ -288,7 +288,7 @@ First, create a config file for each job (for example, in a ``configs`` director
 
   </details>
 
-Then, submit all jobs by iterating over the config files and calling `sky jobs launch` on each:
+Then, submit all jobs by iterating over the config files and calling ``sky jobs launch`` on each:
 
 .. code-block:: bash
 
