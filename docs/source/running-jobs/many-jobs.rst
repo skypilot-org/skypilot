@@ -22,10 +22,10 @@ Reason for using SkyPilot to run many jobs:
 - **Cost-effective**: Only pay for the cheapest resources
 - **Robust**: Automatically recover jobs from failures
 
-Develop a YAML for One Job
+Write a YAML for One Job
 -----------------------------------
 
-Before scaling up to many jobs, develop a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
+Before scaling up to many jobs, write a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
 
 Here is the same example YAML as in :ref:`Tutorial: AI Training <ai-training>`:
 
