@@ -9,7 +9,7 @@ SkyPilot allows you to easily **run many jobs in parallel** and manage them in a
 This guide shows a typical workflow for running many jobs with SkyPilot.
 
 
-.. image:: https://i.imgur.com/x1aFtVn.png
+.. image:: https://i.imgur.com/tvxeNyR.png
   :width: 90%
   :align: center
 .. TODO: Show the components in a GIF.
@@ -248,11 +248,11 @@ First, create a config file for each job (for example, in a ``configs`` director
 
 .. code-block:: bash
 
-  # configs/job1
+  # configs/job-1
   LR=1e-5
   MAX_STEPS=100
 
-  # configs/job2
+  # configs/job-2
   LR=2e-5
   MAX_STEPS=200
 
@@ -276,8 +276,8 @@ First, create a config file for each job (for example, in a ``configs`` director
   job_idx = 1
   for lr in LR_CANDIDATES:
     for max_steps in MAX_STEPS_CANDIDATES:
-      config_file = f"{CONFIG_PATH}/job{job_idx}"
-      with open(config_file, "w") as f:
+      config_file = f'{CONFIG_PATH}/job-{job_idx}'
+      with open(config_file, 'w') as f:
         print(f'LR={lr}', file=f)
         print(f'MAX_STEPS={max_steps}', file=f)
       job_idx += 1
