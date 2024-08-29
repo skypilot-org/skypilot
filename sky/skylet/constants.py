@@ -126,6 +126,8 @@ DISABLE_GPU_ECC_COMMAND = (
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
+# Using lambda instead of str.format() since there are multiple {} in the
+# installation commands and we only want to replace some of them.
 CONDA_INSTALLATION_COMMANDS = lambda conda_auto_activate: (
     'which conda > /dev/null 2>&1 || '
     '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
