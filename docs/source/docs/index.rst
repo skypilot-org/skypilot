@@ -141,12 +141,6 @@ Read the research:
    ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: Guides
-
    ../reference/kubernetes/index
    ../running-jobs/distributed-jobs
    ../running-jobs/many-jobs

@@ -9,8 +9,8 @@ SkyPilot allows you to easily **run many jobs in parallel** and manage them in a
 This guide shows a typical workflow for running many jobs with SkyPilot.
 
 
-.. image:: https://i.imgur.com/VX2YKwR.png
-  :width: 80%
+.. image:: https://i.imgur.com/x1aFtVn.png
+  :width: 90%
   :align: center
 .. TODO: Show the components in a GIF.
 
@@ -166,7 +166,7 @@ Alternative, store the environment variable values in a dotenv file and use `--e
 2. Logging Job Outputs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-When running many jobs, it is useful to log the outputs of all jobs. You can use tools like [W&B](https://wandb.ai/) for this purpose:
+When running many jobs, it is useful to log the outputs of all jobs. You can use tools like `W&B <https://wandb.ai>`__ for this purpose:
 
 .. raw:: html
 

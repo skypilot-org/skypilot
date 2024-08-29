@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
         { selector: '.toctree-l1 > a', text: 'Running on Kubernetes' },
         { selector: '.toctree-l1 > a', text: 'Llama-3.1 (Meta)' },
-        { selector: '.caption-text', text: 'Guides' },
+        { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
