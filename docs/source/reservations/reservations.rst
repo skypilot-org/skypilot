@@ -135,7 +135,9 @@ SkyPilot allows you to launch a cluster with DWS by specifying the ``gcp.managed
         run_duration: 3600
         provision_timeout: 900
 
-``run_duration`` is the duration for a created instance to be kept alive (in seconds, required). ``provision_timeout`` is the timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without requested resources being provisioned, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
+
+1. ``run_duration``: duration for a created instance to be kept alive (in seconds, required).
+2. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without requested resources being provisioned, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
 See the :ref:`config-yaml` for more details.
 
@@ -180,7 +182,9 @@ To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS con
       labels:
         kueue.x-k8s.io/queue-name: dws-local-queue
 
-Here, ``kueue.x-k8s.io/queue-name`` is the name of the Kueue queue to submit your resource request to, and ``provreq.kueue.x-k8s.io/maxRunDurationSeconds`` is the maximum duration for a created instance to be kept alive (in seconds, required), and ``provision_timeout`` is the timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
+1. ``kueue.x-k8s.io/queue-name``: name of the Kueue queue to submit your resource request to.
+2. ``provreq.kueue.x-k8s.io/maxRunDurationSeconds``: maximum duration for a created instance to be kept alive (in seconds, required).
+3. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
 Long-term reservations
 ----------------------
