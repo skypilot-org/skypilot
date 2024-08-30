@@ -53,7 +53,7 @@ To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml
         # 2x M5a.16xlarge reservation in us-east-1
         - "cr-3456789abc"
 
-For more details of the configuration, see reference for :ref:`config-yaml`.
+For more details of the fields, see :ref:`config-yaml`.
 
 
 
