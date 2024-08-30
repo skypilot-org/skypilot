@@ -147,7 +147,7 @@ Read the research:
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Reservations & On-Prem
+   :caption: Reservations & Kubernetes Clusters
 
    ../reservations/reservations
    ../reference/kubernetes/index
