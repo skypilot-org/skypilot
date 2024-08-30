@@ -32,8 +32,8 @@ Once you have successfully created a reservation/block, you will get an ID of th
 
 To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml``:
 
-* ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with *Instance eligibility: open*.
-* ``aws.specific_reservations``: a list of reservation ids that can be used by SkyPilot. This is useful if you have multiple capacity blocks or capacity reservations with *Instance eligibility: targeted* for different instance types in multiple regions/zones.
+* ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with ``Instance eligibility: open``.
+* ``aws.specific_reservations``: a list of reservation IDs that can be used by SkyPilot. This is useful if you have multiple capacity reservations or blocks with ``Instance eligibility: targeted`` for different instance types in multiple regions/zones.
 
 .. note::
 
