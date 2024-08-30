@@ -35,9 +35,6 @@ To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml
 * ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with ``Instance eligibility: open``.
 * ``aws.specific_reservations``: a list of reservation IDs that can be used by SkyPilot. This is useful if you have multiple capacity reservations or blocks with ``Instance eligibility: targeted`` for different instance types in multiple regions/zones.
 
-.. note::
-
-    If any of the fields are specified, please allow about 30 seconds for SkyPilot optimizer to retrieve the latest reservation/block status on all regions and zones from your AWS account.
 
 Example:
 
@@ -57,6 +54,9 @@ Example:
 
 For more details of the fields, see :ref:`config-yaml`.
 
+.. note::
+
+    If any of the fields are specified, please allow about 30 seconds for SkyPilot optimizer to retrieve the latest reservation/block status on all regions and zones from your AWS account.
 
 
 .. _utilizing-reservations:
