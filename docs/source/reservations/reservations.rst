@@ -62,7 +62,7 @@ For more details of the fields, see :ref:`config-yaml`.
 Utilizing Reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
-By specifying configurations above, SkyPilot will automatically figure out the best place to launch your clusters with available capacity in your reservations/blocks considered as zero-cost.
+By specifying configurations above, SkyPilot will prioritize using any available resources in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
 
 For example, if you are launching a cluster with the following SkyPilot YAML:
 
