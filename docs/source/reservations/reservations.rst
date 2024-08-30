@@ -94,7 +94,7 @@ GCP reservations
 
 GCP reservations are similar to AWS capacity reservations, where you can reserve a certain amount of compute capacity for any period of time.
 
-To get a reservation, see the `GCP official docs <https://cloud.google.com/compute/docs/instances/reservations-single-project>`__
+To get a reservation, see the `GCP official docs <https://cloud.google.com/compute/docs/instances/reservations-single-project>`__.
 
 Like AWS, you can specify two fields in ``~/.sky/config.yaml``:
 
