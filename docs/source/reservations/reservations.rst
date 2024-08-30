@@ -46,10 +46,12 @@ You can specify two fields in ``~/.sky/config.yaml``:
       specific_reservations:
         # 1x H100 capacity block in us-east-1
         - "cr-0123456789"
-        # 2x A100 reservation in us-west-2
+        # 2x A100 reservation in us-east-2
         - "cr-123456789a"
-        # 2x M5a.16xlarge reservation in us-east-1
+        # 2x A100 reservation in us-west-2
         - "cr-23456789ab"
+        # 2x M5a.16xlarge reservation in us-east-1
+        - "cr-3456789abc"
 
 For more details of the configuration, see reference for :ref:`config-yaml`.
 
@@ -70,14 +72,14 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
       cloud: aws
       accelerators: A100:8
     
-    num_nodes: 4
+    num_nodes: 2
 
 
 SkyPilot will utilize the capacity reservation as follows:
 
-1. Find available capacity in your capacity block in ``us-west-2`` in the reservation ``cr-123456789a``. Let's say 1 A100 instance capacity is available.
-2. SkyPilot will launch 4 nodes in ``us-west-2`` with 1 node coming from the reservation, and the rest 3 nodes from on-demand.
-3. If it fails to find available A100 instances from on-demand, it will automatically :ref:`failover <auto-failover>` to other regions/zones.
+1. Find available capacity in your capacity blocks in ``us-east-2`` and ``us-west-2`` in the reservation ``cr-123456789a`` and ``cr-23456789ab``, respectively. Let's say 1 A100 instance capacity is available in ``us-east-2`` but no available capacity in ``us-west-2`` (as shown in the figure above).
+2. SkyPilot will first try to launch 2 nodes in ``us-east-2`` with 1 node coming from the reservation, and the rest 1 node as on-demand.
+3. If it fails to find available on-demand A100 instance in ``us-east-2``, it will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones.
 
 
 .. hint::
@@ -109,10 +111,10 @@ Like AWS, you can specify two fields in ``~/.sky/config.yaml``:
 SkyPilot will utilize the reservations similar to AWS reservations as described in :ref:`utilizing-reservations`.
 
 
-GCP Dynamic Workload Scheduling (DWS)
+GCP Dynamic Workload Scheduler (DWS)
 -------------------------------------
 
-GCP `Dynamic Workload Scheduling (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that allows you submit a GPU capacity request, automatically provisions the requested resources when they are available and keeps the resources running for a specified duration.
+GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that allows you submit a GPU capacity request, automatically provisions the requested resources when they are available and keeps the resources running for a specified duration.
 
 .. hint::
 
