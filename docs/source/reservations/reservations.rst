@@ -32,8 +32,8 @@ Once you have successfully created a reservation/block, you will get an ID of th
 
 To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml``:
 
-* ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with *Instance eligibility: open*.
-* ``aws.specific_reservations``: a list of reservation ids that can be used by SkyPilot. This is useful if you have multiple capacity blocks or capacity reservations with *Instance eligibility: targeted* for different instance types in multiple regions/zones.
+* ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with ``Instance eligibility: open``.
+* ``aws.specific_reservations``: a list of reservation IDs that can be used by SkyPilot. This is useful if you have multiple capacity reservations or blocks with ``Instance eligibility: targeted`` for different instance types in multiple regions/zones.
 
 .. note::
 
@@ -53,7 +53,7 @@ To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml
         # 2x M5a.16xlarge reservation in us-east-1
         - "cr-3456789abc"
 
-For more details of the configuration, see reference for :ref:`config-yaml`.
+For more details of the fields, see :ref:`config-yaml`.
 
 
 
@@ -133,7 +133,7 @@ SkyPilot allows you to launch a cluster with DWS by specifying the ``gcp.managed
         run_duration: 3600
         provision_timeout: 900
 
-The ``run_duration`` is the duration for a created instance to be kept alive (in seconds, required), and the ``provision_timeout`` is the timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
+``run_duration`` is the duration for a created instance to be kept alive (in seconds, required). ``provision_timeout`` is the timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without requested resources being provisioned, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
 See the :ref:`config-yaml` for more details.
 
@@ -183,9 +183,9 @@ Here, ``kueue.x-k8s.io/queue-name`` is the name of the Kueue queue to submit you
 Long-term reservations
 ----------------------
 
-Unlike short-term reservations above, long-term ones are more than one month long and can be viewed as a type of on-prem cluster.
+Unlike short-term reservations above, long-term reservations are typically more than one month long and can be viewed as a type of *on-prem cluster*.
 
-SkyPilot supports long-term reservations and on-premise data centers through Kubernetes, i.e. you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
+SkyPilot supports long-term reservations and on-premise clusters through Kubernetes, i.e., you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
 
-See the simple steps to setup a Kubernetes cluster on existing machines and interact with them through SkyPilot in :ref:`kubernetes-overview`.
+See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`kubernetes-overview`.
 
