@@ -19,8 +19,8 @@ utilize the capacity in your cloud accounts.
 AWS Capacity Reservations & Capacity Blocks
 --------------------------------------------
 
-AWS capacity reservations and capacity block offers are a way to lock in a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s(P4d instances) and H100s(P5d instances), while the former is for all other instance types.
-Instead of committing to a 1-3 year long contract, you can get a capacity reservation and capacity block for as short as 1 second and 1 day, respectively.
+AWS **capacity reservations** and **capacity blocks** are ways to reserve a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s (P4d instances) and H100s (P5d instances), while the former is for all other instance types.
+Instead of committing to a 1-3 year long contract, you can get a capacity reservation or capacity block for as short as 1 second or 1 day, respectively.
 
 
 To request capacity reservations/blocks, see the official docs:
