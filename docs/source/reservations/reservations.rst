@@ -28,9 +28,9 @@ To request capacity reservations/blocks, see the official docs:
 * `AWS Capacity Reservations <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-reservations.html>`_
 * `AWS Capacity Blocks <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-blocks.html>`_
 
-Once you have got a reservation/block, you will get an id of your reservation, like ``cr-0123456789abcdefg``.
+Once you have successfully created a reservation/block, you will get an ID of the reservation/block, such as ``cr-0123456789abcdefg``.
 
-You can specify two fields in ``~/.sky/config.yaml``:
+To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml``:
 
 * ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with *Instance eligibility: open*.
 * ``aws.specific_reservations``: a list of reservation ids that can be used by SkyPilot. This is useful if you have multiple capacity blocks or capacity reservations with *Instance eligibility: targeted* for different instance types in multiple regions/zones.
