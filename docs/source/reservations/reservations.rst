@@ -2,7 +2,7 @@
 .. _reservation:
 
 Reservations & DWS
-==================
+===================
 
 
 Clouds are designed to be elastic, but due to the recent GPU shortages, many organizations have started to get reservations
@@ -11,8 +11,13 @@ from cloud providers to lock in GPU capacity.
 SkyPilot can be used to request resources from reservations and even combine them with on-demand/spot resources to fully
 utilize the capacity in your cloud accounts.
 
-AWS capacity reservations & capacity block
-------------------------------------------
+.. image:: https://i.imgur.com/UY9eD1r.png
+  :width: 90%
+  :align: center
+
+
+AWS Capacity Reservations & Capacity Blocks
+--------------------------------------------
 
 AWS capacity reservations and capacity block offers are a way to lock in a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s(P4d instances) and H100s(P5d instances), while the former is for all other instance types.
 Instead of committing to a 1-3 year long contract, you can get a capacity reservation and capacity block for as short as 1 second and 1 day, respectively.
@@ -69,6 +74,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
 
 
 SkyPilot will utilize the capacity reservation as follows:
+
 1. Find available capacity in your capacity block in ``us-west-2`` in the reservation ``cr-123456789a``. Let's say 1 A100 instance capacity is available.
 2. SkyPilot will launch 4 nodes in ``us-west-2`` with 1 node coming from the reservation, and the rest 3 nodes from on-demand.
 3. If it fails to find available A100 instances from on-demand, it will automatically :ref:`failover <auto-failover>` to other regions/zones.
@@ -132,6 +138,7 @@ See the :ref:`config-yaml` for more details.
 In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <task-yaml-experimental>`):
 
 .. code-block:: yaml
+
     experimental:
       config_overrides:
         gcp:
@@ -146,7 +153,7 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
     num_nodes: 4
     
 Using DWS on GKE with Kueue
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 DWS is also supported on Google Kubernetes Engine (GKE) with Kueue. To enable DWS on GKE, you need to set up your GKE cluster with Kueue and DWS, see the `GCP official docs <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest>`
 
