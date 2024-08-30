@@ -128,7 +128,7 @@ GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/co
 Using DWS for VMs
 ~~~~~~~~~~~~~~~~~
 
-SkyPilot allows you to launch a cluster with DWS by specifying the ``gcp.managed_instance_group`` field in ``~/.sky/config.yaml``:
+SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_instance_group`` field in ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
