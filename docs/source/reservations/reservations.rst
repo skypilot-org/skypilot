@@ -19,18 +19,18 @@ utilize the capacity in your cloud accounts.
 AWS Capacity Reservations & Capacity Blocks
 --------------------------------------------
 
-AWS capacity reservations and capacity block offers are a way to lock in a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s(P4d instances) and H100s(P5d instances), while the former is for all other instance types.
-Instead of committing to a 1-3 year long contract, you can get a capacity reservation and capacity block for as short as 1 second and 1 day, respectively.
+AWS **capacity reservations** and **capacity blocks** are ways to reserve a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s (P4d instances) and H100s (P5d instances), while the former is for all other instance types.
+Instead of committing to a 1-3 year long contract, you can get a capacity reservation or capacity block for as short as 1 second or 1 day, respectively.
 
 
 To request capacity reservations/blocks, see the official docs:
 
 * `AWS Capacity Reservations <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-reservations.html>`_
-* `AWS Capacity Block Offers <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-blocks.html>`_
+* `AWS Capacity Blocks <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-blocks.html>`_
 
-Once you have got a reservation/block, you will get an id of your reservation, like ``cr-012345678``.
+Once you have successfully created a reservation/block, you will get an ID of the reservation/block, such as ``cr-012345678``.
 
-You can specify two fields in ``~/.sky/config.yaml``:
+To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml``:
 
 * ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with *Instance eligibility: open*.
 * ``aws.specific_reservations``: a list of reservation ids that can be used by SkyPilot. This is useful if you have multiple capacity blocks or capacity reservations with *Instance eligibility: targeted* for different instance types in multiple regions/zones.
