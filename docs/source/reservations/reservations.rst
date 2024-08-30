@@ -77,7 +77,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
     num_nodes: 2
 
 
-SkyPilot will utilize the capacity reservation as follows:
+SkyPilot will utilize the capacity reservation/block as follows:
 
 1. Find available capacity in your capacity blocks in ``us-east-2`` and ``us-west-2`` in the reservation ``cr-123456789a`` and ``cr-23456789ab``, respectively. Let's say 1 A100 instance capacity is available in ``us-east-2`` but no available capacity in ``us-west-2`` (as shown in the figure above).
 2. SkyPilot will first try to launch 2 nodes in ``us-east-2`` with 1 node coming from the reservation, and the rest 1 node as on-demand.
