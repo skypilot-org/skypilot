@@ -26,7 +26,7 @@ Instead of committing to a 1-3 year long contract, you can get a capacity reserv
 To request capacity reservations/blocks, see the official docs:
 
 * `AWS Capacity Reservations <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-reservations.html>`_
-* `AWS Capacity Block Offers <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-blocks.html>`_
+* `AWS Capacity Blocks <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-blocks.html>`_
 
 Once you have got a reservation/block, you will get an id of your reservation, like ``cr-0123456789abcdefg``.
 
