@@ -84,7 +84,7 @@ SkyPilot will utilize the capacity reservation as follows:
 
 .. hint::
 
-    If you have a capacity block with a starting time in the future, you can use SkyPilot to launch a job on that capacity block as soon as the starting date comes, i.e. ``sky jobs launch --region us-east-1 --gpus H100:8 task.yaml``, so you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
+    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --region us-east-1 --gpus H100:8 task.yaml`` and let SkyPilot to automatically wait until the starting time comes, so you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
 
 
 GCP reservations
