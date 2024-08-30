@@ -94,12 +94,14 @@ GCP reservations
 
 GCP reservations are similar to AWS capacity reservations, where you can reserve a certain amount of compute capacity for any period of time.
 
-To get a reservation, see the `GCP official docs <https://cloud.google.com/compute/docs/instances/reservations-single-project>`__
+To get a reservation, see the `GCP official docs <https://cloud.google.com/compute/docs/instances/reservations-single-project>`__.
 
 Like AWS, you can specify two fields in ``~/.sky/config.yaml``:
 
 * ``gcp.prioritize_reservations``: whether to prioritize launching clusters from reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your `automatically consumed reservations <https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_instances_from_any_matching_reservation>`__.
-* ``gcp.specific_reservations``: a list of reservation ids that can be used by SkyPilot. This is useful if you have multiple `specific reservations <https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_instances_from_a_specific_reservation>`__ for different instance types in multiple regions/zones.
+* ``gcp.specific_reservations``: a list of reservation IDs that can be used by SkyPilot. This is useful if you have multiple `specific reservations <https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_instances_from_a_specific_reservation>`__ for different instance types in multiple regions/zones.
+
+Example:
 
 .. code-block:: yaml
 
@@ -126,7 +128,7 @@ GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/co
 Using DWS for VMs
 ~~~~~~~~~~~~~~~~~
 
-SkyPilot allows you to launch a cluster with DWS by specifying the ``gcp.managed_instance_group`` field in ``~/.sky/config.yaml``:
+SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_instance_group`` field in ``~/.sky/config.yaml``:
 
 .. code-block:: yaml
 
@@ -139,7 +141,7 @@ SkyPilot allows you to launch a cluster with DWS by specifying the ``gcp.managed
 1. ``run_duration``: duration for a created instance to be kept alive (in seconds, required).
 2. ``provision_timeout``: timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without requested resources being provisioned, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
-See the :ref:`config-yaml` for more details.
+See :ref:`config-yaml` for more details.
 
 In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <task-yaml-experimental>`):
 
