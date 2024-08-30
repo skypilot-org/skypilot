@@ -116,9 +116,9 @@ SkyPilot will utilize the reservations similar to AWS reservations as described 
 GCP Dynamic Workload Scheduler (DWS)
 -------------------------------------
 
-GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that allows you submit a GPU capacity request, automatically provisions the requested resources when they are available and keeps the resources running for a specified duration.
+GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that (1) receives a GPU capacity request, (2) automatically provisions the requested resources when they become available, and (3) keeps the resources running for a specified duration.
 
-.. hint::
+.. tip::
 
     It has been observed that using DWS can significantly increase the chance of getting a high-end GPU resource, such as A100s and H100s, compared to using on-demand or spot instances.
 
