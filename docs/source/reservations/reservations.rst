@@ -39,6 +39,8 @@ To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml
 
     If any of the fields are specified, please allow about 30 seconds for SkyPilot optimizer to retrieve the latest reservation/block status on all regions and zones from your AWS account.
 
+Example:
+
 .. code-block:: yaml
 
     aws:
