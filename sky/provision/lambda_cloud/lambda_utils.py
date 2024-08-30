@@ -146,8 +146,8 @@ class LambdaCloudClient:
         # launch requests are rate limited at ~1 request every 10 seconds.
         # So don't use launch requests to check availability.
         # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
-        available_regions = self.list_catalog(
-        )[instance_type]['regions_with_capacity_available']
+        available_regions = (self.list_catalog()[instance_type]
+                             ['regions_with_capacity_available'])
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
             if len(available_regions) > 0:
@@ -178,9 +178,7 @@ class LambdaCloudClient:
 
     def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
         """Terminate instances."""
-        data = json.dumps({'instance_ids': [instance_ids[0]]
-                          }  # TODO(ewzeng) don't hardcode
-                         )
+        data = json.dumps({'instance_ids': list(instance_ids)})
         response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/terminate',
