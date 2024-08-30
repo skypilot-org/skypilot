@@ -183,9 +183,9 @@ Here, ``kueue.x-k8s.io/queue-name`` is the name of the Kueue queue to submit you
 Long-term reservations
 ----------------------
 
-Unlike short-term reservations above, long-term ones are more than one month long and can be viewed as a type of on-prem cluster.
+Unlike short-term reservations above, long-term reservations are typically more than one month long and can be viewed as a type of *on-prem cluster*.
 
-SkyPilot supports long-term reservations and on-premise data centers through Kubernetes, i.e. you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
+SkyPilot supports long-term reservations and on-premise clusters through Kubernetes, i.e., you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
 
-See the simple steps to setup a Kubernetes cluster on existing machines and interact with them through SkyPilot in :ref:`kubernetes-overview`.
+See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`kubernetes-overview`.
 
