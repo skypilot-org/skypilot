@@ -95,7 +95,7 @@ SkyPilot will utilize the capacity reservation/block as follows:
 
 .. hint::
 
-    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --region us-east-1 --gpus H100:8 task.yaml`` and let SkyPilot to automatically wait until the starting time comes. Namely, you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
+    If you have a capacity block with a starting time in the future, you can run ``sky jobs launch --region us-east-1 --gpus H100:8 task.yaml`` to let SkyPilot automatically wait until the starting time is reached. Namely, you don't have to wake up at 4:30am PDT to launch your job on a newly available capacity block.
 
 
 GCP reservations
@@ -172,7 +172,7 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 Using DWS on GKE with Kueue
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-DWS is also supported on Google Kubernetes Engine (GKE) with Kueue. To enable DWS on GKE, you need to set up your GKE cluster with Kueue and DWS, see the `GCP official docs <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest>`__.
+DWS is also supported on Google Kubernetes Engine (GKE) with Kueue. To enable DWS on GKE, you need to set up your GKE cluster with Kueue and DWS; see the `GCP official docs <https://cloud.google.com/kubernetes-engine/docs/how-to/provisioningrequest>`__.
 
 To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS configuration in the SkyPilot task YAML:
 
