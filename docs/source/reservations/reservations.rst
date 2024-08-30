@@ -133,7 +133,7 @@ SkyPilot allows you to launch a cluster with DWS by specifying the ``gcp.managed
         run_duration: 3600
         provision_timeout: 900
 
-The ``run_duration`` is the duration for a created instance to be kept alive (in seconds, required), and the ``provision_timeout`` is the timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without getting the requested resources, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
+``run_duration`` is the duration for a created instance to be kept alive (in seconds, required). ``provision_timeout`` is the timeout for provisioning an instance with DWS (in seconds, optional). If the timeout is reached without requested resources being provisioned, SkyPilot will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones to get the resources.
 
 See the :ref:`config-yaml` for more details.
 
