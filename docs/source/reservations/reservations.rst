@@ -1,8 +1,8 @@
 
 .. _reservation:
 
-Reservations & DWS
-===================
+Reserved, Capacity Blocks & DWS
+===================================
 
 
 Clouds are designed to be elastic, but due to the recent GPU shortages, many organizations have started to get reservations
@@ -11,8 +11,8 @@ from cloud providers to lock in GPU capacity.
 SkyPilot can be used to request resources from reservations and even combine them with on-demand/spot resources to fully
 utilize the capacity in your cloud accounts.
 
-.. image:: https://i.imgur.com/UY9eD1r.png
-  :width: 90%
+.. image:: https://i.imgur.com/SbfnFDs.png
+  :width: 95%
   :align: center
 
 
@@ -56,7 +56,7 @@ For more details of the fields, see :ref:`config-yaml`.
 
 .. note::
 
-    If any of the fields are specified, please allow about 30 seconds for SkyPilot optimizer to retrieve the latest reservation/block status on all regions and zones from your AWS account.
+    If any of the fields are specified, SkyPilot optimizer may take around 30 seconds to retrieve the latest reservation/block status on all regions and zones from your AWS account.
 
 
 .. _utilizing-reservations:
@@ -64,7 +64,14 @@ For more details of the fields, see :ref:`config-yaml`.
 Utilizing Reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
-By specifying configurations above, SkyPilot will prioritize using any available resources in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
+By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
+
+SkyPilot will act as follows:
+
+1. Query reservations/blocks across each AWS regions and zones to find all non-occupied capacity.
+2. Calculate per-zone pricing with non-occupied capacity as zero-cost and on-demand/spot price for the rest of resources (if any is needed to satisfy the requested resources).
+3. :ref:`Automatically failover <auto-failover>` through different zones based on the per-zone pricing until the requested resources are satisfied.
+
 
 For example, if you are launching a cluster with the following SkyPilot YAML:
 
@@ -77,11 +84,13 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
     num_nodes: 2
 
 
-SkyPilot will utilize the capacity reservation as follows:
+SkyPilot will utilize the capacity reservation/block as follows:
 
-1. Find available capacity in your capacity blocks in ``us-east-2`` and ``us-west-2`` in the reservation ``cr-123456789a`` and ``cr-23456789ab``, respectively. Let's say 1 A100 instance capacity is available in ``us-east-2`` but no available capacity in ``us-west-2`` (as shown in the figure above).
-2. SkyPilot will first try to launch 2 nodes in ``us-east-2`` with 1 node coming from the reservation, and the rest 1 node as on-demand.
-3. If it fails to find available an on-demand A100 instance in ``us-east-2``, it will automatically :ref:`failover <auto-failover>` to other clouds/regions/zones.
+1. Query reservations/blocks in ``us-east-2`` and ``us-west-2`` in reservation ``cr-123456789a`` and ``cr-23456789ab``, respectively. Let's say:
+   - 1 A100 instance capacity is available in ``us-east-2``,
+   - No available capacity in ``us-west-2``.
+2. SkyPilot calculates the pricing for all zones and finds that ``us-east-2`` is cheaper than ``us-west-2`` because the former is considered as 1 on-demand price for 2 nodes while the latter is 2 on-demand prices for 1 node.
+3. If it fails to find available an on-demand A100 instance in ``us-east-2``, it will continue :ref:`automatically failover <auto-failover>` to other clouds/regions/zones for normal on-demand/spot instances.
 
 
 .. hint::

@@ -147,7 +147,7 @@ Read the research:
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Reservations & Kubernetes Clusters
+   :caption: Reserved & Existing Clusters
 
    ../reservations/reservations
    ../reference/kubernetes/index
