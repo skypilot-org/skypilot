@@ -121,7 +121,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instance_ids = launch_nodes('head', 1)
         if len(instance_ids) != 1:
             raise RuntimeError(
-                f"Expected exactly one instance, got {len(instance_ids)}")
+                f'Expected exactly one instance, got {len(instance_ids)}')
         created_instance_ids.append(instance_ids[0])
         head_instance_id = instance_ids[0]
 
@@ -204,8 +204,8 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info["private_ip"],
-                external_ip=instance_info["ip"],
+                internal_ip=instance_info['private_ip'],
+                external_ip=instance_info['ip'],
                 ssh_port=22,
                 tags={},
             )
