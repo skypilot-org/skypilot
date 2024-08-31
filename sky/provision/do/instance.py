@@ -20,29 +20,10 @@ MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
 logger = sky_logging.init_logger(__name__)
 
 
-def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    response = utils.client.droplets.list()
-    possible_names = [
-        f'{cluster_name_on_cloud}-head',
-        f'{cluster_name_on_cloud}-worker',
-    ]
-
-    filtered_instances: Dict[str, Any] = {}
-    for instance in instances:
-        instance_id = instance['id']
-        if status_filters is not None and instance[
-                'state'] not in status_filters:
-            continue
-        if instance.get('name') in possible_names:
-            filtered_instances[instance_id] = instance
-    return filtered_instances
-
-
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     head_instance_id = None
-    for inst_id, inst in instances.items():
-        if inst['name'].endswith('-head'):
+    for instance_name, inst in instances.items():
+        if iinstance_name.endswith('-head'):
             head_instance_id = inst_id
             break
     return head_instance_id
@@ -287,13 +268,9 @@ def query_instances(
     instances = _filter_instances(cluster_name_on_cloud, None)
 
     status_map = {
-        'starting': status_lib.ClusterStatus.INIT,
-        'restarting': status_lib.ClusterStatus.INIT,
-        'upgrading': status_lib.ClusterStatus.INIT,
-        'provisioning': status_lib.ClusterStatus.INIT,
-        'stopping': status_lib.ClusterStatus.INIT,
-        'serviceready': status_lib.ClusterStatus.INIT,
-        'ready': status_lib.ClusterStatus.UP,
+        'new': status_lib.ClusterStatus.INIT,
+        'archive': status_lib.ClusterStatus.INIT,
+        'active': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}

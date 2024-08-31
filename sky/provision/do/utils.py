@@ -204,3 +204,37 @@ def create_instance(region: str, instance_name: str,
     logger.debug(f'{instance_name} created')
     
 
+def filter_instances(cluster_name_on_cloud: str,
+                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
+    """Returns Dict mapping instance name to instance metadata filtered by status
+    """
+    response = utils.client.droplets.list()
+    possible_names = [
+        f'{cluster_name_on_cloud}-head',
+        f'{cluster_name_on_cloud}-worker',
+    ]
+
+    filtered_instances: Dict[str, Any] = {}
+    page = 1
+    paginated = True
+    while paginated:
+        try:
+            resp = client().droplets.list(per_page=50, page=page)
+            for instance in resp["droplets"]:
+                if instance['status'] in status_filters or status_filters is None:
+                    filtered_instances[instance['name']] = instance 
+        except HttpResponseError as err:
+            DigitalOceanError(
+                "Error: {0} {1}: {2}".format(
+                    err.status_code, err.reason, err.error.message
+                )
+            )
+
+        pages = resp.links.pages
+        if "next" in pages.keys():
+            # Having to parse the URL to find the next page is not very friendly.
+            parsed_url = urlparse(pages["next"])
+            page = parse_qs(parsed_url.query)["page"][0]
+        else:
+            paginated = False
+    return filtered_instances
