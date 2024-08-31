@@ -110,7 +110,7 @@ This is supported by simply connecting VSCode to the cluster with the cluster na
 
 For more details, please refer to the `VSCode documentation <https://code.visualstudio.com/docs/remote/ssh-tutorial>`__.
 
-.. image:: https://imgur.com/8mKfsET.gif
+.. image:: https://i.imgur.com/8mKfsET.gif
   :align: center
   :alt: Connect to the cluster with VSCode
 

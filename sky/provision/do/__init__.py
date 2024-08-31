@@ -1,4 +1,4 @@
-"""DigitalOcean provisioner for SkyPilot."""
+"""DO provisioner for SkyPilot."""
 
 from sky.provision.do.config import bootstrap_instances
 from sky.provision.do.instance import cleanup_ports

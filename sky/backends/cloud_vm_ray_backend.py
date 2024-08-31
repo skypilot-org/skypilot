@@ -82,7 +82,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
     clouds.GCP: 240,
-    clouds.Lambda: 150,
+    clouds.Lambda: 300,
     clouds.IBM: 160,
     clouds.OCI: 300,
     clouds.Paperspace: 600,
@@ -1933,7 +1933,7 @@ class RetryingVmProvisioner(object):
         while True:
             if (isinstance(to_provision.cloud, clouds.Azure) and
                     to_provision.accelerators is not None and
-                    'A10' in to_provision.accelerators):
+                    'A10' in to_provision.accelerators and prev_handle is None):
                 logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
                                'an A10 cluster on Azure. This may take ~20 '
                                'minutes due to driver installation.'

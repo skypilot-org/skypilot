@@ -882,6 +882,9 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
+    conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
+                           else 'false')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -917,7 +920,7 @@ def write_cluster_config(
 
                 # Conda setup
                 'conda_installation_commands':
-                    constants.CONDA_INSTALLATION_COMMANDS,
+                    constants.CONDA_INSTALLATION_COMMANDS(conda_auto_activate),
                 # We should not use `.format`, as it contains '{}' as the bash
                 # syntax.
                 'ray_skypilot_installation_commands':
