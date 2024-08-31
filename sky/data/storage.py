@@ -455,6 +455,7 @@ class Storage(object):
                  name: Optional[str] = None,
                  source: Optional[SourceType] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
+                 init_store: Optional[StoreType] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: bool = True) -> None:
@@ -487,6 +488,7 @@ class Storage(object):
             Can be a single local path, a list of local paths, or a cloud URI
             (s3://, gs://, etc.). Local paths do not need to be absolute.
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
+          init_store: Optional; Specify store type if provided in task YAML.
           persistent: bool; Whether to persist across sky launches.
           mode: StorageMode; Specify how the storage object is manifested on
             the remote VM. Can be either MOUNT or COPY. Defaults to MOUNT.
@@ -514,6 +516,8 @@ class Storage(object):
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
         self.stores = {} if stores is None else stores
+
+        self.init_store = None if init_store is None else init_store
 
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
@@ -1013,6 +1017,9 @@ class Storage(object):
         if store.is_sky_managed:
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
+    def set_init_store(self, store_type: StoreType):
+        self.init_store = store_type
+
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
@@ -1020,7 +1027,7 @@ class Storage(object):
 
         name = config.pop('name', None)
         source = config.pop('source', None)
-        _ = config.pop('store', None)
+        store = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         if force_delete is None:
@@ -1043,7 +1050,8 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode)
-
+        if store:
+            storage_obj.set_init_store(StoreType(store.upper()))
         # Add force deletion flag
         storage_obj.force_delete = force_delete
         return storage_obj

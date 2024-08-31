@@ -351,10 +351,6 @@ class Task:
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.
-
-        resources = config.get('resources') or {}
-        # Used for adding store if store type is provided
-        region = resources.get('region')
         envs = config.get('envs')
         if envs is not None and isinstance(envs, dict):
             new_envs: Dict[str, Optional[str]] = {}
@@ -439,10 +435,7 @@ class Task:
             mount_path = storage[0]
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
-                store_type = storage[1].get('store', None)
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
-                if store_type is not None:
-                    storage_obj.add_store(store_type.upper(), region)
 
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
@@ -964,7 +957,15 @@ class Task:
         }``.
         """
         for storage in self.storage_mounts.values():
-            if len(storage.stores) == 0:
+
+            if storage.init_store:
+                store_type = storage.init_store
+                preferred_store_type, store_region = self._get_preferred_store()
+                if preferred_store_type is not store_type:
+                    store_region = None
+                self.storage_plans[storage] = store_type
+                storage.add_store(store_type, store_region)
+            elif len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
