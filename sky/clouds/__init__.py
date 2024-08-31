@@ -21,6 +21,7 @@ from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.oci import OCI
+from sky.clouds.do import DO
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
@@ -34,6 +35,7 @@ __all__ = [
     'Cudo',
     'GCP',
     'Lambda',
+    'DO',
     'Paperspace',
     'SCP',
     'RunPod',
