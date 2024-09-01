@@ -113,12 +113,14 @@ Available fields:
       disk_size: 256
 
       # Disk tier to use for OS (optional).
-      # Could be one of 'low', 'medium', 'high' or 'best' (default: 'medium').
+      # Could be one of 'low', 'medium', 'high', 'ultra' or 'best' (default: 'medium').
       # if 'best' is specified, use the best disk tier enabled.
       # Rough performance estimate:
-      #   low: 500 IOPS; read 20MB/s; write 40 MB/s
-      #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
-      #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
+      #   low: 1000 IOPS; read 90 MB/s; write 90 MB/s
+      #   medium: 3000 IOPS; read 220 MB/s; write 220 MB/s
+      #   high: 6000 IOPS; read 400 MB/s; write 400 MB/s
+      #   ultra: 60000 IOPS;  read 4000 MB/s; write 3000 MB/s
+      # Measured by examples/perf/storage_rawperf.yaml
       disk_tier: medium
 
       # Ports to expose (optional).
