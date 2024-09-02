@@ -1,7 +1,7 @@
 
 .. _reservation:
 
-Reserved, Capacity Blocks & DWS
+Reserved, Capacity Blocks, DWS
 ===================================
 
 
