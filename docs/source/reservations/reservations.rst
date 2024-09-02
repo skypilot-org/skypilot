@@ -70,7 +70,7 @@ Specifically, SkyPilot's behavior is as follows:
 
 1. Query reservations/blocks across AWS regions and zones to find all available capacity. (If the task specifies specific regions or zones to use, only those are queried.)
 2. For each zone, calculate its cost: any available reserved capacity is considered as zero cost, and if any on-demand/spot resource is needed to supplement the available reserved capacity to fully satisfy the request, their on-demand/spot price is included.
-3. :ref:`Automatically failover <auto-failover>` through these zones in decreasing per-zone cost order until the requested resources are provisioned.
+3. :ref:`Automatically failover <auto-failover>` through these zones in increasing per-zone cost order until the requested resources are provisioned.
 
 
 For example, if you are launching a cluster with the following SkyPilot YAML:
