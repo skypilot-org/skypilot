@@ -425,7 +425,6 @@ def _post_provision_setup(
         f'{json.dumps(dataclasses.asdict(provision_record), indent=2)}\n'
         'Cluster info:\n'
         f'{json.dumps(dataclasses.asdict(cluster_info), indent=2)}')
-
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
         e = RuntimeError(f'Provision failed for cluster {cluster_name!r}. '

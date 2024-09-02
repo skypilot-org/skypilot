@@ -33,7 +33,6 @@ __all__ = [
     'Azure',
     'Cloud',
     'Cudo',
-    'DO',
     'GCP',
     'Lambda',
     'DO',

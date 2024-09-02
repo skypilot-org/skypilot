@@ -98,7 +98,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             cluster_name=cluster_name_on_cloud,
             region=region,
             zone=None,
-            head_instance_id=head_instance['id'],
+            head_instance_id=head_instance['name'],
             resumed_instance_ids=list(newly_started_instances.keys()),
             created_instance_ids=[],
         )
@@ -138,7 +138,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,
-        head_instance_id=head_instance['id'],
+        head_instance_id=head_instance['name'],
         resumed_instance_ids=list(stopped_instances.keys()),
         created_instance_ids=[instance['id'] for instance in created_instances],
     )
@@ -192,25 +192,46 @@ def terminate_instances(
     del provider_config  # unused
     instances = utils.filter_instances(cluster_name_on_cloud,
                                        status_filters=None)
-    volume_ids = []
     for instance_name, instance_meta in instances.items():
         logger.debug(f'Terminating instance {instance_name}')
         if worker_only and instance_name.endswith('-head'):
             continue
         try:
             utils.client().droplets.destroy(droplet_id=instance_meta['id'])
-            volume_ids.extend(instance_meta['volume_ids'])
         except HttpResponseError as err:
             raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
 
-    for volume_id in volume_ids:
-        try:
-            utils.client().volumes.delete(volume_id=volume_id)
-        except HttpResponseError as err:
-            raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
-                err.status_code, err.reason, err.error.message))
+    
+    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
+        instances = utils.filter_instances(cluster_name_on_cloud,
+                                       status_filters=None)
+        if len(instances) == 0 or len(instances) == 1 and worker_only:
+            break
+        time.sleep(constants.POLL_INTERVAL)
+    else:
+        msg = ('Failed to delete all instances')
+        logger.warning(msg)
+        raise RuntimeError(msg)
 
+    # TODO(asaiacai): Possible private storage resource leakage for autodown
+    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
+        exist_storage = utils.filter_storage(cluster_name_on_cloud)
+        if len(exist_storage) == 0 or len(exist_storage) == 1 and worker_only:
+            break
+        for volume_name, volume_meta in exist_storage.items():
+            if worker_only and volume_name.endswith('-head'):
+                continue
+            try:
+                utils.client().volumes.delete(volume_id=volume_meta['id'])
+            except HttpResponseError as err:
+                logger.info('Error: {0} {1}: {2}'.format(
+                    err.status_code, err.reason, err.error.message))
+        time.sleep(constants.POLL_INTERVAL)
+    else:
+        msg = ('Failed to delete all block stores')
+        logger.warning(msg)
+        raise RuntimeError(msg)
 
 def get_cluster_info(
     region: str,
@@ -221,7 +242,7 @@ def get_cluster_info(
     running_instances = utils.filter_instances(cluster_name_on_cloud,
                                                ['active'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
-    head_instance_id = None
+    head_instance = None
     for instance_name, instance_meta in running_instances.items():
         public_ip, private_ip = None, None
         for net in instance_meta['networks']['v4']:
@@ -242,11 +263,10 @@ def get_cluster_info(
             )
         ]
         if instance_name.endswith('-head'):
-            head_instance_id = instance_meta['id']
-
+            head_instance = instance_meta
     return common.ClusterInfo(
         instances=instances,
-        head_instance_id=head_instance_id,
+        head_instance_id=head_instance['name'],
         provider_name='do',
         provider_config=provider_config,
     )

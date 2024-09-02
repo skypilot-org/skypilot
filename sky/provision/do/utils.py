@@ -74,7 +74,7 @@ def client():
     return _client
 
 
-def ssh_key_id():
+def ssh_key_id(public_key: str):
     global _ssh_key_id
     if _ssh_key_id is None:
         page = 1
@@ -90,12 +90,19 @@ def ssh_key_id():
                 raise DigitalOceanError('Error: {0} {1}: {2}'.format(
                     err.status_code, err.reason, err.error.message)) from err
 
-            pages = resp.links.pages
-            if 'next' in pages.keys():
+            pages = resp['links']
+            if 'pages' in pages and 'next' in pages['pages']:
+                pages = pages['pages']
                 parsed_url = urllib.parse.urlparse(pages['next'])
-                page = urllib.parse.parse_qs(parsed_url.query)['page'][0]
+                page = int(urllib.parse.parse_qs(parsed_url.query)['page'][0])
             else:
                 paginated = False
+
+        request = {
+            'public_key': public_key,
+            'name': SSH_KEY_NAME,
+        }
+        _ssh_key_id = client().ssh_keys.create(body=request)['ssh_key']
     return _ssh_key_id
 
 
@@ -166,7 +173,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         'region': region,
         'size': config.node_config['InstanceType'],
         'image': IMAGE,
-        'ssh_keys': [ssh_key_id()['fingerprint']],
+        'ssh_keys': [ssh_key_id(config.authentication_config['ssh_public_key'])['fingerprint']],
         'tags': ['skypilot', cluster_name_on_cloud]
     }
     instance = _create_droplet(instance_request)
@@ -176,6 +183,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         'name': instance_name,
         'region': region,
         'filesystem_type': 'ext4',
+        'tags' : ['skypilot', cluster_name_on_cloud]
     }
     volume = _create_volume(volume_request)
 
@@ -213,11 +221,42 @@ def filter_instances(
         except HttpResponseError as err:
             DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
-
-        pages = resp.links.pages
-        if 'next' in pages.keys():
+                
+        pages = resp['links']
+        if 'pages' in pages and 'next' in pages['pages']:
+            pages = pages['pages']
             parsed_url = urllib.parse.urlparse(pages['next'])
             page = int(urllib.parse.parse_qs(parsed_url.query)['page'][0])
         else:
             paginated = False
     return filtered_instances
+
+def filter_storage(cluster_name_on_cloud: str) -> Dict[str, Any]:
+    """Returns Dict mapping storage name
+    to storage metadata filtered by status
+    """
+
+    filtered_storage: Dict[str, Any] = {}
+    page = 1
+    paginated = True
+    while paginated:
+        try:
+            resp = client().volumes.list(per_page=50,
+                                          page=page)
+
+            for storage in resp['volumes']:
+                if cluster_name_on_cloud in storage['tags']:
+                    filtered_storage[storage['name']] = storage
+        except HttpResponseError as err:
+            DigitalOceanError('Error: {0} {1}: {2}'.format(
+                err.status_code, err.reason, err.error.message))
+                
+        pages = resp['links']
+        if 'pages' in pages and 'next' in pages['pages']:
+            pages = pages['pages']
+            parsed_url = urllib.parse.urlparse(pages['next'])
+            page = int(urllib.parse.parse_qs(parsed_url.query)['page'][0])
+        else:
+            paginated = False
+    return filtered_storage
+
