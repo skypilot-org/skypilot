@@ -5,9 +5,9 @@ Reserved, Capacity Blocks, DWS
 ===================================
 
 
-With the recent GPU shortage, reservations from cloud providers for locking in GPU capacity have become one of the solutions to ensure the availability of GPU resources. Those reservations can be short-term (e.g., 1-30 days) capacity guarantees, or long-term (e.g., 1-3 years) contracts.
+With the recent GPU shortage, reservations from cloud providers have become a common way to ensure GPU availability for a specific duration. These reservations can be short-term (e.g., 1-30 days) capacity guarantees, or long-term (e.g., 1-3 years) contracts.
 
-This guide shows how SkyPilot can be used to request resources from reservations and even combine them with on-demand/spot resources to fully
+This guide shows how to use SkyPilot to request resources from reservations and even combine them with on-demand/spot resources to fully
 utilize the capacity in your cloud accounts.
 
 .. image:: https://i.imgur.com/FA0BT0E.png
