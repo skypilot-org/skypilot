@@ -66,7 +66,7 @@ Utilizing Reservations
 
 By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
 
-SkyPilot will act as follows:
+Specifically, SkyPilot's behavior is as follows:
 
 1. Query reservations/blocks across each AWS regions and zones to find all non-occupied capacity.
 2. Calculate per-zone pricing with non-occupied capacity as zero-cost and on-demand/spot price for the rest of resources (if any is needed to satisfy the requested resources).
