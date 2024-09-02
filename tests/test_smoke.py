@@ -3439,15 +3439,18 @@ def test_gcp_zero_quota_failover():
 
 def test_long_setup_run_script(generic_cloud: str):
     name = _get_cluster_name()
-    with tempfile.NamedTemporaryFile('w', prefix='sky_app_', suffix='.yaml') as f:
-        f.write(textwrap.dedent(""" \
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
+                                     suffix='.yaml') as f:
+        f.write(
+            textwrap.dedent(""" \
             setup: |
               echo "start long setup"
             """))
         for i in range(1024 * 120):
             f.write(f'  echo {i}\n')
         f.write('  echo "end long setup"\n')
-        f.write(textwrap.dedent(""" \
+        f.write(
+            textwrap.dedent(""" \
             run: |
               echo "run"
         """))
@@ -3469,6 +3472,7 @@ def test_long_setup_run_script(generic_cloud: str):
             f'sky down -y {name}',
         )
         run_one_test(test)
+
 
 # ---------- Testing skyserve ----------
 
