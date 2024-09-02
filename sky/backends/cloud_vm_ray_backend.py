@@ -3153,7 +3153,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
             if returncode == 255:
                 is_message_too_long = False
-                with open(setup_log_path, 'r') as f:
+                with open(setup_log_path, 'r', encoding='utf-8') as f:
                     if 'too long' in f.read():
                         is_message_too_long = True
 
