@@ -86,7 +86,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
 
 SkyPilot will utilize the capacity reservation/block as follows:
 
-1. Query reservations/blocks in ``us-east-2`` and ``us-west-2`` in reservation ``cr-123456789a`` and ``cr-23456789ab``, respectively. Let's say:
+1. Query reservations/blocks in ``us-east-2`` and ``us-west-2`` in reservation ``cr-123456789a`` and ``cr-23456789ab``, respectively. Assume the results are:
    - 1 A100 instance capacity is available in ``us-east-2``,
    - No available capacity in ``us-west-2``.
 2. SkyPilot calculates the pricing for all zones and finds that zones in ``us-east-2`` are cheaper than other zones because it is considered as 1 on-demand price for 2 nodes.
