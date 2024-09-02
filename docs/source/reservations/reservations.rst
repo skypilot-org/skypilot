@@ -5,7 +5,7 @@ Reserved, Capacity Blocks, DWS
 ===================================
 
 
-Clouds are designed to be elastic, but due to the recent GPU shortages, many organizations have started to get reservations
+Clouds are designed to be elastic, but due to the recent GPU shortage, many organizations have started using reservations
 from cloud providers to lock in GPU capacity.
 
 SkyPilot can be used to request resources from reservations and even combine them with on-demand/spot resources to fully
