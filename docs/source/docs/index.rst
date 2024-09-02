@@ -141,9 +141,16 @@ Read the research:
    ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
-   ../reference/kubernetes/index
    ../running-jobs/distributed-jobs
    ../running-jobs/many-jobs
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Reserved & Existing Clusters
+
+   ../reservations/reservations
+   ../reference/kubernetes/index
 
 .. toctree::
    :hidden:
