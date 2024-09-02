@@ -90,7 +90,7 @@ SkyPilot will utilize the capacity reservation/block as follows:
    - 1 A100 instance capacity is available in ``us-east-2``,
    - No available capacity in ``us-west-2``.
 2. SkyPilot calculates the pricing for all zones and finds that zones in ``us-east-2`` are cheaper than other zones because it is considered as 1 on-demand price for 2 nodes.
-3. If it fails to find an available on-demand A100 instance in ``us-east-2``, it will continue :ref:`automatically failover <auto-failover>` to other clouds/regions/zones for normal on-demand/spot instances.
+3. SkyPilot will thus try to provision an on-demand A100 instance in ``us-east-2``. On unavailability, SkyPilot will continue to :ref:`automatically failover <auto-failover>` to other clouds/regions/zones for normal on-demand/spot instances.
 
 
 .. hint::
