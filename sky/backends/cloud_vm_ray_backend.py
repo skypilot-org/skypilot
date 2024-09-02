@@ -3147,12 +3147,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # and source ~/.bashrc in the setup_cmd.
                     #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                     #   bash: no job control in this shell
-                    skip_lines=3
-                )
+                    skip_lines=3)
                 return returncode
 
-            returncode = _run_setup(
-                f'{create_script_code} && {setup_cmd}',)
+            returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
             if returncode == 255:
                 is_message_too_long = False
                 with open(setup_log_path, 'r') as f:
@@ -3164,9 +3162,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # the script to a file and running it with SSH. We use a
                     # general length limit check before but it could be
                     # inaccurate on some systems.
-                    logger.debug('Failed to run setup command inline due to '
-                                'command length limit. Dumping setup script to '
-                                'file and running it with SSH.')
+                    logger.debug(
+                        'Failed to run setup command inline due to '
+                        'command length limit. Dumping setup script to '
+                        'file and running it with SSH.')
                     _dump_setup_script(setup_script)
                     returncode = _run_setup(setup_cmd)
 
