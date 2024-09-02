@@ -12,7 +12,6 @@ import filelock
 
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import recovery_strategy
@@ -24,6 +23,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -492,8 +492,8 @@ def start(job_id, dag_yaml, retry_until_up):
             # Kill the controller process first; if its child process is
             # killed first, then the controller process will raise errors.
             # Kill any possible remaining children processes recursively.
-            subprocess_utils.kill_children_processes(controller_process.pid,
-                                                     force=True)
+            subprocess_utils.kill_children_processes(
+                parent_pids=[controller_process.pid], force=True)
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 

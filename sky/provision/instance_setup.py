@@ -43,8 +43,8 @@ _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
     '"from sky.skylet import job_lib; print(job_lib.get_ray_port())" '
     '2> /dev/null || echo 6379);'
-    f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import common_utils; '
-    'print(common_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
+    f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
+    'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (

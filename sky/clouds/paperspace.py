@@ -9,6 +9,7 @@ import requests
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.provision.paperspace import utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -20,7 +21,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Paperspace(clouds.Cloud):
     """Paperspace GPU Cloud"""
 

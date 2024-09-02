@@ -18,6 +18,7 @@ from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -1377,7 +1378,7 @@ class Resources:
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
         resources_fields = {}
-        resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
+        resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)

@@ -38,14 +38,10 @@ def print_exception_no_traceback():
             if error():
                 raise ValueError('...')
     """
-    if env_options.Options.SHOW_DEBUG_INFO.get():
-        # When SKYPILOT_DEBUG is set, show the full traceback
-        yield
-    else:
-        original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-        sys.tracebacklimit = 0
-        yield
-        sys.tracebacklimit = original_tracelimit
+    original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
+    sys.tracebacklimit = 0
+    yield
+    sys.tracebacklimit = original_tracelimit
 
 
 @contextlib.contextmanager

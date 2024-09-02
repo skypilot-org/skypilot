@@ -22,6 +22,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 
 if typing.TYPE_CHECKING:
     from ray.dashboard.modules.job import pydantic_models as ray_pydantic
@@ -84,7 +85,7 @@ _CONN = _DB.conn
 
 
 class JobStatus(enum.Enum):
-    """Job status"""
+    """Job status enum."""
 
     # 3 in-flux states: each can transition to any state below it.
     # The `job_id` has been generated, but the generated ray program has
@@ -93,24 +94,30 @@ class JobStatus(enum.Enum):
     # In the 'jobs' table, the `submitted_at` column will be set to the current
     # time, when the job is firstly created (in the INIT state).
     INIT = 'INIT'
+    """The job has been submitted, but not started yet."""
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
     PENDING = 'PENDING'
+    """The job is waiting for required resources."""
     # Running the user's setup script (only in effect if --detach-setup is
     # set). Our update_job_status() can temporarily (for a short period) set
     # the status to SETTING_UP, if the generated ray program has not set
     # the status to PENDING or RUNNING yet.
     SETTING_UP = 'SETTING_UP'
+    """The job is running the user's setup script (detach_setup is set)."""
     # The job is running.
     # In the 'jobs' table, the `start_at` column will be set to the current
     # time, when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    """The job is running."""
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
     SUCCEEDED = 'SUCCEEDED'
+    """The job finished successfully."""
     # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
+    """The job fails due to the user code."""
     # The job setup failed (only in effect if --detach-setup is set). It
     # needs to be placed after the `FAILED` state, so that the status
     # set by our generated ray program will not be overwritten by
@@ -118,8 +125,10 @@ class JobStatus(enum.Enum):
     # This is for a better UX, so that the user can find out the reason
     # of the failure quickly.
     FAILED_SETUP = 'FAILED_SETUP'
+    """The job setup failed (detach_setup is set)."""
     # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
+    """The job is cancelled by the user."""
 
     @classmethod
     def nonterminal_statuses(cls) -> List['JobStatus']:
@@ -362,12 +371,12 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return common_utils.encode_payload(statuses)
+    return message_utils.encode_payload(statuses)
 
 
 def load_statuses_payload(
         statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
-    original_statuses = common_utils.decode_payload(statuses_payload)
+    original_statuses = message_utils.decode_payload(statuses_payload)
     statuses = dict()
     for job_id, status in original_statuses.items():
         # json.dumps will convert all keys to strings. Integers will
@@ -405,8 +414,8 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
-        return common_utils.encode_payload(timestamp)
-    return common_utils.encode_payload(None)
+        return message_utils.encode_payload(timestamp)
+    return message_utils.encode_payload(None)
 
 
 def get_ray_port():
@@ -698,7 +707,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-    return common_utils.encode_payload(jobs)
+    return message_utils.encode_payload(jobs)
 
 
 def load_job_queue(payload: str) -> List[Dict[str, Any]]:
@@ -707,7 +716,7 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     Args:
         payload: The encoded payload string to load.
     """
-    jobs = common_utils.decode_payload(payload)
+    jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
     return jobs
@@ -725,7 +734,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
 
     Returns:
         Encoded job IDs that are actually cancelled. Caller should use
-        common_utils.decode_payload() to parse.
+        message_utils.decode_payload() to parse.
     """
     if cancel_all:
         # Cancel all in-progress jobs.
@@ -768,7 +777,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
-    return common_utils.encode_payload(cancelled_ids)
+    return message_utils.encode_payload(cancelled_ids)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
@@ -797,7 +806,7 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
-    return common_utils.encode_payload(run_timestamps)
+    return message_utils.encode_payload(run_timestamps)
 
 
 class JobLibCodeGen:

@@ -7,6 +7,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
+import networkx as nx
 import numpy as np
 import prettytable
 
@@ -109,7 +110,7 @@ class Optimizer:
                  minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
-                 quiet: bool = False):
+                 quiet: bool = False) -> 'dag_lib.Dag':
         """Find the best execution plan for the given DAG.
 
         Args:
