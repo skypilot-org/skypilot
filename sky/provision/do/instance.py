@@ -1,102 +1,96 @@
 """DigitalOcean instance provisioning."""
 
-import pydo
 import time
 from typing import Any, Dict, List, Optional
+import uuid
+
+from azure.core.exceptions import HttpResponseError
 
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
+from sky.provision.do import constants
 from sky.provision.do import utils
-from sky.utils import common_utils
-from sky.utils import ux_utils
 
-# The maximum number of times to poll for the status of an operation.
-POLL_INTERVAL = 5
-MAX_POLLS = 60 // POLL_INTERVAL
+# The maximum number of times to poll for the status of an operation
+MAX_POLLS = 60 // constants.POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
 MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
 
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
-    head_instance_id = None
-    for instance_name, inst in instances.items():
-        if iinstance_name.endswith('-head'):
-            head_instance_id = inst_id
-            break
-    return head_instance_id
+def _get_head_instance(instances: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    for instance_name, instance_meta in instances.items():
+        if instance_name.endswith('-head'):
+            return instance_meta
+    return None
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
 
-    pending_status = [
-        'starting', 'restarting', 'upgrading', 'provisioning', 'stopping'
-    ]
-    newly_started_instances = _filter_instances(cluster_name_on_cloud,
-                                                pending_status + ['off'])
-    client = utils.DigitalOceanCloudClient()
+    pending_status = ['new']
+    newly_started_instances = utils.filter_instances(cluster_name_on_cloud,
+                                                     pending_status + ['off'])
 
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, pending_status)
-        if not instances:
+        instances = utils.filter_instances(cluster_name_on_cloud,
+                                           pending_status)
+        if len(instances) == 0:
             break
         instance_statuses = [
-            instance['state'] for instance in instances.values()
+            instance['status'] for instance in instances.values()
         ]
         logger.info(f'Waiting for {len(instances)} instances to be ready: '
                     f'{instance_statuses}')
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
 
-    exist_instances = _filter_instances(cluster_name_on_cloud,
-                                        status_filters=pending_status +
-                                        ['ready', 'off'])
+    exist_instances = utils.filter_instances(cluster_name_on_cloud,
+                                             status_filters=pending_status +
+                                             ['active', 'off'])
     if len(exist_instances) > config.count:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
             f'{len(exist_instances)} nodes, but {config.count} are required.')
 
-    stopped_instances = _filter_instances(cluster_name_on_cloud,
-                                          status_filters=['off'])
-    for instance_id in stopped_instances:
-        try:
-            client.start(instance_id=instance_id)
-        except utils.DigitalOceanCloudError as e:
-            if 'This machine is currently starting.' in str(e):
-                continue
-            raise e
+    stopped_instances = utils.filter_instances(cluster_name_on_cloud,
+                                               status_filters=['off'])
+    for instance_meta in stopped_instances.values():
+        utils.client().droplet_actions.post(droplet_id=instance_meta['id'],
+                                            body={'type': 'power_on'})
     while True:
-        instances = _filter_instances(cluster_name_on_cloud,
-                                      pending_status + ['off'])
-        if not instances:
+        instances = utils.filter_instances(cluster_name_on_cloud,
+                                           pending_status + ['off'])
+        if len(instances) == 0:
             break
         num_stopped_instances = len(stopped_instances)
         num_restarted_instances = num_stopped_instances - len(instances)
         logger.info(
             f'Waiting for {num_restarted_instances}/{num_stopped_instances} '
             'stopped instances to be restarted.')
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
 
-    exist_instances = _filter_instances(cluster_name_on_cloud,
-                                        status_filters=['ready'])
-    head_instance_id = _get_head_instance_id(exist_instances)
+    exist_instances = utils.filter_instances(cluster_name_on_cloud,
+                                             status_filters=['active'])
+    head_instance = _get_head_instance(exist_instances)
     to_start_count = config.count - len(exist_instances)
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
             f'{len(exist_instances)} nodes, but {config.count} are required.')
     if to_start_count == 0:
-        if head_instance_id is None:
-            head_instance_id = list(exist_instances.keys())[0]
-            client.rename(
-                instance_id=head_instance_id,
-                name=f'{cluster_name_on_cloud}-head',
-            )
-        assert head_instance_id is not None, (
-            'head_instance_id should not be None')
+        if head_instance is None:
+            head_instance = list(exist_instances.values())[0]
+            utils.client().droplet_actions.rename(
+                droplet=head_instance['id'],
+                body={
+                    'type': 'rename',
+                    'name': f'{cluster_name_on_cloud}-'
+                            f'{uuid.uuid4().hex[:4]}-head'
+                })
+        assert head_instance is not None, ('`head_instance` should not be None')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
                     f'{len(exist_instances)} nodes, no need to start more.')
         return common.ProvisionRecord(
@@ -104,54 +98,49 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             cluster_name=cluster_name_on_cloud,
             region=region,
             zone=None,
-            head_instance_id=head_instance_id,
+            head_instance_id=head_instance['id'],
             resumed_instance_ids=list(newly_started_instances.keys()),
             created_instance_ids=[],
         )
 
-    created_instance_ids = []
+    created_instances: List[Dict[str, Any]] = []
     for _ in range(to_start_count):
-        node_type = 'head' if head_instance_id is None else 'worker'
-        try:
-            instance_id = client.launch(
-                name=f'{cluster_name_on_cloud}-{node_type}',
-                instance_type=config.node_config['InstanceType'],
-                network_id=config.node_config['NetworkId'],
-                region=region,
-                disk_size=config.node_config['DiskSize'],
-            )['data']['id']
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'run_instances error: {e}')
-            raise e
-        logger.info(f'Launched instance {instance_id}.')
-        created_instance_ids.append(instance_id)
-        if head_instance_id is None:
-            head_instance_id = instance_id
+        instance_type = 'head' if head_instance is None else 'worker'
+        instance = utils.create_instance(
+            region=region,
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            instance_type=instance_type,
+            config=config)
+        logger.info(f'Launched instance {instance["name"]}.')
+        created_instances.append(instance)
+        if head_instance is None:
+            head_instance = instance
 
     # Wait for instances to be ready.
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        instances = _filter_instances(cluster_name_on_cloud, ['ready'])
+        instances = utils.filter_instances(cluster_name_on_cloud,
+                                           status_filters=['active'])
         logger.info('Waiting for instances to be ready: '
                     f'({len(instances)}/{config.count}).')
         if len(instances) == config.count:
             break
 
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
     else:
         # Failed to launch config.count of instances after max retries
         msg = ('run_instances: Failed to create the'
                'instances due to capacity issue.')
         logger.warning(msg)
         raise RuntimeError(msg)
-    assert head_instance_id is not None, 'head_instance_id should not be None'
+    assert head_instance is not None, 'head_instance should not be None'
     return common.ProvisionRecord(
         provider_name='do',
         cluster_name=cluster_name_on_cloud,
         region=region,
         zone=None,
-        head_instance_id=head_instance_id,
+        head_instance_id=head_instance['id'],
         resumed_instance_ids=list(stopped_instances.keys()),
-        created_instance_ids=created_instance_ids,
+        created_instance_ids=[instance['id'] for instance in created_instances],
     )
 
 
@@ -167,26 +156,26 @@ def stop_instances(
     worker_only: bool = False,
 ) -> None:
     del provider_config  # unused
-    client = utils.DigitalOceanCloudClient()
-    all_instances = _filter_instances(cluster_name_on_cloud, [
-        'ready', 'serviceready', 'upgrading', 'provisioning', 'starting',
-        'restarting'
-    ])
+    all_instances = utils.filter_instances(cluster_name_on_cloud,
+                                           status_filters=None)
     num_instances = len(all_instances)
 
     # Request a stop on all instances
-    for instance_id, instance in all_instances.items():
-        if worker_only and instance['name'].endswith('-head'):
+    for instance_name, instance_meta in all_instances.items():
+        if worker_only and instance_name.endswith('-head'):
             num_instances -= 1
             continue
-        client.stop(instance_id=instance_id)
+        utils.client().droplet_actions.post(
+            droplet_id=instance_meta['id'],
+            body={'type': 'shutdown'},
+        )
 
     # Wait for instances to stop
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        all_instances = _filter_instances(cluster_name_on_cloud, ['off'])
+        all_instances = utils.filter_instances(cluster_name_on_cloud, ['off'])
         if len(all_instances) >= num_instances:
             break
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
                            f'{MAX_POLLS_FOR_UP_OR_STOP} reached. '
@@ -201,30 +190,26 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
     del provider_config  # unused
-    client = utils.DigitalOceanCloudClient()
-    instances = _filter_instances(cluster_name_on_cloud, None)
-    for inst_id, inst in instances.items():
-        logger.debug(f'Terminating instance {inst_id}')
-        if worker_only and inst['name'].endswith('-head'):
+    instances = utils.filter_instances(cluster_name_on_cloud,
+                                       status_filters=None)
+    volume_ids = []
+    for instance_name, instance_meta in instances.items():
+        logger.debug(f'Terminating instance {instance_name}')
+        if worker_only and instance_name.endswith('-head'):
             continue
         try:
-            client.remove(inst_id)
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Failed to terminate instance {inst_id}: '
-                    f'{common_utils.format_exception(e, use_bracket=False)}'
-                ) from e
+            utils.client().droplets.destroy(droplet_id=instance_meta['id'])
+            volume_ids.extend(instance_meta['volume_ids'])
+        except HttpResponseError as err:
+            raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
+                err.status_code, err.reason, err.error.message))
 
-    # TODO(asaiacai): Possible private network resource leakage for autodown
-    if not worker_only:
+    for volume_id in volume_ids:
         try:
-            time.sleep(POLL_INTERVAL)
-            network = client.get_network(network_name=cluster_name_on_cloud)
-            client.delete_network(network_id=network['id'])
-        except IndexError:
-            logger.warning(f'Network {cluster_name_on_cloud}'
-                           'already deleted')
+            utils.client().volumes.delete(volume_id=volume_id)
+        except HttpResponseError as err:
+            raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
+                err.status_code, err.reason, err.error.message))
 
 
 def get_cluster_info(
@@ -233,21 +218,31 @@ def get_cluster_info(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> common.ClusterInfo:
     del region  # unused
-    running_instances = _filter_instances(cluster_name_on_cloud, ['ready'])
+    running_instances = utils.filter_instances(cluster_name_on_cloud,
+                                               ['active'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
-    for instance_id, instance_info in running_instances.items():
-        instances[instance_id] = [
+    for instance_name, instance_meta in running_instances.items():
+        public_ip, private_ip = None, None
+        for net in instance_meta['networks']['v4']:
+            if net['type'] == 'public':
+                public_ip = net['ip_address']
+            else:
+                private_ip = net['ip_address']
+        assert public_ip is not None and private_ip is not None, (
+            'Both private and public ipv4 addresses were not assigned:\n'
+            f'{instance_meta["networks"]["v4"]}')
+        instances[instance_name] = [
             common.InstanceInfo(
-                instance_id=instance_id,
-                internal_ip=instance_info['privateIp'],
-                external_ip=instance_info['publicIp'],
+                instance_id=instance_meta['id'],
+                internal_ip=private_ip,
+                external_ip=public_ip,
                 ssh_port=22,
                 tags={},
             )
         ]
-        if instance_info['name'].endswith('-head'):
-            head_instance_id = instance_id
+        if instance_name.endswith('-head'):
+            head_instance_id = instance_meta['id']
 
     return common.ClusterInfo(
         instances=instances,
@@ -265,7 +260,8 @@ def query_instances(
     """See sky/provision/__init__.py"""
     del non_terminated_only
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
-    instances = _filter_instances(cluster_name_on_cloud, None)
+    instances = utils.filter_instances(cluster_name_on_cloud,
+                                       status_filters=None)
 
     status_map = {
         'new': status_lib.ClusterStatus.INIT,
@@ -274,9 +270,9 @@ def query_instances(
         'off': status_lib.ClusterStatus.STOPPED,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
-    for inst_id, inst in instances.items():
-        status = status_map[inst['state']]
-        statuses[inst_id] = status
+    for instance_meta in instances.values():
+        status = status_map[instance_meta['status']]
+        statuses[instance_meta['id']] = status
     return statuses
 
 

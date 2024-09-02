@@ -4,8 +4,6 @@ import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-import requests
-
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.provision.do import utils
@@ -89,8 +87,8 @@ class DO(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds='DO')
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='DO')
 
     @classmethod
     def zones_provision_loop(
@@ -258,9 +256,8 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            utils.CREDENTIALS_PATH : f'~/.config/doctl/{_CREDENTIAL_FILE}'
-        }
+        utils.client()
+        return {utils.CREDENTIALS_PATH: f'~/.config/doctl/{_CREDENTIAL_FILE}'}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
@@ -272,6 +269,4 @@ class DO(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type, 'DO')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='DO')
+        return service_catalog.validate_region_zone(region, zone, clouds='DO')
