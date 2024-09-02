@@ -173,7 +173,10 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         'region': region,
         'size': config.node_config['InstanceType'],
         'image': IMAGE,
-        'ssh_keys': [ssh_key_id(config.authentication_config['ssh_public_key'])['fingerprint']],
+        'ssh_keys': [
+            ssh_key_id(
+                config.authentication_config['ssh_public_key'])['fingerprint']
+        ],
         'tags': ['skypilot', cluster_name_on_cloud]
     }
     instance = _create_droplet(instance_request)
@@ -183,7 +186,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         'name': instance_name,
         'region': region,
         'filesystem_type': 'ext4',
-        'tags' : ['skypilot', cluster_name_on_cloud]
+        'tags': ['skypilot', cluster_name_on_cloud]
     }
     volume = _create_volume(volume_request)
 
@@ -221,7 +224,7 @@ def filter_instances(
         except HttpResponseError as err:
             DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
-                
+
         pages = resp['links']
         if 'pages' in pages and 'next' in pages['pages']:
             pages = pages['pages']
@@ -230,6 +233,7 @@ def filter_instances(
         else:
             paginated = False
     return filtered_instances
+
 
 def filter_storage(cluster_name_on_cloud: str) -> Dict[str, Any]:
     """Returns Dict mapping storage name
@@ -241,16 +245,15 @@ def filter_storage(cluster_name_on_cloud: str) -> Dict[str, Any]:
     paginated = True
     while paginated:
         try:
-            resp = client().volumes.list(per_page=50,
-                                          page=page)
+            resp = client().volumes.list(per_page=50, page=page)
 
             for storage in resp['volumes']:
-                if cluster_name_on_cloud in storage['tags']:
+                if storage['tags'] and cluster_name_on_cloud in storage['tags']:
                     filtered_storage[storage['name']] = storage
         except HttpResponseError as err:
             DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
-                
+
         pages = resp['links']
         if 'pages' in pages and 'next' in pages['pages']:
             pages = pages['pages']
@@ -259,4 +262,3 @@ def filter_storage(cluster_name_on_cloud: str) -> Dict[str, Any]:
         else:
             paginated = False
     return filtered_storage
-

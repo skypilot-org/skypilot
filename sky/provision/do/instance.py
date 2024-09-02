@@ -202,10 +202,9 @@ def terminate_instances(
             raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
 
-    
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,
-                                       status_filters=None)
+                                           status_filters=None)
         if len(instances) == 0 or len(instances) == 1 and worker_only:
             break
         time.sleep(constants.POLL_INTERVAL)
@@ -225,13 +224,15 @@ def terminate_instances(
             try:
                 utils.client().volumes.delete(volume_id=volume_meta['id'])
             except HttpResponseError as err:
-                logger.info('Error: {0} {1}: {2}'.format(
+                logger.debug('Error: {0} {1}: {2}'.format(
                     err.status_code, err.reason, err.error.message))
+        logger.debug('Reattempting block storage deletion')
         time.sleep(constants.POLL_INTERVAL)
     else:
         msg = ('Failed to delete all block stores')
         logger.warning(msg)
         raise RuntimeError(msg)
+
 
 def get_cluster_info(
     region: str,
@@ -242,7 +243,7 @@ def get_cluster_info(
     running_instances = utils.filter_instances(cluster_name_on_cloud,
                                                ['active'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
-    head_instance = None
+    head_instance: Optional[Dict[str, Any]] = None
     for instance_name, instance_meta in running_instances.items():
         public_ip, private_ip = None, None
         for net in instance_meta['networks']['v4']:
@@ -264,6 +265,7 @@ def get_cluster_info(
         ]
         if instance_name.endswith('-head'):
             head_instance = instance_meta
+    assert head_instance is not None, 'no head instance found'
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance['name'],
