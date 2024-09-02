@@ -242,13 +242,13 @@ Using SkyPilot Storage CLI
 --------------------------------
 
 To manage buckets created by SkyPilot, the sky CLI provides two commands:
-:code:`sky storage ls` and :code:`sky storage delete`.
+:code:`sky storage status` and :code:`sky storage delete`.
 
-1.  :code:`sky storage ls` shows buckets created by SkyPilot.
+1.  :code:`sky storage status` shows buckets created by SkyPilot.
 
 .. code-block:: console
 
-    $ sky storage ls
+    $ sky storage status
     NAME               CREATED     STORE  COMMAND                                        STATUS
     sky-dataset        3 mins ago  S3     sky launch -c demo examples/storage_demo.yaml  READY
 
@@ -263,9 +263,9 @@ To manage buckets created by SkyPilot, the sky CLI provides two commands:
     I 04-02 19:42:26 storage.py:683] Deleting S3 Bucket sky-dataset
 
 .. note::
-    :code:`sky storage ls` only shows storage that were created
+    :code:`sky storage status` only shows storage that were created
     by SkyPilot. Externally created buckets or public buckets are not listed
-    in :code:`sky storage ls` and cannot be managed through SkyPilot.
+    in :code:`sky storage status` and cannot be managed through SkyPilot.
 
 Storage YAML reference
 ----------------------

@@ -94,7 +94,7 @@ from sky.core import start
 from sky.core import status
 from sky.core import stop
 from sky.core import storage_delete
-from sky.core import storage_ls
+from sky.core import storage_status
 from sky.core import tail_logs
 from sky.dag import Dag
 from sky.data import Storage
@@ -183,6 +183,6 @@ __all__ = [
     'spot_queue',
     'spot_cancel',
     # core APIs Storage Management
-    'storage_ls',
+    'storage_status',
     'storage_delete',
 ]
