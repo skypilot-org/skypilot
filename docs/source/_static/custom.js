@@ -26,10 +26,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
+        { selector: '.caption-text', text: 'Reserved & Existing Clusters' },
         { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
         { selector: '.toctree-l1 > a', text: 'Llama-3.1 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Reservations, Capacity Blocks, DWS' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
