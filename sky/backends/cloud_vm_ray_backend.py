@@ -3136,8 +3136,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_log_path = os.path.join(self.log_dir,
                                           f'setup-{runner.node_id}.log')
 
-            def _run_setup(setup_cmd: str) -> Tuple[int, str, str]:
-                returncode, stdout, stderr = runner.run(
+            def _run_setup(setup_cmd: str) -> int:
+                returncode = runner.run(
                     setup_cmd,
                     log_path=setup_log_path,
                     process_stream=False,
@@ -3147,23 +3147,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # and source ~/.bashrc in the setup_cmd.
                     #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                     #   bash: no job control in this shell
-                    skip_lines=3,
-                    require_outputs=True,
+                    skip_lines=3
                 )
-                return returncode, stdout, stderr
+                return returncode
 
-            returncode, stdout, stderr = _run_setup(
+            returncode = _run_setup(
                 f'{create_script_code} && {setup_cmd}',)
-            if returncode == 255 and 'too long' in stdout + stderr:
-                # If the setup script is too long, we retry it with dumping
-                # the script to a file and running it with SSH. We use a general
-                # length limit check before but it could be inaccurate on some
-                # systems.
-                logger.debug('Failed to run setup command inline due to '
-                             'command length limit. Dumping setup script to '
-                             'file and running it with SSH.')
-                _dump_setup_script(setup_script)
-                returncode, stdout, stderr = _run_setup(setup_cmd)
+            if returncode == 255:
+                is_message_too_long = False
+                with open(setup_log_path, 'r') as f:
+                    if 'too long' in f.read():
+                        is_message_too_long = True
+
+                if is_message_too_long:
+                    # If the setup script is too long, we retry it with dumping
+                    # the script to a file and running it with SSH. We use a
+                    # general length limit check before but it could be
+                    # inaccurate on some systems.
+                    logger.debug('Failed to run setup command inline due to '
+                                'command length limit. Dumping setup script to '
+                                'file and running it with SSH.')
+                    _dump_setup_script(setup_script)
+                    returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case

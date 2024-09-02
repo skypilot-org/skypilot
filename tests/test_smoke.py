@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
@@ -3435,6 +3436,39 @@ def test_gcp_zero_quota_failover():
     )
     run_one_test(test)
 
+
+def test_long_setup_run_script(generic_cloud: str):
+    name = _get_cluster_name()
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_', suffix='.yaml') as f:
+        f.write(textwrap.dedent(""" \
+            setup: |
+              echo "start long setup"
+            """))
+        for i in range(1024 * 120):
+            f.write(f'  echo {i}\n')
+        f.write('  echo "end long setup"\n')
+        f.write(textwrap.dedent(""" \
+            run: |
+              echo "run"
+        """))
+        for i in range(1024 * 120):
+            f.write(f'  echo {i}\n')
+        f.write('  echo "end run"\n')
+        f.flush()
+
+        test = Test(
+            'long-setup-run-script',
+            [
+                f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup --detach-run --cpus 2+ {f.name}',
+                f'sky exec --detach-run {name} "echo hello"',
+                f'sky exec --detach-run {name} {f.name}',
+                f'sky logs {name} --status 1',
+                f'sky logs {name} --status 2',
+                f'sky logs {name} --status 3',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
 
 # ---------- Testing skyserve ----------
 
