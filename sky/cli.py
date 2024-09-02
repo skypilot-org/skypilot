@@ -29,6 +29,7 @@ import functools
 import multiprocessing
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -392,7 +393,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         ctx.exit()
 
     try:
-        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        subprocess.run(cmd,
+                       shell=True,
+                       check=True,
+                       executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
         click.echo(
             'Completion will take effect once you restart the terminal: ' +
