@@ -3294,11 +3294,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=False,
                                                       require_outputs=True)
         if returncode == 255 and 'too long' in stdout + stderr:
-            # If the setup script is too long, we retry it with dumping
+            # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
             # length limit check before but it could be inaccurate on some
             # systems.
+            logger.debug('Failed to submit job due to command length limit. '
+                         'Dumping job to file and running it with SSH.')
             _dump_code_to_file(codegen)
+            job_submit_cmd = f'{mkdir_code} && {code}'
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           job_submit_cmd,
                                                           stream_logs=False,
