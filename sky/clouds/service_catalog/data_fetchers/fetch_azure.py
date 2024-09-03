@@ -281,6 +281,8 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         return row['AcceleratorCount']
 
     # Manually update the GPU count for fractional A10 instance types.
+    # Those instance types have fractional GPU count, but Azure API returns
+    # 1 GPU count for them. We manually update the GPU count here.
     df_ret['AcceleratorCount'] = df_ret.apply(_upd_a10_gpu_count,
                                               axis='columns')
 

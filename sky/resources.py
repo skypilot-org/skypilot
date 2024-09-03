@@ -1142,8 +1142,8 @@ class Resources:
                     return False
                 if self.accelerators[acc] > other_accelerators[acc]:
                     return False
-                if isinstance(self.accelerators[acc], float) or isinstance(
-                        other_accelerators[acc], float):
+                if (isinstance(other_accelerators[acc], float) and
+                        not other_accelerators[acc].is_integer()):
                     # If the requested accelerator count is a float, we only
                     # allow strictly equal counts since all of the float point
                     # accelerator counts are less than 1 (e.g., 0.1, 0.5), and
