@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -437,6 +437,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
+            **GCP._get_disk_specs(r.disk_tier),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -494,8 +495,6 @@ class GCP(clouds.Cloud):
         if self._is_machine_image(image_id):
             resources_vars['machine_image'] = image_id
             resources_vars['image_id'] = None
-
-        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
         firewall_rule = None
         if resources.ports is not None:
@@ -917,11 +916,23 @@ class GCP(clouds.Cloud):
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls._translate_disk_tier(disk_tier)
         tier2name = {
+            resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
         return tier2name[tier]
+
+    @classmethod
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        specs: Dict[str, Any] = {'disk_tier': cls._get_disk_type(disk_tier)}
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            # Only pd-extreme supports custom iops.
+            # see https://cloud.google.com/compute/docs/disks#disk-types
+            specs['disk_iops'] = 20000
+        return specs
 
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:

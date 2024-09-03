@@ -795,7 +795,11 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
-        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
+        if disk_tier == resources_utils.DiskTier.LOW:
+            return 'standard'
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            return 'io2'
+        return 'gp3'
 
     @classmethod
     def _get_disk_specs(
@@ -803,15 +807,19 @@ class AWS(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
+            resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
-            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
-            'disk_iops': tier2iops[tier],
-            'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
+            'disk_iops': tier2iops[tier]
+                         if cls._get_disk_type(tier) != 'standard' else None,
+            # Custom disk throughput is only available for gp3
+            # see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-ebs.html
+            'disk_throughput': tier2iops[tier] // 16
+                               if cls._get_disk_type(tier) == 'gp3' else None,
         }
 
     @classmethod
