@@ -42,8 +42,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    # path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
-    path = f'~/.sky/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    # path = f'~/.sky/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -401,7 +401,8 @@ class SSHCommandRunner(CommandRunner):
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
-        disable_control_master: Optional[bool] = False,
+        # disable_control_master: Optional[bool] = False,
+        disable_control_master: Optional[bool] = True,
     ):
         """Initialize SSHCommandRunner.
 
