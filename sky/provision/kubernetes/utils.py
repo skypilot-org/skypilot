@@ -1028,6 +1028,9 @@ def get_ssh_proxy_command(
             ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
             proxy_cmd_path=ssh_jump_proxy_command_path,
             proxy_cmd_target_pod=k8s_ssh_target,
+            # We embed both the current context and namespace to the SSH proxy
+            # command to make sure SSH still works when the current context/namespace
+            # is changed by the user.
             current_kube_context=current_context,
             current_kube_namespace=current_namespace)
     return ssh_jump_proxy_command
