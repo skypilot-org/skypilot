@@ -129,8 +129,8 @@ Read the research:
 
    ../getting-started/installation
    ../getting-started/quickstart
-   ../getting-started/tutorial
    ../examples/interactive-development
+   ../getting-started/tutorial
 
 
 .. toctree::
@@ -141,8 +141,16 @@ Read the research:
    ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
-   ../reference/kubernetes/index
    ../running-jobs/distributed-jobs
+   ../running-jobs/many-jobs
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Reserved & Existing Clusters
+
+   ../reservations/reservations
+   ../reference/kubernetes/index
 
 .. toctree::
    :hidden:
@@ -187,14 +195,6 @@ Read the research:
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Developer Guides
-
-   ../developers/CONTRIBUTING
-   Guide: Adding a New Cloud <https://docs.google.com/document/d/1oWox3qb3Kz3wXXSGg9ZJWwijoa99a3PIQUHBR8UgEGs/edit?usp=sharing>
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
    :caption: Cloud Admin and Usage
 
    ../cloud-setup/cloud-permissions/index
@@ -210,4 +210,5 @@ Read the research:
    ../reference/cli
    ../reference/api
    ../reference/config
+   ../developers/index
 

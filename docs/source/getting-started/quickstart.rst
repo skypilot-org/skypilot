@@ -219,7 +219,7 @@ Congratulations!  In this quickstart, you have launched a cluster, run a task, a
 
 Next steps:
 
-- Adapt :ref:`Tutorial: DNN Training <dnn-training>` to start running your own project on SkyPilot!
+- Adapt :ref:`Tutorial: AI Training <ai-training>` to start running your own project on SkyPilot!
 - See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
 - To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
 

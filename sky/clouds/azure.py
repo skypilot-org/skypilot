@@ -60,9 +60,10 @@ class Azure(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
     _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
-    # Azure does not support high disk tier.
-    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
-                             {resources_utils.DiskTier.HIGH})
+    # Azure does not support high disk and ultra disk tier.
+    _SUPPORTED_DISK_TIERS = (
+        set(resources_utils.DiskTier) -
+        {resources_utils.DiskTier.HIGH, resources_utils.DiskTier.ULTRA})
 
     _INDENT_PREFIX = ' ' * 4
 
@@ -599,9 +600,10 @@ class Azure(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
-        if disk_tier == resources_utils.DiskTier.HIGH:
-            return False, ('Azure disk_tier=high is not supported now. '
-                           'Please use disk_tier={low, medium} instead.')
+        if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
+            return False, (
+                'Azure disk_tier={high, ultra} is not supported now. '
+                'Please use disk_tier={low, medium, best} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         if cls._get_disk_type(
@@ -628,6 +630,7 @@ class Azure(clouds.Cloud):
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
+            resources_utils.DiskTier.ULTRA: 'Disabled',
             resources_utils.DiskTier.HIGH: 'Disabled',
             resources_utils.DiskTier.MEDIUM: 'Premium_LRS',
             resources_utils.DiskTier.LOW: 'Standard_LRS',

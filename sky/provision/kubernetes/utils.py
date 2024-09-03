@@ -110,8 +110,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
-    if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
-        # A100-80GB, L4 and H100-80GB have a different name pattern.
+    if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB'):
+        # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
+        # have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
@@ -194,13 +195,10 @@ class GKELabelFormatter(GPULabelFormatter):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
-            if acc in ['H100-80GB', 'H100-MEGA-80GB']:
-                # H100 is named H100-80GB or H100-MEGA-80GB in GKE,
-                # where the latter has improved bandwidth.
-                # See a3-mega instances on GCP.
-                # TODO: we do not distinguish the two GPUs for simplicity,
-                # but we can evaluate whether we should distinguish
-                # them based on users' requests.
+            if acc == 'H100-80GB':
+                # H100 can be either H100-80GB or H100-MEGA-80GB in GKE
+                # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
+                # to distinguish between a3-high and a3-mega instances
                 return 'H100'
             return acc
         else:
