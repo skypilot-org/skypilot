@@ -3462,9 +3462,9 @@ def test_long_setup_run_script(generic_cloud: str):
         test = Test(
             'long-setup-run-script',
             [
-                f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup --detach-run --cpus 2+ {f.name}',
-                f'sky exec --detach-run {name} "echo hello"',
-                f'sky exec --detach-run {name} {f.name}',
+                f'sky launch -y -c {name} --cloud {generic_cloud} --cpus 2+ {f.name}',
+                f'sky exec {name} "echo hello"',
+                f'sky exec {name} {f.name}',
                 f'sky logs {name} --status 1',
                 f'sky logs {name} --status 2',
                 f'sky logs {name} --status 3',
