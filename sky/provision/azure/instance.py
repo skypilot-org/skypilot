@@ -397,8 +397,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         tags.update(new_instance_tags)
 
         if USE_AZ_ML:
-            # TODO(tian): DEBUG HERE!
-            from azure.ai.ml import entities  # pylint: disable=import-outside-toplevel
+            # pylint: disable=import-outside-toplevel
+            from azure.ai.ml import entities
             ins = entities.ComputeInstance(name=target_instance.name, tags=tags)
             ml_client.begin_create_or_update(ins).result()
         else:
@@ -610,6 +610,7 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=inst.tags,
+                ssh_port=50000 if USE_AZ_ML else 22,
             )
         ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
