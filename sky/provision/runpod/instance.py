@@ -227,17 +227,23 @@ def query_ports(
     del head_ip, provider_config  # Unused.
     # RunPod ports sometimes take a while to be ready.
     start_time = time.time()
+    ports_to_query = resources_utils.port_ranges_to_set(ports)
     while True:
         instances = _filter_instances(cluster_name_on_cloud,
                                       None,
                                       head_only=True)
         assert len(instances) == 1
         head_inst = list(instances.values())[0]
-        if (all(port in head_inst['port2endpoint'] for port in ports) or
-                time.time() - start_time > QUERY_PORTS_TIMEOUT_SECONDS):
-            return {
-                port: [common.SocketEndpoint(**endpoint)]
-                for port, endpoint in head_inst['port2endpoint'].items()
-                if port in resources_utils.port_ranges_to_set(ports)
-            }
+        ready_ports: Dict[int, List[common.Endpoint]] = {
+            port: [common.SocketEndpoint(**endpoint)]
+            for port, endpoint in head_inst['port2endpoint'].items()
+            if port in ports_to_query
+        }
+        not_ready_ports = ports_to_query - set(ready_ports.keys())
+        if not not_ready_ports:
+            return ready_ports
+        if time.time() - start_time > QUERY_PORTS_TIMEOUT_SECONDS:
+            logger.warning(f'Querying ports {ports} timed out. Ports '
+                           f'{not_ready_ports} are not ready.')
+            return ready_ports
         time.sleep(1)
