@@ -197,7 +197,8 @@ def terminate_instances(
         if worker_only and instance_name.endswith('-head'):
             continue
         try:
-            utils.client().droplets.destroy(droplet_id=instance_meta['id'])
+            utils.client().droplets.destroy_with_associated_resources_dangerous(
+                droplet_id=instance_meta['id'])
         except HttpResponseError as err:
             raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
@@ -210,26 +211,6 @@ def terminate_instances(
         time.sleep(constants.POLL_INTERVAL)
     else:
         msg = ('Failed to delete all instances')
-        logger.warning(msg)
-        raise RuntimeError(msg)
-
-    # TODO(asaiacai): Possible head storage resource leakage on autodown.
-    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        exist_storage = utils.filter_storage(cluster_name_on_cloud)
-        if len(exist_storage) == 0 or len(exist_storage) == 1 and worker_only:
-            break
-        for volume_name, volume_meta in exist_storage.items():
-            if worker_only and volume_name.endswith('-head'):
-                continue
-            try:
-                utils.client().volumes.delete(volume_id=volume_meta['id'])
-            except HttpResponseError as err:
-                logger.debug('Error: {0} {1}: {2}'.format(
-                    err.status_code, err.reason, err.error.message))
-        logger.debug('Reattempting block storage deletion')
-        time.sleep(1)
-    else:
-        msg = ('Failed to delete all block stores')
         logger.warning(msg)
         raise RuntimeError(msg)
 

@@ -235,32 +235,3 @@ def filter_instances(
         else:
             paginated = False
     return filtered_instances
-
-
-def filter_storage(cluster_name_on_cloud: str) -> Dict[str, Any]:
-    """Returns Dict mapping storage name
-    to storage metadata filtered by status
-    """
-
-    filtered_storage: Dict[str, Any] = {}
-    page = 1
-    paginated = True
-    while paginated:
-        try:
-            resp = client().volumes.list(per_page=50, page=page)
-
-            for storage in resp['volumes']:
-                if storage['tags'] and cluster_name_on_cloud in storage['tags']:
-                    filtered_storage[storage['name']] = storage
-        except HttpResponseError as err:
-            DigitalOceanError('Error: {0} {1}: {2}'.format(
-                err.status_code, err.reason, err.error.message))
-
-        pages = resp['links']
-        if 'pages' in pages and 'next' in pages['pages']:
-            pages = pages['pages']
-            parsed_url = urllib.parse.urlparse(pages['next'])
-            page = int(urllib.parse.parse_qs(parsed_url.query)['page'][0])
-        else:
-            paginated = False
-    return filtered_storage
