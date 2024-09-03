@@ -257,9 +257,7 @@ class DO(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         utils.client()
-        return {
-            f'~/.config/doctl/{_CREDENTIAL_FILE}': utils.CREDENTIALS_PATH
-        }
+        return {f'~/.config/doctl/{_CREDENTIAL_FILE}': utils.CREDENTIALS_PATH}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

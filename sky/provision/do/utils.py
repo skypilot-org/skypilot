@@ -31,7 +31,6 @@ INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 SSH_KEY_NAME = f'sky-key-{common_utils.get_user_hash()}'
-IMAGE = 'ubuntu-22-04-x64'
 
 CREDENTIALS_PATH = '~/.config/doctl/config.yaml'
 _client = None
@@ -172,7 +171,10 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         'name': instance_name,
         'region': region,
         'size': config.node_config['InstanceType'],
-        'image': IMAGE,
+        'image': constants.GPU_IMAGES.get(
+            config.node_config['InstanceType'],
+            'ubuntu-22-04-x64',
+        ),
         'ssh_keys': [
             ssh_key_id(
                 config.authentication_config['ssh_public_key'])['fingerprint']

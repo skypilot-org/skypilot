@@ -213,7 +213,7 @@ def terminate_instances(
         logger.warning(msg)
         raise RuntimeError(msg)
 
-    # TODO(asaiacai): Possible private storage resource leakage for autodown
+    # TODO(asaiacai): Possible head storage resource leakage on autodown.
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         exist_storage = utils.filter_storage(cluster_name_on_cloud)
         if len(exist_storage) == 0 or len(exist_storage) == 1 and worker_only:
@@ -227,7 +227,7 @@ def terminate_instances(
                 logger.debug('Error: {0} {1}: {2}'.format(
                     err.status_code, err.reason, err.error.message))
         logger.debug('Reattempting block storage deletion')
-        time.sleep(constants.POLL_INTERVAL)
+        time.sleep(1)
     else:
         msg = ('Failed to delete all block stores')
         logger.warning(msg)
