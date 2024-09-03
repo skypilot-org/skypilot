@@ -179,7 +179,8 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
             ssh_key_id(
                 config.authentication_config['ssh_public_key'])['fingerprint']
         ],
-        'tags': ['skypilot', cluster_name_on_cloud]
+        'tags': ['skypilot', cluster_name_on_cloud],
+        'user_data': 'snap install docker'
     }
     instance = _create_droplet(instance_request)
 

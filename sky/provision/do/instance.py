@@ -198,15 +198,15 @@ def terminate_instances(
             continue
         try:
             utils.client().droplets.destroy_with_associated_resources_dangerous(
-                droplet_id=instance_meta['id'])
+                droplet_id=instance_meta['id'], x_dangerous=True)
         except HttpResponseError as err:
-            raise utils.DigitalOceanError('Error: {0} {1}: {2}'.format(
+            logger.warning('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
 
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,
                                            status_filters=None)
-        if len(instances) == 0 or len(instances) == 1 and worker_only:
+        if len(instances) == 0 or len(instances) <= 1 and worker_only:
             break
         time.sleep(constants.POLL_INTERVAL)
     else:
