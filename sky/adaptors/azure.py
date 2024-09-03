@@ -118,6 +118,15 @@ def get_client(name: str,
             from azure.mgmt import authorization
             return authorization.AuthorizationManagementClient(
                 credential, subscription_id)
+        elif name == 'ml':
+            rg = kwargs.pop('resource_group', None)
+            ws = kwargs.pop('workspace_name', None)
+            assert rg is not None, ('Must provide resource_group keyword '
+                                    'arguments for ML client.')
+            assert ws is not None, ('Must provide workspace keyword '
+                                    'arguments for ML client.')
+            from azure.ai.ml import MLClient
+            return MLClient(credential, subscription_id, rg, ws)
         elif name == 'graph':
             import msgraph
             return msgraph.GraphServiceClient(credential)

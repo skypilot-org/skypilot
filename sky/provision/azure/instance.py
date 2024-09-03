@@ -21,10 +21,13 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from azure.ai import ml
     from azure.mgmt import compute as azure_compute
     from azure.mgmt import resource as azure_resource
 
 logger = sky_logging.init_logger(__name__)
+
+USE_AZ_ML = True
 
 # Suppress noisy logs from Azure SDK. Reference:
 # https://github.com/Azure/azure-sdk-for-python/issues/9422
@@ -143,6 +146,10 @@ def _get_azure_sdk_function(client: Any, function_name: str) -> Callable:
 
 def _get_instance_ips(network_client, vm, resource_group: str,
                       use_internal_ips: bool) -> Tuple[str, Optional[str]]:
+    if USE_AZ_ML:
+        ns = vm.network_settings
+        external_ip = ns.public_ip_address if not use_internal_ips else None
+        return (ns.private_ip_address, external_ip)
     nic_id = vm.network_profile.network_interfaces[0].id
     nic_name = nic_id.split('/')[-1]
     nic = network_client.network_interfaces.get(
@@ -183,12 +190,36 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
+def _create_ml_client(subscription_id, resource_group, cluster_name_on_cloud,
+                      location):
+    if not USE_AZ_ML:
+        return None
+    from azure.ai.ml import entities  # pylint: disable=import-outside-toplevel
+    workspace_name = cluster_name_on_cloud + '-ws'
+    ml_client = azure.get_client('ml',
+                                 subscription_id,
+                                 resource_group=resource_group,
+                                 workspace_name=workspace_name)
+    try:
+        ml_client.workspaces.get(workspace_name)
+    except azure.exceptions().ResourceNotFoundError:
+        logger.info(f'Cannot find workspace {workspace_name}. Creating...')
+        workspace = entities.Workspace(
+            name=workspace_name,
+            location=location,
+        )
+        create = _get_azure_sdk_function(ml_client.workspaces, 'create')
+        ws = create(workspace).result()
+        logger.info(f'Workspace {workspace_name} created. Detailed: {ws}')
+    return ml_client
+
+
 def _create_instances(
         compute_client: 'azure_compute.ComputeManagementClient',
         resource_client: 'azure_resource.ResourceManagementClient',
-        cluster_name_on_cloud: str, resource_group: str,
-        provider_config: Dict[str, Any], node_config: Dict[str, Any],
-        tags: Dict[str, str], count: int) -> List:
+        ml_client: Optional['ml.MLClient'], cluster_name_on_cloud: str,
+        resource_group: str, provider_config: Dict[str, Any],
+        node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> List:
     vm_id = uuid4().hex[:UNIQUE_ID_LEN]
     tags = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
@@ -208,6 +239,31 @@ def _create_instances(
 
     vm_name = f'{cluster_name_on_cloud}-{vm_id}'
     use_internal_ips = provider_config.get('use_internal_ips', False)
+
+    filters = {
+        constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+        _TAG_SKYPILOT_VM_ID: vm_id
+    }
+
+    if USE_AZ_ML:
+        assert ml_client is not None, ml_client
+        # pylint: disable=import-outside-toplevel
+        from azure.ai.ml import entities
+
+        # TODO(tian): Change to Cluster if num nodes >= 1
+        ins = entities.ComputeInstance(
+            name=vm_name,
+            size=node_config['azure_arm_parameters']['vmSize'],
+            tags=node_tags,
+            ssh_public_access_enabled=True,
+            ssh_settings=entities.ComputeInstanceSshSettings(
+                ssh_key_value=node_config['azure_arm_parameters']['publicKey']),
+            enable_node_public_ip=not use_internal_ips,
+            # TODO(tian): Add creation script
+        )
+        ml_client.begin_create_or_update(ins).wait()
+        return _filter_instances(compute_client, ml_client, resource_group,
+                                 filters)
 
     template_params = node_config['azure_arm_parameters'].copy()
     # We don't include 'head' or 'worker' in the VM name as on Azure the VM
@@ -274,11 +330,8 @@ def _create_instances(
         deployment_name=vm_name,
         parameters=parameters,
     ).wait()
-    filters = {
-        constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-        _TAG_SKYPILOT_VM_ID: vm_id
-    }
-    instances = _filter_instances(compute_client, resource_group, filters)
+    instances = _filter_instances(compute_client, ml_client, resource_group,
+                                  filters)
     assert len(instances) == count, (len(instances), count)
     return instances
 
@@ -291,6 +344,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resource_group = provider_config['resource_group']
     subscription_id = provider_config['subscription_id']
     compute_client = azure.get_client('compute', subscription_id)
+    ml_client = _create_ml_client(subscription_id, resource_group,
+                                  cluster_name_on_cloud,
+                                  provider_config['location'])
 
     instances_to_resume = []
     resumed_instance_ids: List[str] = []
@@ -304,6 +360,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                            {AzureInstanceStatus.DELETING})
     existing_instances = _filter_instances(
         compute_client,
+        ml_client,
         tag_filters=filters,
         resource_group=resource_group,
         status_filters=list(non_deleting_states),
@@ -339,9 +396,17 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         tags = target_instance.tags
         tags.update(new_instance_tags)
 
-        update = _get_azure_sdk_function(compute_client.virtual_machines,
-                                         'update')
-        update(resource_group, target_instance.name, parameters={'tags': tags})
+        if USE_AZ_ML:
+            # TODO(tian): DEBUG HERE!
+            from azure.ai.ml import entities  # pylint: disable=import-outside-toplevel
+            ins = entities.ComputeInstance(name=target_instance.name, tags=tags)
+            ml_client.begin_create_or_update(ins).result()
+        else:
+            update = _get_azure_sdk_function(compute_client.virtual_machines,
+                                             'update')
+            update(resource_group,
+                   target_instance.name,
+                   parameters={'tags': tags})
         return target_instance.name
 
     head_instance_id = _get_head_instance_id(existing_instances)
@@ -432,6 +497,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         created_instances = _create_instances(
             compute_client=compute_client,
             resource_client=resource_client,
+            ml_client=ml_client,
             cluster_name_on_cloud=cluster_name_on_cloud,
             resource_group=resource_group,
             provider_config=provider_config,
@@ -447,6 +513,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         # Wait for all instances to be in running state
         instances = _filter_instances(
             compute_client,
+            ml_client,
             resource_group,
             filters,
             status_filters=non_running_instance_statuses,
@@ -463,6 +530,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     running_instances = _filter_instances(
         compute_client,
+        ml_client,
         resource_group,
         filters,
         status_filters=[AzureInstanceStatus.RUNNING])
@@ -518,9 +586,13 @@ def get_cluster_info(
                                           azure.get_subscription_id())
     compute_client = azure.get_client('compute', subscription_id)
     network_client = azure.get_client('network', subscription_id)
+    ml_client = _create_ml_client(subscription_id, resource_group,
+                                  cluster_name_on_cloud,
+                                  provider_config['location'])
 
     running_instances = _filter_instances(
         compute_client,
+        ml_client,
         resource_group,
         filters,
         status_filters=[AzureInstanceStatus.RUNNING])
@@ -560,11 +632,20 @@ def stop_instances(
     subscription_id = provider_config['subscription_id']
     resource_group = provider_config['resource_group']
     compute_client = azure.get_client('compute', subscription_id)
+    ml_client = _create_ml_client(subscription_id, resource_group,
+                                  cluster_name_on_cloud,
+                                  provider_config['location'])
     tag_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     if worker_only:
         tag_filters[constants.TAG_RAY_NODE_KIND] = 'worker'
 
-    nodes = _filter_instances(compute_client, resource_group, tag_filters)
+    nodes = _filter_instances(compute_client, ml_client, resource_group,
+                              tag_filters)
+    if USE_AZ_ML:
+        with pool.ThreadPool() as p:
+            p.starmap(ml_client.compute.begin_stop,
+                      [(node.name,) for node in nodes])
+        return
     stop_virtual_machine = _get_azure_sdk_function(
         client=compute_client.virtual_machines, function_name='deallocate')
     with pool.ThreadPool() as p:
@@ -583,21 +664,47 @@ def terminate_instances(
     # delete a resource group.
     subscription_id = provider_config['subscription_id']
     resource_group = provider_config['resource_group']
+    compute_client = azure.get_client('compute', subscription_id)
+    ml_client = _create_ml_client(subscription_id, resource_group,
+                                  cluster_name_on_cloud,
+                                  provider_config['location'])
     if worker_only:
-        compute_client = azure.get_client('compute', subscription_id)
         delete_virtual_machine = _get_azure_sdk_function(
             client=compute_client.virtual_machines, function_name='delete')
         filters = {
             constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
             constants.TAG_RAY_NODE_KIND: 'worker'
         }
-        nodes = _filter_instances(compute_client, resource_group, filters)
+        nodes = _filter_instances(compute_client, ml_client, resource_group,
+                                  filters)
+        if USE_AZ_ML:
+            with pool.ThreadPool() as p:
+                p.starmap(ml_client.compute.begin_delete,
+                          [(node.name,) for node in nodes])
+            return
         with pool.ThreadPool() as p:
             p.starmap(delete_virtual_machine,
                       [(resource_group, node.name) for node in nodes])
         return
 
     assert provider_config is not None, cluster_name_on_cloud
+
+    if USE_AZ_ML:
+        all_nodes = _filter_instances(
+            compute_client, ml_client, resource_group,
+            {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud})
+        # TODO(tian): Does delete workspace means cleanup the compute instances?
+        with pool.ThreadPool() as p:
+            p.starmap(ml_client.compute.begin_delete,
+                      [(node.name,) for node in all_nodes])
+        # TODO(tian): Have a function to generate workspace name.
+        workspace_name = cluster_name_on_cloud + '-ws'
+        # TODO(tian): Does delete resource group means cleanup the workspace?
+        ml_client.workspaces.begin_delete(
+            workspace_name,
+            delete_dependent_resources=True,
+            permanently_delete=True,
+        ).wait()
 
     resource_group_client = azure.get_client('resource', subscription_id)
     delete_resource_group = _get_azure_sdk_function(
@@ -616,6 +723,9 @@ def terminate_instances(
 def _get_instance_status(
         compute_client: 'azure_compute.ComputeManagementClient', vm,
         resource_group: str) -> Optional[AzureInstanceStatus]:
+    if USE_AZ_ML:
+        return AzureInstanceStatus.from_raw_states(vm.provisioning_state,
+                                                   vm.state.lower())
     try:
         instance = compute_client.virtual_machines.instance_view(
             resource_group_name=resource_group, vm_name=vm.name)
@@ -641,6 +751,7 @@ def _get_instance_status(
 
 def _filter_instances(
     compute_client: 'azure_compute.ComputeManagementClient',
+    ml_client: Optional['ml.MLClient'],
     resource_group: str,
     tag_filters: Dict[str, str],
     status_filters: Optional[List[AzureInstanceStatus]] = None,
@@ -654,9 +765,13 @@ def _filter_instances(
         return True
 
     try:
-        list_virtual_machines = _get_azure_sdk_function(
-            client=compute_client.virtual_machines, function_name='list')
-        vms = list_virtual_machines(resource_group_name=resource_group)
+        if USE_AZ_ML:
+            assert ml_client is not None, 'ml_client is None'
+            vms = ml_client.compute.list()
+        else:
+            list_virtual_machines = _get_azure_sdk_function(
+                client=compute_client.virtual_machines, function_name='list')
+            vms = list_virtual_machines(resource_group_name=resource_group)
         nodes = list(filter(match_tags, vms))
     except azure.exceptions().ResourceNotFoundError as e:
         if _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE in str(e):
@@ -685,7 +800,11 @@ def query_instances(
     resource_group = provider_config['resource_group']
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     compute_client = azure.get_client('compute', subscription_id)
-    nodes = _filter_instances(compute_client, resource_group, filters)
+    ml_client = _create_ml_client(subscription_id, resource_group,
+                                  cluster_name_on_cloud,
+                                  provider_config['location'])
+    nodes = _filter_instances(compute_client, ml_client, resource_group,
+                              filters)
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
 
     def _fetch_and_map_status(node, resource_group: str) -> None:
@@ -710,6 +829,9 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    if USE_AZ_ML:
+        logger.debug('Azure ML does not support opening ports yet.')
+        return
     assert provider_config is not None, cluster_name_on_cloud
     subscription_id = provider_config['subscription_id']
     resource_group = provider_config['resource_group']
@@ -778,6 +900,9 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    if USE_AZ_ML:
+        logger.debug('Azure ML does not support opening ports yet.')
+        return
     # Azure will automatically cleanup network security groups when cleanup
     # resource group. So we don't need to do anything here.
     del cluster_name_on_cloud, ports, provider_config  # Unused.
