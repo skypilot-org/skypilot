@@ -68,17 +68,16 @@ PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/kubernetes-port-forward-proxy-command.sh'
 POD_STATUSES = {
     'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
 }
-AUTODOWN_ANNOTATIONS_KEY = 'skypilot.co/autodown'
-IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY = (
+AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
+IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
 KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS = [
-    AUTODOWN_ANNOTATIONS_KEY, IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY
+    AUTODOWN_ANNOTATION_KEY, IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY
 ]
 ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
                                        '{namespace} while trying to {action} '
                                        'Annotations {annotations}.')
 
-V1Pod = Any
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1782,14 +1781,14 @@ def filter_pods(namespace: str,
     return {pod.metadata.name: pod for pod in pods}
 
 
-def _remove_pod_annotations(pod: V1Pod, annotations_key: str,
+def _remove_pod_annotations(pod: Any, annotations_key: str,
                             namespace: str) -> None:
     """Removes specified Annotations from a Kubernetes pod."""
     try:
         # Remove the specified annotations
         if pod.metadata.annotations:
             if annotations_key in pod.metadata.annotations:
-                # Patch the pod with the updated metadata
+                # Patch the pod with the updated metadata.
                 body = {'metadata': {'annotations': {annotations_key: None}}}
                 kubernetes.core_api().patch_namespaced_pod(
                     name=pod.metadata.name,
@@ -1810,7 +1809,7 @@ def _remove_pod_annotations(pod: V1Pod, annotations_key: str,
                 raise
 
 
-def _add_pod_annotations(pod: V1Pod, annotations: Dict[str, str],
+def _add_pod_annotations(pod: Any, annotations: Dict[str, str],
                          namespace: str) -> None:
     """Adds specified Annotations on a Kubernetes pod."""
     try:
@@ -1852,11 +1851,11 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
         if down:
             for annotations_key in annotations_keys:
                 annotations: Dict[str, str] = {}
-                if annotations_key == IDLE_MINUTES_TO_AUTOSTOP_ANNOTATIONS_KEY:
+                if annotations_key == IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY:
                     annotations.update(
                         {annotations_key: str(idle_minutes_to_autostop)})
-                else:  # annotation_key == AUTODOWN_ANNOTATIONS_KEY
-                    annotations.update({annotations_key: 'true')})
+                else:  # annotation_key == AUTODOWN_ANNOTATION_KEY
+                    annotations.update({annotations_key: 'true'})
                 _add_pod_annotations(pod=pod,
                                      annotations=annotations,
                                      namespace=namespace)
