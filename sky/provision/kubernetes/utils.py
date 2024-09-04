@@ -1856,7 +1856,7 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
                     annotations.update(
                         {annotations_key: str(idle_minutes_to_autostop)})
                 else:  # annotation_key == AUTODOWN_ANNOTATIONS_KEY
-                    annotations.update({annotations_key: str(True)})
+                    annotations.update({annotations_key: 'true')})
                 _add_pod_annotations(pod=pod,
                                      annotations=annotations,
                                      namespace=namespace)
