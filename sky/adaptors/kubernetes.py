@@ -18,7 +18,6 @@ kubernetes = common.LazyImport('kubernetes',
 urllib3 = common.LazyImport('urllib3',
                             import_error_message=_IMPORT_ERROR_MESSAGE)
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _configured = False
 _core_api = None
@@ -72,6 +71,7 @@ def _load_config():
     global _configured
     if _configured:
         return
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     try:
         # Load in-cluster config if running in a pod
         # Kubernetes set environment variables for service discovery do not
