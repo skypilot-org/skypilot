@@ -190,12 +190,15 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
+def _get_workspace_name(cluster_name_on_cloud: str) -> str:
+    return f'{cluster_name_on_cloud}-ws'
+
+
 def _create_ml_client(subscription_id, resource_group, cluster_name_on_cloud,
                       location):
     if not USE_AZ_ML:
         return None
-    from azure.ai.ml import entities  # pylint: disable=import-outside-toplevel
-    workspace_name = cluster_name_on_cloud + '-ws'
+    workspace_name = _get_workspace_name(cluster_name_on_cloud)
     ml_client = azure.get_client('ml',
                                  subscription_id,
                                  resource_group=resource_group,
@@ -204,7 +207,7 @@ def _create_ml_client(subscription_id, resource_group, cluster_name_on_cloud,
         ml_client.workspaces.get(workspace_name)
     except azure.exceptions().ResourceNotFoundError:
         logger.info(f'Cannot find workspace {workspace_name}. Creating...')
-        workspace = entities.Workspace(
+        workspace = azure.create_az_ml_workspace(
             name=workspace_name,
             location=location,
         )
@@ -245,27 +248,29 @@ def _create_instances(
         _TAG_SKYPILOT_VM_ID: vm_id
     }
 
+    template_params = node_config['azure_arm_parameters'].copy()
+
     if USE_AZ_ML:
         assert ml_client is not None, ml_client
-        # pylint: disable=import-outside-toplevel
-        from azure.ai.ml import entities
 
-        # TODO(tian): Change to Cluster if num nodes >= 1
-        ins = entities.ComputeInstance(
-            name=vm_name,
-            size=node_config['azure_arm_parameters']['vmSize'],
-            tags=node_tags,
-            ssh_public_access_enabled=True,
-            ssh_settings=entities.ComputeInstanceSshSettings(
-                ssh_key_value=node_config['azure_arm_parameters']['publicKey']),
-            enable_node_public_ip=not use_internal_ips,
-            # TODO(tian): Add creation script
-        )
-        ml_client.begin_create_or_update(ins).wait()
+        pollers = []
+        for c in range(count):
+            ins = azure.create_az_ml_compute_instance(
+                name=f'{vm_name}-{c}',
+                size=template_params['vmSize'],
+                tags=node_tags,
+                ssh_public_access_enabled=True,
+                ssh_settings=azure.create_az_ml_compute_instance_ssh_settings(
+                    ssh_key_value=template_params['publicKey']),
+                enable_node_public_ip=not use_internal_ips,
+                # TODO(tian): Add creation script
+            )
+            pollers.append(ml_client.begin_create_or_update(ins))
+        for poller in pollers:
+            poller.result()
         return _filter_instances(compute_client, ml_client, resource_group,
                                  filters)
 
-    template_params = node_config['azure_arm_parameters'].copy()
     # We don't include 'head' or 'worker' in the VM name as on Azure the VM
     # name is immutable and we may change the node type for existing VM in the
     # multi-node cluster, due to manual termination of the head node.
@@ -397,9 +402,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         tags.update(new_instance_tags)
 
         if USE_AZ_ML:
-            # pylint: disable=import-outside-toplevel
-            from azure.ai.ml import entities
-            ins = entities.ComputeInstance(name=target_instance.name, tags=tags)
+            ins = azure.create_az_ml_compute_instance(name=target_instance.name,
+                                                      tags=tags)
             ml_client.begin_create_or_update(ins).result()
         else:
             update = _get_azure_sdk_function(compute_client.virtual_machines,
@@ -698,8 +702,7 @@ def terminate_instances(
         with pool.ThreadPool() as p:
             p.starmap(ml_client.compute.begin_delete,
                       [(node.name,) for node in all_nodes])
-        # TODO(tian): Have a function to generate workspace name.
-        workspace_name = cluster_name_on_cloud + '-ws'
+        workspace_name = _get_workspace_name(cluster_name_on_cloud)
         # TODO(tian): Does delete resource group means cleanup the workspace?
         ml_client.workspaces.begin_delete(
             workspace_name,
