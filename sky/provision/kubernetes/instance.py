@@ -15,7 +15,6 @@ from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.provision.kubernetes.utils import _get_namespace
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
@@ -339,7 +338,7 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _set_env_vars_in_pods(namespace: str, new_pods: List):
+def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
     """Setting environment variables in pods.
 
     Once all containers are ready, we can exec into them and set env vars.
@@ -359,7 +358,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
 
     for new_pod in new_pods:
         runner = command_runner.KubernetesCommandRunner(
-            (namespace, new_pod.metadata.name))
+            ((namespace, context), new_pod.metadata.name))
         rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
                                    require_outputs=True,
                                    stream_logs=False)
@@ -367,7 +366,7 @@ def _set_env_vars_in_pods(namespace: str, new_pods: List):
                                      new_pod.metadata.name, rc, stdout)
 
 
-def _check_user_privilege(namespace: str, new_nodes: List) -> None:
+def _check_user_privilege(namespace: str, context: str, new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
     # the kubernetes instance pod.
     check_k8s_user_sudo_cmd = (
@@ -385,7 +384,7 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
 
     for new_node in new_nodes:
         runner = command_runner.KubernetesCommandRunner(
-            (namespace, new_node.metadata.name))
+            ((namespace, context), new_node.metadata.name))
         rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
                                         require_outputs=True,
                                         separate_stderr=True,
@@ -402,7 +401,7 @@ def _check_user_privilege(namespace: str, new_nodes: List) -> None:
                 'from the image.')
 
 
-def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
+def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
     set_k8s_ssh_cmd = (
@@ -435,7 +434,7 @@ def _setup_ssh_in_pods(namespace: str, new_nodes: List) -> None:
     # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
     for new_node in new_nodes:
         pod_name = new_node.metadata.name
-        runner = command_runner.KubernetesCommandRunner((namespace, pod_name))
+        runner = command_runner.KubernetesCommandRunner(((namespace, context), pod_name))
         logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
         rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
                                    require_outputs=True,
@@ -459,7 +458,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
     provider_config = config.provider_config
-    namespace = _get_namespace(provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
     tags = {
@@ -624,9 +623,9 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # Make sure commands used in these methods are generic and work
         # on most base images. E.g., do not use Python, since that may not
         # be installed by default.
-        _check_user_privilege(namespace, uninitialized_pods_list)
-        _setup_ssh_in_pods(namespace, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, uninitialized_pods_list)
+        _check_user_privilege(namespace, context, uninitialized_pods_list)
+        _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
+        _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
 
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
@@ -778,7 +777,7 @@ def get_cluster_info(
     ssh_user = 'sky'
     get_k8s_ssh_user_cmd = 'echo $(whoami)'
     assert head_pod_name is not None
-    runner = command_runner.KubernetesCommandRunner((namespace, head_pod_name))
+    runner = command_runner.KubernetesCommandRunner(((namespace, context), head_pod_name))
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -859,10 +858,11 @@ def get_command_runners(
     assert cluster_info.provider_config is not None, cluster_info
     instances = cluster_info.instances
     namespace = kubernetes_utils.get_namespace_from_config(cluster_info.provider_config)
+    context = kubernetes_utils.get_context_from_config(cluster_info.provider_config)
     node_list = []
     if cluster_info.head_instance_id is not None:
-        node_list = [(namespace, cluster_info.head_instance_id)]
-    node_list.extend((namespace, pod_name)
+        node_list = [((namespace, context), cluster_info.head_instance_id)]
+    node_list.extend(((namespace, context), pod_name)
                      for pod_name in instances.keys()
                      if pod_name != cluster_info.head_instance_id)
     return command_runner.KubernetesCommandRunner.make_runner_list(

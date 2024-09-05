@@ -649,13 +649,13 @@ class KubernetesCommandRunner(CommandRunner):
 
     def __init__(
         self,
-        node: Tuple[str, str],
+        node: Tuple[Tuple[str, str], str],
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
 
         Example Usage:
-            runner = KubernetesCommandRunner((namespace, pod_name))
+            runner = KubernetesCommandRunner((namespace, context), pod_name))
             runner.run('ls -l')
             runner.rsync(source, target, up=True)
 
@@ -664,7 +664,7 @@ class KubernetesCommandRunner(CommandRunner):
         """
         del kwargs
         super().__init__(node)
-        self.namespace, self.pod_name = node
+        (self.namespace, self.context), self.pod_name = node
 
     @timeline.event
     def run(
@@ -720,7 +720,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout = _DEFAULT_CONNECT_TIMEOUT
         kubectl_args = [
             '--pod-running-timeout', f'{connect_timeout}s', '-n',
-            self.namespace, self.pod_name
+            self.namespace, '--context', self.context, self.pod_name
         ]
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
