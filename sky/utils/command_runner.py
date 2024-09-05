@@ -821,7 +821,7 @@ class KubernetesCommandRunner(CommandRunner):
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{self.namespace}',
+            node_destination=f'{self.pod_name}@{self.namespace}@{self.context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,
