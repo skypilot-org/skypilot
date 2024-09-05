@@ -146,11 +146,6 @@ class Kubernetes(clouds.Cloud):
         return self._REPR
 
     @classmethod
-    def get_port(cls, svc_name) -> int:
-        ns = kubernetes_utils.get_current_kube_config_context_namespace()
-        return kubernetes_utils.get_port(svc_name, ns)
-
-    @classmethod
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
@@ -321,6 +316,7 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
+            'k8s_context': kubernetes_utils.get_current_kube_config_context_name(),
             'k8s_port_mode': port_mode.value,
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,

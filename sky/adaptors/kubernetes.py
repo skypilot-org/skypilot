@@ -1,5 +1,5 @@
 """Kubernetes adaptors"""
-
+import functools
 # pylint: disable=import-outside-toplevel
 
 import logging
@@ -19,13 +19,6 @@ urllib3 = common.LazyImport('urllib3',
                             import_error_message=_IMPORT_ERROR_MESSAGE)
 
 _configured = False
-_core_api = None
-_auth_api = None
-_networking_api = None
-_custom_objects_api = None
-_node_api = None
-_apps_api = None
-_api_client = None
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -66,7 +59,7 @@ def _api_logging_decorator(logger: str, level: int):
     return decorated_api
 
 
-def _load_config():
+def _load_config(context: str = None):
     global _configured
     if _configured:
         return
@@ -81,7 +74,7 @@ def _load_config():
         kubernetes.config.load_incluster_config()
     except kubernetes.config.config_exception.ConfigException:
         try:
-            kubernetes.config.load_kube_config()
+            kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = ''
             if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -102,75 +95,53 @@ def _load_config():
                 raise ValueError(err_str) from None
     _configured = True
 
-
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def core_api():
-    global _core_api
-    if _core_api is None:
-        _load_config()
-        _core_api = kubernetes.client.CoreV1Api()
-    return _core_api
+def core_api(context: str = None):
+    _load_config(context)
+    return kubernetes.client.CoreV1Api()
 
 
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def auth_api():
-    global _auth_api
-    if _auth_api is None:
-        _load_config()
-        _auth_api = kubernetes.client.RbacAuthorizationV1Api()
-
-    return _auth_api
+def auth_api(context: str = None):
+    _load_config(context)
+    return kubernetes.client.RbacAuthorizationV1Api()
 
 
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def networking_api():
-    global _networking_api
-    if _networking_api is None:
-        _load_config()
-        _networking_api = kubernetes.client.NetworkingV1Api()
-
-    return _networking_api
+def networking_api(context: str = None):
+    _load_config(context)
+    return kubernetes.client.NetworkingV1Api()
 
 
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def custom_objects_api():
-    global _custom_objects_api
-    if _custom_objects_api is None:
-        _load_config()
-        _custom_objects_api = kubernetes.client.CustomObjectsApi()
-
-    return _custom_objects_api
+def custom_objects_api(context: str = None):
+    _load_config(context)
+    return kubernetes.client.CustomObjectsApi()
 
 
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def node_api():
-    global _node_api
-    if _node_api is None:
-        _load_config()
-        _node_api = kubernetes.client.NodeV1Api()
-
-    return _node_api
+def node_api(context: str = None):
+    _load_config(context)
+    return kubernetes.client.NodeV1Api()
 
 
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def apps_api():
-    global _apps_api
-    if _apps_api is None:
-        _load_config()
-        _apps_api = kubernetes.client.AppsV1Api()
-
-    return _apps_api
+def apps_api(context: str = None):
+    _load_config(context)
+    return kubernetes.client.AppsV1Api()
 
 
+@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def api_client():
-    global _api_client
-    if _api_client is None:
-        _load_config()
-        _api_client = kubernetes.client.ApiClient()
-
-    return _api_client
-
+def api_client(context: str = None):
+    _load_config(context)
+    return kubernetes.client.ApiClient()
 
 def api_exception():
     return kubernetes.client.rest.ApiException

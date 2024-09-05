@@ -58,7 +58,8 @@ def _open_ports_using_loadbalancer(
     kubernetes_utils.merge_custom_metadata(content['service_spec']['metadata'])
 
     network_utils.create_or_replace_namespaced_service(
-        namespace=provider_config.get('namespace', 'default'),
+        namespace=kubernetes_utils.get_namespace_from_config(provider_config),
+        context=kubernetes_utils.get_context_from_config(provider_config),
         service_name=service_name,
         service_spec=content['service_spec'])
 
@@ -68,8 +69,9 @@ def _open_ports_using_ingress(
     ports: List[int],
     provider_config: Dict[str, Any],
 ) -> None:
+    context = kubernetes_utils.get_context_from_config(provider_config)
     # Check if an ingress controller exists
-    if not network_utils.ingress_controller_exists():
+    if not network_utils.ingress_controller_exists(context):
         raise Exception(
             'Ingress controller not found. '
             'Install Nginx ingress controller first: '
@@ -108,7 +110,8 @@ def _open_ports_using_ingress(
         # Update metadata from config
         kubernetes_utils.merge_custom_metadata(service_spec['metadata'])
         network_utils.create_or_replace_namespaced_service(
-            namespace=provider_config.get('namespace', 'default'),
+            namespace=kubernetes_utils.get_namespace_from_config(provider_config),
+            context=kubernetes_utils.get_context_from_config(provider_config),
             service_name=service_name,
             service_spec=service_spec,
         )
@@ -116,7 +119,8 @@ def _open_ports_using_ingress(
     kubernetes_utils.merge_custom_metadata(content['ingress_spec']['metadata'])
     # Create or update the single ingress for all services
     network_utils.create_or_replace_namespaced_ingress(
-        namespace=provider_config.get('namespace', 'default'),
+        namespace=kubernetes_utils.get_namespace_from_config(provider_config),
+        context=kubernetes_utils.get_context_from_config(provider_config),
         ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
         ingress_spec=content['ingress_spec'],
     )
@@ -173,7 +177,8 @@ def _cleanup_ports_for_ingress(
     # Delete the single ingress used for all ports
     ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress'
     network_utils.delete_namespaced_ingress(
-        namespace=provider_config.get('namespace', 'default'),
+        namespace=kubernetes_utils.get_namespace_from_config(provider_config),
+        context=kubernetes_utils.get_context_from_config(provider_config),
         ingress_name=ingress_name,
     )
 
