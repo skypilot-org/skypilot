@@ -488,6 +488,7 @@ class Cloud:
         """
         return None
 
+
     @classmethod
     def get_current_user_identity_str(cls) -> Optional[str]:
         """Returns a user friendly representation of the current identity."""
@@ -495,6 +496,18 @@ class Cloud:
         if user_identity is None:
             return None
         return ', '.join(user_identity)
+
+    def get_supported_identities(self) -> Optional[List[str]]:
+        """Returns the supported identities of the cloud.
+
+        The supported identities are the identities that SkyPilot can switch to
+        without requiring the user to manually switch the cloud credentials.
+
+        Returns:
+            None if the cloud does not have a concept of user identity;
+            otherwise the supported identities that SkyPilot can switch to.
+        """
+        raise None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.

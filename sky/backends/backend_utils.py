@@ -1559,6 +1559,7 @@ def check_owner_identity(cluster_name: str) -> None:
 
     cloud = handle.launched_resources.cloud
     current_user_identity = cloud.get_current_user_identity()
+    supported_user_identities = cloud.get_supported_identities()
     owner_identity = record['owner']
     if current_user_identity is None:
         # Skip the check if the cloud does not support user identity.
@@ -1575,6 +1576,15 @@ def check_owner_identity(cluster_name: str) -> None:
             cluster_name, current_user_identity)
     else:
         assert isinstance(owner_identity, list)
+        if supported_user_identities:
+            # If the cloud supports switching user identities, check if the
+            # requested identity is available and use it.
+            for owner_identity in owner_identity:
+                for supported_identity in supported_user_identities:
+                    if owner_identity == supported_identity:
+                        return
+        # If the cloud does not support switching user identities, check if
+        # the current user identity matches the owner identity.
         # It is OK if the owner identity is shorter, which will happen when
         # the cluster is launched before #1808. In that case, we only check
         # the same length (zip will stop at the shorter one).

@@ -437,19 +437,37 @@ class Kubernetes(clouds.Cloud):
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
 
+    @staticmethod
+    def get_identity_from_context(context):
+        if 'namespace' in context['context']:
+            namespace = context['context']['namespace']
+        else:
+            namespace = kubernetes_utils.DEFAULT_NAMESPACE
+        user = context['context']['user']
+        cluster = context['context']['cluster']
+        identity_str = f'{cluster}_{user}_{namespace}'
+        return identity_str
+
+    @classmethod
+    def get_supported_identities(cls) -> Optional[List[str]]:
+        k8s = kubernetes.kubernetes
+        identities = []
+        try:
+            all_contexts, current_context = k8s.config.list_kube_config_contexts()
+            # Add current context at the head of the list
+            for context in all_contexts:
+                identity_str = cls.get_identity_from_context(context)
+                identities.append(identity_str)
+            return identities
+        except k8s.config.config_exception.ConfigException:
+            return None
+
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
         k8s = kubernetes.kubernetes
         try:
             _, current_context = k8s.config.list_kube_config_contexts()
-            if 'namespace' in current_context['context']:
-                namespace = current_context['context']['namespace']
-            else:
-                namespace = kubernetes_utils.DEFAULT_NAMESPACE
-
-            user = current_context['context']['user']
-            cluster = current_context['context']['cluster']
-            return [f'{cluster}_{user}_{namespace}']
+            return [cls.get_identity_from_context(current_context)]
         except k8s.config.config_exception.ConfigException:
             return None
 
