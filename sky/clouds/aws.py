@@ -1,5 +1,6 @@
 """Amazon Web Services."""
 import enum
+import fnmatch
 import functools
 import json
 import os
@@ -7,7 +8,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -16,6 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -173,6 +175,10 @@ class AWS(clouds.Cloud):
         return regions
 
     @classmethod
+    def optimize_by_zone(cls) -> bool:
+        return aws_utils.use_reservations()
+
+    @classmethod
     def zones_provision_loop(
         cls,
         *,
@@ -196,11 +202,13 @@ class AWS(clouds.Cloud):
                                             zone=None)
         for r in regions:
             assert r.zones is not None, r
-            if num_nodes > 1:
+            if num_nodes > 1 or aws_utils.use_reservations():
                 # When num_nodes > 1, we shouldn't pass a list of zones to the
                 # AWS NodeProvider to try, because it may then place the nodes of
                 # the same cluster in different zones. This is an artifact of the
                 # current AWS NodeProvider implementation.
+                # Also, when using reservations, they are zone-specific, so we
+                # should return one zone at a time.
                 for z in r.zones:
                     yield [z]
             else:
@@ -370,12 +378,13 @@ class AWS(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources',
-                                        cluster_name_on_cloud: str,
-                                        region: 'clouds.Region',
-                                        zones: Optional[List['clouds.Zone']],
-                                        dryrun: bool = False) -> Dict[str, Any]:
+    def make_deploy_resources_variables(
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name: resources_utils.ClusterName,
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            dryrun: bool = False) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
 
@@ -397,22 +406,39 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
-        user_security_group = skypilot_config.get_nested(
+        disk_encrypted = skypilot_config.get_nested(('aws', 'disk_encrypted'),
+                                                    False)
+        user_security_group_config = skypilot_config.get_nested(
             ('aws', 'security_group_name'), None)
-        if resources.ports is not None:
-            # Already checked in Resources._try_validate_ports
-            assert user_security_group is None
-            security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
-                cluster_name_on_cloud)
-        elif user_security_group is not None:
-            assert resources.ports is None
-            security_group = user_security_group
-        else:
+        user_security_group = None
+        if isinstance(user_security_group_config, str):
+            user_security_group = user_security_group_config
+        elif isinstance(user_security_group_config, list):
+            for profile in user_security_group_config:
+                if fnmatch.fnmatchcase(cluster_name.display_name,
+                                       list(profile.keys())[0]):
+                    user_security_group = list(profile.values())[0]
+                    break
+        security_group = user_security_group
+        if security_group is None:
             security_group = DEFAULT_SECURITY_GROUP_NAME
+            if resources.ports is not None:
+                # Already checked in Resources._try_validate_ports
+                security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
+                    cluster_name.display_name)
+        elif resources.ports is not None:
+            with ux_utils.print_exception_no_traceback():
+                logger.warning(
+                    f'Skip opening ports {resources.ports} for cluster {cluster_name!r}, '
+                    'as `aws.security_group_name` in `~/.sky/config.yaml` is specified as '
+                    f' {security_group!r}. Please make sure the specified security group '
+                    'has requested ports setup; or, leave out `aws.security_group_name` '
+                    'in `~/.sky/config.yaml`.')
 
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'disk_encrypted': disk_encrypted,
             'use_spot': r.use_spot,
             'region': region_name,
             'zones': ','.join(zone_names),
@@ -425,7 +451,7 @@ class AWS(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> resources_utils.FeasibleResources:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Check the instance type is valid in the cloud
@@ -436,10 +462,12 @@ class AWS(clouds.Cloud):
                 region=resources.region,
                 zone=resources.zone)
             if not regions:
-                return ([], [])
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -465,9 +493,10 @@ class AWS(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -482,8 +511,10 @@ class AWS(clouds.Cloud):
             zone=resources.zone,
             clouds='aws')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
@@ -767,7 +798,11 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
-        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
+        if disk_tier == resources_utils.DiskTier.LOW:
+            return 'standard'
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            return 'io2'
+        return 'gp3'
 
     @classmethod
     def _get_disk_specs(
@@ -775,15 +810,19 @@ class AWS(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
+            resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
-            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
-            'disk_iops': tier2iops[tier],
-            'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
+            'disk_iops': tier2iops[tier]
+                         if cls._get_disk_type(tier) != 'standard' else None,
+            # Custom disk throughput is only available for gp3
+            # see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-ebs.html
+            'disk_throughput': tier2iops[tier] // 16
+                               if cls._get_disk_type(tier) == 'gp3' else None,
         }
 
     @classmethod
@@ -832,6 +871,37 @@ class AWS(clouds.Cloud):
         # Quota found to be greater than zero, try provisioning
         return True
 
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = aws_utils.list_reservations_for_instance_type(
+            instance_type, region)
+
+        filtered_reservations = []
+        for r in reservations:
+            if zone != r.zone:
+                continue
+            if r.targeted:
+                if r.name in specific_reservations:
+                    filtered_reservations.append(r)
+            else:
+                filtered_reservations.append(r)
+        reservation_available_resources = {
+            r.name: r.available_resources for r in filtered_reservations
+        }
+        logger.debug('Get AWS reservations available resources:'
+                     f'{region}-{zone}: {reservation_available_resources}')
+        return reservation_available_resources
+
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
@@ -840,22 +910,24 @@ class AWS(clouds.Cloud):
         assert False, 'This code path should not be used.'
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
-        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
+        assert region is not None, (cluster_name.display_name,
+                                    cluster_name.name_on_cloud, region)
         del zone  # unused
 
-        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
+        status = provision_lib.query_instances('AWS',
+                                               cluster_name.name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to find the source cluster {cluster_name!r} on '
+                    f'Failed to find the source cluster {cluster_name.display_name!r} on '
                     'AWS.')
 
         if len(instance_ids) != 1:
@@ -882,7 +954,7 @@ class AWS(clouds.Cloud):
             stream_logs=True)
 
         rich_utils.force_update_status(
-            f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
+            f'Waiting for the source image {cluster_name.display_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
         wait_image_cmd = (
@@ -973,7 +1045,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def is_label_valid(cls, label_key: str,
                        label_value: str) -> Tuple[bool, Optional[str]]:
-        key_regex = re.compile(r'^[^aws:][\S]{0,127}$')
+        key_regex = re.compile(r'^(?!aws:)[\S]{1,127}$')
         value_regex = re.compile(r'^[\S]{0,255}$')
         key_valid = bool(key_regex.match(label_key))
         value_valid = bool(value_regex.match(label_value))

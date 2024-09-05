@@ -488,6 +488,7 @@ class ReplicaInfo:
         self,
         readiness_path: str,
         post_data: Optional[Dict[str, Any]],
+        timeout: int,
         headers: Optional[Dict[str, str]],
     ) -> Tuple['ReplicaInfo', bool, float]:
         """Probe the readiness of the replica.
@@ -512,17 +513,15 @@ class ReplicaInfo:
             logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
                 msg += 'POST'
-                response = requests.post(
-                    readiness_path,
-                    headers=headers,
-                    json=post_data,
-                    timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
+                response = requests.post(readiness_path,
+                                         json=post_data,
+                                         headers=headers,
+                                         timeout=timeout)
             else:
                 msg += 'GET'
-                response = requests.get(
-                    readiness_path,
-                    headers=headers,
-                    timeout=serve_constants.READINESS_PROBE_TIMEOUT_SECONDS)
+                response = requests.get(readiness_path,
+                                        headers=headers,
+                                        timeout=timeout)
             msg += (f' request to {replica_identity} returned status '
                     f'code {response.status_code}')
             if response.status_code == 200:
@@ -580,8 +579,6 @@ class ReplicaManager:
         self.latest_version: int = serve_constants.INITIAL_VERSION
         # Oldest version among the currently provisioned and launched replicas
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
-        serve_state.add_or_update_version(self._service_name,
-                                          self.latest_version, spec)
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
@@ -1043,6 +1040,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         (
                             self._get_readiness_path(info.version),
                             self._get_post_data(info.version),
+                            self._get_readiness_timeout_seconds(info.version),
                             self._get_readiness_headers(info.version),
                         ),
                     ),)
@@ -1230,3 +1228,6 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _get_initial_delay_seconds(self, version: int) -> int:
         return self._get_version_spec(version).initial_delay_seconds
+
+    def _get_readiness_timeout_seconds(self, version: int) -> int:
+        return self._get_version_spec(version).readiness_timeout_seconds

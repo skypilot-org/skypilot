@@ -1,0 +1,58 @@
+# LoRA finetuning Meta Llama-3.1 on any of your own infra.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --env HF_TOKEN
+#
+# To finetune a 70B model:  
+#
+#  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --env HF_TOKEN --env MODEL_SIZE=70B
+
+envs:
+  MODEL_SIZE: 8B
+  HF_TOKEN:
+  DATASET: "yahma/alpaca-cleaned"
+  # Change this to your own checkpoint bucket
+  CHECKPOINT_BUCKET_NAME: sky-llama-31-checkpoints
+
+
+resources:
+  accelerators: A100:8
+  disk_tier: best
+  use_spot: true
+
+file_mounts:
+  /configs: ./configs
+  /output:
+    name: $CHECKPOINT_BUCKET_NAME
+    mode: MOUNT
+    # Optionally, specify the store to enforce to use one of the stores below:
+    #   r2/azure/gcs/s3/cos
+    # store: r2
+
+setup: |
+  pip install torch torchvision
+
+  # Install torch tune from source for the latest Llama-3.1 model
+  pip install git+https://github.com/pytorch/torchtune.git@58255001bd0b1e3a81a6302201024e472af05379
+  # pip install torchtune
+  
+  tune download meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+    --hf-token $HF_TOKEN \
+    --output-dir /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+    --ignore-patterns "original/consolidated*"
+
+run: |
+  tune run --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
+    lora_finetune_distributed \
+    --config /configs/${MODEL_SIZE}-lora.yaml \
+    dataset.source=$DATASET
+
+  # Remove the checkpoint files to save space, LoRA serving only needs the
+  # adapter files.
+  rm /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/*.pt
+  rm /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/*.safetensors
+  
+  mkdir -p /output/$MODEL_SIZE-lora
+  rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct /output/$MODEL_SIZE-lora
+  cp -r /tmp/lora_finetune_output /output/$MODEL_SIZE-lora/

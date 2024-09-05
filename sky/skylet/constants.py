@@ -1,4 +1,6 @@
 """Constants for SkyPilot."""
+from typing import List, Tuple
+
 from packaging import version
 
 import sky
@@ -49,6 +51,11 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
+# environment. `deactivate` command does not work when conda is used.
+DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
+    'export PATH='
+    f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
 
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
@@ -93,6 +100,26 @@ DOCKER_LOGIN_ENV_VARS = {
     DOCKER_SERVER_ENV_VAR,
 }
 
+# Commands for disable GPU ECC, which can improve the performance of the GPU
+# for some workloads by 30%. This will only be applied when a user specify
+# `nvidia_gpus.disable_ecc: true` in ~/.sky/config.yaml.
+# Running this command will reboot the machine, introducing overhead for
+# provisioning the machine.
+# https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
+DISABLE_GPU_ECC_COMMAND = (
+    # Check if the GPU ECC is enabled. We use `sudo which` to check nvidia-smi
+    # because in some environments, nvidia-smi is not in path for sudo and we
+    # should skip disabling ECC in this case.
+    'sudo which nvidia-smi && echo "Checking Nvidia ECC Mode" && '
+    'out=$(nvidia-smi -q | grep "ECC Mode" -A2) && '
+    'echo "$out" && echo "$out" | grep Current | grep Enabled && '
+    'echo "Disabling Nvidia ECC" && '
+    # Disable the GPU ECC.
+    'sudo nvidia-smi -e 0 && '
+    # Reboot the machine to apply the changes.
+    '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
+    '|| true; ')
+
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
 # best effort.
@@ -102,10 +129,15 @@ DOCKER_LOGIN_ENV_VARS = {
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
-    'bash Miniconda3-Linux-x86_64.sh -b && '
+    # We do not use && for installation of conda and the following init commands
+    # because for some images, conda is already installed, but not initialized.
+    # In this case, we need to initialize conda and set auto_activate_base to
+    # true.
+    '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
-    'conda config --set auto_activate_base true && '
-    f'conda activate base; }}; '
+    # Caller should replace {conda_auto_activate} with either true or false.
+    'conda config --set auto_activate_base {conda_auto_activate} && '
+    'conda activate base; }; }; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
     # If Python version is larger then equal to 3.12, create a new conda env
@@ -114,10 +146,12 @@ CONDA_INSTALLATION_COMMANDS = (
     # costly to create a new conda env, and venv should be a lightweight and
     # faster alternative when the python version satisfies the requirement.
     '[[ $(python3 --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
-    f'echo "Creating conda env with Python 3.10" && '
+    'echo "Creating conda env with Python 3.10" && '
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
+    # We use --system-site-packages to reuse the system site packages to avoid
+    # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
@@ -135,6 +169,10 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'export PIP_DISABLE_PIP_VERSION_CHECK=1;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
+    # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
+    # causing the error:
+    #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
+    f'{SKY_PIP_CMD} install "setuptools<70"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -220,3 +258,32 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
+
+# SkyPilot environment variables
+SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'
+SKYPILOT_NODE_IPS = 'SKYPILOT_NODE_IPS'
+SKYPILOT_NUM_GPUS_PER_NODE = 'SKYPILOT_NUM_GPUS_PER_NODE'
+SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
+
+# Placeholder for the SSH user in proxy command, replaced when the ssh_user is
+# known after provisioning.
+SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
+
+# The keys that can be overridden in the `~/.sky/config.yaml` file. The
+# overrides are specified in task YAMLs.
+OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
+    ('docker', 'run_options'),
+    ('nvidia_gpus', 'disable_ecc'),
+    ('kubernetes', 'pod_config'),
+    ('kubernetes', 'provision_timeout'),
+    ('gcp', 'managed_instance_group'),
+]
+
+# Constants for Azure blob storage
+WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
+# Observed time for new role assignment to propagate was ~45s
+WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 180
+RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
+ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
+    'Failed to assign Storage Blob Data Owner role to the '
+    'storage account {storage_account_name}.')

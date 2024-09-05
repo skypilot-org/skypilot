@@ -25,6 +25,7 @@ from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -38,23 +39,11 @@ _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
 
-@dataclasses.dataclass
-class ClusterName:
-    display_name: str
-    name_on_cloud: str
-
-    def __repr__(self) -> str:
-        return repr(self.display_name)
-
-    def __str__(self) -> str:
-        return self.display_name
-
-
 def _bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
-    cluster_name: ClusterName,
+    cluster_name: resources_utils.ClusterName,
     bootstrap_config: provision_common.ProvisionConfig,
 ) -> provision_common.ProvisionRecord:
     provider_name = repr(cloud)
@@ -135,11 +124,12 @@ def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
-    cluster_name: ClusterName,
+    cluster_name: resources_utils.ClusterName,
     num_nodes: int,
     cluster_yaml: str,
     prev_cluster_ever_up: bool,
     log_dir: str,
+    ports_to_open_on_launch: Optional[List[int]] = None,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
 
@@ -161,7 +151,8 @@ def bulk_provision(
         ['node_config'],
         count=num_nodes,
         tags={},
-        resume_stopped_nodes=True)
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=ports_to_open_on_launch)
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
@@ -225,7 +216,7 @@ def bulk_provision(
             raise
 
 
-def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
+def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
                      terminate: bool, provider_config: Dict) -> None:
     """Deleting or stopping a cluster.
 
@@ -411,8 +402,8 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 
 def _post_provision_setup(
-        cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
-        provision_record: provision_common.ProvisionRecord,
+        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
@@ -437,10 +428,11 @@ def _post_provision_setup(
 
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
-        raise RuntimeError(
-            f'Provision failed for cluster {cluster_name!r}. '
-            'Could not find any head instance. To fix: refresh '
-            'status with: sky status -r; and retry provisioning.')
+        e = RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
+                         'Could not find any head instance. To fix: refresh '
+                         f'status with: sky status -r; and retry provisioning.')
+        setattr(e, 'detailed_reason', str(cluster_info))
+        raise e
 
     # TODO(suquark): Move wheel build here in future PRs.
     # We don't set docker_user here, as we are configuring the VM itself.
@@ -563,8 +555,8 @@ def _post_provision_setup(
 
 
 def post_provision_runtime_setup(
-        cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
-        provision_record: provision_common.ProvisionRecord,
+        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
         log_dir: str) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.

@@ -65,6 +65,8 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
+    # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
+    #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
     k8s_cloud = Kubernetes()
     if not any(
@@ -136,15 +138,13 @@ def list_accelerators_realtime(
                     total_accelerators_capacity[
                         accelerator_name] += quantized_count
 
+            if accelerator_name not in total_accelerators_available:
+                total_accelerators_available[accelerator_name] = 0
             if accelerators_available >= min_quantity_filter:
                 quantized_availability = min_quantity_filter * (
                     accelerators_available // min_quantity_filter)
-                if accelerator_name not in total_accelerators_available:
-                    total_accelerators_available[
-                        accelerator_name] = quantized_availability
-                else:
-                    total_accelerators_available[
-                        accelerator_name] += quantized_availability
+                total_accelerators_available[
+                    accelerator_name] += quantized_availability
 
     result = []
 

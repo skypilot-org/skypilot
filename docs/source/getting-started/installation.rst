@@ -11,33 +11,6 @@ Install SkyPilot using pip:
 
 .. tab-set::
 
-    .. tab-item:: Nightly (recommended)
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.11.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          # Choose your cloud:
-
-          pip install "skypilot-nightly[aws]"
-          pip install "skypilot-nightly[gcp]"
-          pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[oci]"
-          pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
-          pip install "skypilot-nightly[fluidstack]"
-          pip install "skypilot-nightly[paperspace]"
-          pip install "skypilot-nightly[cudo]"
-          pip install "skypilot-nightly[ibm]"
-          pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[all]"
-
     .. tab-item:: Latest Release
         :sync: latest-release-tab
 
@@ -64,6 +37,35 @@ Install SkyPilot using pip:
           pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
           pip install "skypilot[all]"
+
+
+    .. tab-item:: Nightly
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.11.
+          conda create -y -n sky python=3.10
+          conda activate sky
+
+          # Choose your cloud:
+
+          pip install "skypilot-nightly[aws]"
+          pip install "skypilot-nightly[gcp]"
+          pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[runpod]"
+          pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[cudo]"
+          pip install "skypilot-nightly[ibm]"
+          pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[vsphere]"
+          pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[all]"
+
 
     .. tab-item:: From Source
         :sync: from-source-tab
@@ -99,19 +101,19 @@ To use more than one cloud, combine the pip extras:
 
 .. tab-set::
 
-    .. tab-item:: Nightly (recommended)
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot-nightly[aws,gcp]"
-
     .. tab-item:: Latest Release
         :sync: latest-release-tab
 
         .. code-block:: shell
 
           pip install -U "skypilot[aws,gcp]"
+
+    .. tab-item:: Nightly
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          pip install -U "skypilot-nightly[aws,gcp]"
 
     .. tab-item:: From Source
         :sync: from-source-tab
@@ -299,37 +301,37 @@ RunPod
 Fluidstack
 ~~~~~~~~~~~~~~~~~~
 
-`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://console.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` and the :code:`API token` to :code:`~/.fluidstack/api_token`:
-
+`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://dashboard.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` :
 .. code-block:: shell
 
   mkdir -p ~/.fluidstack
   echo "your_api_key_here" > ~/.fluidstack/api_key
-  echo "your_api_token_here" > ~/.fluidstack/api_token
+
 
 
 Cudo Compute
 ~~~~~~~~~~~~~~~~~~
 
-`Cudo Compute <https://www.cudocompute.com/>`__ GPU cloud provides low cost GPUs powered with green energy.
-1. Create a billing account by following `this guide <https://www.cudocompute.com/docs/guide/billing/>`__.
-2. Create a project `<https://www.cudocompute.com/docs/guide/projects/>`__.
-3. Create an API Key by following `this guide <https://www.cudocompute.com/docs/guide/api-keys/>`__.
-3. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
-3. Run :code:`cudoctl init`:
+`Cudo Compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
 
-.. code-block:: shell
+1. Create a `billing account <https://www.cudocompute.com/docs/guide/billing/>`__.
+2. Create a `project <https://www.cudocompute.com/docs/guide/projects/>`__.
+3. Create an `API Key <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+4. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+5. Run :code:`cudoctl init`:
 
-  cudoctl init
-    ✔ api key: my-api-key
-    ✔ project: my-project
-    ✔ billing account: my-billing-account
-    ✔ context: default
-    config file saved ~/.config/cudo/cudo.yml
+   .. code-block:: shell
 
-  pip install "cudo-compute>=0.1.10"
+     cudoctl init
+       ✔ api key: my-api-key
+       ✔ project: my-project
+       ✔ billing account: my-billing-account
+       ✔ context: default
+       config file saved ~/.config/cudo/cudo.yml
 
-If you want to want to use skypilot with a different Cudo Compute account or project, just run :code:`cudoctl init`: again.
+     pip install "cudo-compute>=0.1.10"
+
+If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
 
 
 
@@ -503,7 +505,7 @@ You can simply run:
     -v "$HOME/.sky:/root/.sky:rw" \
     -v "$HOME/.aws:/root/.aws:rw" \
     -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" \
-    berkeleyskypilot/skypilot-nightly
+    berkeleyskypilot/skypilot
 
   docker exec -it sky /bin/bash
 

@@ -11,9 +11,9 @@ docker:
   container_name: {{docker_container_name}}
   run_options:
     - --ulimit nofile=1048576:1048576
-    {%- if custom_resources is not none %}
-      --gpus all
-    {%- endif %}
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
   {%- if docker_login_config is not none %}
   docker_login_config:
     username: |-
@@ -72,8 +72,11 @@ available_node_types:
           Ebs:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}
-            {% if custom_disk_perf %}
+            Encrypted: {{disk_encrypted}}
+            {% if disk_iops %}
             Iops: {{disk_iops}}
+            {% endif %}
+            {% if disk_throughput %}
             Throughput: {{disk_throughput}}
             {% endif %}
       {% if use_spot %}
@@ -83,6 +86,12 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      CapacityReservationSpecification:
+        CapacityReservationPreference: open
+        {% if specific_reservations %}
+        CapacityReservationTarget:
+          CapacityReservationId: {{specific_reservations}}
+        {% endif %}
       # Use cloud init in UserData to set up the authorized_keys to get
       # around the number of keys limit and permission issues with
       # ec2.describe_key_pairs.
@@ -153,6 +162,9 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
     {{ conda_installation_commands }}
     conda config --remove channels "https://aws-ml-conda-ec2.s3.us-west-2.amazonaws.com" || true;
     {{ ray_skypilot_installation_commands }}

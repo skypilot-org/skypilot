@@ -13,18 +13,15 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
+from sky.provision.gcp import mig_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
-# Tag uniquely identifying all nodes of a cluster
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 # Tag for the name of the node
 INSTANCE_NAME_MAX_LEN = 64
 INSTANCE_NAME_UUID_LEN = 8
-TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
-TAG_RAY_NODE_KIND = 'ray-node-type'
 
 TPU_NODE_CREATION_FAILURE = 'Failed to provision TPU node.'
 
@@ -100,19 +97,20 @@ def _generate_node_name(cluster_name: str, node_suffix: str,
     return node_name
 
 
-def _log_errors(errors: List[Dict[str, str]], e: Any,
-                zone: Optional[str]) -> None:
-    """Format errors into a string."""
+def _format_and_log_message_from_errors(errors: List[Dict[str, str]], e: Any,
+                                        zone: Optional[str]) -> str:
+    """Format errors into a string and log it to the console."""
     if errors:
         plural = 's' if len(errors) > 1 else ''
         codes = ', '.join(repr(e.get('code', 'N/A')) for e in errors)
         messages = '; '.join(
             repr(e.get('message', 'N/A').strip('.')) for e in errors)
         zone_str = f' in {zone}' if zone else ''
-        logger.warning(f'Got return code{plural} {codes}'
-                       f'{zone_str}: {messages}')
+        msg = f'Got return code{plural} {codes}{zone_str}: {messages}'
     else:
-        logger.warning(f'create_instances: Failed with reason: {e}')
+        msg = f'create_instances: Failed with reason: {e}'
+    logger.warning(msg)
+    return msg
 
 
 def selflink_to_name(selflink: str) -> str:
@@ -133,6 +131,8 @@ def instance_to_handler(instance: str):
         return GCPComputeInstance
     elif instance_type == 'tpu':
         return GCPTPUVMInstance
+    elif instance.startswith(constants.MIG_NAME_PREFIX):
+        return GCPManagedInstanceGroup
     else:
         raise ValueError(f'Unknown instance type: {instance_type}')
 
@@ -176,8 +176,11 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> None:
+    def wait_for_operation(cls,
+                           operation: dict,
+                           project_id: str,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None) -> None:
         raise NotImplementedError
 
     @classmethod
@@ -239,6 +242,7 @@ class GCPInstance:
         node_config: dict,
         labels: dict,
         count: int,
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         """Creates multiple instances and returns result.
@@ -246,6 +250,21 @@ class GCPInstance:
         Returns a tuple of (errors, list[instance_names]).
         """
         raise NotImplementedError
+
+    @classmethod
+    def start_instances(cls, cluster_name: str, project_id: str, zone: str,
+                        instances: List[str], labels: Dict[str,
+                                                           str]) -> List[str]:
+        """Start multiple instances.
+
+        Returns:
+            List of instance names that are started.
+        """
+        del cluster_name  # Unused
+        for instance_id in instances:
+            cls.start_instance(instance_id, project_id, zone)
+            cls.set_labels(project_id, zone, instance_id, labels)
+        return instances
 
     @classmethod
     def start_instance(cls, node_id: str, project_id: str, zone: str) -> None:
@@ -264,15 +283,9 @@ class GCPInstance:
                         target_instance_id: str,
                         is_head: bool = True) -> str:
         if is_head:
-            node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '1',
-                TAG_RAY_NODE_KIND: 'head',
-            }
+            node_tag = provision_constants.HEAD_NODE_TAGS
         else:
-            node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '0',
-                TAG_RAY_NODE_KIND: 'worker',
-            }
+            node_tag = provision_constants.WORKER_NODE_TAGS
         cls.set_labels(project_id=project_id,
                        availability_zone=availability_zone,
                        node_id=target_instance_id,
@@ -400,11 +413,18 @@ class GCPComputeInstance(GCPInstance):
         return instances
 
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> None:
+    def wait_for_operation(cls,
+                           operation: dict,
+                           project_id: str,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None,
+                           timeout: int = GCP_TIMEOUT) -> None:
         if zone is not None:
             kwargs = {'zone': zone}
             operation_caller = cls.load_resource().zoneOperations()
+        elif region is not None:
+            kwargs = {'region': region}
+            operation_caller = cls.load_resource().regionOperations()
         else:
             kwargs = {}
             operation_caller = cls.load_resource().globalOperations()
@@ -423,13 +443,13 @@ class GCPComputeInstance(GCPInstance):
             return request.execute(num_retries=GCP_MAX_RETRIES)
 
         wait_start = time.time()
-        while time.time() - wait_start < GCP_TIMEOUT:
+        while time.time() - wait_start < timeout:
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
             # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
-            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
-            result = call_operation(operation_caller.wait, timeout)
+            remaining_timeout = max(timeout - (time.time() - wait_start), 1)
+            result = call_operation(operation_caller.wait, remaining_timeout)
             if result['status'] == 'DONE':
                 # NOTE: Error example:
                 # {
@@ -441,8 +461,10 @@ class GCPComputeInstance(GCPInstance):
                     logger.debug(
                         'wait_operations: Failed to create instances. Reason: '
                         f'{errors}')
-                    _log_errors(errors, result, zone)
+                    msg = _format_and_log_message_from_errors(
+                        errors, result, zone)
                     error = common.ProvisionerError('Operation failed')
+                    setattr(error, 'detailed_reason', msg)
                     error.errors = errors
                     raise error
                 return
@@ -451,9 +473,10 @@ class GCPComputeInstance(GCPInstance):
         else:
             logger.warning('wait_for_operation: Timeout waiting for creation '
                            'operation, cancelling the operation ...')
-            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
+            remaining_timeout = max(timeout - (time.time() - wait_start), 1)
             try:
-                result = call_operation(operation_caller.delete, timeout)
+                result = call_operation(operation_caller.delete,
+                                        remaining_timeout)
             except gcp.http_error_exception() as e:
                 logger.debug('wait_for_operation: failed to cancel operation '
                              f'due to error: {e}')
@@ -462,8 +485,10 @@ class GCPComputeInstance(GCPInstance):
                 'message': f'Timeout waiting for operation {operation["name"]}',
                 'domain': 'wait_for_operation'
             }]
-            _log_errors(errors, None, zone)
+            msg = _format_and_log_message_from_errors(errors, None, zone)
             error = common.ProvisionerError('Operation timed out')
+            # Used for usage collection only, to include in the usage message.
+            setattr(error, 'detailed_reason', msg)
             error.errors = errors
             raise error
 
@@ -606,7 +631,7 @@ class GCPComputeInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        cls.wait_for_operation(operation, project_id, availability_zone)
+        cls.wait_for_operation(operation, project_id, zone=availability_zone)
 
     @classmethod
     def create_instances(
@@ -617,6 +642,7 @@ class GCPComputeInstance(GCPInstance):
         node_config: dict,
         labels: dict,
         count: int,
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         # NOTE: The syntax for bulkInsert() is different from insert().
@@ -643,8 +669,8 @@ class GCPComputeInstance(GCPInstance):
         config.update({
             'labels': dict(
                 labels, **{
-                    TAG_RAY_CLUSTER_NAME: cluster_name,
-                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                    provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
 
@@ -740,6 +766,19 @@ class GCPComputeInstance(GCPInstance):
         return operations
 
     @classmethod
+    def _convert_selflinks_in_config(cls, config: dict) -> None:
+        """Convert selflinks to names in the config."""
+        for disk in config.get('disks', []):
+            disk_type = disk.get('initializeParams', {}).get('diskType')
+            if disk_type is not None:
+                disk['initializeParams']['diskType'] = selflink_to_name(
+                    disk_type)
+        config['machineType'] = selflink_to_name(config['machineType'])
+        for accelerator in config.get('guestAccelerators', []):
+            accelerator['acceleratorType'] = selflink_to_name(
+                accelerator['acceleratorType'])
+
+    @classmethod
     def _bulk_insert(cls, names: List[str], project_id: str, zone: str,
                      config: dict) -> List[dict]:
         source_instance_template = config.pop('sourceInstanceTemplate', None)
@@ -752,15 +791,7 @@ class GCPComputeInstance(GCPInstance):
                 k: v for d in config['scheduling'] for k, v in d.items()
             }
 
-        for disk in config.get('disks', []):
-            disk_type = disk.get('initializeParams', {}).get('diskType')
-            if disk_type is not None:
-                disk['initializeParams']['diskType'] = selflink_to_name(
-                    disk_type)
-        config['machineType'] = selflink_to_name(config['machineType'])
-        for accelerator in config.get('guestAccelerators', []):
-            accelerator['acceleratorType'] = selflink_to_name(
-                accelerator['acceleratorType'])
+        cls._convert_selflinks_in_config(config)
 
         body = {
             'count': len(names),
@@ -819,7 +850,7 @@ class GCPComputeInstance(GCPInstance):
                 })
             logger.debug(
                 f'create_instances: googleapiclient.errors.HttpError: {e}')
-            _log_errors(errors, e, zone)
+            _format_and_log_message_from_errors(errors, e, zone)
             return errors
 
         # Allow Google Compute Engine instance templates.
@@ -849,13 +880,13 @@ class GCPComputeInstance(GCPInstance):
             if errors:
                 logger.debug('create_instances: Failed to create instances. '
                              f'Reason: {errors}')
-                _log_errors(errors, operations, zone)
+                _format_and_log_message_from_errors(errors, operations, zone)
                 return errors
 
         logger.debug('Waiting GCP instances to be ready ...')
         try:
             for operation in operations:
-                cls.wait_for_operation(operation, project_id, zone)
+                cls.wait_for_operation(operation, project_id, zone=zone)
         except common.ProvisionerError as e:
             return e.errors
         except gcp.http_error_exception() as e:
@@ -876,7 +907,7 @@ class GCPComputeInstance(GCPInstance):
             instance=node_id,
         ).execute())
 
-        cls.wait_for_operation(operation, project_id, zone)
+        cls.wait_for_operation(operation, project_id, zone=zone)
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
@@ -935,7 +966,220 @@ class GCPComputeInstance(GCPInstance):
             logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
             return
 
-        cls.wait_for_operation(operation, project_id, availability_zone)
+        cls.wait_for_operation(operation, project_id, zone=availability_zone)
+
+
+class GCPManagedInstanceGroup(GCPComputeInstance):
+    """Handler for GCP Managed Instance Group."""
+
+    @classmethod
+    def create_instances(
+        cls,
+        cluster_name: str,
+        project_id: str,
+        zone: str,
+        node_config: dict,
+        labels: dict,
+        count: int,
+        total_count: int,
+        include_head_node: bool,
+    ) -> Tuple[Optional[List], List[str]]:
+        logger.debug(f'Creating cluster with MIG: {cluster_name!r}')
+        config = copy.deepcopy(node_config)
+        labels = dict(config.get('labels', {}), **labels)
+
+        config.update({
+            'labels': dict(
+                labels,
+                **{
+                    provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    # Assume all nodes are workers, we can update the head node
+                    # once the instances are created.
+                    **provision_constants.WORKER_NODE_TAGS,
+                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
+                }),
+        })
+        cls._convert_selflinks_in_config(config)
+
+        # Convert label values to string and lowercase per MIG API requirement.
+        region = zone.rpartition('-')[0]
+        instance_template_name = mig_utils.get_instance_template_name(
+            cluster_name)
+        managed_instance_group_name = mig_utils.get_managed_instance_group_name(
+            cluster_name)
+
+        instance_template_exists = mig_utils.check_instance_template_exits(
+            project_id, region, instance_template_name)
+        mig_exists = mig_utils.check_managed_instance_group_exists(
+            project_id, zone, managed_instance_group_name)
+
+        label_filters = {
+            provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+        }
+        potential_head_instances = []
+        if mig_exists:
+            instances = cls.filter(
+                project_id,
+                zone,
+                label_filters={
+                    provision_constants.TAG_RAY_NODE_KIND: 'head',
+                    **label_filters,
+                },
+                status_filters=cls.NEED_TO_TERMINATE_STATES)
+            potential_head_instances = list(instances.keys())
+
+        config['labels'] = {
+            k: str(v).lower() for k, v in config['labels'].items()
+        }
+        if instance_template_exists:
+            if mig_exists:
+                logger.debug(
+                    f'Instance template {instance_template_name} already '
+                    'exists. Skip creating it.')
+            else:
+                logger.debug(
+                    f'Instance template {instance_template_name!r} '
+                    'exists and no instance group is using it. This is a '
+                    'leftover of a previous autodown. Delete it and recreate '
+                    'it.')
+                # TODO(zhwu): this is a bit hacky as we cannot delete instance
+                # template during an autodown, we can only defer the deletion
+                # to the next launch of a cluster with the same name. We should
+                # find a better way to handle this.
+                cls._delete_instance_template(project_id, zone,
+                                              instance_template_name)
+                instance_template_exists = False
+
+        if not instance_template_exists:
+            operation = mig_utils.create_region_instance_template(
+                cluster_name, project_id, region, instance_template_name,
+                config)
+            cls.wait_for_operation(operation, project_id, region=region)
+        # create managed instance group
+        instance_template_url = (f'projects/{project_id}/regions/{region}/'
+                                 f'instanceTemplates/{instance_template_name}')
+        if not mig_exists:
+            # Create a new MIG with size 0 and resize it later for triggering
+            # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # pylint: disable=line-too-long
+            operation = mig_utils.create_managed_instance_group(
+                project_id,
+                zone,
+                managed_instance_group_name,
+                instance_template_url,
+                size=0)
+            cls.wait_for_operation(operation, project_id, zone=zone)
+
+        managed_instance_group_config = config[
+            constants.MANAGED_INSTANCE_GROUP_CONFIG]
+        if count > 0:
+            # Use resize to trigger DWS for creating VMs.
+            operation = mig_utils.resize_managed_instance_group(
+                project_id,
+                zone,
+                managed_instance_group_name,
+                count,
+                run_duration=managed_instance_group_config['run_duration'])
+            cls.wait_for_operation(operation, project_id, zone=zone)
+
+        # This will block the provisioning until the nodes are ready, which
+        # makes the failover not effective. We rely on the request timeout set
+        # by user to trigger failover.
+        mig_utils.wait_for_managed_group_to_be_stable(
+            project_id,
+            zone,
+            managed_instance_group_name,
+            timeout=managed_instance_group_config.get(
+                'provision_timeout',
+                constants.DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT))
+
+        pending_running_instance_names = cls._add_labels_and_find_head(
+            cluster_name, project_id, zone, labels, potential_head_instances)
+        assert len(pending_running_instance_names) == total_count, (
+            pending_running_instance_names, total_count)
+        cls.create_node_tag(
+            project_id,
+            zone,
+            pending_running_instance_names[0],
+            is_head=True,
+        )
+        return None, pending_running_instance_names
+
+    @classmethod
+    def _delete_instance_template(cls, project_id: str, zone: str,
+                                  instance_template_name: str) -> None:
+        logger.debug(f'Deleting instance template {instance_template_name}...')
+        region = zone.rpartition('-')[0]
+        try:
+            operation = cls.load_resource().regionInstanceTemplates().delete(
+                project=project_id,
+                region=region,
+                instanceTemplate=instance_template_name).execute()
+            cls.wait_for_operation(operation, project_id, region=region)
+        except gcp.http_error_exception() as e:
+            if re.search(mig_utils.IT_RESOURCE_NOT_FOUND_PATTERN,
+                         str(e)) is None:
+                raise
+            logger.warning(
+                f'Instance template {instance_template_name!r} does not exist. '
+                'Skip deletion.')
+
+    @classmethod
+    def delete_mig(cls, project_id: str, zone: str, cluster_name: str) -> None:
+        mig_name = mig_utils.get_managed_instance_group_name(cluster_name)
+        # Get all resize request of the MIG and cancel them.
+        mig_utils.cancel_all_resize_request_for_mig(project_id, zone, mig_name)
+        logger.debug(f'Deleting MIG {mig_name!r} ...')
+        try:
+            operation = cls.load_resource().instanceGroupManagers().delete(
+                project=project_id, zone=zone,
+                instanceGroupManager=mig_name).execute()
+            cls.wait_for_operation(operation, project_id, zone=zone)
+        except gcp.http_error_exception() as e:
+            if re.search(mig_utils.MIG_RESOURCE_NOT_FOUND_PATTERN,
+                         str(e)) is None:
+                raise
+            logger.warning(f'MIG {mig_name!r} does not exist. Skip '
+                           'deletion.')
+
+        # In the autostop case, the following deletion of instance template
+        # will not be executed as the instance that runs the deletion will be
+        # terminated with the managed instance group. It is ok to leave the
+        # instance template there as when a user creates a new cluster with the
+        # same name, the instance template will be updated in our
+        # create_instances method.
+        cls._delete_instance_template(
+            project_id, zone,
+            mig_utils.get_instance_template_name(cluster_name))
+
+    @classmethod
+    def _add_labels_and_find_head(
+            cls, cluster_name: str, project_id: str, zone: str,
+            labels: Dict[str, str],
+            potential_head_instances: List[str]) -> List[str]:
+        pending_running_instances = cls.filter(
+            project_id,
+            zone,
+            {provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name},
+            # Find all provisioning and running instances.
+            status_filters=cls.NEED_TO_STOP_STATES)
+        for running_instance_name in pending_running_instances.keys():
+            if running_instance_name in potential_head_instances:
+                head_instance_name = running_instance_name
+                break
+        else:
+            head_instance_name = list(pending_running_instances.keys())[0]
+        # We need to update the node's label if mig already exists, as the
+        # config is not updated during the resize operation.
+        for instance_name in pending_running_instances.keys():
+            cls.set_labels(project_id=project_id,
+                           availability_zone=zone,
+                           node_id=instance_name,
+                           labels=labels)
+
+        pending_running_instance_names = list(pending_running_instances.keys())
+        pending_running_instance_names.remove(head_instance_name)
+        # Label for head node type will be set by caller
+        return [head_instance_name] + pending_running_instance_names
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -959,10 +1203,13 @@ class GCPTPUVMInstance(GCPInstance):
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
 
     @classmethod
-    def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: Optional[str]) -> None:
+    def wait_for_operation(cls,
+                           operation: dict,
+                           project_id: str,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None) -> None:
         """Poll for TPU operation until finished."""
-        del project_id, zone  # unused
+        del project_id, region, zone  # unused
 
         @_retry_on_http_exception(
             f'Failed to wait for operation {operation["name"]}')
@@ -1176,6 +1423,7 @@ class GCPTPUVMInstance(GCPInstance):
         node_config: dict,
         labels: dict,
         count: int,
+        total_count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
         config = copy.deepcopy(node_config)
@@ -1198,8 +1446,8 @@ class GCPTPUVMInstance(GCPInstance):
         config.update({
             'labels': dict(
                 labels, **{
-                    TAG_RAY_CLUSTER_NAME: cluster_name,
-                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                    provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+                    provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
 
@@ -1225,11 +1473,10 @@ class GCPTPUVMInstance(GCPInstance):
         for i, name in enumerate(names):
             node_config = config.copy()
             if i == 0:
-                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '1'
-                node_config['labels'][TAG_RAY_NODE_KIND] = 'head'
+                node_config['labels'].update(provision_constants.HEAD_NODE_TAGS)
             else:
-                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '0'
-                node_config['labels'][TAG_RAY_NODE_KIND] = 'worker'
+                node_config['labels'].update(
+                    provision_constants.WORKER_NODE_TAGS)
             try:
                 logger.debug('Launching GCP TPU VM ...')
                 request = (
@@ -1257,7 +1504,7 @@ class GCPTPUVMInstance(GCPInstance):
                         'domain': 'create_instances',
                         'message': error_details,
                     })
-                    _log_errors(errors, e, zone)
+                    _format_and_log_message_from_errors(errors, e, zone)
                     return errors, names
                 for detail in error_details:
                     # To be consistent with error messages returned by operation
@@ -1276,7 +1523,7 @@ class GCPTPUVMInstance(GCPInstance):
                                 'domain': violation.get('subject'),
                                 'message': violation.get('description'),
                             })
-                _log_errors(errors, e, zone)
+                _format_and_log_message_from_errors(errors, e, zone)
                 return errors, names
         errors = []
         for operation in operations:
@@ -1294,7 +1541,7 @@ class GCPTPUVMInstance(GCPInstance):
         if errors:
             logger.debug('create_instances: Failed to create instances. '
                          f'Reason: {errors}')
-            _log_errors(errors, operations, zone)
+            _format_and_log_message_from_errors(errors, operations, zone)
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
@@ -1336,7 +1583,7 @@ class GCPTPUVMInstance(GCPInstance):
                 'message': 'Timeout waiting for creation operation',
                 'domain': 'create_instances'
             }]
-            _log_errors(errors, None, zone)
+            _format_and_log_message_from_errors(errors, None, zone)
             return errors, names
 
         # NOTE: Error example:
@@ -1353,7 +1600,7 @@ class GCPTPUVMInstance(GCPInstance):
             logger.debug(
                 'create_instances: Failed to create instances. Reason: '
                 f'{errors}')
-            _log_errors(errors, results, zone)
+            _format_and_log_message_from_errors(errors, results, zone)
             return errors, names
         assert all(success), (
             'Failed to create instances, but there is no error. '
@@ -1406,10 +1653,11 @@ class GCPNodeType(enum.Enum):
     """Enum for GCP node types (compute & tpu)"""
 
     COMPUTE = 'compute'
+    MIG = 'mig'
     TPU = 'tpu'
 
 
-def get_node_type(node: dict) -> GCPNodeType:
+def get_node_type(config: Dict[str, Any]) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
 
     This is a very simple check. If we have a ``machineType`` key,
@@ -1419,17 +1667,22 @@ def get_node_type(node: dict) -> GCPNodeType:
 
     This works for both node configs and API returned nodes.
     """
-
-    if 'machineType' not in node and 'acceleratorType' not in node:
+    if ('machineType' not in config and 'acceleratorType' not in config):
         raise ValueError(
             'Invalid node. For a Compute instance, "machineType" is '
             'required. '
             'For a TPU instance, "acceleratorType" and no "machineType" '
             'is required. '
-            f'Got {list(node)}')
+            f'Got {list(config)}')
 
-    if 'machineType' not in node and 'acceleratorType' in node:
+    if 'machineType' not in config and 'acceleratorType' in config:
         return GCPNodeType.TPU
+
+    if (config.get(constants.MANAGED_INSTANCE_GROUP_CONFIG, None) is not None
+            and config.get('guestAccelerators', None) is not None):
+        # DWS in MIG only works for machine with GPUs.
+        return GCPNodeType.MIG
+
     return GCPNodeType.COMPUTE
 
 
@@ -1475,7 +1728,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                            'https://console.cloud.google.com/iam-admin/quotas '
                            'for more information.'
             }]
-            _log_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'PERMISSION_DENIED' in stderr:
@@ -1484,7 +1737,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                 'domain': 'tpu',
                 'message': 'TPUs are not available in this zone.'
             }]
-            _log_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'no more capacity in the zone' in stderr:
@@ -1493,7 +1746,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                 'domain': 'tpu',
                 'message': 'No more capacity in this zone.'
             }]
-            _log_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -1506,7 +1759,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                 'message': (f'TPU type {tpu_type} is not available in this '
                             f'zone {zone}.')
             }]
-            _log_errors(provisioner_err.errors, e, zone)
+            _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         # TODO(zhwu): Add more error code handling, if needed.
@@ -1515,7 +1768,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             'domain': 'tpu',
             'message': stderr
         }]
-        _log_errors(provisioner_err.errors, e, zone)
+        _format_and_log_message_from_errors(provisioner_err.errors, e, zone)
         raise provisioner_err from e
 
 

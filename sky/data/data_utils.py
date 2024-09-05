@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import textwrap
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -15,14 +16,23 @@ from filelock import FileLock
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 Client = Any
 
 logger = sky_logging.init_logger(__name__)
+
+AZURE_CONTAINER_URL = (
+    'https://{storage_account_name}.blob.core.windows.net/{container_name}')
+
+# Retry 5 times by default for delayed propagation to Azure system
+# when creating Storage Account.
+_STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT = 5
 
 
 def split_s3_path(s3_path: str) -> Tuple[str, str]:
@@ -47,6 +57,28 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def split_az_path(az_path: str) -> Tuple[str, str, str]:
+    """Splits Path into Storage account and Container names and Relative Path
+
+    Args:
+        az_path: Container Path,
+          e.g. https://azureopendatastorage.blob.core.windows.net/nyctlc
+
+    Returns:
+        str: Name of the storage account
+        str: Name of the container
+        str: Paths of the file/directory defined within the container
+    """
+    path_parts = az_path.replace('https://', '').split('/')
+    service_endpoint = path_parts.pop(0)
+    service_endpoint_parts = service_endpoint.split('.')
+    storage_account_name = service_endpoint_parts[0]
+    container_name = path_parts.pop(0)
+    path = '/'.join(path_parts)
+
+    return storage_account_name, container_name, path
 
 
 def split_r2_path(r2_path: str) -> Tuple[str, str]:
@@ -124,6 +156,145 @@ def verify_gcs_bucket(name: str) -> bool:
         return True
     except gcp.not_found_exception():
         return False
+
+
+def create_az_client(client_type: str, **kwargs: Any) -> Client:
+    """Helper method that connects to AZ client for diverse Resources.
+
+    Args:
+      client_type: str; specify client type, e.g. storage, resource, container
+
+    Returns:
+        Client object facing AZ Resource of the 'client_type'.
+    """
+    resource_group_name = kwargs.pop('resource_group_name', None)
+    container_url = kwargs.pop('container_url', None)
+    storage_account_name = kwargs.pop('storage_account_name', None)
+    refresh_client = kwargs.pop('refresh_client', False)
+    if client_type == 'container':
+        # We do not assert on resource_group_name as it is set to None when the
+        # container_url is for public container with user access.
+        assert container_url is not None, ('container_url must be provided for '
+                                           'container client')
+        assert storage_account_name is not None, ('storage_account_name must '
+                                                  'be provided for container '
+                                                  'client')
+
+    if refresh_client:
+        azure.get_client.cache_clear()
+
+    subscription_id = azure.get_subscription_id()
+    client = azure.get_client(client_type,
+                              subscription_id,
+                              container_url=container_url,
+                              storage_account_name=storage_account_name,
+                              resource_group_name=resource_group_name)
+    return client
+
+
+def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
+    """Helper method that checks if the AZ Container exists
+
+    Args:
+      storage_account_name: str; Name of the storage account
+      container_name: str; Name of the container
+
+    Returns:
+      True if the container exists, False otherwise.
+    """
+    container_url = AZURE_CONTAINER_URL.format(
+        storage_account_name=storage_account_name,
+        container_name=container_name)
+    resource_group_name = azure.get_az_resource_group(storage_account_name)
+    container_client = create_az_client(
+        client_type='container',
+        container_url=container_url,
+        storage_account_name=storage_account_name,
+        resource_group_name=resource_group_name)
+    return container_client.exists()
+
+
+def get_az_storage_account_key(
+    storage_account_name: str,
+    resource_group_name: Optional[str] = None,
+    storage_client: Optional[Client] = None,
+    resource_client: Optional[Client] = None,
+) -> Optional[str]:
+    """Returns access key of the given name of storage account.
+
+    Args:
+        storage_account_name: Name of the storage account
+        resource_group_name: Name of the resource group the
+            passed storage account belongs to.
+        storage_clent: Client object facing Storage
+        resource_client: Client object facing Resource
+
+    Returns:
+        One of the two access keys to the given storage account, or None if
+        the account is not found.
+    """
+    if resource_client is None:
+        resource_client = create_az_client('resource')
+    if storage_client is None:
+        storage_client = create_az_client('storage')
+    if resource_group_name is None:
+        resource_group_name = azure.get_az_resource_group(
+            storage_account_name, storage_client)
+    # resource_group_name is None when using a public container or
+    # a private container not belonging to the user.
+    if resource_group_name is None:
+        return None
+
+    attempt = 0
+    backoff = common_utils.Backoff()
+    while True:
+        storage_account_keys = None
+        resources = resource_client.resources.list_by_resource_group(
+            resource_group_name)
+        # resource group is either created or read when Storage initializes.
+        assert resources is not None
+        for resource in resources:
+            if (resource.type == 'Microsoft.Storage/storageAccounts' and
+                    resource.name == storage_account_name):
+                assert storage_account_keys is None
+                keys = storage_client.storage_accounts.list_keys(
+                    resource_group_name, storage_account_name)
+                storage_account_keys = [key.value for key in keys.keys]
+        # If storage account was created right before call to this method,
+        # it is possible to fail to retrieve the key as the creation did not
+        # propagate to Azure yet. We retry several times.
+        if storage_account_keys is None:
+            attempt += 1
+            time.sleep(backoff.current_backoff())
+            if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
+                raise RuntimeError('Failed to obtain key value of storage '
+                                   f'account {storage_account_name!r}. '
+                                   'Check if the storage account was created.')
+            continue
+        # Azure provides two sets of working storage account keys and we use
+        # one of it.
+        storage_account_key = storage_account_keys[0]
+        return storage_account_key
+
+
+def is_az_container_endpoint(endpoint_url: str) -> bool:
+    """Checks if provided url follows a valid container endpoint naming format.
+
+    Args:
+      endpoint_url: Url of container endpoint.
+        e.g. https://azureopendatastorage.blob.core.windows.net/nyctlc
+
+    Returns:
+      bool: True if the endpoint is valid, False otherwise.
+    """
+    # Storage account must be length of 3-24
+    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
+    pattern = re.compile(
+        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
+    match = pattern.match(endpoint_url)
+    if match is None:
+        return False
+    return True
 
 
 def create_r2_client(region: str = 'auto') -> Client:

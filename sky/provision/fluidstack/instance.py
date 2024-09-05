@@ -26,8 +26,8 @@ logger = sky_logging.init_logger(__name__)
 def get_internal_ip(node_info: Dict[str, Any]) -> None:
     node_info['internal_ip'] = node_info['ip_address']
     runner = command_runner.SSHCommandRunner(
-        node_info['ip_address'],
-        ssh_user=node_info['capabilities']['default_user_name'],
+        (node_info['ip_address'], 22),
+        ssh_user='ubuntu',
         ssh_private_key=auth.PRIVATE_SSH_KEY_PATH)
     result = runner.run(_GET_INTERNAL_IP_CMD,
                         require_outputs=True,
@@ -61,7 +61,7 @@ def _filter_instances(
         if (include_instances is not None and
                 instance['id'] not in include_instances):
             continue
-        if instance.get('hostname') in possible_names:
+        if instance.get('name') in possible_names:
             filtered_instances[instance['id']] = instance
     return filtered_instances
 
@@ -69,7 +69,7 @@ def _filter_instances(
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     head_instance_id = None
     for inst_id, inst in instances.items():
-        if inst['hostname'].endswith('-head'):
+        if inst['name'].endswith('-head'):
             head_instance_id = inst_id
             break
     return head_instance_id
@@ -80,16 +80,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
 
     pending_status = [
-        'create',
-        'requesting',
-        'provisioning',
-        'customizing',
-        'starting',
-        'stopping',
-        'start',
-        'stop',
-        'reboot',
-        'rebooting',
+        'pending',
     ]
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -127,7 +118,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                         f'{instance_name}')
             rename(instance_id, instance_name)
         if (instance_id != head_instance_id and
-                instance['hostname'].endswith('-head')):
+                instance['name'].endswith('-head')):
             # Multiple head instances exist.
             # This is a rare case when the instance name was manually modified
             # on the cloud or some unexpected behavior happened.
@@ -167,7 +158,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
             instance_ids = utils.FluidstackClient().create_instance(
-                hostname=f'{cluster_name_on_cloud}-{node_type}',
+                name=f'{cluster_name_on_cloud}-{node_type}',
                 instance_type=config.node_config['InstanceType'],
                 ssh_pub_key=config.node_config['AuthorizedKey'],
                 region=region)
@@ -184,9 +175,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instances = _filter_instances(cluster_name_on_cloud,
                                       pending_status + ['running'])
         if len(instances) < config.count:
-            # Some of pending instances have been convert to a state that will
-            # not convert to `running` status. This can be due to resource
-            # availability issue.
             all_instances = _filter_instances(
                 cluster_name_on_cloud,
                 status_filters=None,
@@ -253,15 +241,11 @@ def terminate_instances(
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
-        if worker_only and inst['hostname'].endswith('-head'):
+        if worker_only and inst['name'].endswith('-head'):
             continue
         try:
             utils.FluidstackClient().delete(inst_id)
         except Exception as e:  # pylint: disable=broad-except
-            if (isinstance(e, utils.FluidstackAPIError) and
-                    'Machine is already terminated' in str(e)):
-                logger.debug(f'Instance {inst_id} is already terminated.')
-                continue
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
@@ -291,7 +275,7 @@ def get_cluster_info(
                 tags={},
             )
         ]
-        if instance_info['hostname'].endswith('-head'):
+        if instance_info['name'].endswith('-head'):
             head_instance_id = instance_id
 
     return common.ClusterInfo(instances=instances,
@@ -311,22 +295,10 @@ def query_instances(
     instances = _filter_instances(cluster_name_on_cloud, None)
     instances = _filter_instances(cluster_name_on_cloud, None)
     status_map = {
-        'provisioning': status_lib.ClusterStatus.INIT,
-        'requesting': status_lib.ClusterStatus.INIT,
-        'create': status_lib.ClusterStatus.INIT,
-        'customizing': status_lib.ClusterStatus.INIT,
-        'stopping': status_lib.ClusterStatus.STOPPED,
-        'stop': status_lib.ClusterStatus.STOPPED,
-        'start': status_lib.ClusterStatus.INIT,
-        'reboot': status_lib.ClusterStatus.STOPPED,
-        'rebooting': status_lib.ClusterStatus.STOPPED,
+        'pending': status_lib.ClusterStatus.INIT,
         'stopped': status_lib.ClusterStatus.STOPPED,
-        'starting': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
-        'failed to create': status_lib.ClusterStatus.INIT,
-        'timeout error': status_lib.ClusterStatus.INIT,
-        'out of stock': status_lib.ClusterStatus.INIT,
-        'terminating': None,
+        'unhealthy': status_lib.ClusterStatus.INIT,
         'terminated': None,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}

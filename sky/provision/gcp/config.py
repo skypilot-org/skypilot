@@ -672,7 +672,8 @@ def _configure_subnet(region: str, cluster_name: str,
             'type': 'ONE_TO_ONE_NAT',
         }],
     }]
-    if config.provider_config.get('use_internal_ips', False):
+    enable_external_ips = _enable_external_ips(config)
+    if not enable_external_ips:
         # Removing this key means the VM will not be assigned an external IP.
         default_interfaces[0].pop('accessConfigs')
 
@@ -686,12 +687,17 @@ def _configure_subnet(region: str, cluster_name: str,
         node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
         # TPU doesn't have accessConfigs
         node_config['networkConfig'].pop('accessConfigs', None)
-        if config.provider_config.get('use_internal_ips', False):
-            node_config['networkConfig']['enableExternalIps'] = False
-        else:
-            node_config['networkConfig']['enableExternalIps'] = True
+        node_config['networkConfig']['enableExternalIps'] = enable_external_ips
 
     return config
+
+
+def _enable_external_ips(config: common.ProvisionConfig) -> bool:
+    force_enable_external_ips = config.provider_config.get(
+        'force_enable_external_ips', False)
+    use_internal_ips = config.provider_config.get('use_internal_ips', False)
+
+    return force_enable_external_ips or not use_internal_ips
 
 
 def _delete_firewall_rule(project_id: str, compute, name):

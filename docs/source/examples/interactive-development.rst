@@ -1,3 +1,5 @@
+.. _dev-cluster:
+
 Start a Development Cluster
 ===========================
 
@@ -90,7 +92,7 @@ SSH
 SkyPilot will automatically configure the SSH setting for a cluster, so that users can connect to the cluster with the cluster name:
 
 .. code-block:: bash
-  
+
   ssh dev
 
 
@@ -99,7 +101,7 @@ SkyPilot will automatically configure the SSH setting for a cluster, so that use
 VSCode
 ~~~~~~
 
-A common use case for interactive development is to connect a local IDE to a remote cluster and directly edit code that lives on the cluster. 
+A common use case for interactive development is to connect a local IDE to a remote cluster and directly edit code that lives on the cluster.
 This is supported by simply connecting VSCode to the cluster with the cluster name:
 
 #. Click on the top bar, type: :code:`> remote-ssh`, and select :code:`Remote-SSH: Connect Current Window to Host...`
@@ -108,7 +110,7 @@ This is supported by simply connecting VSCode to the cluster with the cluster na
 
 For more details, please refer to the `VSCode documentation <https://code.visualstudio.com/docs/remote/ssh-tutorial>`__.
 
-.. image:: https://imgur.com/8mKfsET.gif
+.. image:: https://i.imgur.com/8mKfsET.gif
   :align: center
   :alt: Connect to the cluster with VSCode
 

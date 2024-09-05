@@ -15,7 +15,9 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
+from sky.clouds.utils import aws_utils
 from sky.provision import common
+from sky.provision import constants
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
@@ -25,11 +27,6 @@ logger = sky_logging.init_logger(__name__)
 
 _T = TypeVar('_T')
 
-# Tag uniquely identifying all nodes of a cluster
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
-TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Max retries for general AWS API calls.
 BOTO_MAX_RETRIES = 12
 # Max retries for creating an instance.
@@ -103,7 +100,7 @@ def _default_ec2_resource(region: str) -> Any:
 
 def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     return [{
-        'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+        'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
     }]
 
@@ -181,8 +178,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
                       count: int, associate_public_ip_address: bool) -> List:
     tags = {
         'Name': cluster_name,
-        TAG_RAY_CLUSTER_NAME: cluster_name,
-        TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
+        constants.TAG_RAY_CLUSTER_NAME: cluster_name,
+        constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
         **tags
     }
     conf = node_config.copy()
@@ -211,6 +208,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
     # Guaranteed by config.py (the bootstrapping phase):
     assert 'NetworkInterfaces' not in conf, conf
     assert security_group_ids is not None, conf
+
+    logger.debug(f'Creating {count} instances with config: \n{conf}')
 
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
@@ -250,10 +249,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
-    head_node_markers = (
-        (TAG_SKYPILOT_HEAD_NODE, '1'),
-        (TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
-    )
+    head_node_markers = tuple(constants.HEAD_NODE_TAGS.items())
+
     for inst in instances:
         for t in inst.tags:
             if (t['Key'], t['Value']) in head_node_markers:
@@ -288,7 +285,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         'Name': 'instance-state-name',
         'Values': ['pending', 'running', 'stopping', 'stopped'],
     }, {
-        'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+        'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
     }]
     exist_instances = list(ec2.instances.filter(Filters=filters))
@@ -314,31 +311,27 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             raise RuntimeError(f'Impossible state "{state}".')
 
     def _create_node_tag(target_instance, is_head: bool = True) -> str:
+        node_type_tags = (constants.HEAD_NODE_TAGS
+                          if is_head else constants.WORKER_NODE_TAGS)
+        node_tag = [{'Key': k, 'Value': v} for k, v in node_type_tags.items()]
         if is_head:
-            node_tag = [{
-                'Key': TAG_SKYPILOT_HEAD_NODE,
-                'Value': '1'
-            }, {
-                'Key': TAG_RAY_NODE_KIND,
-                'Value': 'head'
-            }, {
+            node_tag.append({
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-head'
-            }]
+            })
         else:
-            node_tag = [{
-                'Key': TAG_SKYPILOT_HEAD_NODE,
-                'Value': '0'
-            }, {
-                'Key': TAG_RAY_NODE_KIND,
-                'Value': 'worker'
-            }, {
+            node_tag.append({
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-worker'
-            }]
+            })
+        # Remove AWS internal tags, as they are not allowed to be set by users.
+        target_instance_tags = [
+            tag for tag in target_instance.tags
+            if not tag['Key'].startswith('aws:')
+        ]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
-            Tags=target_instance.tags + node_tag,
+            Tags=target_instance_tags + node_tag,
         )
         return target_instance.id
 
@@ -444,19 +437,87 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = _create_node_tag(resumed_instances[0])
 
     if to_start_count > 0:
+        target_reservation_names = (config.node_config.get(
+            'CapacityReservationSpecification',
+            {}).get('CapacityReservationTarget',
+                    {}).get('CapacityReservationId', []))
+        created_instances = []
+        if target_reservation_names:
+            node_config = copy.deepcopy(config.node_config)
+            # Clear the capacity reservation specification settings in the
+            # original node config, as we will create instances with
+            # reservations with specific settings for each reservation.
+            node_config['CapacityReservationSpecification'] = {
+                'CapacityReservationTarget': {}
+            }
+
+            reservations = aws_utils.list_reservations_for_instance_type(
+                node_config['InstanceType'], region=region)
+            # Filter the reservations by the user-specified ones, because
+            # reservations contain 'open' reservations as well, which do not
+            # need to explicitly specify in the config for creating instances.
+            target_reservations = []
+            for r in reservations:
+                if (r.targeted and r.name in target_reservation_names):
+                    target_reservations.append(r)
+            logger.debug(f'Reservations: {reservations}')
+            logger.debug(f'Target reservations: {target_reservations}')
+
+            target_reservations_list = sorted(
+                target_reservations,
+                key=lambda x: x.available_resources,
+                reverse=True)
+            for r in target_reservations_list:
+                if r.available_resources <= 0:
+                    # We have sorted the reservations by the available
+                    # resources, so if the reservation is not available, the
+                    # following reservations are not available either.
+                    break
+                reservation_count = min(r.available_resources, to_start_count)
+                logger.debug(f'Creating {reservation_count} instances '
+                             f'with reservation {r.name}')
+                node_config['CapacityReservationSpecification'][
+                    'CapacityReservationTarget'] = {
+                        'CapacityReservationId': r.name
+                    }
+                if r.type == aws_utils.ReservationType.BLOCK:
+                    # Capacity block reservations needs to specify the market
+                    # type during instance creation.
+                    node_config['InstanceMarketOptions'] = {
+                        'MarketType': aws_utils.ReservationType.BLOCK.value
+                    }
+                created_reserved_instances = _create_instances(
+                    ec2_fail_fast,
+                    cluster_name_on_cloud,
+                    node_config,
+                    tags,
+                    reservation_count,
+                    associate_public_ip_address=(
+                        not config.provider_config['use_internal_ips']))
+                created_instances.extend(created_reserved_instances)
+                to_start_count -= reservation_count
+                if to_start_count <= 0:
+                    break
+
         # TODO(suquark): If there are existing instances (already running or
         #  resumed), then we cannot guarantee that they will be in the same
         #  availability zone (when there are multiple zones specified).
         #  This is a known issue before.
 
-        created_instances = _create_instances(
-            ec2_fail_fast,
-            cluster_name_on_cloud,
-            config.node_config,
-            tags,
-            to_start_count,
-            associate_public_ip_address=(
-                not config.provider_config['use_internal_ips']))
+        if to_start_count > 0:
+            # Remove the capacity reservation specification from the node config
+            # as we have already created the instances with the reservations.
+            config.node_config.get('CapacityReservationSpecification',
+                                   {}).pop('CapacityReservationTarget', None)
+            created_remaining_instances = _create_instances(
+                ec2_fail_fast,
+                cluster_name_on_cloud,
+                config.node_config,
+                tags,
+                to_start_count,
+                associate_public_ip_address=(
+                    not config.provider_config['use_internal_ips']))
+            created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
         created_instance_ids = [n.id for n in created_instances]
@@ -563,7 +624,7 @@ def stop_instances(
     ]
     if worker_only:
         filters.append({
-            'Name': f'tag:{TAG_RAY_NODE_KIND}',
+            'Name': f'tag:{constants.TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
     instances = _filter_instances(ec2,
@@ -601,7 +662,7 @@ def terminate_instances(
     ]
     if worker_only:
         filters.append({
-            'Name': f'tag:{TAG_RAY_NODE_KIND}',
+            'Name': f'tag:{constants.TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
@@ -717,16 +778,31 @@ def open_ports(
 
     existing_ports: Set[int] = set()
     for existing_rule in sg.ip_permissions:
-        # Skip any non-tcp rules.
-        if existing_rule['IpProtocol'] != 'tcp':
+        # Skip any non-tcp rules or if all traffic (-1) is specified.
+        if existing_rule['IpProtocol'] not in ['tcp', '-1']:
             continue
         # Skip any rules that don't have a FromPort or ToPort.
-        if 'FromPort' not in existing_rule or 'ToPort' not in existing_rule:
-            continue
-        existing_ports.update(
-            range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
-    ports_to_open = resources_utils.port_set_to_ranges(
-        resources_utils.port_ranges_to_set(ports) - existing_ports)
+        if 'FromPort' in existing_rule and 'ToPort' in existing_rule:
+            existing_ports.update(
+                range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
+        elif existing_rule['IpProtocol'] == '-1':
+            # For AWS, IpProtocol = -1 means all traffic
+            for group_pairs in existing_rule['UserIdGroupPairs']:
+                if group_pairs['GroupId'] != sg.id:
+                    # We skip the port opening when the rule allows access from
+                    # other security groups, as that is likely added by a user
+                    # manually and satisfy their requirement.
+                    # The security group created by SkyPilot allows all traffic
+                    # from the same security group, which should not be skipped.
+                    existing_ports.add(-1)
+                    break
+            break
+
+    ports_to_open = []
+    # Do not need to open any ports when all traffic is already allowed.
+    if -1 not in existing_ports:
+        ports_to_open = resources_utils.port_set_to_ranges(
+            resources_utils.port_ranges_to_set(ports) - existing_ports)
 
     ip_permissions = []
     for port in ports_to_open:
@@ -799,7 +875,7 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
 
     filters = [
         {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name_on_cloud],
         },
     ]
@@ -850,7 +926,7 @@ def get_cluster_info(
             'Values': ['running'],
         },
         {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name_on_cloud],
         },
     ]

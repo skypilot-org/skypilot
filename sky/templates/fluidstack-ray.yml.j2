@@ -55,14 +55,16 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo systemctl stop unattended-upgrades || true;
+  - {%- for initial_setup_command in initial_setup_commands %}
+    {{ initial_setup_command }}
+    {%- endfor %}
+    sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
-    {{ cuda_installation_commands }}
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}

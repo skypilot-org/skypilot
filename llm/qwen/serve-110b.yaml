@@ -29,8 +29,8 @@ setup: |
     conda create -n qwen python=3.10 -y
     conda activate qwen
   fi
-  pip install -U vllm==0.4.1
-  pip install -U transformers==4.38.0
+  pip install vllm==0.4.2
+  pip install flash-attn==2.5.9.post1
 
 run: |
   conda activate qwen

@@ -29,6 +29,7 @@ import functools
 import multiprocessing
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -368,7 +369,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                 echo "{bashrc_diff}" >> ~/.bashrc'
 
         cmd = (f'(grep -q "SkyPilot" ~/.bashrc) || '
-               f'[[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd})')
+               f'([[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd}) || '
+               f'(echo "Bash must be version 4 or above." && exit 1))')
+
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
@@ -390,7 +393,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         ctx.exit()
 
     try:
-        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        subprocess.run(cmd,
+                       shell=True,
+                       check=True,
+                       executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
         click.echo(
             'Completion will take effect once you restart the terminal: ' +
@@ -3072,6 +3078,19 @@ def show_gpus(
             ])
         return realtime_gpu_table
 
+    def _get_kubernetes_node_info_table():
+        node_table = log_utils.create_table(
+            ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
+
+        node_info_dict = kubernetes_utils.get_kubernetes_node_info()
+        for node_name, node_info in node_info_dict.items():
+            node_table.add_row([
+                node_name, node_info.gpu_type,
+                node_info.total['nvidia.com/gpu'],
+                node_info.free['nvidia.com/gpu']
+            ])
+        return node_table
+
     def _output():
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
@@ -3112,6 +3131,12 @@ def show_gpus(
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                            f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
+                    k8s_node_table = _get_kubernetes_node_info_table()
+                    yield '\n\n'
+                    yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'Kubernetes per node GPU availability'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
                     k8s_messages += (
                         '\n' + kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -3199,6 +3224,7 @@ def show_gpus(
             print_section_titles = True
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
+            # TODO(romilb): Show filtered per node GPU availability here as well
             try:
                 k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
                     name_filter=name, quantity_filter=quantity)
@@ -3868,7 +3894,7 @@ def _generate_task_with_service(
     env: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
-    ports: Tuple[str],
+    ports: Optional[Tuple[str]],
     cpus: Optional[str],
     memory: Optional[str],
     disk_size: Optional[int],

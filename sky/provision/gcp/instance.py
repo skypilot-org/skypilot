@@ -10,16 +10,12 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
-
-TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
-# Tag uniquely identifying all nodes of a cluster
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
-TAG_RAY_NODE_KIND = 'ray-node-type'
 
 _INSTANCE_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/zones/.*/instances/.*\' was not found')
@@ -66,7 +62,9 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     handler: Type[
         instance_utils.GCPInstance] = instance_utils.GCPComputeInstance
@@ -124,15 +122,15 @@ def _wait_for_operations(
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            handler.wait_for_operation(operation, project_id, zone)
+            handler.wait_for_operation(operation, project_id, zone=zone)
 
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
     for inst in instances:
         labels = inst.get('labels', {})
-        if (labels.get(TAG_RAY_NODE_KIND) == 'head' or
-                labels.get(TAG_SKYPILOT_HEAD_NODE) == '1'):
+        if (labels.get(provision_constants.TAG_RAY_NODE_KIND) == 'head' or
+                labels.get(provision_constants.TAG_SKYPILOT_HEAD_NODE) == '1'):
             head_instance_id = inst['name']
             break
     return head_instance_id
@@ -158,12 +156,16 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
+    elif node_type == instance_utils.GCPNodeType.MIG:
+        resource = instance_utils.GCPManagedInstanceGroup
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
-    filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    filter_labels = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     # wait until all stopping instances are stopped/terminated
     while True:
@@ -264,12 +266,16 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
         resumed_instance_ids = [n['name'] for n in stopped_instances]
         if resumed_instance_ids:
-            for instance_id in resumed_instance_ids:
-                resource.start_instance(instance_id, project_id,
-                                        availability_zone)
-                resource.set_labels(project_id, availability_zone, instance_id,
-                                    labels)
-        to_start_count -= len(resumed_instance_ids)
+            resumed_instance_ids = resource.start_instances(
+                cluster_name_on_cloud, project_id, availability_zone,
+                resumed_instance_ids, labels)
+        # In MIG case, the resumed_instance_ids will include the previously
+        # PENDING and RUNNING instances. To avoid double counting, we need to
+        # remove them from the resumed_instance_ids.
+        ready_instances = set(resumed_instance_ids)
+        ready_instances |= set([n['name'] for n in running_instances])
+        ready_instances |= set([n['name'] for n in pending_instances])
+        to_start_count = config.count - len(ready_instances)
 
         if head_instance_id is None:
             head_instance_id = resource.create_node_tag(
@@ -281,9 +287,14 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     if to_start_count > 0:
         errors, created_instance_ids = resource.create_instances(
-            cluster_name_on_cloud, project_id, availability_zone,
-            config.node_config, labels, to_start_count,
-            head_instance_id is None)
+            cluster_name_on_cloud,
+            project_id,
+            availability_zone,
+            config.node_config,
+            labels,
+            to_start_count,
+            total_count=config.count,
+            include_head_node=head_instance_id is None)
         if errors:
             error = common.ProvisionerError('Failed to launch instances.')
             error.errors = errors
@@ -387,7 +398,9 @@ def get_cluster_info(
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -415,7 +428,7 @@ def get_cluster_info(
         project_id,
         zone,
         {
-            **label_filters, TAG_RAY_NODE_KIND: 'head'
+            **label_filters, provision_constants.TAG_RAY_NODE_KIND: 'head'
         },
         lambda h: [h.RUNNING_STATE],
     )
@@ -441,14 +454,16 @@ def stop_instances(
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     tpu_node = provider_config.get('tpu_node')
     if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
     if worker_only:
-        label_filters[TAG_RAY_NODE_KIND] = 'worker'
+        label_filters[provision_constants.TAG_RAY_NODE_KIND] = 'worker'
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -510,9 +525,18 @@ def terminate_instances(
     if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    use_mig = provider_config.get('use_managed_instance_group', False)
+    if use_mig:
+        # Deleting the MIG will also delete the instances.
+        instance_utils.GCPManagedInstanceGroup.delete_mig(
+            project_id, zone, cluster_name_on_cloud)
+        return
+
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
     if worker_only:
-        label_filters[TAG_RAY_NODE_KIND] = 'worker'
+        label_filters[provision_constants.TAG_RAY_NODE_KIND] = 'worker'
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -555,7 +579,9 @@ def open_ports(
     project_id = provider_config['project_id']
     firewall_rule_name = provider_config['firewall_rule']
 
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance,
         instance_utils.GCPTPUVMInstance,

@@ -1,5 +1,4 @@
 """Azure."""
-import base64
 import functools
 import json
 import os
@@ -7,17 +6,15 @@ import re
 import subprocess
 import textwrap
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import colorama
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import azure
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -63,13 +60,15 @@ class Azure(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
     _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
-    # Azure does not support high disk tier.
-    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
-                             {resources_utils.DiskTier.HIGH})
+    # Azure does not support high disk and ultra disk tier.
+    _SUPPORTED_DISK_TIERS = (
+        set(resources_utils.DiskTier) -
+        {resources_utils.DiskTier.HIGH, resources_utils.DiskTier.ULTRA})
 
     _INDENT_PREFIX = ' ' * 4
 
-    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_AUTOSCALER
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -273,10 +272,10 @@ class Azure(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -316,14 +315,17 @@ class Azure(clouds.Cloud):
             'image_version': version,
         }
 
+        # Setup the A10 nvidia driver.
+        need_nvidia_driver_extension = (acc_dict is not None and
+                                        'A10' in acc_dict)
+
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
         # Also, add default user to docker group.
         # pylint: disable=line-too-long
-        cloud_init_setup_commands = base64.b64encode(
-            textwrap.dedent("""\
+        cloud_init_setup_commands = textwrap.dedent("""\
             #cloud-config
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
@@ -339,7 +341,7 @@ class Azure(clouds.Cloud):
               - path: /etc/apt/apt.conf.d/10cloudinit-disable
                 content: |
                   APT::Periodic::Enable "0";
-            """).encode('utf-8')).decode('utf-8')
+            """).split('\n')
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
             if (r.disk_tier is not None and
@@ -368,25 +370,28 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
+            'need_nvidia_driver_extension': need_nvidia_driver_extension,
             'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
-            'resource_group': f'{cluster_name_on_cloud}-{region_name}',
+            'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
         }
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
-    ) -> Tuple[List['resources.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             ok, _ = Azure.check_disk_tier(resources.instance_type,
                                           resources.disk_tier)
             if not ok:
-                return ([], [])
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -416,9 +421,10 @@ class Azure(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -433,8 +439,10 @@ class Azure(clouds.Cloud):
             zone=resources.zone,
             clouds='azure')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -473,6 +481,19 @@ class Azure(clouds.Cloud):
             return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
                            f'{cls._INDENT_PREFIX}Details: '
                            f'{common_utils.format_exception(e)}')
+
+        # Check if the azure blob storage dependencies are installed.
+        try:
+            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
+            from azure.storage import blob
+            import msgraph
+        except ImportError as e:
+            return False, (
+                f'Azure blob storage depdencies are not installed. '
+                'Run the following commands:'
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -579,9 +600,10 @@ class Azure(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
-        if disk_tier == resources_utils.DiskTier.HIGH:
-            return False, ('Azure disk_tier=high is not supported now. '
-                           'Please use disk_tier={low, medium} instead.')
+        if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
+            return False, (
+                'Azure disk_tier={high, ultra} is not supported now. '
+                'Please use disk_tier={low, medium, best} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         if cls._get_disk_type(
@@ -608,95 +630,9 @@ class Azure(clouds.Cloud):
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
+            resources_utils.DiskTier.ULTRA: 'Disabled',
             resources_utils.DiskTier.HIGH: 'Disabled',
             resources_utils.DiskTier.MEDIUM: 'Premium_LRS',
             resources_utils.DiskTier.LOW: 'Standard_LRS',
         }
         return tier2name[tier]
-
-    @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List[status_lib.ClusterStatus]:
-        del zone  # unused
-        status_map = {
-            'VM starting': status_lib.ClusterStatus.INIT,
-            'VM running': status_lib.ClusterStatus.UP,
-            # 'VM stopped' in Azure means Stopped (Allocated), which still bills
-            # for the VM.
-            'VM stopping': status_lib.ClusterStatus.INIT,
-            'VM stopped': status_lib.ClusterStatus.INIT,
-            # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
-            # bill for the VM.
-            'VM deallocating': status_lib.ClusterStatus.STOPPED,
-            'VM deallocated': status_lib.ClusterStatus.STOPPED,
-        }
-        tag_filter_str = ' '.join(
-            f'tags.\\"{k}\\"==\'{v}\'' for k, v in tag_filters.items())
-
-        query_node_id = (f'az vm list --query "[?{tag_filter_str}].id" -o json')
-        returncode, stdout, stderr = log_lib.run_with_log(query_node_id,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
-        logger.debug(f'{query_node_id} returned {returncode}.\n'
-                     '**** STDOUT ****\n'
-                     f'{stdout}\n'
-                     '**** STDERR ****\n'
-                     f'{stderr}')
-        if returncode == 0:
-            if not stdout.strip():
-                return []
-            node_ids = json.loads(stdout.strip())
-            if not node_ids:
-                return []
-            state_str = '[].powerState'
-            if len(node_ids) == 1:
-                state_str = 'powerState'
-            node_ids_str = '\t'.join(node_ids)
-            query_cmd = (
-                f'az vm show -d --ids {node_ids_str} --query "{state_str}" -o json'
-            )
-            returncode, stdout, stderr = log_lib.run_with_log(
-                query_cmd, '/dev/null', require_outputs=True, shell=True)
-            logger.debug(f'{query_cmd} returned {returncode}.\n'
-                         '**** STDOUT ****\n'
-                         f'{stdout}\n'
-                         '**** STDERR ****\n'
-                         f'{stderr}')
-
-        # NOTE: Azure cli should be handled carefully. The query command above
-        # takes about 1 second to run.
-        # An alternative is the following command, but it will take more than
-        # 20 seconds to run.
-        # query_cmd = (
-        #     f'az vm list --show-details --query "['
-        #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
-        #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
-        # )
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query Azure cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        assert stdout.strip(), f'No status returned for {name!r}'
-
-        original_statuses_list = json.loads(stdout.strip())
-        if not original_statuses_list:
-            # No nodes found. The original_statuses_list will be empty string.
-            # Return empty list.
-            return []
-        if not isinstance(original_statuses_list, list):
-            original_statuses_list = [original_statuses_list]
-        statuses = []
-        for s in original_statuses_list:
-            if s not in status_map:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ClusterStatusFetchingError(
-                        f'Failed to parse status from Azure response: {stdout}')
-            node_status = status_map[s]
-            if node_status is not None:
-                statuses.append(node_status)
-        return statuses

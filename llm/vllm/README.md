@@ -4,7 +4,7 @@
 <!-- $UNCOMMENT# vLLM: Easy, Fast, and Cheap LLM Inference -->
 
 <p align="center">
-    <img src="https://imgur.com/yxtzPEu.png" alt="vLLM"/>
+    <img src="https://i.imgur.com/yxtzPEu.png" alt="vLLM"/>
 </p>
 
 This README contains instructions to run a demo for vLLM, an open-source library for fast LLM inference and serving, which improves the throughput compared to HuggingFace by **up to 24x**.
@@ -33,6 +33,8 @@ sky launch -c vllm-llama2 serve-openai-api.yaml --env HF_TOKEN=YOUR_HUGGING_FACE
 ```bash
 sky launch -c vllm-llama2 serve-openai-api.yaml --gpus V100:1 --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
+**Tip**: You can also use the vLLM docker container for faster setup. Refer to [serve-openai-api-docker.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/serve-openai-api-docker.yaml) for more.
+
 2. Check the IP for the cluster with:
 ```
 IP=$(sky status --ip vllm-llama2)
