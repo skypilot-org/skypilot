@@ -19,7 +19,7 @@ SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 # time the load balancer syncs with controller, it will update all available
 # replica ips for each service, also send the number of requests in last query
 # interval.
-LB_CONTROLLER_SYNC_INTERVAL_SECONDS = 20
+LB_CONTROLLER_SYNC_INTERVAL_SECONDS = 10
 
 # The maximum retry times for load balancer for each request. After changing to
 # proxy implementation, we do retry for failed requests.
