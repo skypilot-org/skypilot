@@ -324,6 +324,15 @@ def update(
         service_name: Name of the service.
     """
     _validate_service_task(task)
+
+    assert task.service is not None
+    if (task.service.ssl_keyfile is not None or
+            task.service.ssl_certfile is not None):
+        logger.warning('Updating SSL keyfile and certfile is not supported. '
+                       'Any updates to the keyfile and certfile will not take '
+                       'effect. To update SSL keyfile and certfile, please '
+                       'tear down the service and spin up a new one.')
+
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=

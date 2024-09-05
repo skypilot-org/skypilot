@@ -221,14 +221,15 @@ class SkyServeLoadBalancer:
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
 
-        # TODO(tian): How to update this? Should we allow updating it?
         ssl_kwargs = {} if self._ssl_keyfile is None else {
             'ssl_keyfile': self._ssl_keyfile,
             'ssl_certfile': self._ssl_certfile,
         }
 
+        schema = 'https' if self._ssl_keyfile is not None else 'http'
+
         logger.info('SkyServe Load Balancer started on '
-                    f'http://0.0.0.0:{self._load_balancer_port}')
+                    f'{schema}://0.0.0.0:{self._load_balancer_port}')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',
