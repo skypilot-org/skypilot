@@ -28,8 +28,9 @@ class LoadBalancingPolicy:
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
-    def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
-        replica = self._select_replica(request)
+    def select_replica(self, request: 'fastapi.Request',
+                       disabled_urls: List[str]) -> Optional[str]:
+        replica = self._select_replica(request, disabled_urls)
         if replica is not None:
             logger.info(f'Selected replica {replica} '
                         f'for request {_request_repr(request)}')
@@ -40,7 +41,8 @@ class LoadBalancingPolicy:
 
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_urls: List[str]) -> Optional[str]:
         raise NotImplementedError
 
 
@@ -61,10 +63,16 @@ class RoundRobinPolicy(LoadBalancingPolicy):
         self.ready_replicas = ready_replicas
         self.index = 0
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_urls: List[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
-        self.index = (self.index + 1) % len(self.ready_replicas)
-        return ready_replica_url
+        check_disable = True
+        if all(url in disabled_urls for url in self.ready_replicas):
+            check_disable = False
+        while True:
+            ready_replica_url = self.ready_replicas[self.index]
+            self.index = (self.index + 1) % len(self.ready_replicas)
+            if not check_disable or ready_replica_url not in disabled_urls:
+                return ready_replica_url

@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Union
+from typing import Dict, List, Union
 
 import aiohttp
 import fastapi
@@ -160,11 +160,12 @@ class SkyServeLoadBalancer:
         # SkyServe supports serving on Spot Instances. To avoid preemptions
         # during request handling, we add a retry here.
         retry_cnt = 0
+        failed_replica_urls: List[str] = []
         while True:
             retry_cnt += 1
             with self._client_pool_lock:
                 ready_replica_url = self._load_balancing_policy.select_replica(
-                    request)
+                    request, failed_replica_urls)
             if ready_replica_url is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
@@ -184,6 +185,8 @@ class SkyServeLoadBalancer:
                 # 499 means a client terminates the connection
                 # before the server is able to respond.
                 return fastapi.responses.Response(status_code=499)
+            assert ready_replica_url is not None
+            failed_replica_urls.append(ready_replica_url)
             # TODO(tian): Fail fast for errors like 404 not found.
             if retry_cnt == constants.LB_MAX_RETRY:
                 if isinstance(response_or_exception, fastapi.HTTPException):
