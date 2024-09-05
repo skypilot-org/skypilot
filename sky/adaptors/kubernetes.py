@@ -95,6 +95,7 @@ def _load_config(context: str = None):
                 raise ValueError(err_str) from None
     _configured = True
 
+
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
 def core_api(context: str = None):

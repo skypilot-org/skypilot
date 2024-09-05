@@ -133,8 +133,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
         return msg
 
     for new_node in new_nodes:
-        pod = kubernetes.core_api(context).read_namespaced_pod(new_node.metadata.name,
-                                                        namespace)
+        pod = kubernetes.core_api(context).read_namespaced_pod(
+            new_node.metadata.name, namespace)
         pod_status = pod.status.phase
         # When there are multiple pods involved while launching instance,
         # there may be a single pod causing issue while others are
@@ -366,7 +366,8 @@ def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
                                      new_pod.metadata.name, rc, stdout)
 
 
-def _check_user_privilege(namespace: str, context: str, new_nodes: List) -> None:
+def _check_user_privilege(namespace: str, context: str,
+                          new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
     # the kubernetes instance pod.
     check_k8s_user_sudo_cmd = (
@@ -434,7 +435,8 @@ def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
     # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
     for new_node in new_nodes:
         pod_name = new_node.metadata.name
-        runner = command_runner.KubernetesCommandRunner(((namespace, context), pod_name))
+        runner = command_runner.KubernetesCommandRunner(
+            ((namespace, context), pod_name))
         logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
         rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
                                    require_outputs=True,
@@ -444,7 +446,8 @@ def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
 
-def _label_pod(namespace: str, context: str, pod_name: str, label: Dict[str, str]) -> None:
+def _label_pod(namespace: str, context: str, pod_name: str,
+               label: Dict[str, str]) -> None:
     """Label a pod."""
     kubernetes.core_api(context).patch_namespaced_pod(
         pod_name,
@@ -480,7 +483,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      'terminating pods. Waiting them to finish: '
                      f'{list(terminating_pods.keys())}')
         time.sleep(POLL_INTERVAL)
-        terminating_pods = _filter_pods(namespace, context, tags, ['Terminating'])
+        terminating_pods = _filter_pods(namespace, context, tags,
+                                        ['Terminating'])
 
     if len(terminating_pods) > 0:
         # If there are still terminating pods, we force delete them.
@@ -497,7 +501,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 _request_timeout=config_lib.DELETION_TIMEOUT,
                 grace_period_seconds=0)
 
-    running_pods = _filter_pods(namespace, context, tags, ['Pending', 'Running'])
+    running_pods = _filter_pods(namespace, context, tags,
+                                ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{list(running_pods.keys())}')
@@ -515,7 +520,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
     try:
-        nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class(context)
+        nvidia_runtime_exists = kubernetes_utils.check_nvidia_runtime_class(
+            context)
     except kubernetes.kubernetes.client.ApiException as e:
         logger.warning('run_instances: Error occurred while checking for '
                        f'nvidia RuntimeClass - '
@@ -569,7 +575,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 }
             }
 
-        pod = kubernetes.core_api(context).create_namespaced_pod(namespace, pod_spec)
+        pod = kubernetes.core_api(context).create_namespaced_pod(
+            namespace, pod_spec)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
@@ -777,7 +784,8 @@ def get_cluster_info(
     ssh_user = 'sky'
     get_k8s_ssh_user_cmd = 'echo $(whoami)'
     assert head_pod_name is not None
-    runner = command_runner.KubernetesCommandRunner(((namespace, context), head_pod_name))
+    runner = command_runner.KubernetesCommandRunner(
+        ((namespace, context), head_pod_name))
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -857,8 +865,10 @@ def get_command_runners(
     """Get a command runner for the given cluster."""
     assert cluster_info.provider_config is not None, cluster_info
     instances = cluster_info.instances
-    namespace = kubernetes_utils.get_namespace_from_config(cluster_info.provider_config)
-    context = kubernetes_utils.get_context_from_config(cluster_info.provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(
+        cluster_info.provider_config)
+    context = kubernetes_utils.get_context_from_config(
+        cluster_info.provider_config)
     node_list = []
     if cluster_info.head_instance_id is not None:
         node_list = [((namespace, context), cluster_info.head_instance_id)]

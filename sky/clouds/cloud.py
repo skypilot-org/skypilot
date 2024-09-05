@@ -488,7 +488,6 @@ class Cloud:
         """
         return None
 
-
     @classmethod
     def get_current_user_identity_str(cls) -> Optional[str]:
         """Returns a user friendly representation of the current identity."""

@@ -1171,6 +1171,58 @@ def test_kubernetes_storage_mounts():
         run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_context_switch():
+    name = _get_cluster_name()
+    new_context = f'sky-test-context-{int(time.time())}'
+    new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    test_commands = [
+        # Launch a cluster and run a simple task
+        f'sky launch -y -c {name} --cloud kubernetes "echo Hello from original context"',
+        f'sky logs {name} 1 --status',  # Ensure job succeeded
+
+        # Get current context details and save to a file for later use in cleanup
+        'CURRENT_CONTEXT=$(kubectl config current-context); '
+        'echo "$CURRENT_CONTEXT" > /tmp/sky_test_current_context; '
+        'CURRENT_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.cluster}"); '
+        'CURRENT_USER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.user}"); '
+
+        # Create a new context with a different name and namespace
+        f'kubectl config set-context {new_context} --cluster="$CURRENT_CLUSTER" --user="$CURRENT_USER" --namespace={new_namespace}',
+
+        # Create the new namespace if it doesn't exist
+        f'kubectl create namespace {new_namespace} --dry-run=client -o yaml | kubectl apply -f -',
+
+        # Set the new context as active
+        f'kubectl config use-context {new_context}',
+
+        # Verify the new context is active
+        f'[ "$(kubectl config current-context)" = "{new_context}" ] || exit 1',
+
+        # Try to run sky exec on the original cluster (should still work)
+        f'sky exec {name} "echo Success: sky exec works after context switch"',
+
+        # Test sky queue
+        f'sky queue {name}',
+    ]
+
+    cleanup_commands = (
+        f'kubectl delete namespace {new_namespace}; '
+        f'kubectl config delete-context {new_context}; '
+        'kubectl config use-context $(cat /tmp/sky_test_current_context); '
+        'rm /tmp/sky_test_current_context; '
+        f'sky down -y {name}')
+
+    test = Test(
+        'kubernetes_context_switch',
+        test_commands,
+        cleanup_commands,
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
 @pytest.mark.parametrize(
     'image_id',
     [

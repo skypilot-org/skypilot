@@ -23,9 +23,9 @@ def bootstrap_instances(
         region: str, cluster_name: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     del region, cluster_name  # unused
-    namespace = kubernetes_utils.get_namespace_from_config(config.provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(
+        config.provider_config)
     context = kubernetes_utils.get_context_from_config(config.provider_config)
-
 
     _configure_services(namespace, context, config.provider_config)
 
@@ -42,7 +42,8 @@ def bootstrap_instances(
         # necessary roles and role bindings.
         # If not, set up the roles and bindings for skypilot-service-account
         # here.
-        _configure_autoscaler_service_account(namespace, context, config.provider_config)
+        _configure_autoscaler_service_account(namespace, context,
+                                              config.provider_config)
         _configure_autoscaler_role(namespace,
                                    context,
                                    config.provider_config,
@@ -52,9 +53,9 @@ def bootstrap_instances(
             context,
             config.provider_config,
             binding_field='autoscaler_role_binding')
-        _configure_autoscaler_cluster_role(namespace, context, config.provider_config)
-        _configure_autoscaler_cluster_role_binding(namespace,
-                                                   context,
+        _configure_autoscaler_cluster_role(namespace, context,
+                                           config.provider_config)
+        _configure_autoscaler_cluster_role_binding(namespace, context,
                                                    config.provider_config)
         # SkyPilot system namespace is required for FUSE mounting. Here we just
         # create the namespace and set up the necessary permissions.
@@ -274,7 +275,8 @@ def _configure_autoscaler_service_account(
 
     logger.info('_configure_autoscaler_service_account: '
                 f'{not_found_msg(account_field, name)}')
-    kubernetes.core_api(context).create_namespaced_service_account(namespace, account)
+    kubernetes.core_api(context).create_namespaced_service_account(
+        namespace, account)
     logger.info('_configure_autoscaler_service_account: '
                 f'{created_msg(account_field, name)}')
 
@@ -316,7 +318,8 @@ def _configure_autoscaler_role(namespace: str, context: str,
             return
         logger.info('_configure_autoscaler_role: '
                     f'{updating_existing_msg(role_field, name)}')
-        kubernetes.auth_api(context).patch_namespaced_role(name, namespace, role)
+        kubernetes.auth_api(context).patch_namespaced_role(
+            name, namespace, role)
         return
 
     logger.info('_configure_autoscaler_role: '
@@ -387,13 +390,13 @@ def _configure_autoscaler_role_binding(
 
     logger.info('_configure_autoscaler_role_binding: '
                 f'{not_found_msg(binding_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role_binding(rb_namespace, binding)
+    kubernetes.auth_api(context).create_namespaced_role_binding(
+        rb_namespace, binding)
     logger.info('_configure_autoscaler_role_binding: '
                 f'{created_msg(binding_field, name)}')
 
 
-def _configure_autoscaler_cluster_role(namespace,
-                                       context,
+def _configure_autoscaler_cluster_role(namespace, context,
                                        provider_config: Dict[str, Any]) -> None:
     role_field = 'autoscaler_cluster_role'
     if role_field not in provider_config:
@@ -432,9 +435,7 @@ def _configure_autoscaler_cluster_role(namespace,
 
 
 def _configure_autoscaler_cluster_role_binding(
-        namespace,
-        context,
-        provider_config: Dict[str, Any]) -> None:
+        namespace, context, provider_config: Dict[str, Any]) -> None:
     binding_field = 'autoscaler_cluster_role_binding'
     if binding_field not in provider_config:
         logger.info('_configure_autoscaler_cluster_role_binding: '
@@ -654,7 +655,8 @@ def _configure_services(namespace: str, context: str,
         else:
             logger.info(
                 f'_configure_services: {not_found_msg("service", name)}')
-            kubernetes.core_api(context).create_namespaced_service(namespace, service)
+            kubernetes.core_api(context).create_namespaced_service(
+                namespace, service)
             logger.info(f'_configure_services: {created_msg("service", name)}')
 
 

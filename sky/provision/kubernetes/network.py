@@ -110,7 +110,8 @@ def _open_ports_using_ingress(
         # Update metadata from config
         kubernetes_utils.merge_custom_metadata(service_spec['metadata'])
         network_utils.create_or_replace_namespaced_service(
-            namespace=kubernetes_utils.get_namespace_from_config(provider_config),
+            namespace=kubernetes_utils.get_namespace_from_config(
+                provider_config),
             context=kubernetes_utils.get_context_from_config(provider_config),
             service_name=service_name,
             service_spec=service_spec,
