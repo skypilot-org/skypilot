@@ -1,5 +1,5 @@
 
-# When using pod@namespace@context, rsync passes args as: {us} -l pod@namespace context context
+# When using pod@namespace@context, rsync passes args as: {us} -l pod@namespace context
 # We need to split the pod@namespace into pod and namespace
 shift
 pod_at_namespace=$1
