@@ -1559,7 +1559,10 @@ def check_owner_identity(cluster_name: str) -> None:
 
     cloud = handle.launched_resources.cloud
     current_user_identity = cloud.get_current_user_identity()
-    supported_user_identities = cloud.get_supported_identities()
+    try:
+        supported_user_identities = cloud.get_supported_identities()
+    except NotImplementedError:
+        supported_user_identities = None
     owner_identity = record['owner']
     if current_user_identity is None:
         # Skip the check if the cloud does not support user identity.

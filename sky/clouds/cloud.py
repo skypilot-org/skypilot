@@ -506,7 +506,7 @@ class Cloud:
             None if the cloud does not have a concept of user identity;
             otherwise the supported identities that SkyPilot can switch to.
         """
-        raise None
+        raise NotImplementedError
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
