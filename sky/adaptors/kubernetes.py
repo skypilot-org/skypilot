@@ -4,7 +4,7 @@ import functools
 
 import logging
 import os
-from typing import Any, Callable, Set
+from typing import Any, Callable, Optional, Set
 
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
@@ -59,7 +59,7 @@ def _api_logging_decorator(logger: str, level: int):
     return decorated_api
 
 
-def _load_config(context: str = None):
+def _load_config(context: Optional[str] = None):
     global _configured
     if _configured:
         return
@@ -98,49 +98,49 @@ def _load_config(context: str = None):
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def core_api(context: str = None):
+def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
 
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def auth_api(context: str = None):
+def auth_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.RbacAuthorizationV1Api()
 
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def networking_api(context: str = None):
+def networking_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NetworkingV1Api()
 
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def custom_objects_api(context: str = None):
+def custom_objects_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
 
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def node_api(context: str = None):
+def node_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NodeV1Api()
 
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def apps_api(context: str = None):
+def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
 
 
 @functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
-def api_client(context: str = None):
+def api_client(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.ApiClient()
 
