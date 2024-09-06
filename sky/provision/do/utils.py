@@ -5,7 +5,6 @@ https://github.com/digitalocean/pydo/blob/main/examples/poc_droplets_volumes_ssh
 """
 
 import os
-import time
 from typing import Any, Dict, List, Optional
 import urllib
 import uuid
@@ -171,8 +170,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
 
     attach_request = {'type': 'attach', 'droplet_id': instance['id']}
     try:
-        action_response = client().volume_actions.post_by_id(
-            volume['id'], attach_request)
+        client().volume_actions.post_by_id(volume['id'], attach_request)
     except HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err

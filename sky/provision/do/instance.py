@@ -145,7 +145,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         zone=None,
         head_instance_id=head_instance['name'],
         resumed_instance_ids=list(stopped_instances.keys()),
-        created_instance_ids=[instance['name'] for instance in created_instances],
+        created_instance_ids=[
+            instance['name'] for instance in created_instances
+        ],
     )
 
 
@@ -205,8 +207,9 @@ def terminate_instances(
             utils.client().droplets.destroy_with_associated_resources_dangerous(
                 droplet_id=instance_meta['id'], x_dangerous=True)
         except HttpResponseError as err:
-            logger.warning('Error: {0} {1}: {2}'.format(
-                err.status_code, err.reason, err.error.message))
+            logger.warning('Error: {0} {1}: {2}'.format(err.status_code,
+                                                        err.reason,
+                                                        err.error.message))
 
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,
@@ -231,7 +234,6 @@ def get_cluster_info(
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance: Optional[Dict[str, Any]] = None
     for instance_name, instance_meta in running_instances.items():
-        public_ip, private_ip = None, None
         if instance_name.endswith('-head'):
             head_instance = instance_meta
         for net in instance_meta['networks']['v4']:

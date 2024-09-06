@@ -9,9 +9,7 @@ GPU_IMAGES = {
     'gpu-h100x8-640gb': '164155527',
 }
 
-INSTALL_DOCKER = (
-    '#!/bin/bash\n'
-    'if ! command -v docker &> /dev/null; then \n'
-    'sudo apt install -y docker.io \n'
-    'fi \n'
-)
+INSTALL_DOCKER = ('#!/bin/bash\n'
+                  'if ! command -v docker &> /dev/null; then \n'
+                  'sudo apt install -y docker.io \n'
+                  'fi \n')
