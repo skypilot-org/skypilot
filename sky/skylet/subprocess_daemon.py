@@ -1,17 +1,35 @@
 """Sky subprocess daemon.
-
 Wait for parent_pid to exit, then SIGTERM (or SIGKILL if needed) the child
 processes of proc_pid.
 """
-
 import argparse
+import os
 import sys
 import time
 
 import psutil
 
-if __name__ == '__main__':
 
+def daemonize():
+    """Separates the process from parent process with double-forking."""
+    # First fork
+    if os.fork() > 0:
+        # original process terminates.
+        sys.exit()
+
+    # Continues to run from first forked child process.
+    # Detach from parent environment
+    os.setsid()
+
+    # Second fork
+    if os.fork() > 0:
+        # The first forked child process terminates.
+        sys.exit()
+    # Continues to run from second forked child process.
+
+
+if __name__ == '__main__':
+    daemonize()
     parser = argparse.ArgumentParser()
     parser.add_argument('--parent-pid', type=int, required=True)
     parser.add_argument('--proc-pid', type=int, required=True)
@@ -28,29 +46,33 @@ if __name__ == '__main__':
     if process is None:
         sys.exit()
 
+    children = []
     if parent_process is not None:
         # Wait for either parent or target process to exit.
         while process.is_running() and parent_process.is_running():
+            try:
+                # if process is terminated by the time reaching this line,
+                # it returns an empty list.
+                tmp_children = process.children(recursive=True)
+                if tmp_children:
+                    children = tmp_children
+                    children.append(process)
+            except psutil.NoSuchProcess:
+                pass
             time.sleep(1)
 
-    try:
-        children = process.children(recursive=True)
-        children.append(process)
-    except psutil.NoSuchProcess:
-        sys.exit()
-
-    for pid in children:
+    for child in children:
         try:
-            pid.terminate()
+            child.terminate()
         except psutil.NoSuchProcess:
-            pass
+            continue
 
     # Wait 30s for the processes to exit gracefully.
     time.sleep(30)
 
     # SIGKILL if they're still running.
-    for pid in children:
+    for child in children:
         try:
-            pid.kill()
+            child.kill()
         except psutil.NoSuchProcess:
-            pass
+            continue
