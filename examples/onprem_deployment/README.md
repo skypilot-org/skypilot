@@ -24,9 +24,9 @@ At the end of this guide, you will be able to run SkyPilot clusters, jobs and se
 The first node will be used as the head node. Here is an example `ips.txt` file:
 
     ```
-    1.2.3.4
-    1.2.3.5
-    1.2.3.6
+    192.168.1.1
+    192.168.1.2
+    192.168.1.3
     ```
 
 2. Run `./deploy.sh` and pass the ips.txt file, SSH username and SSH keys as arguments:
