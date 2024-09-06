@@ -9,10 +9,10 @@ from typing import Any, Dict, List, Optional
 import urllib
 import uuid
 
-from azure.core.exceptions import HttpResponseError
 import pydo
 
 from sky import sky_logging
+from sky.adaptors import azure
 from sky.provision import common
 from sky.provision.do import constants
 from sky.utils import common_utils
@@ -81,10 +81,10 @@ def ssh_key_id(public_key: str):
             try:
                 resp = client().ssh_keys.list(per_page=50, page=page)
                 for ssh_key in resp['ssh_keys']:
-                    if ssh_key['name'] == SSH_KEY_NAME:
+                    if ssh_key['public_key'] == public_key:
                         _ssh_key_id = ssh_key
                         return _ssh_key_id
-            except HttpResponseError as err:
+            except azure.exceptions().HttpResponseError as err:
                 raise DigitalOceanError('Error: {0} {1}: {2}'.format(
                     err.status_code, err.reason, err.error.message)) from err
 
@@ -108,7 +108,7 @@ def _create_volume(request: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = client().volumes.create(body=request)
         volume = resp['volume']
-    except HttpResponseError as err:
+    except azure.exceptions().HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err
     else:
@@ -122,7 +122,7 @@ def _create_droplet(request: Dict[str, Any]) -> Dict[str, Any]:
 
         get_resp = client().droplets.get(droplet_id)
         droplet = get_resp['droplet']
-    except HttpResponseError as err:
+    except azure.exceptions().HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err
     return droplet
@@ -171,7 +171,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     attach_request = {'type': 'attach', 'droplet_id': instance['id']}
     try:
         client().volume_actions.post_by_id(volume['id'], attach_request)
-    except HttpResponseError as err:
+    except azure.exceptions().HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err
     logger.debug(f'{instance_name} created')
@@ -197,7 +197,7 @@ def filter_instances(
                 if status_filters is None or instance[
                         'status'] in status_filters:
                     filtered_instances[instance['name']] = instance
-        except HttpResponseError as err:
+        except azure.exceptions().HttpResponseError as err:
             DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
 
