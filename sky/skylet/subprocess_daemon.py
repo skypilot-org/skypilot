@@ -11,7 +11,7 @@ import psutil
 
 
 def daemonize():
-    """Separates the process from parent process with double-forking."""
+    """Separates the process from its parent process with double-forking."""
     # First fork
     if os.fork() > 0:
         # original process terminates.
