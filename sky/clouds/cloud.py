@@ -496,7 +496,7 @@ class Cloud:
             return None
         return ', '.join(user_identity)
 
-    def get_supported_identities(self) -> Optional[List[str]]:
+    def get_supported_identities(self) -> Optional[List[List[str]]]:
         """Returns the supported identities of the cloud.
 
         The supported identities are the identities that SkyPilot can switch to

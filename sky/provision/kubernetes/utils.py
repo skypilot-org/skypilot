@@ -355,8 +355,7 @@ def get_kubernetes_nodes() -> List[Any]:
 
 
 def get_kubernetes_pods() -> List[Any]:
-    """
-    Gets the kubernetes pods in the current namespace and current context.
+    """Gets the kubernetes pods in the current namespace and current context.
 
     Used for computing cluster resource usage.
     """
@@ -577,18 +576,20 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 f'to set up GPUs.{suffix}')
 
 
-def get_head_ssh_port(cluster_name: str, namespace: str, context: str) -> int:
+def get_head_ssh_port(cluster_name: str, namespace: str,
+                      context: Optional[str]) -> int:
     svc_name = f'{cluster_name}-head-ssh'
     return get_port(svc_name, namespace, context)
 
 
-def get_port(svc_name: str, namespace: str, context: str) -> int:
+def get_port(svc_name: str, namespace: str, context: Optional[str]) -> int:
     """Gets the nodeport of the specified service.
 
     Args:
         svc_name (str): Name of the kubernetes service. Note that this may be
             different from the cluster name.
         namespace (str): Kubernetes namespace to look for the service in.
+        context (str): Kubernetes context to use.
     """
     head_service = kubernetes.core_api(context).read_namespaced_service(
         svc_name, namespace)
@@ -596,7 +597,7 @@ def get_port(svc_name: str, namespace: str, context: str) -> int:
 
 
 def get_external_ip(network_mode: Optional[
-    kubernetes_enums.KubernetesNetworkingMode], context: str) -> str:
+    kubernetes_enums.KubernetesNetworkingMode], context: Optional[str]) -> str:
     if network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
         return '127.0.0.1'
     # Return the IP address of the first node with an external IP

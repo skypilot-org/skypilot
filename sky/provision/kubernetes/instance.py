@@ -816,7 +816,6 @@ def query_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
-    del provider_config  # unused
     status_map = {
         'Pending': status_lib.ClusterStatus.INIT,
         'Running': status_lib.ClusterStatus.UP,
@@ -826,6 +825,7 @@ def query_instances(
         'Terminating': None,
     }
 
+    assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
 
