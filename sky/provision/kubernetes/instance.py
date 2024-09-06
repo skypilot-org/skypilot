@@ -530,8 +530,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'override runtimeClassName in ~/.sky/config.yaml. '
                        'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
-    needs_gpus = (pod_spec['spec']['containers'][0].get('resources', {}).
-                  get('limits', {}).get('nvidia.com/gpu', 0) > 0)
+    needs_gpus = (pod_spec['spec']['containers'][0].get('resources', {}).get(
+        'limits', {}).get('nvidia.com/gpu', 0) > 0)
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
