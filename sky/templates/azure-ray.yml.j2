@@ -45,6 +45,9 @@ provider:
   # The upper-level SkyPilot code has make sure there will not be resource
   # leakage.
   disable_launch_config_check: true
+  {%- if disk_performance_tier is not none %}
+  disk_performance_tier: {{disk_performance_tier}}
+  {%- endif %}
 
 
 auth:

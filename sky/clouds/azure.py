@@ -361,7 +361,7 @@ class Azure(clouds.Cloud):
                 start_index += 1
             assert False, 'Low disk tier should always be supported on Azure.'
 
-        return {
+        resources_vars = {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'num_gpus': acc_count,
@@ -376,6 +376,12 @@ class Azure(clouds.Cloud):
             'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
         }
+
+        disk_performance_tier = Azure._get_disk_performance_tier(r.disk_tier)
+        if disk_performance_tier is not None:
+            resources_vars['disk_performance_tier'] = disk_performance_tier
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
@@ -600,10 +606,10 @@ class Azure(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
-        if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
+        if disk_tier == resources_utils.DiskTier.ULTRA:
             return False, (
-                'Azure disk_tier={high, ultra} is not supported now. '
-                'Please use disk_tier={low, medium, best} instead.')
+                'Azure disk_tier=ultra is not supported now. '
+                'Please use disk_tier={low, medium, high, best} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         if cls._get_disk_type(
@@ -631,8 +637,17 @@ class Azure(clouds.Cloud):
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'Disabled',
-            resources_utils.DiskTier.HIGH: 'Disabled',
+            resources_utils.DiskTier.HIGH: 'Premium_LRS',
             resources_utils.DiskTier.MEDIUM: 'Premium_LRS',
             resources_utils.DiskTier.LOW: 'Standard_LRS',
         }
         return tier2name[tier]
+
+    @classmethod
+    def _get_disk_performance_tier(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Optional[str]:
+        tier = cls._translate_disk_tier(disk_tier)
+        if tier == resources_utils.DiskTier.HIGH:
+            return 'P50'
+        return None

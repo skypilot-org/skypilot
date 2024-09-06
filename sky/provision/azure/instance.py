@@ -18,6 +18,7 @@ from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -274,6 +275,16 @@ def _create_instances(
         deployment_name=vm_name,
         parameters=parameters,
     ).wait()
+
+    if 'disk_performance_tier' in provider_config:
+        performance_tier = provider_config['disk_performance_tier']
+        disks = compute_client.disks.list_by_resource_group(resource_group)
+        for disk in disks:
+            name = disk.name
+            subprocess_utils.run_no_outputs(
+                f'az disk update -n {name} -g {resource_group} '
+                f'--set tier={performance_tier}')
+
     filters = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         _TAG_SKYPILOT_VM_ID: vm_id
