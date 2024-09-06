@@ -31,6 +31,8 @@ REGIONS = [
     'us-west-2',
     'us-west-1',
     'us-south-1',
+    'us-south-2',
+    'us-south-3',
     'us-west-3',
     'us-midwest-1',
 ]
