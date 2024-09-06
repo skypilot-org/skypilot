@@ -60,7 +60,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     for instance_meta in stopped_instances.values():
         utils.client().droplet_actions.post(droplet_id=instance_meta['id'],
                                             body={'type': 'power_on'})
-    while True:
+    for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,
                                            pending_status + ['off'])
         if len(instances) == 0:
@@ -71,6 +71,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             f'Waiting for {num_restarted_instances}/{num_stopped_instances} '
             'stopped instances to be restarted.')
         time.sleep(constants.POLL_INTERVAL)
+    else:
+        msg = ('run_instances: Failed to restart all'
+               'instances possibly due to to capacity issue.')
+        logger.warning(msg)
+        raise RuntimeError(msg)
 
     exist_instances = utils.filter_instances(cluster_name_on_cloud,
                                              status_filters=['active'])
@@ -140,7 +145,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         zone=None,
         head_instance_id=head_instance['name'],
         resumed_instance_ids=list(stopped_instances.keys()),
-        created_instance_ids=[instance['id'] for instance in created_instances],
+        created_instance_ids=[instance['name'] for instance in created_instances],
     )
 
 
@@ -227,25 +232,22 @@ def get_cluster_info(
     head_instance: Optional[Dict[str, Any]] = None
     for instance_name, instance_meta in running_instances.items():
         public_ip, private_ip = None, None
+        if instance_name.endswith('-head'):
+            head_instance = instance_meta
         for net in instance_meta['networks']['v4']:
             if net['type'] == 'public':
-                public_ip = net['ip_address']
-            else:
-                private_ip = net['ip_address']
-        assert public_ip is not None and private_ip is not None, (
-            'Both private and public ipv4 addresses were not assigned:\n'
-            f'{instance_meta["networks"]["v4"]}')
+                instance_ip = net['ip_address']
+                break
         instances[instance_name] = [
             common.InstanceInfo(
-                instance_id=instance_meta['id'],
-                internal_ip=private_ip,
-                external_ip=public_ip,
+                instance_id=instance_meta['name'],
+                internal_ip=instance_ip,
+                external_ip=instance_ip,
                 ssh_port=22,
                 tags={},
             )
         ]
-        if instance_name.endswith('-head'):
-            head_instance = instance_meta
+
     assert head_instance is not None, 'no head instance found'
     return common.ClusterInfo(
         instances=instances,
@@ -275,7 +277,7 @@ def query_instances(
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for instance_meta in instances.values():
         status = status_map[instance_meta['status']]
-        statuses[instance_meta['id']] = status
+        statuses[instance_meta['name']] = status
     return statuses
 
 

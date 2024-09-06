@@ -33,6 +33,9 @@ class DO(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            'Docker container images as runtime environments'
+            f' are not supported in {_REPR}. Try using in `run`',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

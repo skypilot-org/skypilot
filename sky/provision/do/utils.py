@@ -105,29 +105,6 @@ def ssh_key_id(public_key: str):
     return _ssh_key_id
 
 
-def _wait_for_action(action_id: str, wait: int = constants.POLL_INTERVAL):
-    """Waits for action to complete before throwing an error.
-
-    Args:
-        action_id (str): action id
-        wait (int, optional): wait time before polling status of action
-    """
-    status = 'in-progress'
-    while status == 'in-progress':
-        try:
-            resp = client().actions.get(action_id)
-        except HttpResponseError as err:
-            raise DigitalOceanError('Error: {0} {1}: {2}'.format(
-                err.status_code, err.reason, err.error.message)) from err
-        else:
-            status = resp['action']['status']
-            if status == 'in-progress':
-                time.sleep(wait)
-            elif status == 'errored':
-                raise Exception('{0} action {1} {2}'.format(
-                    resp['action']['type'], resp['action']['id'], status))
-
-
 def _create_volume(request: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = client().volumes.create(body=request)
@@ -143,7 +120,6 @@ def _create_droplet(request: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = client().droplets.create(body=request)
         droplet_id = resp['droplet']['id']
-        _wait_for_action(resp['links']['actions'][0]['id'])
 
         get_resp = client().droplets.get(droplet_id)
         droplet = get_resp['droplet']
@@ -180,7 +156,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
                 config.authentication_config['ssh_public_key'])['fingerprint']
         ],
         'tags': ['skypilot', cluster_name_on_cloud],
-        'user_data': 'snap install docker'
+        'user_data': constants.INSTALL_DOCKER,
     }
     instance = _create_droplet(instance_request)
 
@@ -197,7 +173,6 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     try:
         action_response = client().volume_actions.post_by_id(
             volume['id'], attach_request)
-        _wait_for_action(action_response['action']['id'])
     except HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err

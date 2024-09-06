@@ -1181,6 +1181,7 @@ def test_kubernetes_storage_mounts():
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
     ])
+@pytest.mark.no_do
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
     name = _get_cluster_name()
@@ -1662,6 +1663,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.no_do
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = _get_cluster_name()
