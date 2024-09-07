@@ -336,13 +336,17 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
     the status in a while loop as in `log_lib._follow_job_logs`. Otherwise, use
     `get_status`.
     """
-    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
-                           (job_id,))
-    for (status,) in rows:
-        if status is None:
-            return None
-        return JobStatus(status)
-    return None
+
+    def db_operation():
+        rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
+                               (job_id,))
+        for (status,) in rows:
+            if status is None:
+                return None
+            return JobStatus(status)
+        return None
+
+    return db_utils.retry_on_database_locked(db_operation)
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
