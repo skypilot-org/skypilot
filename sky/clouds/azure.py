@@ -61,9 +61,8 @@ class Azure(clouds.Cloud):
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     # Azure does not support high disk and ultra disk tier.
-    _SUPPORTED_DISK_TIERS = (
-        set(resources_utils.DiskTier) -
-        {resources_utils.DiskTier.ULTRA})
+    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
+                             {resources_utils.DiskTier.ULTRA})
 
     _INDENT_PREFIX = ' ' * 4
 
