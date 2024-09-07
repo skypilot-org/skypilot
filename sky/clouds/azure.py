@@ -643,12 +643,3 @@ class Azure(clouds.Cloud):
             resources_utils.DiskTier.LOW: 'Standard_LRS',
         }
         return tier2name[tier]
-
-    @classmethod
-    def _get_disk_performance_tier(
-            cls,
-            disk_tier: Optional[resources_utils.DiskTier]) -> Optional[str]:
-        tier = cls._translate_disk_tier(disk_tier)
-        if tier == resources_utils.DiskTier.HIGH:
-            return 'P50'
-        return None

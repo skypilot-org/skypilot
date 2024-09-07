@@ -281,6 +281,7 @@ def _create_instances(
         disks = compute_client.disks.list_by_resource_group(resource_group)
         for disk in disks:
             name = disk.name
+            # TODO(tian): Investigate if we can use Python SDK to update this.
             subprocess_utils.run_no_outputs(
                 f'az disk update -n {name} -g {resource_group} '
                 f'--set tier={performance_tier}')
