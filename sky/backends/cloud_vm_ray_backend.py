@@ -2670,8 +2670,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             continue
                         self_count = example_resource.accelerators[acc]
                         existing_count = launched_resources.accelerators[acc]
-                        if (isinstance(existing_count, float) and
-                                not existing_count.is_integer() and
+                        if (isinstance(self_count, float) and
+                                isinstance(existing_count, float) and
                                 not math.isclose(self_count, existing_count)):
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.ResourcesMismatchError(
