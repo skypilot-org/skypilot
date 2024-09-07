@@ -276,8 +276,8 @@ def _create_instances(
         parameters=parameters,
     ).wait()
 
-    if 'disk_performance_tier' in provider_config:
-        performance_tier = provider_config['disk_performance_tier']
+    performance_tier = node_config.get('disk_performance_tier', None)
+    if performance_tier is not None:
         disks = compute_client.disks.list_by_resource_group(resource_group)
         for disk in disks:
             name = disk.name
