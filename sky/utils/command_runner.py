@@ -666,6 +666,10 @@ class KubernetesCommandRunner(CommandRunner):
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
 
+    @property
+    def node_id(self) -> str:
+        return f'{self.context}-{self.namespace}-{self.pod_name}'
+
     @timeline.event
     def run(
             self,
