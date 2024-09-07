@@ -3181,7 +3181,7 @@ def show_gpus(
             yield from tpu_table.get_string()
 
             # Other GPUs
-            if show_all:
+            if show_all or cloud is not None:
                 yield '\n\n'
                 for gpu, qty in sorted(result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
