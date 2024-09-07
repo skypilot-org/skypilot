@@ -98,7 +98,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 # Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
 # TODO(zhwu,tian): Support fractional GPUs on k8s as well.
 AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS = {
-    f'Standard_NV{vcpu}ads_A10_v5': vcpu / 24 for vcpu in [6, 12, 18]
+    f'Standard_NV{vcpu}ads_A10_v5': vcpu / 36 for vcpu in [6, 12, 18]
 }
 
 USEFUL_COLUMNS = [
