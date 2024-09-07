@@ -2,6 +2,7 @@
 import contextlib
 import sqlite3
 import threading
+import time
 from typing import Any, Callable, Optional
 
 
@@ -73,6 +74,28 @@ def rename_column(
     conn.commit()
 
 
+def retry_on_database_locked(func: Callable,
+                             max_retries: int = 5,
+                             retry_delay: float = 0.1):
+    """Retry a database operation if it fails due to database lock."""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except sqlite3.OperationalError as e:
+            if 'database is locked' in str(e) and attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                raise
+    raise sqlite3.OperationalError(
+        'Database operation failed after maximum retries')
+
+
+def enable_wal_mode(conn: 'sqlite3.Connection'):
+    """Enable WAL mode for the given SQLite connection."""
+    conn.execute('PRAGMA journal_mode=WAL;')
+    conn.commit()
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -83,4 +106,5 @@ class SQLiteConn(threading.local):
         # errors. This is a hack, but it works.
         self.conn = sqlite3.connect(db_path, timeout=10)
         self.cursor = self.conn.cursor()
+        enable_wal_mode(self.conn)  # Enable WAL mode
         create_table(self.cursor, self.conn)
