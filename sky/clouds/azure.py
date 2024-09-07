@@ -476,7 +476,7 @@ class Azure(clouds.Cloud):
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
         try:
-            cls.get_current_user_identity()
+            cls.get_active_user_identity()
         except exceptions.CloudUserIdentityError as e:
             return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
                            f'{cls._INDENT_PREFIX}Details: '
@@ -509,7 +509,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_active_user_identity(cls) -> Optional[List[str]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
@@ -554,8 +554,8 @@ class Azure(clouds.Cloud):
         return [f'{account_email} [subscription_id={project_id}]']
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return user_identity[0]

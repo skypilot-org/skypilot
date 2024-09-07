@@ -258,8 +258,8 @@ class Lambda(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO(ewzeng): Implement get_current_user_identity for Lambda
+    def get_active_user_identity(cls) -> Optional[List[str]]:
+        # TODO(ewzeng): Implement get_active_user_identity for Lambda
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:

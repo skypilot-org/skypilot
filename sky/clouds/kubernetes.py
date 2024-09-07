@@ -450,7 +450,16 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
-    def get_supported_identities(cls) -> List[List[str]]:
+    def get_active_user_identity(cls) -> Optional[List[str]]:
+        k8s = kubernetes.kubernetes
+        try:
+            _, current_context = k8s.config.list_kube_config_contexts()
+            return [cls.get_identity_from_context(current_context)]
+        except k8s.config.config_exception.ConfigException:
+            return None
+
+    @classmethod
+    def get_user_identities(cls) -> List[List[str]]:
         k8s = kubernetes.kubernetes
         identities = []
         try:
@@ -458,7 +467,7 @@ class Kubernetes(clouds.Cloud):
         except k8s.config.config_exception.ConfigException:
             return []
         # Add current context at the head of the list
-        current_identity = cls.get_current_user_identity()
+        current_identity = cls.get_active_user_identity()
         if not current_identity:
             return []
         identities.append(current_identity)
@@ -466,15 +475,6 @@ class Kubernetes(clouds.Cloud):
             identity_str = cls.get_identity_from_context(context)
             identities.append([identity_str])
         return identities
-
-    @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.kubernetes
-        try:
-            _, current_context = k8s.config.list_kube_config_contexts()
-            return [cls.get_identity_from_context(current_context)]
-        except k8s.config.config_exception.ConfigException:
-            return None
 
     @classmethod
     def is_label_valid(cls, label_key: str,

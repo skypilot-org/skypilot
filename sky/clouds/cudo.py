@@ -328,7 +328,7 @@ class Cudo(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_active_user_identity(cls) -> Optional[List[str]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None

@@ -715,7 +715,7 @@ class GCP(clouds.Cloud):
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            identity = cls.get_current_user_identity()
+            identity = cls.get_active_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 exceptions.CloudUserIdentityError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
@@ -826,7 +826,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
-            account = cls.get_current_user_identity()[0]
+            account = cls.get_active_user_identity()[0]
         except exceptions.CloudUserIdentityError:
             return None
         if GCPIdentityType.SERVICE_ACCOUNT.value in account:
@@ -835,7 +835,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> List[str]:
+    def get_active_user_identity(cls) -> List[str]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -869,8 +869,8 @@ class GCP(clouds.Cloud):
         return [f'{account} [project_id={project_id}]']
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return user_identity[0].replace('\n', '')

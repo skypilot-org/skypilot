@@ -547,7 +547,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            identity_str = cls.get_current_user_identity_str()
+            identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -584,7 +584,7 @@ class AWS(clouds.Cloud):
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
-            # `get_current_user_identity` does not guarantee this file exists.
+            # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
@@ -648,7 +648,7 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_active_user_identity(cls) -> Optional[List[str]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
         These fields come from `aws sts get-caller-identity`. We permit the same
@@ -755,8 +755,8 @@ class AWS(clouds.Cloud):
         return user_ids
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         identity_str = f'{user_identity[0]} [account={user_identity[1]}]'

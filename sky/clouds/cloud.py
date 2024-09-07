@@ -441,7 +441,7 @@ class Cloud:
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_active_user_identity(cls) -> Optional[List[str]]:
         """(Advanced) Returns currently active user identity of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they
@@ -470,13 +470,14 @@ class Cloud:
         When performing an identity check between the current active identity
         and the owner identity associated with a cluster, we compare the two
         lists in order: if a position does not match, we go to the next. To
-        see an example, see the docstring of the AWS.get_current_user_identity.
+        see an example, see the docstring of the AWS.get_active_user_identity.
 
 
         Example identities (see cloud implementations):
             - AWS: [UserId, AccountId]
             - GCP: [email address + project ID]
             - Azure: [email address + subscription ID]
+            - Kubernetes: [context name]
 
         Returns:
             None if the cloud does not have a concept of user identity
@@ -489,24 +490,40 @@ class Cloud:
         return None
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        """Returns a user friendly representation of the current identity."""
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        """Returns a user friendly representation of the active identity."""
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return ', '.join(user_identity)
 
-    def get_supported_identities(self) -> Optional[List[List[str]]]:
-        """Returns the supported identities of the cloud.
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """Returns all available user identities of this cloud.
 
-        The supported identities are the identities that SkyPilot can switch to
-        without requiring the user to manually switch the cloud credentials.
+        See get_active_user_identity for definition of user identity.
+
+        This method returns a list of user identities, with the current active
+        identity being the first element. Most clouds have only one identity
+        available, so the returned list will only have one element: the current
+        active identity.
+
+        However, some clouds (e.g., Kubernetes) can have multiple current
+        identities (e.g., multiple contexts configured in kubeconfig) that
+        can be dynamically switched, so the list can have multiple elements.
+
+        Example return values:
+            - AWS: [[UserId, AccountId]]
+            - GCP: [[email address + project ID]]
+            - Azure: [[email address + subscription ID]]
+            - Kubernetes: [[current active context], [context 2], ...]
 
         Returns:
             None if the cloud does not have a concept of user identity;
-            otherwise the supported identities that SkyPilot can switch to.
+            otherwise all the user identities.
         """
-        raise NotImplementedError
+        active_identity = cls.get_active_user_identity()
+        return [active_identity] if active_identity is not None else None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
