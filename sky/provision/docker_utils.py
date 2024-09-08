@@ -196,21 +196,21 @@ class DockerInitializer:
                 if [[ $docker_installed -eq 1 ]]
                 then
                     # wait for docker daemon to be ready
-                    docker_ready=0
+                    docker_socket_ready=0
                     end_time=$((SECONDS + _docker_socket_wait_timeout_seconds))
                     while [ $SECONDS -lt $end_time ]; do
                         if {self.docker_cmd} info >/dev/null 2>&1; then
-                            echo "docker_ready:" "Y"
-                            docker_ready=1
+                            echo "docker_socket_ready:" "Y"
+                            docker_socket_ready=1
                             break
                         else
                             exec su -l $USER
                             sleep 5
                         fi
                     done
-                    if [[ $docker_ready -eq 0 ]]
+                    if [[ $docker_socket_ready -eq 0 ]]
                     then
-                        echo "docker_ready:" "N"
+                        echo "docker_socket_ready:" "N"
                     fi
 
                     # check runtime info
@@ -243,7 +243,12 @@ class DockerInitializer:
                 if k == 'MemAvailable':
                     k = 'mem_available_in_kb'
                     v = int(v.split()[0])  # type: ignore
-                ret[k] = v
+                if k in [
+                        'docker_installed', 'docker_socket_ready',
+                        'docker_runtime', 'container_status', 'container_image',
+                        'mem_available_in_kb', 'status_checking_completed'
+                ]:  # robust parsing
+                    ret[k] = v
         return ret
 
     def initialize(self) -> str:
