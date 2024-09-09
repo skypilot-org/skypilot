@@ -18,8 +18,6 @@ kubernetes = common.LazyImport('kubernetes',
 urllib3 = common.LazyImport('urllib3',
                             import_error_message=_IMPORT_ERROR_MESSAGE)
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 _configured = False
 _core_api = None
 _auth_api = None
