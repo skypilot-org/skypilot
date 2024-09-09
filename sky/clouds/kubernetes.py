@@ -316,8 +316,6 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
-            'k8s_context':
-                kubernetes_utils.get_current_kube_config_context_name(),
             'k8s_port_mode': port_mode.value,
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
@@ -334,6 +332,12 @@ class Kubernetes(clouds.Cloud):
             'k8s_spot_label_value': spot_label_value,
             'image_id': image_id,
         }
+
+        # Add kubecontext if it is set. It may be None if SkyPilot is running
+        # inside a pod with in-cluster auth.
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context is not None:
+            deploy_vars['k8s_context'] = curr_context
 
         return deploy_vars
 
