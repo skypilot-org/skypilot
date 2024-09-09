@@ -882,6 +882,11 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", encoding="utf-8"))\''
     )
 
+    # We disable conda auto-activation if the user has specified a docker image
+    # to use, which is likely to already have a conda environment activated.
+    conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
+                           else 'false')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -916,10 +921,11 @@ def write_cluster_config(
                 'specific_reservations': specific_reservations,
 
                 # Conda setup
-                'conda_installation_commands':
-                    constants.CONDA_INSTALLATION_COMMANDS,
                 # We should not use `.format`, as it contains '{}' as the bash
                 # syntax.
+                'conda_installation_commands':
+                    constants.CONDA_INSTALLATION_COMMANDS.replace(
+                        '{conda_auto_activate}', conda_auto_activate),
                 'ray_skypilot_installation_commands':
                     (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
                         '{sky_wheel_hash}',

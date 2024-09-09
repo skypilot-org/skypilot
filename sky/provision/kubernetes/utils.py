@@ -110,8 +110,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
-    if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
-        # A100-80GB, L4 and H100-80GB have a different name pattern.
+    if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB'):
+        # A100-80GB, L4, H100-80GB and H100-MEGA-80GB
+        # have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
@@ -194,13 +195,10 @@ class GKELabelFormatter(GPULabelFormatter):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
             acc = value.replace('nvidia-', '').upper()
-            if acc in ['H100-80GB', 'H100-MEGA-80GB']:
-                # H100 is named H100-80GB or H100-MEGA-80GB in GKE,
-                # where the latter has improved bandwidth.
-                # See a3-mega instances on GCP.
-                # TODO: we do not distinguish the two GPUs for simplicity,
-                # but we can evaluate whether we should distinguish
-                # them based on users' requests.
+            if acc == 'H100-80GB':
+                # H100 can be either H100-80GB or H100-MEGA-80GB in GKE
+                # we map H100 ---> H100-80GB and keep H100-MEGA-80GB
+                # to distinguish between a3-high and a3-mega instances
                 return 'H100'
             return acc
         else:
@@ -937,7 +935,8 @@ def construct_ssh_jump_command(
         ssh_jump_user: str = 'sky',
         proxy_cmd_path: Optional[str] = None,
         proxy_cmd_target_pod: Optional[str] = None,
-        current_kube_context: Optional[str] = None) -> str:
+        current_kube_context: Optional[str] = None,
+        current_kube_namespace: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
@@ -951,9 +950,12 @@ def construct_ssh_jump_command(
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
         kube_context_flag = f' {current_kube_context}' if (current_kube_context
                                                            is not None) else ''
+        kube_namespace_flag = f' {current_kube_namespace}' if (
+            current_kube_namespace is not None) else ''
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
                                    f'{proxy_cmd_target_pod}'
-                                   f'{kube_context_flag}\'')
+                                   f'{kube_context_flag}'
+                                   f'{kube_namespace_flag}\'')
     return ssh_jump_proxy_command
 
 
@@ -1019,13 +1021,18 @@ def get_ssh_proxy_command(
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
         current_context = get_current_kube_config_context_name()
+        current_namespace = get_current_kube_config_context_namespace()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
             ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
             proxy_cmd_path=ssh_jump_proxy_command_path,
             proxy_cmd_target_pod=k8s_ssh_target,
-            current_kube_context=current_context)
+            # We embed both the current context and namespace to the SSH proxy
+            # command to make sure SSH still works when the current
+            # context/namespace is changed by the user.
+            current_kube_context=current_context,
+            current_kube_namespace=current_namespace)
     return ssh_jump_proxy_command
 
 
