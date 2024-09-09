@@ -5,11 +5,19 @@ Deploy SkyPilot on existing infrastructure
 
 This page will help you deploy SkyPilot on your existing infrastructure - whether it's on-premises machines or reserved instances on a cloud provider.
 
-Given a list of IP addresses and SSH keys, the ``deploy.sh`` script will install necessary
-dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
+**Simply provide a list of IP addresses and SSH keys,**
+the `deploy.sh <https://github.com/skypilot-org/skypilot/blob/onprem_deploy_script/examples/onprem_deployment/deploy.sh>`_
+script will install necessary dependencies on the remote machines and configure
+SkyPilot to run jobs and services on the cluster.
 
-Behind the scenes, the script deploys a lightweight Kubernetes cluster on the remote machines using `k3s <https://k3s.io/>`_.
-Note that no Kubernetes knowledge is required - SkyPilot abstracts away the complexity of Kubernetes and provides a simple interface to run your jobs and services.
+At the end of this guide, you will be able to use SkyPilot to run jobs or services
+on your own pre-existing infrastructure.
+
+.. note::
+
+    Behind the scenes, the script deploys a lightweight Kubernetes cluster on the remote machines using `k3s <https://k3s.io/>`_.
+
+    Note that no Kubernetes knowledge is required. SkyPilot abstracts away the complexity of Kubernetes and provides a simple interface to run your jobs and services.
 
 Prerequisites
 -------------
@@ -23,13 +31,13 @@ Prerequisites
 
 * Debian-based OS (tested on Debian 11)
 * SSH access with key-based authentication
-  * All machines must use the same SSH key and username
+* All machines must use the same SSH key and username
 * Port 6443 must be accessible on the head node from your local machine
 
 Deployment steps
 ----------------
 
-1. Create ``ips.txt`` with the IP addresses of your machines with one IP per line (like a MPI hostfile).
+1. Create a test file ``ips.txt`` with the IP addresses of your machines with one IP per line (like a MPI hostfile).
    The first node will be used as the head node. Here is an example ``ips.txt`` file:
 
    .. code-block:: text
@@ -70,7 +78,7 @@ Deployment steps
 
       sky check kubernetes
 
-   You can now use SkyPilot to launch your development clusters and training jobs on your own infrastructure.
+   You can now use SkyPilot to launch your :ref:`development clusters <dev-cluster>` and `training jobs <ai-training>` on your own infrastructure.
 
    .. code-block:: console
 
@@ -90,13 +98,16 @@ Deployment steps
 
    You can optionally use ``kubectl`` to interact with the cluster.
 
-5. To teardown the Kubernetes cluster and clean up, use the ``--cleanup`` flag:
+Cleanup
+-------
 
-   .. code-block:: bash
+To teardown the Kubernetes cluster and clean up all state created by deploy.sh, use the ``--cleanup`` flag:
 
-      IP_FILE=ips.txt
-      USERNAME=username
-      SSH_KEY=path/to/ssh/key
-      ./deploy.sh $IP_FILE $USERNAME $SSH_KEY --cleanup
+.. code-block:: bash
 
-   This will stop all Kubernetes services on the remote machines.
+    IP_FILE=ips.txt
+    USERNAME=username
+    SSH_KEY=path/to/ssh/key
+    ./deploy.sh $IP_FILE $USERNAME $SSH_KEY --cleanup
+
+This will stop all Kubernetes services on the remote machines.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Refer to https://skypilot.readthedocs.io/en/latest/reservations/existing-clusters.html for details on how to use this script.
 set -e
 
 # Colors for nicer UX
