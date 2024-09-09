@@ -58,12 +58,11 @@ class Azure(clouds.Cloud):
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
-    _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     # Azure does not support high disk and ultra disk tier.
-    _SUPPORTED_DISK_TIERS = (
-        set(resources_utils.DiskTier) -
-        {resources_utils.DiskTier.HIGH, resources_utils.DiskTier.ULTRA})
+    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
+                             {resources_utils.DiskTier.ULTRA})
 
     _INDENT_PREFIX = ' ' * 4
 
@@ -361,7 +360,9 @@ class Azure(clouds.Cloud):
                 start_index += 1
             assert False, 'Low disk tier should always be supported on Azure.'
 
-        return {
+        disk_tier = _failover_disk_tier()
+
+        resources_vars = {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'num_gpus': acc_count,
@@ -371,11 +372,17 @@ class Azure(clouds.Cloud):
             'zones': None,
             **image_config,
             'need_nvidia_driver_extension': need_nvidia_driver_extension,
-            'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
+            'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
         }
+
+        # Setting disk performance tier for high disk tier.
+        if disk_tier == resources_utils.DiskTier.HIGH:
+            resources_vars['disk_performance_tier'] = 'P50'
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
@@ -600,10 +607,10 @@ class Azure(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
-        if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
+        if disk_tier == resources_utils.DiskTier.ULTRA:
             return False, (
-                'Azure disk_tier={high, ultra} is not supported now. '
-                'Please use disk_tier={low, medium, best} instead.')
+                'Azure disk_tier=ultra is not supported now. '
+                'Please use disk_tier={low, medium, high, best} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         if cls._get_disk_type(
@@ -611,7 +618,7 @@ class Azure(clouds.Cloud):
         ) == 'Premium_LRS' and not Azure._is_s_series(instance_type):
             return False, (
                 'Azure premium SSDs are only supported for S-series '
-                'instances. To use disk_tier=medium, please make sure '
+                'instances. To use disk_tier>=medium, please make sure '
                 'instance_type is specified to an S-series instance.')
         return True, ''
 
@@ -631,7 +638,7 @@ class Azure(clouds.Cloud):
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
             resources_utils.DiskTier.ULTRA: 'Disabled',
-            resources_utils.DiskTier.HIGH: 'Disabled',
+            resources_utils.DiskTier.HIGH: 'Premium_LRS',
             resources_utils.DiskTier.MEDIUM: 'Premium_LRS',
             resources_utils.DiskTier.LOW: 'Standard_LRS',
         }
