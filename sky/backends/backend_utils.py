@@ -1610,6 +1610,9 @@ def check_owner_identity(cluster_name: str) -> None:
             err_msg = f'the activated account is {user_identities[0]!r}.'
         else:
             err_msg = (f'available accounts are {user_identities!r}.')
+        if cloud.is_same_cloud(clouds.Kubernetes()):
+            err_msg += (' Check your kubeconfig file and make sure the '
+                        'correct context is available.')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'{cluster_name!r} ({cloud}) is owned by account '
