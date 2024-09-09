@@ -723,8 +723,7 @@ class KubernetesCommandRunner(CommandRunner):
         if connect_timeout is None:
             connect_timeout = _DEFAULT_CONNECT_TIMEOUT
         kubectl_args = [
-            '--pod-running-timeout', f'{connect_timeout}s', '-n',
-            self.namespace
+            '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
         ]
         if self.context:
             kubectl_args += ['--context', self.context]

@@ -956,8 +956,8 @@ def construct_ssh_jump_command(
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
-        kube_context_flag = f'-c {current_kube_context} ' if (current_kube_context
-                                                           is not None) else ''
+        kube_context_flag = f'-c {current_kube_context} ' if (
+            current_kube_context is not None) else ''
         kube_namespace_flag = f'-n {current_kube_namespace} ' if (
             current_kube_namespace is not None) else ''
         ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
