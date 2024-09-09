@@ -1448,7 +1448,8 @@ class S3Store(AbstractStore):
             logger.info(
                 f'Created S3 bucket {bucket_name!r} in {region or "us-east-1"}')
 
-            # add tags to the bucket
+            # Add AWS tags configured in config.yaml to the bucket.
+            # This is useful for cost tracking and external cleanup.
             bucket_tags = skypilot_config.get_nested(('aws', 'labels'), {})
             if bucket_tags:
                 s3_client.put_bucket_tagging(
