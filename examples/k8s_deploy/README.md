@@ -1,15 +1,11 @@
-# Deploying a Kubernetes cluster on Lambda in 1-click with SkyPilot
+# Deploying a Kubernetes cluster on the cloud in 1-click with SkyPilot
 
-This example demonstrates how to deploy a Kubernetes cluster on Lambda instances.
+This example demonstrates how to deploy a Kubernetes cluster on the cloud with SkyPilot. For the purposes of this guide, we will use lambda cloud as the cloud provider, but you can change cloud providers by editing `deploy_k8s.yaml`.
 
 ## Prerequisites
-1. SkyPilot installed from `lambda_k8s` branch:
+1. Latest SkyPilot nightly release:
 ```bash
-git clone https://github.com/skypilot-org/skypilot.git
-cd skypilot
-
-git checkout lambda_k8s
-pip install -e ".[lambda,kubernetes]"
+pip install "skypilot-nightly[lambda,kubernetes]"
 ```
 
 2. On your lambda cloud dashboard, configure the firewall to allow inbound connections on port `443` and `6443` (required to expose k8s API server).
