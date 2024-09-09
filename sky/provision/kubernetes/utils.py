@@ -58,7 +58,9 @@ KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
 # Port-forward proxy command constants
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.sh'
-PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/kubernetes-port-forward-proxy-command.sh'
+# We add a version suffix to the port-forward proxy command to ensure backward
+# compatibility and avoid overwriting the older version.
+PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/kubernetes-port-forward-proxy-command-v2.sh'
 
 logger = sky_logging.init_logger(__name__)
 
