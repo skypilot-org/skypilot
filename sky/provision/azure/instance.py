@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import azure
 from sky.provision import common
@@ -27,8 +28,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-USE_AZ_ML = True
-
 # Suppress noisy logs from Azure SDK. Reference:
 # https://github.com/Azure/azure-sdk-for-python/issues/9422
 azure_logger = logging.getLogger('azure')
@@ -42,6 +41,10 @@ _WAIT_CREATION_TIMEOUT_SECONDS = 600
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
+
+
+def _use_az_ml() -> bool:
+    return skypilot_config.get_nested(('azure', 'use_az_ml'), False)
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -146,7 +149,7 @@ def _get_azure_sdk_function(client: Any, function_name: str) -> Callable:
 
 def _get_instance_ips(network_client, vm, resource_group: str,
                       use_internal_ips: bool) -> Tuple[str, Optional[str]]:
-    if USE_AZ_ML:
+    if _use_az_ml():
         ns = vm.network_settings
         external_ip = ns.public_ip_address if not use_internal_ips else None
         return (ns.private_ip_address, external_ip)
@@ -194,9 +197,10 @@ def _get_workspace_name(cluster_name_on_cloud: str) -> str:
     return f'{cluster_name_on_cloud}-ws'
 
 
-def _create_ml_client(subscription_id, resource_group, cluster_name_on_cloud,
-                      location):
-    if not USE_AZ_ML:
+def _create_ml_client(subscription_id: str, resource_group: str,
+                      cluster_name_on_cloud,
+                      location: str) -> Optional['ml.MLClient']:
+    if not _use_az_ml():
         return None
     workspace_name = _get_workspace_name(cluster_name_on_cloud)
     ml_client = azure.get_client('ml',
@@ -204,9 +208,11 @@ def _create_ml_client(subscription_id, resource_group, cluster_name_on_cloud,
                                  resource_group=resource_group,
                                  workspace_name=workspace_name)
     try:
-        ml_client.workspaces.get(workspace_name)
+        get = _get_azure_sdk_function(ml_client.workspaces, 'get')
+        get(workspace_name)
     except azure.exceptions().ResourceNotFoundError:
         logger.info(f'Cannot find workspace {workspace_name}. Creating...')
+        # TODO(tian): Suppress logs from Azure ML.
         workspace = azure.create_az_ml_workspace(
             name=workspace_name,
             location=location,
@@ -250,20 +256,27 @@ def _create_instances(
 
     template_params = node_config['azure_arm_parameters'].copy()
 
-    if USE_AZ_ML:
+    if _use_az_ml():
         assert ml_client is not None, ml_client
 
         pollers = []
         for c in range(count):
             ins = azure.create_az_ml_compute_instance(
-                name=f'{vm_name}-{c}',
+                # Azure ML Instance name cannot ended with a dash and a number.
+                # e.g. cluster-1 is not allowed. So we use -n{c} suffix here.
+                name=f'{cluster_name_on_cloud}-n{c}',
+                # TODO(tian): Check if instance type is supported by Azure ML.
+                # Maybe we need to have a dedicated catalog for it.
                 size=template_params['vmSize'],
                 tags=node_tags,
                 ssh_public_access_enabled=True,
                 ssh_settings=azure.create_az_ml_compute_instance_ssh_settings(
                     ssh_key_value=template_params['publicKey']),
+                network_settings=azure.create_az_ml_network_settings(
+                    subnet=provider_config['subnet']),
                 enable_node_public_ip=not use_internal_ips,
                 # TODO(tian): Add creation script
+                # TODO(tian): Check if A10 works properly
             )
             pollers.append(ml_client.begin_create_or_update(ins))
         for poller in pollers:
@@ -401,7 +414,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         tags = target_instance.tags
         tags.update(new_instance_tags)
 
-        if USE_AZ_ML:
+        if _use_az_ml():
+            assert ml_client is not None, 'ml_client is None'
             ins = azure.create_az_ml_compute_instance(name=target_instance.name,
                                                       tags=tags)
             ml_client.begin_create_or_update(ins).result()
@@ -614,7 +628,8 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=inst.tags,
-                ssh_port=50000 if USE_AZ_ML else 22,
+                # Azure ML instances have different default ports.
+                ssh_port=inst.ssh_settings.ssh_port if _use_az_ml() else 22,
             )
         ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
@@ -646,16 +661,18 @@ def stop_instances(
 
     nodes = _filter_instances(compute_client, ml_client, resource_group,
                               tag_filters)
-    if USE_AZ_ML:
+    if _use_az_ml():
+        assert ml_client is not None, 'ml_client is None'
         with pool.ThreadPool() as p:
-            p.starmap(ml_client.compute.begin_stop,
-                      [(node.name,) for node in nodes])
-        return
-    stop_virtual_machine = _get_azure_sdk_function(
-        client=compute_client.virtual_machines, function_name='deallocate')
-    with pool.ThreadPool() as p:
-        p.starmap(stop_virtual_machine,
-                  [(resource_group, node.name) for node in nodes])
+            stop_az_ml_instance = _get_azure_sdk_function(
+                client=ml_client.compute, function_name='stop')
+            p.starmap(stop_az_ml_instance, [(node.name,) for node in nodes])
+    else:
+        stop_virtual_machine = _get_azure_sdk_function(
+            client=compute_client.virtual_machines, function_name='deallocate')
+        with pool.ThreadPool() as p:
+            p.starmap(stop_virtual_machine,
+                      [(resource_group, node.name) for node in nodes])
 
 
 def terminate_instances(
@@ -674,41 +691,46 @@ def terminate_instances(
                                   cluster_name_on_cloud,
                                   provider_config['location'])
     if worker_only:
-        delete_virtual_machine = _get_azure_sdk_function(
-            client=compute_client.virtual_machines, function_name='delete')
         filters = {
             constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
             constants.TAG_RAY_NODE_KIND: 'worker'
         }
         nodes = _filter_instances(compute_client, ml_client, resource_group,
                                   filters)
-        if USE_AZ_ML:
+        if _use_az_ml():
+            assert ml_client is not None, 'ml_client is None'
+            delete_az_ml_instance = _get_azure_sdk_function(
+                client=ml_client.compute, function_name='delete')
             with pool.ThreadPool() as p:
-                p.starmap(ml_client.compute.begin_delete,
+                p.starmap(delete_az_ml_instance,
                           [(node.name,) for node in nodes])
-            return
-        with pool.ThreadPool() as p:
-            p.starmap(delete_virtual_machine,
-                      [(resource_group, node.name) for node in nodes])
+        else:
+            delete_virtual_machine = _get_azure_sdk_function(
+                client=compute_client.virtual_machines, function_name='delete')
+            with pool.ThreadPool() as p:
+                p.starmap(delete_virtual_machine,
+                          [(resource_group, node.name) for node in nodes])
         return
 
     assert provider_config is not None, cluster_name_on_cloud
 
-    if USE_AZ_ML:
+    # TODO(tian): Do we really need this? Does clean up workspace means that
+    # all workspaces and AZ ML instances are deleted?
+    if _use_az_ml():
+        assert ml_client is not None, 'ml_client is None'
         all_nodes = _filter_instances(
             compute_client, ml_client, resource_group,
             {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud})
-        # TODO(tian): Does delete workspace means cleanup the compute instances?
         with pool.ThreadPool() as p:
             p.starmap(ml_client.compute.begin_delete,
                       [(node.name,) for node in all_nodes])
         workspace_name = _get_workspace_name(cluster_name_on_cloud)
-        # TODO(tian): Does delete resource group means cleanup the workspace?
         ml_client.workspaces.begin_delete(
             workspace_name,
             delete_dependent_resources=True,
             permanently_delete=True,
         ).wait()
+        ml_client.workspaces.begin_create
 
     resource_group_client = azure.get_client('resource', subscription_id)
     delete_resource_group = _get_azure_sdk_function(
@@ -727,7 +749,7 @@ def terminate_instances(
 def _get_instance_status(
         compute_client: 'azure_compute.ComputeManagementClient', vm,
         resource_group: str) -> Optional[AzureInstanceStatus]:
-    if USE_AZ_ML:
+    if _use_az_ml():
         return AzureInstanceStatus.from_raw_states(vm.provisioning_state,
                                                    vm.state.lower())
     try:
@@ -769,9 +791,11 @@ def _filter_instances(
         return True
 
     try:
-        if USE_AZ_ML:
+        if _use_az_ml():
             assert ml_client is not None, 'ml_client is None'
-            vms = ml_client.compute.list()
+            list_az_ml_instance = _get_azure_sdk_function(
+                client=ml_client.compute, function_name='list')
+            vms = list_az_ml_instance()
         else:
             list_virtual_machines = _get_azure_sdk_function(
                 client=compute_client.virtual_machines, function_name='list')
@@ -833,7 +857,7 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    if USE_AZ_ML:
+    if _use_az_ml():
         logger.debug('Azure ML does not support opening ports yet.')
         return
     assert provider_config is not None, cluster_name_on_cloud
@@ -904,7 +928,7 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    if USE_AZ_ML:
+    if _use_az_ml():
         logger.debug('Azure ML does not support opening ports yet.')
         return
     # Azure will automatically cleanup network security groups when cleanup

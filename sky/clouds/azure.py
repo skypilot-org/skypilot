@@ -13,6 +13,7 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.utils import common_utils
@@ -58,6 +59,10 @@ class Azure(clouds.Cloud):
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+    # Azure ML has a 24 character limit for instance names. Here we reserve 4
+    # characters for the multi-node suffix '-n{c}'. Please reference to
+    # sky/provision/azure/instance.py::_create_instances for more details.
+    _AZ_ML_MAX_NAME_LEN_LIMIT = 20
     _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
     # Azure does not support high disk and ultra disk tier.
@@ -86,6 +91,8 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def max_cluster_name_length(cls) -> int:
+        if skypilot_config.get_nested(('azure', 'use_az_ml'), False):
+            return cls._AZ_ML_MAX_NAME_LEN_LIMIT
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_to_hourly_cost(self,

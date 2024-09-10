@@ -482,6 +482,12 @@ def create_az_ml_compute_instance_ssh_settings(**kwargs):
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
+def create_az_ml_network_settings(**kwargs):
+    from azure.ai.ml import entities
+    return entities.NetworkSettings(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def deployment_mode():
     """Azure deployment mode."""
     from azure.mgmt.resource.resources.models import DeploymentMode

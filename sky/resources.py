@@ -221,6 +221,9 @@ class Resources:
 
         self._cluster_config_overrides = _cluster_config_overrides
 
+        self._use_az_ml = skypilot_config.get_nested(('azure', 'use_az_ml'),
+                                                     False)
+
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
@@ -232,6 +235,7 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
         self._try_validate_labels()
+        self._try_validate_az_ml()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -456,6 +460,10 @@ class Resources:
         if self._cluster_config_overrides is None:
             return {}
         return self._cluster_config_overrides
+
+    @property
+    def use_az_ml(self) -> bool:
+        return self._use_az_ml
 
     @requires_fuse.setter
     def requires_fuse(self, value: Optional[bool]) -> None:
@@ -985,6 +993,18 @@ class Resources:
                 raise ValueError(
                     'The following labels are invalid:'
                     '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
+
+    def _try_validate_az_ml(self) -> None:
+        if not self.use_az_ml:
+            return
+        if self.extract_docker_image() is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Docker image is not supported for Azure Machine Learning.')
+        if self.ports is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Ports are not supported for Azure Machine Learning.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

@@ -36,6 +36,7 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -2616,6 +2617,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
+        # Check whether Azure cluster uses Azure ML API
+        if launched_resources.cloud.is_same_cloud(clouds.Azure()):
+            task_use_az_ml = skypilot_config.get_nested(('azure', 'use_az_ml'),
+                                                        False)
+            cluster_use_az_ml = launched_resources.use_az_ml
+            if cluster_use_az_ml != task_use_az_ml:
+                task_str = 'uses' if task_use_az_ml else 'does not use'
+                cluster_str = 'uses' if cluster_use_az_ml else 'does not use'
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        f'Task requirements {task_str} Azure ML API, but the '
+                        f'specified cluster {cluster_name} {cluster_str} it. '
+                        f'Please set azure.use_az_ml to {cluster_use_az_ml} in '
+                        '~/.sky/config.yaml.')
+
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
         valid_resource = None
@@ -3466,6 +3482,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 is_identity_mismatch_and_purge = True
             else:
                 raise
+
+        if handle.launched_resources.cloud.is_same_cloud(clouds.Azure()):
+            task_use_az_ml = skypilot_config.get_nested(('azure', 'use_az_ml'),
+                                                        False)
+            cluster_use_az_ml = handle.launched_resources.use_az_ml
+            if cluster_use_az_ml != task_use_az_ml:
+                task_str = 'uses' if task_use_az_ml else 'does not use'
+                cluster_str = 'uses' if cluster_use_az_ml else 'does not use'
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        f'Current setup {task_str} Azure ML API, but the '
+                        f'specified cluster {cluster_name} to terminate '
+                        f'{cluster_str} it. Please set azure.use_az_ml '
+                        f'to {cluster_use_az_ml} in ~/.sky/config.yaml.')
 
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
