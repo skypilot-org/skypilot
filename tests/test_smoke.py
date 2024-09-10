@@ -1205,6 +1205,9 @@ def test_kubernetes_context_switch():
 
         # Test sky queue
         f'sky queue {name}',
+
+        # Test SSH access
+        f'ssh {name} whoami',
     ]
 
     cleanup_commands = (

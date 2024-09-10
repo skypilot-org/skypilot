@@ -18,8 +18,6 @@ kubernetes = common.LazyImport('kubernetes',
 urllib3 = common.LazyImport('urllib3',
                             import_error_message=_IMPORT_ERROR_MESSAGE)
 
-_configured = False
-
 # Timeout to use for API calls
 API_TIMEOUT = 5
 
@@ -60,9 +58,6 @@ def _api_logging_decorator(logger: str, level: int):
 
 
 def _load_config(context: Optional[str] = None):
-    global _configured
-    if _configured:
-        return
     try:
         # Load in-cluster config if running in a pod
         # Kubernetes set environment variables for service discovery do not
@@ -93,53 +88,52 @@ def _load_config(context: Optional[str] = None):
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
-    _configured = True
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def auth_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.RbacAuthorizationV1Api()
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def networking_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NetworkingV1Api()
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def custom_objects_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def node_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NodeV1Api()
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
 
 
-@functools.lru_cache()
 @_api_logging_decorator('urllib3', logging.ERROR)
+@functools.lru_cache()
 def api_client(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.ApiClient()
