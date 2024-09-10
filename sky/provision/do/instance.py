@@ -6,7 +6,7 @@ import uuid
 
 from sky import sky_logging
 from sky import status_lib
-from sky.adaptors import azure
+from sky.adaptors.do import azure
 from sky.provision import common
 from sky.provision.do import constants
 from sky.provision.do import utils

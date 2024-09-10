@@ -5,14 +5,12 @@ https://github.com/digitalocean/pydo/blob/main/examples/poc_droplets_volumes_ssh
 """
 
 import os
-from typing import Any, Dict, List, Optional
 import urllib
 import uuid
-
-import pydo
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky.adaptors import azure
+from sky.adaptors import do
 from sky.provision import common
 from sky.provision.do import constants
 from sky.utils import common_utils
@@ -61,7 +59,7 @@ def _init_client():
                            'to the skypilot context,'
                            '`doctl auth init --context skypilot`') from e
 
-        _client = pydo.Client(token=api_token)
+        _client = do.pydo.Client(token=api_token)
     return _client
 
 
@@ -84,7 +82,7 @@ def ssh_key_id(public_key: str):
                     if ssh_key['public_key'] == public_key:
                         _ssh_key_id = ssh_key
                         return _ssh_key_id
-            except azure.exceptions().HttpResponseError as err:
+            except do.exceptions().HttpResponseError as err:
                 raise DigitalOceanError('Error: {0} {1}: {2}'.format(
                     err.status_code, err.reason, err.error.message)) from err
 
@@ -108,7 +106,7 @@ def _create_volume(request: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = client().volumes.create(body=request)
         volume = resp['volume']
-    except azure.exceptions().HttpResponseError as err:
+    except do.exceptions().HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err
     else:
@@ -122,7 +120,7 @@ def _create_droplet(request: Dict[str, Any]) -> Dict[str, Any]:
 
         get_resp = client().droplets.get(droplet_id)
         droplet = get_resp['droplet']
-    except azure.exceptions().HttpResponseError as err:
+    except do.exceptions().HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err
     return droplet
@@ -171,7 +169,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     attach_request = {'type': 'attach', 'droplet_id': instance['id']}
     try:
         client().volume_actions.post_by_id(volume['id'], attach_request)
-    except azure.exceptions().HttpResponseError as err:
+    except do.exceptions().HttpResponseError as err:
         raise DigitalOceanError('Error: {0} {1}: {2}'.format(
             err.status_code, err.reason, err.error.message)) from err
     logger.debug(f'{instance_name} created')
@@ -197,7 +195,7 @@ def filter_instances(
                 if status_filters is None or instance[
                         'status'] in status_filters:
                     filtered_instances[instance['name']] = instance
-        except azure.exceptions().HttpResponseError as err:
+        except do.exceptions().HttpResponseError as err:
             DigitalOceanError('Error: {0} {1}: {2}'.format(
                 err.status_code, err.reason, err.error.message))
 
