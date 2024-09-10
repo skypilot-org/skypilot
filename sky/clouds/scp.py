@@ -337,7 +337,7 @@ class SCP(clouds.Cloud):
         }
 
     @classmethod
-    def get_active_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # TODO(jgoo1): Implement get_active_user_identity for SCP
         return None
 

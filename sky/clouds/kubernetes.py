@@ -454,30 +454,20 @@ class Kubernetes(clouds.Cloud):
         return identity_str
 
     @classmethod
-    def get_active_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.kubernetes
-        try:
-            _, current_context = k8s.config.list_kube_config_contexts()
-            return [cls.get_identity_from_context(current_context)]
-        except k8s.config.config_exception.ConfigException:
-            return None
-
-    @classmethod
-    def get_user_identities(cls) -> List[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         k8s = kubernetes.kubernetes
         identities = []
         try:
-            all_contexts, _ = (k8s.config.list_kube_config_contexts())
+            all_contexts, current_context = (
+                k8s.config.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
-            return []
+            return None
         # Add current context at the head of the list
-        current_identity = cls.get_active_user_identity()
-        if not current_identity:
-            return []
+        current_identity = [cls.get_identity_from_context(current_context)]
         identities.append(current_identity)
         for context in all_contexts:
-            identity_str = cls.get_identity_from_context(context)
-            identities.append([identity_str])
+            identity = [cls.get_identity_from_context(context)]
+            identities.append(identity)
         return identities
 
     @classmethod

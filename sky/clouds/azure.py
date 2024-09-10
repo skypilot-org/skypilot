@@ -509,7 +509,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_active_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
@@ -551,7 +551,9 @@ class Azure(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure project ID.') from e
-        return [f'{account_email} [subscription_id={project_id}]']
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for Az. Currently we only support one identity.
+        return [[f'{account_email} [subscription_id={project_id}]']]
 
     @classmethod
     def get_active_user_identity_str(cls) -> Optional[str]:

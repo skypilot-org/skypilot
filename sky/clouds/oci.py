@@ -455,7 +455,7 @@ class OCI(clouds.Cloud):
         return file_mounts
 
     @classmethod
-    def get_active_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         # If the user switches the compartment_ocid, the existing clusters

@@ -826,16 +826,19 @@ class GCP(clouds.Cloud):
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
-            account = cls.get_active_user_identity()[0]
+            account = cls.get_active_user_identity()
         except exceptions.CloudUserIdentityError:
             return None
-        if GCPIdentityType.SERVICE_ACCOUNT.value in account:
+        if account is None:
+            return None
+        assert account is not None
+        if GCPIdentityType.SERVICE_ACCOUNT.value in account[0]:
             return GCPIdentityType.SERVICE_ACCOUNT
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_active_user_identity(cls) -> List[str]:
+    def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -866,7 +869,9 @@ class GCP(clouds.Cloud):
                     '  Reason: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
-        return [f'{account} [project_id={project_id}]']
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for GCP. Currently we only support one identity.
+        return [[f'{account} [project_id={project_id}]']]
 
     @classmethod
     def get_active_user_identity_str(cls) -> Optional[str]:

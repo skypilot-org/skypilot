@@ -648,7 +648,7 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    def get_active_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
         These fields come from `aws sts get-caller-identity`. We permit the same
@@ -752,7 +752,9 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_ids
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for AWS. Currently we only support one identity.
+        return [user_ids]
 
     @classmethod
     def get_active_user_identity_str(cls) -> Optional[str]:
