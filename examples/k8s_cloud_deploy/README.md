@@ -8,7 +8,9 @@ This example demonstrates how to deploy a Kubernetes cluster on the cloud with S
 pip install "skypilot-nightly[lambda,kubernetes]"
 ```
 
-2. On your lambda cloud dashboard, configure the firewall to allow inbound connections on port `443` and `6443` (required to expose k8s API server).
+2. Use a cloud which supports opening ports on SkyPilot or manually expose ports 6443 and 443 on the VMs. This is required to expose k8s API server. 
+
+   For example, if using lambda cloud, configure the firewall on the lambda cloud dashboard to allow inbound connections on port `443` and `6443`.
 
 <p align="center">
 <img src="https://i.imgur.com/uSA7BMH.png" alt="firewall" width="500"/>
@@ -16,11 +18,12 @@ pip install "skypilot-nightly[lambda,kubernetes]"
 
 ## Instructions
 
-1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node.
+1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node. If using GCP, AWS or Azure, uncomment the ports line to allow inbound connections to the Kubernetes API server. 
 ```yaml
 resources:
   cloud: lambda
   accelerators: A10:1
+  # ports: 6443
 
 num_nodes: 2
 ```
