@@ -9,8 +9,6 @@ from sky.sky_logging import set_logging_level
 from sky.utils import env_options
 from sky.utils import ux_utils
 
-# pylint: disable=import-outside-toplevel
-
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
                          'Try running: pip install "skypilot[kubernetes]"')
 kubernetes = common.LazyImport('kubernetes',
