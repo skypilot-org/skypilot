@@ -3180,19 +3180,26 @@ def show_gpus(
                 yield '\n\n'
             yield from tpu_table.get_string()
 
-            # Other GPUs
+            # Handle Other GPUs
             if show_all or cloud is not None:
                 yield '\n\n'
                 for gpu, qty in sorted(result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
                 yield '\n\n'
-            else:
+
+            # Handle hints and messages
+            if not show_all and cloud is None:
                 yield ('\n\nHint: use -a/--all to see all accelerators '
                        '(including non-common ones) and pricing.')
-                if k8s_messages:
-                    yield '\n'
-                    yield k8s_messages
+
+            # Handle k8 messages if present
+            if k8s_messages:
+                yield '\n'
+                yield k8s_messages
+
+            # Return if we're not showing all or if a specific cloud was queried
+            if not show_all or cloud is not None:
                 return
         else:
             # Parse accelerator string
