@@ -206,7 +206,7 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
 
   The regions specified that does not have the accelerator will be ignored automatically.
 
-This will genereate the following output:
+This will generate the following output:
 
 .. code-block:: console
 

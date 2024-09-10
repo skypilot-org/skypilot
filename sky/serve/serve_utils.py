@@ -490,9 +490,8 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                     raise ValueError(
                         f'The service {service_name!r} is already running. '
                         'Please specify a different name for your service. '
-                        'To update an existing service, run: `sky serve down` '
-                        'and then `sky serve up` again (in-place update will '
-                        'be supported in the future).')
+                        'To update an existing service, run: sky serve update '
+                        f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return common_utils.encode_payload(lb_port)

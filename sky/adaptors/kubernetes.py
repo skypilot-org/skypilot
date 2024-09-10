@@ -56,6 +56,7 @@ def _api_logging_decorator(logger: str, level: int):
 
 
 def _load_config(context: Optional[str] = None):
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     try:
         # Load in-cluster config if running in a pod
         # Kubernetes set environment variables for service discovery do not
