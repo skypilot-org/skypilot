@@ -210,7 +210,6 @@ def run_with_log(
 
             subprocess.Popen(
                 daemon_cmd,
-                start_new_session=True,
                 # Suppress output
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
