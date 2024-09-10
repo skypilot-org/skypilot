@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -571,7 +572,7 @@ class SSHCommandRunner(CommandRunner):
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
-        os.makedirs(log_dir, exist_ok=True)
+        log_utils.create_and_symlink_log_dir(log_dir)
 
         executable = None
         if not process_stream:
@@ -750,7 +751,7 @@ class KubernetesCommandRunner(CommandRunner):
         ]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
-        os.makedirs(log_dir, exist_ok=True)
+        log_utils.create_and_symlink_log_dir(log_dir)
 
         executable = None
         if not process_stream:
