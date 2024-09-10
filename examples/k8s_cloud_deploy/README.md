@@ -1,6 +1,6 @@
 # Deploying a Kubernetes cluster on the cloud in 1-click with SkyPilot
 
-This example demonstrates how to deploy a Kubernetes cluster on the cloud with SkyPilot. For the purposes of this guide, we will use lambda cloud as the cloud provider, but you can change cloud providers by editing `deploy_k8s.yaml`.
+This example demonstrates how to deploy a Kubernetes cluster on the cloud with SkyPilot. For the purposes of this guide, we will use lambda cloud as the cloud provider, but you can change cloud providers by editing `cloud_k8s.yaml`.
 
 ## Prerequisites
 1. Latest SkyPilot nightly release:
@@ -16,7 +16,7 @@ pip install "skypilot-nightly[lambda,kubernetes]"
 
 ## Instructions
 
-1. Edit `deploy_k8s.yaml` to set the desired number of workers and GPUs per node.
+1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node.
 ```yaml
 resources:
   cloud: lambda

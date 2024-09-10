@@ -1,6 +1,6 @@
 #!/bin/bash
 echo -e "\033[1m===== SkyPilot Kubernetes cluster deployment script =====\033[0m"
-echo -e "This script will deploy a Kubernetes cluster on the cloud and GPUs specified in deploy_k8s.yaml.\n"
+echo -e "This script will deploy a Kubernetes cluster on the cloud and GPUs specified in cloud_k8s.yaml.\n"
 
 set -ex
 
@@ -8,7 +8,7 @@ set -ex
 CLUSTER_NAME=${CLUSTER_NAME:-k8s}
 
 # Deploy the k8s cluster
-sky launch -y -c ${CLUSTER_NAME} deploy_k8s.yaml
+sky launch -y -c ${CLUSTER_NAME} cloud_k8s.yaml
 
 # Get the endpoint of the k8s cluster
 # Attempt to get the primary endpoint and handle any errors
