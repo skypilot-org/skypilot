@@ -14,7 +14,7 @@ def daemonize():
     """Detaches the process from its parent process with double-forking.
     
     This detachment is crucial in the context of SkyPilot and Ray job. When
-    'sky cancel' is executed, it uses Ray's stop_job API to terminate the job.
+    'sky cancel' is executed, it uses Ray's stop job API to terminate the job.
     Without daemonization, this subprocess_daemon process would be terminated
     along with its parent process, ray::task, which is launched with Ray job.
     Daemonization ensures this process survives the 'sky cancel' command, 
@@ -62,7 +62,7 @@ if __name__ == '__main__':
             try:
                 # process.children() must be called while the target process
                 # is alive, as it will return an empty list if the target
-                # process has already terminated. 
+                # process has already terminated.
                 tmp_children = process.children(recursive=True)
                 if tmp_children:
                     children = tmp_children
