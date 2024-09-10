@@ -60,8 +60,9 @@ if __name__ == '__main__':
         # Wait for either parent or target process to exit.
         while process.is_running() and parent_process.is_running():
             try:
-                # if process is terminated by the time reaching this line,
-                # it returns an empty list.
+                # process.children() must be called while the target process
+                # is alive, as it will return an empty list if the target
+                # process has already terminated. 
                 tmp_children = process.children(recursive=True)
                 if tmp_children:
                     children = tmp_children
