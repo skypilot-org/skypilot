@@ -11,21 +11,30 @@ import psutil
 
 
 def daemonize():
-    """Separates the process from its parent process with double-forking."""
-    # First fork
+    """Detaches the process from its parent process with double-forking.
+    
+    This detachment is crucial in the context of SkyPilot and Ray job. When
+    'sky cancel' is executed, it uses Ray's stop_job API to terminate the job.
+    Without daemonization, this subprocess_daemon process would be terminated
+    along with its parent process, ray::task, which is launched with Ray job.
+    Daemonization ensures this process survives the 'sky cancel' command, 
+    allowing it to prevent orphaned processes of Ray job.
+    """
+    # First fork: Creates a child process identical to the parent
     if os.fork() > 0:
-        # original process terminates.
+        # Parent process exits, allowing the child to run independently
         sys.exit()
 
     # Continues to run from first forked child process.
-    # Detach from parent environment
+    # Detach from parent environment.
     os.setsid()
 
-    # Second fork
+    # Second fork: Creates a grandchild process
     if os.fork() > 0:
-        # The first forked child process terminates.
+        # First child exits, orphaning the grandchild
         sys.exit()
-    # Continues to run from second forked child process.
+    # Continues execution in the grandchild process
+    # This process is now fully detached from the original parent and terminal
 
 
 if __name__ == '__main__':
