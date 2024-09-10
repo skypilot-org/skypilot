@@ -150,7 +150,7 @@ Read the research:
    :caption: Reserved & Existing Clusters
 
    ../reservations/reservations
-   Using Existing Infra <../reservations/existing-clusters>
+   Using Existing Clusters <../reservations/existing-clusters>
    ../reference/kubernetes/index
 
 .. toctree::

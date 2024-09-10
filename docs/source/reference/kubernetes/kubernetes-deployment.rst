@@ -196,7 +196,10 @@ Deploying on Amazon EKS
 Deploying on on-prem clusters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
+If you have a list of IP addresses and the SSH credentials for your on-prem cluster, you follow our
+:ref:`Using Existing Clusters <existing-clusters>` guide to set up SkyPilot on your on-prem cluster.
+
+Alternatively, you can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
 such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_,
 `k3s <https://docs.k3s.io/quick-start>`_ or
 `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.

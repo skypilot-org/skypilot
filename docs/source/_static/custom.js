@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Llama-3.1 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Reserved, Capacity Blocks, DWS' },
-        { selector: '.toctree-l1 > a', text: 'Using Existing Infra' },
+        { selector: '.toctree-l1 > a', text: 'Using Existing Clusters' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

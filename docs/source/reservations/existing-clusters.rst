@@ -1,23 +1,30 @@
-.. _existing-infra:
+.. _existing-clusters:
 
-Deploy SkyPilot on existing infrastructure
-==========================================
+Deploy SkyPilot on existing clusters
+====================================
 
-This page will help you deploy SkyPilot on your existing infrastructure - whether it's on-premises machines or reserved instances on a cloud provider.
+This page will help you deploy SkyPilot on your existing clusters - whether it's on-premises machines or reserved instances on a cloud provider.
 
-**Simply provide a list of IP addresses and SSH keys,**
-the `deploy.sh <https://github.com/skypilot-org/skypilot/blob/onprem_deploy_script/examples/onprem_deployment/deploy.sh>`_
+**Given a list of IP addresses and SSH keys,**
+the `deploy.sh <https://github.com/skypilot-org/skypilot/blob/master/examples/existing_infra/deploy.sh>`_
 script will install necessary dependencies on the remote machines and configure
 SkyPilot to run jobs and services on the cluster.
 
 At the end of this guide, you will be able to use SkyPilot to run jobs or services
-on your own pre-existing infrastructure.
+on your own preexisting cluster.
+
+.. figure:: ../images/sky-existing-infra-workflow.png
+   :width: 85%
+   :align: center
+   :alt: Deploying SkyPilot on existing clusters
+
+   Given a list of IP addresses and SSH keys, ``deploy.sh`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
 
 .. note::
 
     Behind the scenes, the script deploys a lightweight Kubernetes cluster on the remote machines using `k3s <https://k3s.io/>`_.
 
-    Note that no Kubernetes knowledge is required. SkyPilot abstracts away the complexity of Kubernetes and provides a simple interface to run your jobs and services.
+    **Note that no Kubernetes knowledge is required for running this guide.** SkyPilot abstracts away the complexity of Kubernetes and provides a simple interface to run your jobs and services.
 
 Prerequisites
 -------------
@@ -32,13 +39,15 @@ Prerequisites
 * Debian-based OS (tested on Debian 11)
 * SSH access with key-based authentication
 * All machines must use the same SSH key and username
-* Port 6443 must be accessible on the head node from your local machine
+* Port 6443 must be accessible on at least one node from your local machine
 
 Deployment steps
 ----------------
 
-1. Create a test file ``ips.txt`` with the IP addresses of your machines with one IP per line (like a MPI hostfile).
-   The first node will be used as the head node. Here is an example ``ips.txt`` file:
+1. Create a file ``ips.txt`` with the IP addresses of your machines with one IP per line.
+   The first node will be used as the head node - this node must have port 6443 accessible from your local machine.
+
+   Here is an example ``ips.txt`` file:
 
    .. code-block:: text
 
@@ -46,11 +55,13 @@ Deployment steps
       192.168.1.2
       192.168.1.3
 
+   In this example, the first node (``192.168.1.1``) has port 6443 open and will be used as the head node.
+
 2. Get the deployment script:
 
    .. code-block:: bash
 
-      wget https://raw.githubusercontent.com/skypilot-org/skypilot/main/examples/onprem_deployment/deploy.sh
+      wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/existing_infra/deploy.sh
       chmod +x deploy.sh
 
 2. Run ``./deploy.sh`` and pass the ``ips.txt`` file, SSH username, and SSH keys as arguments:
@@ -59,9 +70,9 @@ Deployment steps
 
       chmod +x deploy.sh
       IP_FILE=ips.txt
-      USERNAME=username
+      SSH_USERNAME=username
       SSH_KEY=path/to/ssh/key
-      ./deploy.sh $IP_FILE $USERNAME $SSH_KEY
+      ./deploy.sh $IP_FILE $SSH_USERNAME $SSH_KEY
 
 3. The script will deploy a Kubernetes cluster on the remote machines, setup GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
@@ -96,18 +107,22 @@ Deployment steps
       my-cluster-4               H100      8           8
       my-cluster-5               H100      8           4
 
-   You can optionally use ``kubectl`` to interact with the cluster.
+      $ sky launch --cloud kubernetes --gpus H100:1 -- nvidia-smi
+
+   .. tip::
+
+     You can also use ``kubectl`` to interact with the cluster.
 
 Cleanup
 -------
 
-To teardown the Kubernetes cluster and clean up all state created by deploy.sh, use the ``--cleanup`` flag:
+To clean up all state created by ``deploy.sh`` on your cluster, use the ``--cleanup`` flag:
 
 .. code-block:: bash
 
     IP_FILE=ips.txt
-    USERNAME=username
+    SSH_USERNAME=username
     SSH_KEY=path/to/ssh/key
-    ./deploy.sh $IP_FILE $USERNAME $SSH_KEY --cleanup
+    ./deploy.sh $IP_FILE $SSH_USERNAME $SSH_KEY --cleanup
 
 This will stop all Kubernetes services on the remote machines.
