@@ -127,7 +127,6 @@ def bootstrap_instances(
         random.seed(cluster_id)
         subnet_mask = f'10.{random.randint(1, 254)}.0.0/16'
     logger.info(f'Using subnet mask: {subnet_mask}')
-    nsg_name = get_nsg_name(cluster_id=cluster_id)
 
     parameters = {
         'properties': {
