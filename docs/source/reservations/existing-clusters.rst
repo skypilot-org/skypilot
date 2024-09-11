@@ -96,16 +96,16 @@ Deployment steps
       $ sky show-gpus --cloud kubernetes
       Kubernetes GPUs
       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-      L4    1, 2, 4       12          2
-      H100  1, 2, 4, 8    16          12
+      L4    1, 2, 4       12          12
+      H100  1, 2, 4, 8    16          16
       Kubernetes per node GPU availability
       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-      my-cluster-0               L4        4           2
-      my-cluster-1               L4        4           0
-      my-cluster-2               L4        2           0
-      my-cluster-3               L4        2           0
+      my-cluster-0               L4        4           4
+      my-cluster-1               L4        4           4
+      my-cluster-2               L4        2           2
+      my-cluster-3               L4        2           2
       my-cluster-4               H100      8           8
-      my-cluster-5               H100      8           4
+      my-cluster-5               H100      8           8
 
       $ sky launch --cloud kubernetes --gpus H100:1 -- nvidia-smi
 
