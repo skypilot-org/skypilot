@@ -1845,11 +1845,10 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
     for _, pod in running_pods.items():
         if down:
             idle_minutes_to_autostop_annotation = {
-                IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY: str(idle_minutes_to_autostop)
+                IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY:
+                    str(idle_minutes_to_autostop)
             }
-            autodown_annotation = {
-                AUTODOWN_ANNOTATION_KEY: 'true'
-            }
+            autodown_annotation = {AUTODOWN_ANNOTATION_KEY: 'true'}
             _add_pod_annotation(pod=pod,
                                 annotation=idle_minutes_to_autostop_annotation,
                                 namespace=namespace)
@@ -1862,9 +1861,10 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
         # command.
         elif (idle_minutes_to_autostop is not None and
               idle_minutes_to_autostop < 0):
-                _remove_pod_annotation(pod=pod,
-                                       annotation_key=IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY,
-                                       namespace=namespace)
-                _remove_pod_annotation(pod=pod,
-                                       annotation_key=AUTODOWN_ANNOTATION_KEY,
-                                       namespace=namespace)
+            _remove_pod_annotation(
+                pod=pod,
+                annotation_key=IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY,
+                namespace=namespace)
+            _remove_pod_annotation(pod=pod,
+                                   annotation_key=AUTODOWN_ANNOTATION_KEY,
+                                   namespace=namespace)
