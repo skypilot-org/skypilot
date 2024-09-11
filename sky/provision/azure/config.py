@@ -118,7 +118,7 @@ def bootstrap_instances(
 
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
-    cluster_id = get_cluster_id(
+    cluster_id, nsg_name = get_cluster_id_and_nsg_name(
         resource_group=provider_config['resource_group'],
         cluster_name_on_cloud=cluster_name_on_cloud)
     subnet_mask = provider_config.get('subnet_mask')
