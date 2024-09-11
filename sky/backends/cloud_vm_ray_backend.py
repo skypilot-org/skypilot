@@ -2676,8 +2676,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.ResourcesMismatchError(
                                     'Cluster has a fractional accelerator '
-                                    'counts. For such cluster, a task should request exact '
-                                    'the same count of accelerators. Got required accelerator '
+                                    'counts. For such cluster, a task should '
+                                    'request exact the same count of '
+                                    'accelerators. Got required accelerator '
                                     f'{acc}:{self_count} but the existing '
                                     f'cluster has {acc}:{existing_count}.')
             requested_resource_str = ', '.join(requested_resource_list)
