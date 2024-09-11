@@ -40,8 +40,7 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     return func
 
 
-def get_cluster_id(resource_group: str, cluster_name_on_cloud: str):
-    """Generate a unique cluster ID."""
+def get_cluster_id_and_nsg_name(resource_group: str, cluster_name_on_cloud: str) -> Tuple[str, str]:
     hasher = hashlib.md5(resource_group.encode('utf-8'))
     unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     # We use the cluster name + resource group hash as the
@@ -49,20 +48,8 @@ def get_cluster_id(resource_group: str, cluster_name_on_cloud: str):
     # the deployments have unique names during failover.
     cluster_id = _CLUSTER_ID.format(cluster_name_on_cloud=cluster_name_on_cloud,
                                     unique_id=unique_id)
-    return cluster_id
-
-
-def get_nsg_name(resource_group: str = '',
-                 cluster_name_on_cloud: str = '',
-                 cluster_id: str = '') -> str:
-    """Return the NSG name for a given cluster.."""
-    if not cluster_id:
-        assert resource_group
-        assert cluster_name_on_cloud
-        cluster_id = get_cluster_id(resource_group=resource_group,
-                                    cluster_name_on_cloud=cluster_name_on_cloud)
     nsg_name = f'sky-{cluster_id}-nsg'
-    return nsg_name
+    return cluster_id, nsg_name                  
 
 
 @common.log_function_start_end
