@@ -123,7 +123,7 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
         with the zone name (e.g. us-east-1a).
     """
     try:
-        user_identity_list = aws.AWS.get_current_user_identity()
+        user_identity_list = aws.AWS.get_active_user_identity()
         assert user_identity_list, user_identity_list
         user_identity = user_identity_list[0]
         aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
