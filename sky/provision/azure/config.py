@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 import random
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Tuple
 
 from sky.adaptors import azure
 from sky.provision import common
@@ -40,7 +40,8 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     return func
 
 
-def get_cluster_id_and_nsg_name(resource_group: str, cluster_name_on_cloud: str) -> Tuple[str, str]:
+def get_cluster_id_and_nsg_name(resource_group: str,
+                                cluster_name_on_cloud: str) -> Tuple[str, str]:
     hasher = hashlib.md5(resource_group.encode('utf-8'))
     unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
     # We use the cluster name + resource group hash as the
@@ -49,7 +50,7 @@ def get_cluster_id_and_nsg_name(resource_group: str, cluster_name_on_cloud: str)
     cluster_id = _CLUSTER_ID.format(cluster_name_on_cloud=cluster_name_on_cloud,
                                     unique_id=unique_id)
     nsg_name = f'sky-{cluster_id}-nsg'
-    return cluster_id, nsg_name                  
+    return cluster_id, nsg_name
 
 
 @common.log_function_start_end
