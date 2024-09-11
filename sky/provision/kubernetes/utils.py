@@ -71,9 +71,6 @@ POD_STATUSES = {
 AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
 IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
     'skypilot.co/idle_minutes_to_autostop')
-KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS = [
-    AUTODOWN_ANNOTATION_KEY, IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY
-]
 ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
                                        '{namespace} while trying to {action} '
                                        'an annotation {annotation}.')
@@ -1837,7 +1834,6 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
                              idle_minutes_to_autostop: Optional[int],
                              down: bool = False) -> None:
     """Adds or removes Annotations of autodown on Kubernetes pods."""
-    annotations_keys = KUBERNETES_AUTODOWN_ANNOTATIONS_KEYS
     tags = {
         provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
     }
@@ -1848,23 +1844,27 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
     for _, pod in running_pods.items():
         if down:
-            for annotation_key in annotations_keys:
-                annotation: Dict[str, str] = {}
-                if annotation_key == IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY:
-                    annotation.update(
-                        {annotation_key: str(idle_minutes_to_autostop)})
-                else:  # annotation_key == AUTODOWN_ANNOTATION_KEY
-                    annotation.update({annotation_key: 'true'})
-                _add_pod_annotation(pod=pod,
-                                    annotation=annotation,
-                                    namespace=namespace)
+            idle_minutes_to_autostop_annotation = {
+                IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY: str(idle_minutes_to_autostop)
+            }
+            autodown_annotation = {
+                AUTODOWN_ANNOTATION_KEY: 'true'
+            }
+            _add_pod_annotation(pod=pod,
+                                annotation=idle_minutes_to_autostop_annotation,
+                                namespace=namespace)
+            _add_pod_annotation(pod=pod,
+                                annotation=autodown_annotation,
+                                namespace=namespace)
 
         # If idle_minutes_to_autostop is negative, it indicates a request to
         # cancel autostop using the --cancel flag with the `sky autostop`
         # command.
         elif (idle_minutes_to_autostop is not None and
               idle_minutes_to_autostop < 0):
-            for annotation_key in annotations_keys:
                 _remove_pod_annotation(pod=pod,
-                                       annotation_key=annotation_key,
+                                       annotation_key=IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY,
+                                       namespace=namespace)
+                _remove_pod_annotation(pod=pod,
+                                       annotation_key=AUTODOWN_ANNOTATION_KEY,
                                        namespace=namespace)
