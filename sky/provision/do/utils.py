@@ -5,9 +5,9 @@ https://github.com/digitalocean/pydo/blob/main/examples/poc_droplets_volumes_ssh
 """
 
 import os
+from typing import Any, Dict, List, Optional
 import urllib
 import uuid
-from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import do
