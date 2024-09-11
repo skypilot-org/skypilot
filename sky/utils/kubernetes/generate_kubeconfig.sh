@@ -169,7 +169,9 @@ roleRef:
   kind: Role
   name: skypilot-system-service-account-role
   apiGroup: rbac.authorization.k8s.io
----
+EOF
+# Apply optional ingress-related roles, but don't make the script fail if it fails
+kubectl apply -f - <<EOF || echo "Failed to apply optional ingress-related roles. Nginx ingress is likely not installed. This is not critical and the script will continue."
 # Optional: Role for accessing ingress resources
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -117,7 +117,7 @@ class Cloud:
 
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
-    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
+    _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
@@ -176,6 +176,11 @@ class Cloud:
             `region.zones` is an empty list.
         """
         raise NotImplementedError
+
+    @classmethod
+    def optimize_by_zone(cls) -> bool:
+        """Returns whether to optimize this cloud by zone (default: region)."""
+        return False
 
     @classmethod
     def zones_provision_loop(

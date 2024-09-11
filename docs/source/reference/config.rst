@@ -90,7 +90,7 @@ Available fields and semantics:
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
-    # Tags to assign to all instances launched by SkyPilot (optional).
+    # Tags to assign to all instances and buckets created by SkyPilot (optional).
     #
     # Example use case: cost tracking by user/team/project.
     #
@@ -192,6 +192,35 @@ Available fields and semantics:
     #
     # Default: false.
     disk_encrypted: false
+
+    # Reserved capacity (optional).
+    #
+    # Whether to prioritize capacity reservations (considered as 0 cost) in the
+    # optimizer.
+    #
+    # If you have capacity reservations in your AWS project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation within all regions and AWS will auto consume your reservations
+    # with instance match criteria to "open", and setting to false means
+    # optimizer uses regular, non-zero pricing in optimization (if by chance any
+    # matching reservation exists, AWS will still consume the reservation).
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from AWS when set to true.
+    #
+    # Default: false.
+    prioritize_reservations: false
+    #
+    # The targeted capacity reservations (CapacityReservationId) to be
+    # considered when provisioning clusters on AWS. SkyPilot will automatically
+    # prioritize this reserved capacity (considered as zero cost) if the
+    # requested resources matches the reservation.
+    #
+    # Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-reservations-launch.html
+    specific_reservations:
+      - cr-a1234567
+      - cr-b2345678
+
 
     # Identity to use for AWS instances (optional).
     #
@@ -307,12 +336,15 @@ Available fields and semantics:
     # Setting this to true guarantees the optimizer will pick any matching
     # reservation and GCP will auto consume your reservation, and setting to
     # false means optimizer uses regular, non-zero pricing in optimization (if
-    # by chance any matching reservation is selected, GCP still auto consumes
-    # the reservation).
+    # by chance any matching reservation exists, GCP still auto consumes the
+    # reservation).
     #
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
     # to true.
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from GCP when set to true.
     #
     # Default: false.
     prioritize_reservations: false

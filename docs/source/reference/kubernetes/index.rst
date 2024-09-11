@@ -1,7 +1,7 @@
 .. _kubernetes-overview:
 
-Running on Kubernetes
-=============================
+Using Kubernetes
+================
 
 SkyPilot tasks can be run on your private on-prem or cloud Kubernetes clusters.
 The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
