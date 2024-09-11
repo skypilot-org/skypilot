@@ -527,8 +527,11 @@ def get_instance_type_for_accelerator_impl(
         fuzzy_candidate_list = []
         if len(fuzzy_result) > 0:
             for _, row in fuzzy_result.iterrows():
+                acc_cnt = row['AcceleratorCount']
+                acc_count_display = (int(acc_cnt)
+                                     if acc_cnt.is_integer() else acc_cnt)
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
-                                            f'{int(row["AcceleratorCount"])}')
+                                            f'{acc_count_display}')
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpus(result, cpus)
