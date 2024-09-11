@@ -1142,11 +1142,11 @@ class Resources:
                     return False
                 if self.accelerators[acc] > other_accelerators[acc]:
                     return False
-                if isinstance(self.accelerators[acc], float) or isinstance(
-                        other_accelerators[acc], float):
-                    # If the requested accelerator count is a float, we only
+                if (isinstance(other_accelerators[acc], float) and
+                        not other_accelerators[acc].is_integer()):
+                    # If the existing accelerator count is a float, we only
                     # allow strictly equal counts since all of the float point
-                    # accelerator counts are less than 1 (e.g., 0.1, 0.5), and
+                    # accelerator counts are less than 1 (e.g., 0.167, 0.5), and
                     # we want to avoid semantic ambiguity (e.g. launching
                     # with --gpus A10:0.25 on a A10:0.75 cluster).
                     if not math.isclose(self.accelerators[acc],

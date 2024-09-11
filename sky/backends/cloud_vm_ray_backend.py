@@ -2670,16 +2670,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             continue
                         self_count = example_resource.accelerators[acc]
                         existing_count = launched_resources.accelerators[acc]
-                        if (isinstance(self_count, float) and
-                                isinstance(existing_count, float) and
+                        if (isinstance(existing_count, float) and
+                                not existing_count.is_integer() and
                                 not math.isclose(self_count, existing_count)):
                             with ux_utils.print_exception_no_traceback():
                                 raise exceptions.ResourcesMismatchError(
-                                    'Task requested resources with fractional '
-                                    'accelerator counts. For fractional '
-                                    'counts, the required count must match the '
-                                    'existing cluster. Got required accelerator'
-                                    f' {acc}:{self_count} but the existing '
+                                    'Cluster has a fractional accelerator '
+                                    'counts. For such cluster, the required '
+                                    'count must match exactly with the count '
+                                    'in the cluster. Got required accelerator '
+                                    f'{acc}:{self_count} but the existing '
                                     f'cluster has {acc}:{existing_count}.')
             requested_resource_str = ', '.join(requested_resource_list)
             if isinstance(task.resources, list):

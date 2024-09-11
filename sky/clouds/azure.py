@@ -284,11 +284,9 @@ class Azure(clouds.Cloud):
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         acc_count = None
         if acc_dict is not None:
-            custom_resources = resources_utils.make_ray_custom_resources_str(
-                acc_dict)
             acc_count = str(sum(acc_dict.values()))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
