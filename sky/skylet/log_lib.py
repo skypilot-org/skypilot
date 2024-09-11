@@ -208,10 +208,10 @@ def run_with_log(
                 str(proc.pid),
             ]
 
-            # We do not need to set `start_new_session=True` here, as the daemon
-            # script will detach itself from the parent process with fork to avoid being
-            # killed by ray job. See the reason we daemonize the process in
-            # `sky/skylet/subprocess_daemon.py`
+            # We do not need to set `start_new_session=True` here, as the
+            # daemon script will detach itself from the parent process with
+            # fork to avoid being killed by ray job. See the reason we
+            # daemonize the process in `sky/skylet/subprocess_daemon.py`.
             subprocess.Popen(
                 daemon_cmd,
                 # Suppress output
