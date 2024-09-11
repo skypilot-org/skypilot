@@ -20,7 +20,8 @@ sky launch -c pixtral pixtral.yaml
 --------------------------------------------------------------------------------------------------------------
  CLOUD        INSTANCE                   vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
 --------------------------------------------------------------------------------------------------------------
- RunPod       1x_L4_SECURE               4       24        L4:1           CA              0.44          ✔     
+ Kubernetes   4CPU--8GB--1L4             4       16        L4:1           kubernetes      0.00          ✔ 
+ RunPod       1x_L4_SECURE               4       24        L4:1           CA              0.44               
  GCP          g2-standard-4              4       16        L4:1           us-east4-a      0.70                
  AWS          g6.xlarge                  4       16        L4:1           us-east-1       0.80                
  AWS          g5.xlarge                  4       16        A10G:1         us-east-1       1.01                
