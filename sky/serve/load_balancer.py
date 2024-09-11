@@ -160,11 +160,15 @@ class SkyServeLoadBalancer:
         # SkyServe supports serving on Spot Instances. To avoid preemptions
         # during request handling, we add a retry here.
         retry_cnt = 0
-        # TODO(tian): Here we try to not retry those failed replicas for the
-        # case when the replica is in a NOT_READY state but does not sync-ed
-        # to the load balancer yet. However, we still maintain a per-request
-        # failed replica list instead of the global one to avoid the case for
-        # transient networking issues, and letting new requests to retry them.
+        # Here we try to not retry those failed replicas for the case when the
+        # replica is in a NOT_READY state but does not sync-ed to the load
+        # balancer yet. However, we still maintain a per-request failed replica
+        # list instead of the global one to avoid the case for transient
+        # networking issues, and letting new requests to retry them. Since our
+        # LB policy is a global one, when the request rate is high, it is likely
+        # that multiple retries on a single request will use the same replica.
+        # Here we use the failed replica list to keep track of the failures
+        # happened on every request and try to avoid them in the next retry.
         failed_replica_urls: List[str] = []
         while True:
             retry_cnt += 1
