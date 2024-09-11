@@ -166,6 +166,13 @@ class SkyServeLoadBalancer:
             with self._client_pool_lock:
                 ready_replica_url = self._load_balancing_policy.select_replica(
                     request, failed_replica_urls)
+                # If all replicas are failed, retry them again as some
+                # of them might be transient networking issues.
+                if ready_replica_url is None and failed_replica_urls:
+                    failed_replica_urls = []
+                    ready_replica_url = (
+                        self._load_balancing_policy.select_replica(
+                            request, failed_replica_urls))
             if ready_replica_url is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
