@@ -3429,6 +3429,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         valid_resource = self.check_resources_fit_cluster(handle,
                                                           task,
                                                           check_ports=True)
+        # For fractional acc count clusters, we round up the number of accs to 1
+        # (see sky/utils/resources_utils.py::make_ray_custom_resources_str).
+        # Also, we requires to launch on such cluster, the specified acc count
+        # must exactly match the launched acc count. Therefore, here we set the
+        # required acc count to 1 to make sure there will be only one task
+        # running on the cluster.
+        launched_accs = handle.launched_resources.accelerators
+        if (launched_accs is not None and
+                valid_resource.accelerators is not None):
+            for _, count in launched_accs.items():
+                if isinstance(count, float) and not count.is_integer():
+                    valid_resource = valid_resource.copy(
+                        accelerators={
+                            k: math.ceil(v)
+                            for k, v in valid_resource.accelerators.items()
+                        })
         task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
