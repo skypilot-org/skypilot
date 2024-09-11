@@ -2389,8 +2389,6 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -2398,8 +2396,6 @@ def test_cancel_aws():
 
 
 @pytest.mark.gcp
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -2407,8 +2403,6 @@ def test_cancel_gcp():
 
 
 @pytest.mark.azure
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
