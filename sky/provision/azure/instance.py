@@ -718,7 +718,7 @@ def _get_cluster_nsg(network_client: Client, resource_group: str,
         cluster_name_on_cloud=cluster_name_on_cloud)
     second_legacy_nsg_name = _SECOND_LEGACY_NSG_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
-    nsg_name = config_lib.get_nsg_name(
+    _, nsg_name = config_lib.get_cluster_id_and_nsg_name(
         resource_group=resource_group,
         cluster_name_on_cloud=cluster_name_on_cloud)
     possible_nsg_names = [nsg_name, legacy_nsg_name, second_legacy_nsg_name]
