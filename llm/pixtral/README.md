@@ -55,32 +55,15 @@ pip install 'skypilot-nightly[all]'
 ```
 
 2. Launch the model on any cloud or Kubernetes:
-```
+```bash
 sky launch -c pixtral pixtral.yaml
 ```
 
-```
---------------------------------------------------------------------------------------------------------------
- CLOUD        INSTANCE                   vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
---------------------------------------------------------------------------------------------------------------
- Kubernetes   4CPU--8GB--1L4             4       16        L4:1           kubernetes      0.00          ✔ 
- RunPod       1x_L4_SECURE               4       24        L4:1           CA              0.44               
- GCP          g2-standard-4              4       16        L4:1           us-east4-a      0.70                
- AWS          g6.xlarge                  4       16        L4:1           us-east-1       0.80                
- AWS          g5.xlarge                  4       16        A10G:1         us-east-1       1.01                
- RunPod       1x_L40_SECURE              16      48        L40:1          CA              1.14                
- Fluidstack   L40_48GB::1                32      60        L40:1          CANADA          1.15                
- AWS          g6e.xlarge                 4       32        L40S:1         us-east-1       1.86                
- RunPod       1x_A100-80GB_SECURE        8       80        A100-80GB:1    CA              1.99                
- Azure        Standard_NV36ads_A10_v5    36      440       A10:1          eastus          3.20                
- Azure        Standard_NC24ads_A100_v4   24      220       A100-80GB:1    eastus          3.67                
- GCP          a2-highgpu-1g              12      85        A100:1         us-central1-a   3.67                
- GCP          a2-ultragpu-1g             12      170       A100-80GB:1    us-central1-a   5.03                
---------------------------------------------------------------------------------------------------------------
-```
+![Pixtral on SkyPilot](https://i.imgur.com/lgK10Tx.png)
+
 
 3. Get the endpoint and send requests:
-```
+```bash
 ENDPOINT=$(sky status --endpoint 8081 pixtral)
 
 curl --location http://$ENDPOINT/v1/chat/completions \
@@ -95,24 +78,78 @@ curl --location http://$ENDPOINT/v1/chat/completions \
                 {"type" : "text", "text": "Describe this image in detail please."},
                 {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
                 {"type" : "text", "text": "and this one as well."},
-                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971
-db031b.png"}}
+                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png"}}
             ]
         }],
         "max_tokens": 1024
     }' | jq .
 ```
 
+In this example, we send two images to the model and ask it to describe them.
+
+
+<div style="text-align: center;">
+  <img src="https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg" alt="Image1" width="300" style="display:inline-block; margin-right:10px;">
+  <img src="https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png" alt="Image2" width="300" style="display:inline-block;">
+</div>
+
+
+Example output (parsed version):
+```markdown
+Sure! Let me describe the images for you.
+
+### Image 1:
+This image shows three people jogging outdoors in a lush, green setting. The person on the left is a man wearing a light gray T-shirt and black shorts. He appears to be smiling and is actively running. The person in the middle is a woman with curly hair, dressed in a bright yellow tank top and black shorts. She also looks happy and is running alongside the man. The person on the right is another woman with long, wavy hair, wearing a light pink T-shirt and dark leggings. She is smiling and running as well. The background is filled with dense greenery, suggesting they are in a park or a forest.
+
+### Image 2:
+This image features a family of five posing together in a studio setting. The family members are all dressed in matching red outfits. From left to right, the first person is a woman with long blonde hair. Next to her is a young boy with light brown hair. The third person is a man with short dark hair and a mustache, smiling broadly. The fourth person is another young boy with dark hair and a slight smile. The last person is another woman with long blonde hair, mirroring the first woman. They are all laying on the floor, facing forward, with their hands clasped together in front of them. The background is plain white, focusing the attention on the family.
+
+These descriptions should give you a clear picture of the scenes depicted in the images.
+```
+
+<details>
+<summary>Raw JSON</summary>
+
+```json
+{
+  "id": "chat-5733a2abfd664a019c7c61e38bb6603c",
+  "object": "chat.completion",
+  "created": 1726103777,
+  "model": "mistralai/Pixtral-12B-2409",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Sure! Let me describe the images for you.\n\n### Image 1:\nThis image shows three people jogging outdoors in a lush, green setting. The person on the left is a man wearing a light gray T-shirt and black shorts. He appears to be smiling and is actively running. The person in the middle is a woman with curly hair, dressed in a bright yellow tank top and black shorts. She also looks happy and is running alongside the man. The person on the right is another woman with long, wavy hair, wearing a light pink T-shirt and dark leggings. She is smiling and running as well. The background is filled with dense greenery, suggesting they are in a park or a forest.\n\n### Image 2:\nThis image features a family of five posing together in a studio setting. The family members are all dressed in matching red outfits. From left to right, the first person is a woman with long blonde hair. Next to her is a young boy with light brown hair. The third person is a man with short dark hair and a mustache, smiling broadly. The fourth person is another young boy with dark hair and a slight smile. The last person is another woman with long blonde hair, mirroring the first woman. They are all laying on the floor, facing forward, with their hands clasped together in front of them. The background is plain white, focusing the attention on the family.\n\nThese descriptions should give you a clear picture of the scenes depicted in the images.",
+        "tool_calls": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 4457,
+    "total_tokens": 4764,
+    "completion_tokens": 307
+  },
+  "prompt_logprobs": null
+}
+```
+
+</details>
+
 
 ## Scale Up Pixtral Endpoint as a Service
 
 1. Start a service with SkyServe:
-```
+```bash
 sky serve up -n pixtral pixtral.yaml
 ```
 
 2. Get the endpoint and send requests:
-```
+```bash
 ENDPOINT=$(sky serve status --endpoint pixtral)
 
 curl --location http://$ENDPOINT/v1/chat/completions \
@@ -127,8 +164,7 @@ curl --location http://$ENDPOINT/v1/chat/completions \
                 {"type" : "text", "text": "Describe this image in detail please."},
                 {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
                 {"type" : "text", "text": "and this one as well."},
-                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971
-db031b.png"}}
+                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png"}}
             ]
         }],
         "max_tokens": 1024
