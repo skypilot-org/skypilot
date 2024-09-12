@@ -1,6 +1,5 @@
 # Deploy Pixtral with One Click on Any Cloud or Kubernetes
 
-On Sep 11, 2024, Mistral released a new [Pixtral 12B](https://x.com/MistralAI/status/1833758285167722836), their first multimodal model. This guide shows how to use run and deploy this multimodal model on any cloud and Kubernetes.
 
 
 ```
@@ -45,6 +44,8 @@ On Sep 11, 2024, Mistral released a new [Pixtral 12B](https://x.com/MistralAI/st
                     ░░░░░░░░░░░░░░░░░
                        ░░░░░
 ```
+
+On Sep 11, 2024, Mistral released a new [Pixtral 12B](https://x.com/MistralAI/status/1833758285167722836), their first multimodal model. This guide shows how to use run and deploy this multimodal model on any cloud and Kubernetes.
 
 ## Run Pixtral on Any Cloud or Kubernetes
 
