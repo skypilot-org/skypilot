@@ -1,4 +1,4 @@
-# Deploy Pixtral On Kubernetes or Your Own Cloud
+# Deploy Pixtral Privately On Your Kubernetes or Your Own Cloud
 
 
 
