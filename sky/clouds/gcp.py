@@ -428,7 +428,7 @@ class GCP(clouds.Cloud):
             if (r.disk_tier is not None and
                     r.disk_tier != resources_utils.DiskTier.BEST):
                 return r.disk_tier
-            # Failover disk tier from high to low.
+            # Failover disk tier from ultra to low.
             all_tiers = list(reversed(resources_utils.DiskTier))
             start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
             while start_index < len(all_tiers):
