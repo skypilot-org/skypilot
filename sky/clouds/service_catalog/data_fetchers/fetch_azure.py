@@ -97,8 +97,10 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 # in the API response. We manually changing the number of GPUs to a float here.
 # Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
 # TODO(zhwu,tian): Support fractional GPUs on k8s as well.
+# TODO(tian): Maybe we should support literally fractional count, i.e. A10:1/6
+# instead of float point count (A10:0.167).
 AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS = {
-    f'Standard_NV{vcpu}ads_A10_v5': vcpu / 36 for vcpu in [6, 12, 18]
+    f'Standard_NV{vcpu}ads_A10_v5': round(vcpu / 36, 3) for vcpu in [6, 12, 18]
 }
 
 USEFUL_COLUMNS = [
