@@ -1,0 +1,37 @@
+# Usage: sky bench launch -b gemma serve.yaml
+envs:
+  MODEL_NAME: google/gemma-2b-it
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
+resources:
+  image_id: docker:vllm/vllm-openai:latest
+  candidates:
+    - { accelerators: T4:1 }
+    - { accelerators: L4:1 }
+    - { accelerators: V100:1 }
+
+workdir: .
+
+setup: |
+  python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+  pip install --upgrade setuptools
+  # Install SkyCallback
+  pip install "git+https://github.com/skypilot-org/skypilot.git#egg=sky-callback&subdirectory=sky/callbacks/"
+  
+  
+  echo 'Starting vllm openai api server...'
+  nohup python3 -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME \
+    --host 0.0.0.0 \
+    --dtype half > ~/openai_api_server.log 2>&1 &
+  
+  # Wait for the server to start
+  echo 'Waiting for the server to start...'
+  while ! grep -q "Uvicorn running on http://0.0.0.0:8000" ~/openai_api_server.log; do
+    sleep 1
+  done
+  echo 'Server started!'
+
+run: |
+  echo 'Running benchmark...'
+  python3 benchmark.py
