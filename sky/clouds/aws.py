@@ -858,6 +858,12 @@ class AWS(clouds.Cloud):
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
 
+        if aws_utils.use_reservations():
+            # When reservations are used, it is possible that a user has
+            # reservations for an instance type, but does not have the quota
+            # for that instance type. Skipping the quota check in this case.
+            return True
+
         client = aws.client('service-quotas', region_name=region)
         try:
             response = client.get_service_quota(ServiceCode='ec2',
