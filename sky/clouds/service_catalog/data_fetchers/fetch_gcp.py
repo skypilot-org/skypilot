@@ -10,6 +10,7 @@ import io
 import multiprocessing
 import os
 import textwrap
+import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -19,6 +20,7 @@ import numpy as np
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -37,6 +39,9 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 
 # The number of digits to round the price to.
 PRICE_ROUNDING = 5
+
+# The number of retries for the TPU API.
+TPU_RETRY_TIMES = 3
 
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
@@ -518,6 +523,34 @@ def get_gpu_df(skus: List[Dict[str, Any]],
     return df
 
 
+def _get_tpu_response_for_zone(zone: str) -> list:
+    parent = f'projects/{project_id}/locations/{zone}'
+    # Sometimes the response is empty ({}) even for enabled zones. Here we
+    # retry the request for a few times.
+    backoff = common_utils.Backoff(initial_backoff=1)
+    for _ in range(TPU_RETRY_TIMES):
+        tpus_request = (
+            tpu_client.projects().locations().acceleratorTypes().list(
+                parent=parent))
+        try:
+            tpus_response = tpus_request.execute()
+            if tpus_response:
+                return tpus_response.get('acceleratorTypes', [])
+        except gcp.http_error_exception() as error:
+            if error.resp.status == 403:
+                print('  TPU API is not enabled or you don\'t have TPU access '
+                      f'to zone: {zone!r}.')
+            else:
+                print(f'  An error occurred: {error}')
+            # If error happens, fail early.
+            return []
+        time_to_sleep = backoff.current_backoff()
+        print(f'Retry zone {zone!r} in {time_to_sleep} seconds...')
+        time.sleep(time_to_sleep)
+    print(f'Failed to fetch TPUs for zone {zone!r}.')
+    return []
+
+
 def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     # Use hardcoded TPU V5 data as it is invisible in some zones.
     missing_tpus_df = pd.DataFrame(columns=[
@@ -526,20 +559,8 @@ def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     if zone in TPU_V5_MISSING_ZONES_DF:
         missing_tpus_df = TPU_V5_MISSING_ZONES_DF[zone]
     tpus = []
-    parent = f'projects/{project_id}/locations/{zone}'
-    tpus_request = tpu_client.projects().locations().acceleratorTypes().list(
-        parent=parent)
-    try:
-        tpus_response = tpus_request.execute()
-        # TODO(tian): Sometimes the response is empty ({}). Need to investigate.
-        for tpu in tpus_response.get('acceleratorTypes', []):
-            tpus.append(tpu)
-    except gcp.http_error_exception() as error:
-        if error.resp.status == 403:
-            print('  TPU API is not enabled or you don\'t have TPU access '
-                  f'to zone: {zone!r}.')
-        else:
-            print(f'  An error occurred: {error}')
+    for tpu in _get_tpu_response_for_zone(zone):
+        tpus.append(tpu)
     new_tpus = []
     for tpu in tpus:
         tpu_name = tpu['type']
