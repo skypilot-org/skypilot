@@ -176,12 +176,53 @@ curl http://$ENDPOINT/v1/chat/completions \
         {
             "role": "user",
             "content": [
-                {"type" : "text", "text": "Describe this image in detail please."},
-                {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
-                {"type" : "text", "text": "and this one as well."},
-                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png"}}
+                {"type" : "text", "text": "Turn this SkyPilot logo into ASCII."},
+                {"type": "image_url", "image_url": {"url": "https://pbs.twimg.com/profile_images/1584596138635632640/HWexMoH5_400x400.jpg"}}
             ]
         }],
         "max_tokens": 1024
     }' | jq .
+```
+
+
+4. Example output (parsed version):
+````markdown
+Here's the logo of SkyPilot converted into ASCII art:
+```
+      ______
+  ___//  __\\____
+   / __ \  __/  __\\
+   |_\ \_\\___ ____ ___\\
+    \/    \/   \/   \/
+````
+
+<details>
+<summary>Raw JSON</summary>
+
+```json
+{
+  "id": "chat-414fb85491ec42809f54a83845fdd629",
+  "object": "chat.completion",
+  "created": 1726109048,
+  "model": "mistralai/Pixtral-12B-2409",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Here's a simple ASCII representation of the Android logo:\n\n```\n      ______\n  ___//  __\\\\____\n / __ \\  __/  __\\\\\n|_\\ \\_\\\\___ ____ ___\\\\\n \\/    \\/   \\/   \\/\n```",
+        "tool_calls": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 660,
+    "total_tokens": 716,
+    "completion_tokens": 56
+  },
+  "prompt_logprobs": null
+}
 ```
