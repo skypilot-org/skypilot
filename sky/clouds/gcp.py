@@ -433,7 +433,7 @@ class GCP(clouds.Cloud):
             start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
-                ok, _ = GCP.check_disk_tier(r.instance_type, disk_tier)
+                ok, _ = GCP._check_disk_tier(r.instance_type, disk_tier)
                 if ok:
                     return disk_tier
                 start_index += 1
@@ -932,7 +932,7 @@ class GCP(clouds.Cloud):
             'gcp')
 
     @classmethod
-    def check_disk_tier(
+    def _check_disk_tier(
             cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
@@ -956,7 +956,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: resources_utils.DiskTier) -> None:
-        ok, msg = cls.check_disk_tier(instance_type, disk_tier)
+        ok, msg = cls._check_disk_tier(instance_type, disk_tier)
         if not ok:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
