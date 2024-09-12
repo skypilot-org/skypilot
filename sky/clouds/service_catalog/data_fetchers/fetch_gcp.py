@@ -41,7 +41,7 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 PRICE_ROUNDING = 5
 
 # The number of retries for the TPU API.
-TPU_RETRY_TIMES = 3
+TPU_RETRY_CNT = 3
 
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
@@ -528,14 +528,14 @@ def _get_tpu_response_for_zone(zone: str) -> list:
     # Sometimes the response is empty ({}) even for enabled zones. Here we
     # retry the request for a few times.
     backoff = common_utils.Backoff(initial_backoff=1)
-    for _ in range(TPU_RETRY_TIMES):
+    for _ in range(TPU_RETRY_CNT):
         tpus_request = (
             tpu_client.projects().locations().acceleratorTypes().list(
                 parent=parent))
         try:
             tpus_response = tpus_request.execute()
-            if tpus_response:
-                return tpus_response.get('acceleratorTypes', [])
+            if 'acceleratorTypes' in tpus_response:
+                return tpus_response['acceleratorTypes']
         except gcp.http_error_exception() as error:
             if error.resp.status == 403:
                 print('  TPU API is not enabled or you don\'t have TPU access '
