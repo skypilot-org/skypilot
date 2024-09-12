@@ -997,14 +997,10 @@ class Resources:
     def _try_validate_az_ml(self) -> None:
         if not self.use_az_ml:
             return
-        if self.extract_docker_image() is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Docker image is not supported for Azure Machine Learning.')
         if self.ports is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Ports are not supported for Azure Machine Learning.')
+                    'Open ports are not supported for Azure Machine Learning.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

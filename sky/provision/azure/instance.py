@@ -499,12 +499,20 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instances_to_resume_ids = [t.name for t in instances_to_resume]
         logger.debug('run_instances: Resuming stopped instances '
                      f'{instances_to_resume_ids}.')
-        start_virtual_machine = _get_azure_sdk_function(
-            compute_client.virtual_machines, 'start')
-        with pool.ThreadPool() as p:
-            p.starmap(
-                start_virtual_machine,
-                [(resource_group, inst.name) for inst in instances_to_resume])
+        if _use_az_ml():
+            assert ml_client is not None, 'ml_client is None'
+            start_az_ml_instance = _get_azure_sdk_function(
+                ml_client.compute, 'start')
+            with pool.ThreadPool() as p:
+                p.starmap(start_az_ml_instance,
+                          [(inst.name,) for inst in instances_to_resume])
+        else:
+            start_virtual_machine = _get_azure_sdk_function(
+                compute_client.virtual_machines, 'start')
+            with pool.ThreadPool() as p:
+                p.starmap(start_virtual_machine, [
+                    (resource_group, inst.name) for inst in instances_to_resume
+                ])
         resumed_instance_ids = instances_to_resume_ids
 
     to_start_count -= len(resumed_instance_ids)
@@ -730,7 +738,6 @@ def terminate_instances(
             delete_dependent_resources=True,
             permanently_delete=True,
         ).wait()
-        ml_client.workspaces.begin_create
 
     resource_group_client = azure.get_client('resource', subscription_id)
     delete_resource_group = _get_azure_sdk_function(

@@ -437,8 +437,6 @@ class SSHCommandRunner(CommandRunner):
         self._ssh_proxy_command = ssh_proxy_command
         self.disable_control_master = disable_control_master
         if docker_user is not None:
-            assert port is None or port == 22, (
-                f'port must be None or 22 for docker_user, got {port}.')
             # Already checked in resources
             assert ssh_proxy_command is None, (
                 'ssh_proxy_command is not supported when using docker.')
@@ -446,7 +444,7 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_user = docker_user
             self.port = constants.DEFAULT_DOCKER_PORT
             self._docker_ssh_proxy_command = lambda ssh: ' '.join(
-                ssh + ssh_options_list(ssh_private_key, None
+                ssh + ssh_options_list(ssh_private_key, None, port=port
                                       ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
