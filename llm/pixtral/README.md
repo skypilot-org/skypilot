@@ -89,13 +89,13 @@ curl --location http://$ENDPOINT/v1/chat/completions \
 In this example, we send two images to the model and ask it to describe them.
 
 
-<div style="text-align: center;">
+<center>
   <img src="https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg" alt="Image1" width="300" style="display:inline-block; margin-right:10px;">
   <img src="https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png" alt="Image2" width="300" style="display:inline-block;">
-</div>
+</center>
 
 
-Example output (parsed version):
+4. Example output (parsed version):
 ```markdown
 Sure! Let me describe the images for you.
 
