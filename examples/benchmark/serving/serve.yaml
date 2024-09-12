@@ -5,6 +5,7 @@ envs:
 
 resources:
   image_id: docker:vllm/vllm-openai:latest
+  cloud: aws
   candidates:
     - { accelerators: T4:1 }
     - { accelerators: L4:1 }
@@ -18,12 +19,23 @@ setup: |
   # Install SkyCallback
   pip install "git+https://github.com/skypilot-org/skypilot.git#egg=sky-callback&subdirectory=sky/callbacks/"
   
+  # Customize vLLM flags based on GPU type we're running on
+  GPU_TYPE=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1)
+  FLAGS=""
+  if [[ "$GPU_TYPE" == *"T4"* ]]; then
+    FLAGS="--dtype half"
+  elif [[ "$GPU_TYPE" == *"V100"* ]]; then
+    FLAGS="--dtype half"
+  fi
+  
+  echo "Detected GPU: $GPU_TYPE"
+  echo "Using flags: $FLAGS"
   
   echo 'Starting vllm openai api server...'
   nohup python3 -m vllm.entrypoints.openai.api_server \
     --model $MODEL_NAME \
     --host 0.0.0.0 \
-    --dtype half > ~/openai_api_server.log 2>&1 &
+    $FLAGS > ~/openai_api_server.log 2>&1 &
   
   # Wait for the server to start
   echo 'Waiting for the server to start...'
@@ -34,4 +46,5 @@ setup: |
 
 run: |
   echo 'Running benchmark...'
+  # Can add config selection based on GPU type here
   python3 benchmark.py
