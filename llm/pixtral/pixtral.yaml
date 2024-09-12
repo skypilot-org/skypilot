@@ -18,7 +18,7 @@ service:
 
 resources:
   accelerators: {L40, L40S, A100, A100-80GB}
-  cpus: 4+
+  cpus: 2+
   disk_tier: best
   ports: 8081  # Expose to internet traffic.
 

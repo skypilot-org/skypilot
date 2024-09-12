@@ -60,7 +60,7 @@ pip install 'skypilot-nightly[all]'
 sky launch -c pixtral pixtral.yaml
 ```
 
-![Pixtral on SkyPilot](https://i.imgur.com/lgK10Tx.png)
+![Pixtral on SkyPilot](https://i.imgur.com/afzNiaK.png)
 
 
 3. Get the endpoint and send requests:
