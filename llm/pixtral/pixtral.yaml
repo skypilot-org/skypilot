@@ -10,10 +10,9 @@ service:
       model: $MODEL_NAME
       messages:
         - role: user
-          content: {
-            "type": "text",
-            "text": "Are you alive?"
-          }
+          content:
+            - type: text
+              text: "Are you alive?"
       max_tokens: 1
 
 resources:

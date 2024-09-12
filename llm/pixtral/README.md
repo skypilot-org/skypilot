@@ -73,7 +73,7 @@ sky launch -c pixtral pixtral.yaml
 ```bash
 ENDPOINT=$(sky status --endpoint 8081 pixtral)
 
-curl --location http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -H 'Authorization: Bearer token' \
     --data '{
@@ -150,16 +150,22 @@ These descriptions should give you a clear picture of the scenes depicted in the
 
 ## Scale Up Pixtral Endpoint as a Service
 
-1. Start a service with SkyServe:
+1. Start a service with [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html):
 ```bash
 sky serve up -n pixtral pixtral.yaml
 ```
 
-2. Get the endpoint and send requests:
+2. Check the status of the services:
+
+```bash
+sky serve status pixtral
+```
+
+3. Get the endpoint and send requests:
 ```bash
 ENDPOINT=$(sky serve status --endpoint pixtral)
 
-curl --location http://$ENDPOINT/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -H 'Authorization: Bearer token' \
     --data '{
