@@ -1,4 +1,4 @@
-# Deploy Pixtral with One Click on Any Cloud or Kubernetes
+# Deploy Pixtral On Kubernetes or Your Own Cloud
 
 
 
@@ -45,22 +45,28 @@
                        ░░░░░
 ```
 
-On Sep 11, 2024, Mistral released a new [Pixtral 12B](https://x.com/MistralAI/status/1833758285167722836), their first multimodal model. This guide shows how to use run and deploy this multimodal model on any cloud and Kubernetes.
+On Sep 11, 2024, Mistral released a new [Pixtral 12B](https://x.com/MistralAI/status/1833758285167722836), their first multimodal model, supporting both text and image inputs.
+
+This guide shows how to use run and deploy this multimodal model on your own clouds or Kubernetes clusters.
 
 ## Run Pixtral on Any Cloud or Kubernetes
 
-1. Install SkyPilot on your local machine:
+1. Install SkyPilot on your local machine and check your kubernetes and cloud setup:
 
 ```bash
-pip install 'skypilot-nightly[all]'
+pip install 'skypilot[all]'
+sky check
 ```
+Detailed instructions for installation and cloud setup [here](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
 
 2. Launch the model on any cloud or Kubernetes:
 ```bash
 sky launch -c pixtral pixtral.yaml
 ```
 
-![Pixtral on SkyPilot](https://i.imgur.com/afzNiaK.png)
+<center>
+  <img src="https://i.imgur.com/afzNiaK.png" alt="Pixtral on SkyPilot" width="80%" style="display:block; margin:auto;">
+</center>
 
 
 3. Get the endpoint and send requests:

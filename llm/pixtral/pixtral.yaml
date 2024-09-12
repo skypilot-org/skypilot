@@ -12,7 +12,7 @@ service:
         - role: user
           content: {
             "type": "text",
-            "text": "What's in this image?"
+            "text": "Are you alive?"
           }
       max_tokens: 1
 
