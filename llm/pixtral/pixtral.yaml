@@ -17,7 +17,7 @@ service:
       max_tokens: 1
 
 resources:
-  accelerators: {L4, L40, L40S, A10g, A10, A100, A100-80GB}
+  accelerators: {L40, L40S, A100, A100-80GB}
   cpus: 4+
   disk_tier: best
   ports: 8081  # Expose to internet traffic.
@@ -29,6 +29,9 @@ setup: |
 run: |
   echo 'Starting vllm api server...'
 
+  export OMP_NUM_THREADS=8
   vllm serve $MODEL_NAME --tokenizer_mode mistral \
     --limit_mm_per_prompt 'image=4' \
-    --max_num_batched_tokens 16384
+    --max_num_batched_tokens 16384 \
+    --max-model-len 10240 \
+    --port 8081

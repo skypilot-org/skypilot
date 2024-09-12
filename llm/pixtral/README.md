@@ -3,6 +3,49 @@
 On Sep 11, 2024, Mistral released a new [Pixtral 12B](https://x.com/MistralAI/status/1833758285167722836), their first multimodal model. This guide shows how to use run and deploy this multimodal model on any cloud and Kubernetes.
 
 
+```
+                                                                 ▄▄▄░░
+                                                        ▄▄▄▄▄█████████░░░░
+                                            ▄▄▄▄▄▄████████████████████░░░░░
+                                         █████████████████████████████░░░░░
+                    ▄▄▄▄▄▄█████░░░       █████████████████████████████░░░░░
+         ▄▄▄▄▄██████████████████░░░░░░  ██████████████████████████████░░░░░
+  ▄█████████████████████████████░░░░░░░░██████████████████████████████░░░░░
+  ███████████████████████████████░░░░░░░██████████████████████████████░░░░░
+  ███████████████████████████████░░░░░░░██████████████████████████████░░░░░
+  ███████████████████████████████░░░░░░███████████████████████████████░░░░░
+  ████████████████████████████████░░░░░███████████████████████████████░░░░░
+  ████████████████████████████████░░░░████████████████████████████████░░░░░
+  █████████████████████████████████░░░████████████████████████████████░░░░░
+  █████████████████████████████████░░░████████████░███████████████████░░░░░
+  ██████████████████████████████████░█████████████░███████████████████░░░░░
+  ███████████████████░██████████████▄█████████████░███████████████████░░░░░
+  ███████████████████░███████████████████████████░░███████████████████░░░░░
+  ███████████████████░░██████████████████████████░░███████████████████░░░░░
+  ███████████████████░░█████████████████████████░░░███████████████████░░░░░
+  ███████████████████░░░████████████████████████░░░███████████████████░░░░░
+  ███████████████████░░░████████████████████████░░░███████████████████░░░░░
+  ███████████████████░░░░██████████████████████░░░░███████████████████░░░░░
+  ███████████████████░░░░██████████████████████░░░░███████████████████░░░░░
+  ███████████████████░░░░░█████████████████████░░░░███████████████████░░░░░
+  ███████████████████░░░░░████████████████████░░░░░███████████████████░░░░░
+  ███████████████████░░░░░░███████████████████░░░░░███████████████████░░░░░
+  ███████████████████░░░░░░██████████████████░░░░░░███████████████████░░░░░
+  ███████████████████░░░░░░░█████████████████░░░░░░███████████████████░░░░░
+  ███████████████████░░░░░░░█████████████████░░░░░░███████████████████░░░░░
+  ███████████████████░░░░░░░░███████████████░░░░░░░██████████░░░░░░░░░░░░░░
+  ███████████████████░░░░░░░░███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  ███████████████████░░░░░░░░███████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  ███████████████████░░░░░░░░░██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ░░░░░░░
+      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░      ░░░
+            ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    ░░░░░░░░░░░░░░░░░░
+               ░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+                    ░░░░░░░░░░░░░░░░░
+                       ░░░░░
+```
+
 ## Run Pixtral on Any Cloud or Kubernetes
 
 1. Install SkyPilot on your local machine:
@@ -40,27 +83,28 @@ sky launch -c pixtral pixtral.yaml
 ```
 ENDPOINT=$(sky status --endpoint 8081 pixtral)
 
-curl --location 'http://$ENDPOINT:8081/v1/chat/completions' \
---header 'Content-Type: application/json' \
---header 'Authorization: Bearer token' \
---data '{
-    "model": "mistralai/Pixtral-12B-2409",
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-            {"type" : "text", "text": "Describe this image in detail please."},
-            {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
-            {"type" : "text", "text": "and this one as well. Answer in French."},
-            {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png"}}
-        ]
-      }
-    ]
-  }' | jq .
+curl --location http://$ENDPOINT/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer token' \
+    --data '{
+        "model": "mistralai/Pixtral-12B-2409",
+        "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type" : "text", "text": "Describe this image in detail please."},
+                {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
+                {"type" : "text", "text": "and this one as well."},
+                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971
+db031b.png"}}
+            ]
+        }],
+        "max_tokens": 1024
+    }' | jq .
 ```
 
 
-## Scale Up as a Service
+## Scale Up Pixtral Endpoint as a Service
 
 1. Start a service with SkyServe:
 ```
@@ -71,21 +115,22 @@ sky serve up -n pixtral pixtral.yaml
 ```
 ENDPOINT=$(sky serve status --endpoint pixtral)
 
-curl --location 'http://$ENDPOINT:8081/v1/chat/completions' \
---header 'Content-Type: application/json' \
---header 'Authorization: Bearer token' \
---data '{
-    "model": "mistralai/Pixtral-12B-2409",
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-            {"type" : "text", "text": "Describe this image in detail please."},
-            {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
-            {"type" : "text", "text": "and this one as well. Answer in French."},
-            {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971db031b.png"}}
-        ]
-      }
-    ]
-  }' | jq .
+curl --location http://$ENDPOINT/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer token' \
+    --data '{
+        "model": "mistralai/Pixtral-12B-2409",
+        "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type" : "text", "text": "Describe this image in detail please."},
+                {"type": "image_url", "image_url": {"url": "https://s3.amazonaws.com/cms.ipressroom.com/338/files/201808/5b894ee1a138352221103195_A680%7Ejogging-edit/A680%7Ejogging-edit_hero.jpg"}},
+                {"type" : "text", "text": "and this one as well."},
+                {"type": "image_url", "image_url": {"url": "https://www.wolframcloud.com/obj/resourcesystem/images/a0e/a0ee3983-46c6-4c92-b85d-059044639928/6af8cfb971
+db031b.png"}}
+            ]
+        }],
+        "max_tokens": 1024
+    }' | jq .
 ```
