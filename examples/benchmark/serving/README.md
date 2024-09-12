@@ -39,8 +39,8 @@ In this guide, we use Sky Benchmark to find the GPU with the lowest $/query for 
     CLUSTER              CLOUD   # NODES   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   PRICE ($/hr)
    --------------------------------------------------------------------------------------------------------
     sky-bench-gemma-0    AWS     1         g4dn.xlarge     4       16        T4:1           0.53
-    sky-bench-gemma-1    GCP     1         g2-standard-4   4       16        L4:1           0.70
-    sky-bench-gemma-2    GCP     1         n1-highmem-8    8       52        V100:1         2.95
+    sky-bench-gemma-1    AWS     1         g6.xlarge       4       16        L4:1           0.80
+    sky-bench-gemma-2    AWS     1         p3.2xlarge      8       61        V100:1         3.06
    --------------------------------------------------------------------------------------------------------
    ```
    
@@ -59,10 +59,10 @@ In this guide, we use Sky Benchmark to find the GPU with the lowest $/query for 
    - SEC/STEP, $/STEP: Average time (cost) per step.
    - EST(hr), EST($): Estimated total time (cost) to complete the benchmark.
    
-   CLUSTER             RESOURCES                             STATUS    DURATION  SPENT($)  #STEPS  SEC/STEP  $/STEP    EST(hr)  EST($)
-   sky-bench-gemma-0   1x AWS(g4dn.xlarge, {'T4': 1})        FINISHED  48s       0.0071    10      4.5758    0.000669  0.01     0.01
-   sky-bench-gemma-1   1x GCP(g2-standard-4, {'L4': 1})      FINISHED  39s       0.0077    10      3.6772    0.000720  0.01     0.01
-   sky-bench-gemma-2   1x GCP(n1-highmem-8, {'V100': 1})     FINISHED  22s       0.0188    10      2.0917    0.001716  0.01     0.02
+   CLUSTER             RESOURCES                        STATUS    DURATION  SPENT($)  #STEPS  SEC/STEP  $/STEP    EST(hr)  EST($)
+   sky-bench-gemma-0   1x AWS(g4dn.xlarge, {'T4': 1})   FINISHED  52s       0.0077    10      4.9604    0.000725  0.01     0.01
+   sky-bench-gemma-1   1x AWS(g6.xlarge, {'L4': 1})     FINISHED  46s       0.0104    10      4.1886    0.000936  0.01     0.01
+   sky-bench-gemma-2   1x AWS(p3.2xlarge, {'V100': 1})  FINISHED  23s       0.0199    10      2.1349    0.001815  0.01     0.02
    ```
    
    In these results, each step corresponds to completion of a batch of 5 queries. This can be configured in `benchmark.py`.
