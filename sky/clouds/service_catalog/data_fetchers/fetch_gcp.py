@@ -547,7 +547,7 @@ def _get_tpu_response_for_zone(zone: str) -> list:
         time_to_sleep = backoff.current_backoff()
         print(f'  Retry zone {zone!r} in {time_to_sleep} seconds...')
         time.sleep(time_to_sleep)
-    print(f'Failed to fetch TPUs for zone {zone!r}.')
+    print(f'ERROR: Failed to fetch TPUs for zone {zone!r}.')
     return []
 
 
