@@ -337,10 +337,14 @@ def get_common_gpus() -> List[str]:
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
     # TODO(wei-lin): refactor below hard-coded list.
+    # There are many TPU configurations available, we show the three smallest
+    # and the largest configurations for the latest gen TPUs.
     return [
-        'tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v2-256', 'tpu-v2-512',
-        'tpu-v3-8', 'tpu-v3-32', 'tpu-v3-64', 'tpu-v3-128', 'tpu-v3-256',
-        'tpu-v3-512', 'tpu-v3-1024', 'tpu-v3-2048'
+        'tpu-v2-512',
+        'tpu-v3-2048',
+        'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32', 'tpu-v4-3968',
+        'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8', 'tpu-v5litepod-256',  # pylint: disable=line-too-long
+        'tpu-v5p-8', 'tpu-v5p-32', 'tpu-v5p-128', 'tpu-v5p-12288'
     ]
 
 
