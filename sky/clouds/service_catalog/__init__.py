@@ -338,7 +338,7 @@ def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
     # TODO(wei-lin): refactor below hard-coded list.
     # There are many TPU configurations available, we show the three smallest
-    # and the largest configurations for the latest gen TPUs.
+    # and the largest configuration for the latest gen TPUs.
     return [
         'tpu-v2-512',
         'tpu-v3-2048',
