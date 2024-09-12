@@ -531,7 +531,8 @@ def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
         parent=parent)
     try:
         tpus_response = tpus_request.execute()
-        for tpu in tpus_response['acceleratorTypes']:
+        # TODO(tian): Sometimes the response is empty ({}). Need to investigate.
+        for tpu in tpus_response.get('acceleratorTypes', []):
             tpus.append(tpu)
     except gcp.http_error_exception() as error:
         if error.resp.status == 403:
