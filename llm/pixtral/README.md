@@ -176,7 +176,7 @@ curl http://$ENDPOINT/v1/chat/completions \
         {
             "role": "user",
             "content": [
-                {"type" : "text", "text": "Turn this SkyPilot logo into ASCII."},
+                {"type" : "text", "text": "Turn this logo into ASCII art."},
                 {"type": "image_url", "image_url": {"url": "https://pbs.twimg.com/profile_images/1584596138635632640/HWexMoH5_400x400.jpg"}}
             ]
         }],
