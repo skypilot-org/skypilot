@@ -44,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -1592,5 +1592,8 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+
+        if version < 20:
+            self._use_az_ml = state.pop('_use_az_ml', False)
 
         self.__dict__.update(state)
