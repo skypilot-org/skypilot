@@ -161,6 +161,8 @@ sky serve up -n pixtral pixtral.yaml
 sky serve status pixtral
 ```
 
+![Serve Pixtral](https://i.imgur.com/WHGZICc.png)
+
 3. Get the endpoint and send requests:
 ```bash
 ENDPOINT=$(sky serve status --endpoint pixtral)
