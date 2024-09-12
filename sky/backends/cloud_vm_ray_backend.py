@@ -2663,24 +2663,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'stores, but the existing cluster with '
                             f'{launched_resources!r} does not support FUSE '
                             f'mounting. Launch a new cluster to run this task.')
-                if (example_resource.accelerators is not None and
-                        launched_resources.accelerators is not None):
-                    for acc in example_resource.accelerators:
-                        if acc not in launched_resources.accelerators:
-                            continue
-                        self_count = example_resource.accelerators[acc]
-                        existing_count = launched_resources.accelerators[acc]
-                        if (isinstance(existing_count, float) and
-                                not existing_count.is_integer() and
-                                not math.isclose(self_count, existing_count)):
-                            with ux_utils.print_exception_no_traceback():
-                                raise exceptions.ResourcesMismatchError(
-                                    'Cluster has a fractional accelerator '
-                                    'counts. For such cluster, a task should '
-                                    'request exact the same count of '
-                                    'accelerators. Got required accelerator '
-                                    f'{acc}:{self_count} but the existing '
-                                    f'cluster has {acc}:{existing_count}.')
             requested_resource_str = ', '.join(requested_resource_list)
             if isinstance(task.resources, list):
                 requested_resource_str = f'[{requested_resource_str}]'
@@ -3431,10 +3413,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           check_ports=True)
         # For fractional acc count clusters, we round up the number of accs to 1
         # (see sky/utils/resources_utils.py::make_ray_custom_resources_str).
-        # Also, we requires to launch on such cluster, the specified acc count
-        # must exactly match the launched acc count. Therefore, here we set the
-        # required acc count to 1 to make sure there will be only one task
-        # running on the cluster.
+        # Here we scale the required acc count to (required / launched) * 1 so
+        # the total number of accs is the same as the requested number.
         launched_accs = handle.launched_resources.accelerators
         if (launched_accs is not None and
                 valid_resource.accelerators is not None):
@@ -3442,7 +3422,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if isinstance(count, float) and not count.is_integer():
                     valid_resource = valid_resource.copy(
                         accelerators={
-                            k: math.ceil(v)
+                            k: v / count
                             for k, v in valid_resource.accelerators.items()
                         })
         task_copy = copy.copy(task)
