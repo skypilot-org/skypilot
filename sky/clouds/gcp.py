@@ -433,7 +433,7 @@ class GCP(clouds.Cloud):
             start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
-                ok, _ = GCP._check_disk_tier(r.instance_type, disk_tier)
+                ok, _ = GCP.check_disk_tier(r.instance_type, disk_tier)
                 if ok:
                     return disk_tier
                 start_index += 1
@@ -547,6 +547,10 @@ class GCP(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            ok, _ = GCP.check_disk_tier(resources.instance_type,
+                                        resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
             return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
@@ -559,15 +563,17 @@ class GCP(clouds.Cloud):
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
                 return resources_utils.FeasibleResources([], [], None)
-            else:
-                r = resources.copy(
-                    cloud=GCP(),
-                    instance_type=host_vm_type,
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
-                return resources_utils.FeasibleResources([r], [], None)
+            ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
+            r = resources.copy(
+                cloud=GCP(),
+                instance_type=host_vm_type,
+                accelerators=None,
+                cpus=None,
+                memory=None,
+            )
+            return resources_utils.FeasibleResources([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -630,6 +636,10 @@ class GCP(clouds.Cloud):
         else:
             host_vm_type = instance_list[0]
 
+        ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+        if not ok:
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
         acc_dict = {acc: acc_count}
         r = resources.copy(
             cloud=GCP(),
@@ -932,7 +942,7 @@ class GCP(clouds.Cloud):
             'gcp')
 
     @classmethod
-    def _check_disk_tier(
+    def check_disk_tier(
             cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
@@ -956,7 +966,7 @@ class GCP(clouds.Cloud):
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: resources_utils.DiskTier) -> None:
-        ok, msg = cls._check_disk_tier(instance_type, disk_tier)
+        ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(msg)
