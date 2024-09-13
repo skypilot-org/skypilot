@@ -165,10 +165,10 @@ class SkyServeLoadBalancer:
         # all retries for the same request can go to the same replica by chance.
         # If the same replica is in `NOT_READY` state but the new state has not
         # been synced from the controller, the current request will fail.
-        # 
-        # We maintain a per-request failed replica list instead of the global one to
-        # allow multiple requests to still try failed replicas for one request in case
-        # that replica is failed by transient network issue.
+        #
+        # We maintain a per-request failed replica set instead of the global
+        # one to allow multiple requests to still try failed replicas for one
+        # time, in case that replica is failed by transient network issue.
         failed_replica_urls: Set[str] = set()
         while True:
             retry_cnt += 1
