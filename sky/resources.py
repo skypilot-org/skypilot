@@ -1001,6 +1001,17 @@ class Resources:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Open ports are not supported for Azure Machine Learning.')
+        if (self.disk_tier is not None or
+                self.disk_size != _DEFAULT_DISK_SIZE_GB):
+            # Azure ML does not support custom disk size and disk tier.
+            # Reference: https://stackoverflow.com/questions/66923216/change-disk-type-azure-ml  # pylint: disable=line-too-long
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Custom disk size and disk tier are not '
+                                 'supported for Azure Machine Learning.')
+        if self.image_id is not None and self.extract_docker_image() is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Custom image is not supported for Azure Machine Learning.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
