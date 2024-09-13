@@ -1,7 +1,7 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
 import random
 import typing
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from sky import sky_logging
 
@@ -29,7 +29,7 @@ class LoadBalancingPolicy:
         raise NotImplementedError
 
     def select_replica(self, request: 'fastapi.Request',
-                       disabled_replicas: List[str]) -> Optional[str]:
+                       disabled_replicas: Set[str]) -> Optional[str]:
         replica = self._select_replica(request, disabled_replicas)
         if replica is not None:
             logger.info(f'Selected replica {replica} '
@@ -39,10 +39,13 @@ class LoadBalancingPolicy:
                            f'{_request_repr(request)}')
         return replica
 
+    def num_ready_replicas(self) -> int:
+        return len(self.ready_replicas)
+
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
     def _select_replica(self, request: 'fastapi.Request',
-                        disabled_replicas: List[str]) -> Optional[str]:
+                        disabled_replicas: Set[str]) -> Optional[str]:
         raise NotImplementedError
 
 
@@ -64,11 +67,9 @@ class RoundRobinPolicy(LoadBalancingPolicy):
         self.index = 0
 
     def _select_replica(self, request: 'fastapi.Request',
-                        disabled_replicas: List[str]) -> Optional[str]:
+                        disabled_replicas: Set[str]) -> Optional[str]:
         del request  # Unused.
-        # Avoid infinite loop.
-        if not self.ready_replicas or all(
-                url in disabled_replicas for url in self.ready_replicas):
+        if not self.ready_replicas:
             return None
         while True:
             ready_replica_url = self.ready_replicas[self.index]

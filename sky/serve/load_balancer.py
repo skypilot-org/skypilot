@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, List, Union
+from typing import Dict, Set, Union
 
 import aiohttp
 import fastapi
@@ -169,19 +169,17 @@ class SkyServeLoadBalancer:
         # that multiple retries on a single request will use the same replica.
         # Here we use the failed replica list to keep track of the failures
         # happened on every request and try to avoid them in the next retry.
-        failed_replica_urls: List[str] = []
+        failed_replica_urls: Set[str] = set()
         while True:
             retry_cnt += 1
             with self._client_pool_lock:
+                # If all replicas are failed, clear the record and retry them
+                # again as some of them might be transient networking issues.
+                if (len(failed_replica_urls) ==
+                        self._load_balancing_policy.num_ready_replicas()):
+                    failed_replica_urls.clear()
                 ready_replica_url = self._load_balancing_policy.select_replica(
                     request, failed_replica_urls)
-                # If all replicas are failed, retry them again as some
-                # of them might be transient networking issues.
-                if ready_replica_url is None and failed_replica_urls:
-                    failed_replica_urls = []
-                    ready_replica_url = (
-                        self._load_balancing_policy.select_replica(
-                            request, failed_replica_urls))
             if ready_replica_url is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
@@ -202,7 +200,7 @@ class SkyServeLoadBalancer:
                 # before the server is able to respond.
                 return fastapi.responses.Response(status_code=499)
             assert ready_replica_url is not None
-            failed_replica_urls.append(ready_replica_url)
+            failed_replica_urls.add(ready_replica_url)
             # TODO(tian): Fail fast for errors like 404 not found.
             if retry_cnt == constants.LB_MAX_RETRY:
                 if isinstance(response_or_exception, fastapi.HTTPException):
