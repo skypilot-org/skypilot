@@ -920,12 +920,13 @@ class Resources:
         if self.cloud is not None:
             try:
                 self.cloud.check_disk_tier_enabled(self.instance_type,
+                                                   self.disk_size,
                                                    self.disk_tier)
-            except exceptions.NotSupportedError:
+            except exceptions.NotSupportedError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Disk tier {self.disk_tier.value} is not supported '
-                        f'for instance type {self.instance_type}.') from None
+                        f'for instance type {self.instance_type}.') from e
 
     def _try_validate_ports(self) -> None:
         """Try to validate the ports attribute.

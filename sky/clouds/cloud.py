@@ -638,13 +638,14 @@ class Cloud:
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_size: int,
                                 disk_tier: resources_utils.DiskTier) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
-        del instance_type  # unused
+        del instance_type, disk_size  # unused
         if disk_tier not in cls._SUPPORTED_DISK_TIERS:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
