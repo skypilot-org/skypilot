@@ -144,11 +144,18 @@ class Azure(clouds.Cloud):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
         image_id_splitted = image_id.split(':')
-        if len(image_id_splitted) != 4:
+        community_image = len(image_id_splitted) == 2
+        official_image = len(image_id_splitted) == 4
+        if not community_image and not official_image:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid image id: {image_id}. Expected '
-                                 'format: <publisher>:<offer>:<sku>:<version>')
-        publisher, offer, sku, version = image_id_splitted
+                                 'format: <publisher>:<offer>:<sku>:<version> '
+                                 'or <publisher>:<offer>')
+        if community_image:
+            publisher, offer = image_id_splitted
+            sku, version = None, None
+        else:
+            publisher, offer, sku, version = image_id_splitted
         if is_skypilot_image_tag:
             if offer == 'ubuntu-hpc':
                 return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
@@ -156,11 +163,18 @@ class Azure(clouds.Cloud):
                 return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
         compute_client = azure.get_client('compute', cls.get_project_id())
         try:
-            image = compute_client.virtual_machine_images.get(
-                region, publisher, offer, sku, version)
+            if official_image:
+                image = compute_client.virtual_machine_images.get(
+                    region, publisher, offer, sku, version)
+            else:
+                image = compute_client.community_gallery_images.get(
+                    region, publisher, offer)
         except azure.exceptions().ResourceNotFoundError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Image not found: {image_id}') from e
+        if not hasattr(image, 'os_disk_image'):
+            # Community gallery images do not have os_disk_image.
+            return 0
         if image.os_disk_image is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Retrieve image size for {image_id} failed.')

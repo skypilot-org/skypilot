@@ -20,6 +20,12 @@
                 "description": "SSH Key for the Virtual Machine"
             }
         },
+        "communityGalleryImageId": {
+            "type": "string",
+            "metadata": {
+                "description": "The community gallery image id"
+            }
+        },
         "imagePublisher": {
             "type": "string",
             "metadata": {
@@ -238,12 +244,7 @@
                         },
                         "diskSizeGB": "[parameters('osDiskSizeGB')]"
                     },
-                    "imageReference": {
-                        "publisher": "[parameters('imagePublisher')]",
-                        "offer": "[parameters('imageOffer')]",
-                        "sku": "[parameters('imageSku')]",
-                        "version": "[parameters('imageVersion')]"
-                    }
+                    "imageReference": "[if(not(empty(parameters('communityGalleryImageId'))), json(concat('{\"communityGalleryImageId\": \"', parameters('communityGalleryImageId'), '\"}')), json(concat('{\"publisher\": \"', parameters('imagePublisher'), '\", \"offer\": \"', parameters('imageOffer'), '\", \"sku\": \"', parameters('imageSku'), '\", \"version\": \"', parameters('imageVersion'), '\"}')))]"
                 },
                 "networkProfile": {
                     "networkInterfaces": [
