@@ -340,19 +340,9 @@ def get_tpus() -> List[str]:
     # There are many TPU configurations available, we show the three smallest
     # and the largest configuration for the latest gen TPUs.
     return [
-        'tpu-v2-512',
-        'tpu-v3-2048',
-        'tpu-v4-8',
-        'tpu-v4-16',
-        'tpu-v4-32',
-        'tpu-v4-3968',
-        'tpu-v5litepod-1',
-        'tpu-v5litepod-4',
-        'tpu-v5litepod-8',
-        'tpu-v5litepod-256',
-        'tpu-v5p-8',
-        'tpu-v5p-32',
-        'tpu-v5p-128',
+        'tpu-v2-512', 'tpu-v3-2048', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
+        'tpu-v4-3968', 'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8',
+        'tpu-v5litepod-256', 'tpu-v5p-8', 'tpu-v5p-32', 'tpu-v5p-128',
         'tpu-v5p-12288'
     ]
 
