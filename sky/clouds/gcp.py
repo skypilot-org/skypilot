@@ -424,6 +424,21 @@ class GCP(clouds.Cloud):
         # issue when first booted.
         image_id = 'skypilot:cpu-debian-11'
 
+        def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
+            if (r.disk_tier is not None and
+                    r.disk_tier != resources_utils.DiskTier.BEST):
+                return r.disk_tier
+            # Failover disk tier from ultra to low.
+            all_tiers = list(reversed(resources_utils.DiskTier))
+            start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
+            while start_index < len(all_tiers):
+                disk_tier = all_tiers[start_index]
+                ok, _ = GCP.check_disk_tier(r.instance_type, disk_tier)
+                if ok:
+                    return disk_tier
+                start_index += 1
+            assert False, 'Low disk tier should always be supported on GCP.'
+
         r = resources
         # Find GPU spec, if any.
         resources_vars = {
@@ -437,7 +452,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
-            **GCP._get_disk_specs(r.disk_tier),
+            **GCP._get_disk_specs(_failover_disk_tier()),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -532,6 +547,10 @@ class GCP(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            ok, _ = GCP.check_disk_tier(resources.instance_type,
+                                        resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
             return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
@@ -544,15 +563,17 @@ class GCP(clouds.Cloud):
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
                 return resources_utils.FeasibleResources([], [], None)
-            else:
-                r = resources.copy(
-                    cloud=GCP(),
-                    instance_type=host_vm_type,
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
-                return resources_utils.FeasibleResources([r], [], None)
+            ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
+            r = resources.copy(
+                cloud=GCP(),
+                instance_type=host_vm_type,
+                accelerators=None,
+                cpus=None,
+                memory=None,
+            )
+            return resources_utils.FeasibleResources([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -615,6 +636,10 @@ class GCP(clouds.Cloud):
         else:
             host_vm_type = instance_list[0]
 
+        ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+        if not ok:
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
         acc_dict = {acc: acc_count}
         r = resources.copy(
             cloud=GCP(),
@@ -915,6 +940,36 @@ class GCP(clouds.Cloud):
         service_catalog.check_accelerator_attachable_to_host(
             resources.instance_type, resources.accelerators, resources.zone,
             'gcp')
+
+    @classmethod
+    def check_disk_tier(
+            cls, instance_type: Optional[str],
+            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
+        if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
+            return True, ''
+        # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
+        # instance types, so we failover to lower tiers for other instance
+        # types. Reference:
+        # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
+        series = instance_type.split('-')[0]
+        if series in ['m2', 'm3', 'n2']:
+            if series == 'n2':
+                num_cpus = int(instance_type.split('-')[2])
+                if num_cpus < 64:
+                    return False, ('n2 series with less than 64 vCPUs are '
+                                   'not supported with pd-extreme.')
+            return True, ''
+        return False, (f'{series} series is not supported with pd-extreme. '
+                       'Only m2, m3 series and n2 series with 64 or more vCPUs '
+                       'are supported.')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
+        ok, msg = cls.check_disk_tier(instance_type, disk_tier)
+        if not ok:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
 
     @classmethod
     def _get_disk_type(cls,
