@@ -1777,7 +1777,8 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
                                get_current_kube_config_context_namespace())
 
 
-def filter_pods(namespace: str, context: str,
+def filter_pods(namespace: str,
+                context: str,
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
     """Filters pods by tags and status."""

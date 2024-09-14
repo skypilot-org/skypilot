@@ -448,8 +448,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      'terminating pods. Waiting them to finish: '
                      f'{list(terminating_pods.keys())}')
         time.sleep(POLL_INTERVAL)
-        terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
-                                                        ['Terminating'])
+        terminating_pods = kubernetes_utils.filter_pods(namespace, context,
+                                                        tags, ['Terminating'])
 
     if len(terminating_pods) > 0:
         # If there are still terminating pods, we force delete them.
@@ -548,7 +548,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags, ['Pending'])
+    wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                  ['Pending'])
     wait_pods = list(wait_pods_dict.values())
 
     networking_mode = network_utils.get_networking_mode(
@@ -578,7 +579,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{list(wait_pods_dict.keys())}')
 
-    running_pods = kubernetes_utils.filter_pods(namespace, context, tags, ['Running'])
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                ['Running'])
     initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
         TAG_POD_INITIALIZED: 'true',
         **tags
@@ -688,7 +690,6 @@ def terminate_instances(
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
     pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
-
 
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
