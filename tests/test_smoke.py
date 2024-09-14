@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
@@ -1168,6 +1169,61 @@ def test_kubernetes_storage_mounts():
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_context_switch():
+    name = _get_cluster_name()
+    new_context = f'sky-test-context-{int(time.time())}'
+    new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    test_commands = [
+        # Launch a cluster and run a simple task
+        f'sky launch -y -c {name} --cloud kubernetes "echo Hello from original context"',
+        f'sky logs {name} 1 --status',  # Ensure job succeeded
+
+        # Get current context details and save to a file for later use in cleanup
+        'CURRENT_CONTEXT=$(kubectl config current-context); '
+        'echo "$CURRENT_CONTEXT" > /tmp/sky_test_current_context; '
+        'CURRENT_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.cluster}"); '
+        'CURRENT_USER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.user}"); '
+
+        # Create a new context with a different name and namespace
+        f'kubectl config set-context {new_context} --cluster="$CURRENT_CLUSTER" --user="$CURRENT_USER" --namespace={new_namespace}',
+
+        # Create the new namespace if it doesn't exist
+        f'kubectl create namespace {new_namespace} --dry-run=client -o yaml | kubectl apply -f -',
+
+        # Set the new context as active
+        f'kubectl config use-context {new_context}',
+
+        # Verify the new context is active
+        f'[ "$(kubectl config current-context)" = "{new_context}" ] || exit 1',
+
+        # Try to run sky exec on the original cluster (should still work)
+        f'sky exec {name} "echo Success: sky exec works after context switch"',
+
+        # Test sky queue
+        f'sky queue {name}',
+
+        # Test SSH access
+        f'ssh {name} whoami',
+    ]
+
+    cleanup_commands = (
+        f'kubectl delete namespace {new_namespace}; '
+        f'kubectl config delete-context {new_context}; '
+        'kubectl config use-context $(cat /tmp/sky_test_current_context); '
+        'rm /tmp/sky_test_current_context; '
+        f'sky down -y {name}')
+
+    test = Test(
+        'kubernetes_context_switch',
+        test_commands,
+        cleanup_commands,
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
 
 
 @pytest.mark.parametrize(
@@ -2446,8 +2502,6 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -2455,8 +2509,6 @@ def test_cancel_aws():
 
 
 @pytest.mark.gcp
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -2464,8 +2516,6 @@ def test_cancel_gcp():
 
 
 @pytest.mark.azure
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
@@ -3362,11 +3412,11 @@ def test_aws_disk_tier():
                 f'Reservations[].Instances[].InstanceId --output text`; ' +
                 _get_aws_query_command(region, '$id', 'VolumeType',
                                        specs['disk_tier']) +
-                ('' if disk_tier == resources_utils.DiskTier.LOW else
-                 (_get_aws_query_command(region, '$id', 'Iops',
-                                         specs['disk_iops']) +
-                  _get_aws_query_command(region, '$id', 'Throughput',
-                                         specs['disk_throughput']))),
+                ('' if specs['disk_tier']
+                 == 'standard' else _get_aws_query_command(
+                     region, '$id', 'Iops', specs['disk_iops'])) +
+                ('' if specs['disk_tier'] != 'gp3' else _get_aws_query_command(
+                    region, '$id', 'Throughput', specs['disk_throughput'])),
             ],
             f'sky down -y {name}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
@@ -3402,8 +3452,8 @@ def test_gcp_disk_tier():
 @pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
-        if disk_tier == resources_utils.DiskTier.HIGH:
-            # Azure does not support high disk tier.
+        if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
+            # Azure does not support high and ultra disk tier.
             continue
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier.value
@@ -3492,6 +3542,43 @@ def test_gcp_zero_quota_failover():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
+
+def test_long_setup_run_script(generic_cloud: str):
+    name = _get_cluster_name()
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
+                                     suffix='.yaml') as f:
+        f.write(
+            textwrap.dedent(""" \
+            setup: |
+              echo "start long setup"
+            """))
+        for i in range(1024 * 120):
+            f.write(f'  echo {i}\n')
+        f.write('  echo "end long setup"\n')
+        f.write(
+            textwrap.dedent(""" \
+            run: |
+              echo "run"
+        """))
+        for i in range(1024 * 120):
+            f.write(f'  echo {i}\n')
+        f.write('  echo "end run"\n')
+        f.flush()
+
+        test = Test(
+            'long-setup-run-script',
+            [
+                f'sky launch -y -c {name} --cloud {generic_cloud} --cpus 2+ {f.name}',
+                f'sky exec {name} "echo hello"',
+                f'sky exec {name} {f.name}',
+                f'sky logs {name} --status 1',
+                f'sky logs {name} --status 2',
+                f'sky logs {name} --status 3',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
 
 
 # ---------- Testing skyserve ----------
@@ -5089,14 +5176,10 @@ class TestStorageWithCredentials:
                 private_bucket).path.strip('/')
         else:
             private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
-        match_str = storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-            name=private_bucket_name)
-        if store_type == 'https':
-            # Azure blob uses a different error string since container may
-            # not exist even though the bucket name is ok.
-            match_str = 'Attempted to fetch a non-existent public container'
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match=match_str):
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @pytest.mark.no_fluidstack

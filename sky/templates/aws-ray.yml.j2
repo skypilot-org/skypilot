@@ -73,8 +73,10 @@ available_node_types:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}
             Encrypted: {{disk_encrypted}}
-            {% if custom_disk_perf %}
+            {% if disk_iops %}
             Iops: {{disk_iops}}
+            {% endif %}
+            {% if disk_throughput %}
             Throughput: {{disk_throughput}}
             {% endif %}
       {% if use_spot %}

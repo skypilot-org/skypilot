@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import colorama
 
@@ -424,6 +424,21 @@ class GCP(clouds.Cloud):
         # issue when first booted.
         image_id = 'skypilot:cpu-debian-11'
 
+        def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
+            if (r.disk_tier is not None and
+                    r.disk_tier != resources_utils.DiskTier.BEST):
+                return r.disk_tier
+            # Failover disk tier from ultra to low.
+            all_tiers = list(reversed(resources_utils.DiskTier))
+            start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
+            while start_index < len(all_tiers):
+                disk_tier = all_tiers[start_index]
+                ok, _ = GCP.check_disk_tier(r.instance_type, disk_tier)
+                if ok:
+                    return disk_tier
+                start_index += 1
+            assert False, 'Low disk tier should always be supported on GCP.'
+
         r = resources
         # Find GPU spec, if any.
         resources_vars = {
@@ -437,6 +452,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
+            **GCP._get_disk_specs(_failover_disk_tier()),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -495,8 +511,6 @@ class GCP(clouds.Cloud):
             resources_vars['machine_image'] = image_id
             resources_vars['image_id'] = None
 
-        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
-
         firewall_rule = None
         if resources.ports is not None:
             firewall_rule = (USER_PORTS_FIREWALL_RULE_NAME.format(
@@ -533,6 +547,10 @@ class GCP(clouds.Cloud):
     ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            ok, _ = GCP.check_disk_tier(resources.instance_type,
+                                        resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
             return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
@@ -545,15 +563,17 @@ class GCP(clouds.Cloud):
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
                 return resources_utils.FeasibleResources([], [], None)
-            else:
-                r = resources.copy(
-                    cloud=GCP(),
-                    instance_type=host_vm_type,
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
-                return resources_utils.FeasibleResources([r], [], None)
+            ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
+            r = resources.copy(
+                cloud=GCP(),
+                instance_type=host_vm_type,
+                accelerators=None,
+                cpus=None,
+                memory=None,
+            )
+            return resources_utils.FeasibleResources([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -616,6 +636,10 @@ class GCP(clouds.Cloud):
         else:
             host_vm_type = instance_list[0]
 
+        ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+        if not ok:
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
         acc_dict = {acc: acc_count}
         r = resources.copy(
             cloud=GCP(),
@@ -716,7 +740,7 @@ class GCP(clouds.Cloud):
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            identity = cls.get_current_user_identity()
+            identity = cls.get_active_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 exceptions.CloudUserIdentityError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
@@ -827,16 +851,19 @@ class GCP(clouds.Cloud):
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
-            account = cls.get_current_user_identity()[0]
+            account = cls.get_active_user_identity()
         except exceptions.CloudUserIdentityError:
             return None
-        if GCPIdentityType.SERVICE_ACCOUNT.value in account:
+        if account is None:
+            return None
+        assert account is not None
+        if GCPIdentityType.SERVICE_ACCOUNT.value in account[0]:
             return GCPIdentityType.SERVICE_ACCOUNT
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> List[str]:
+    def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -867,11 +894,13 @@ class GCP(clouds.Cloud):
                     '  Reason: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
-        return [f'{account} [project_id={project_id}]']
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for GCP. Currently we only support one identity.
+        return [[f'{account} [project_id={project_id}]']]
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return user_identity[0].replace('\n', '')
@@ -913,15 +942,57 @@ class GCP(clouds.Cloud):
             'gcp')
 
     @classmethod
+    def check_disk_tier(
+            cls, instance_type: Optional[str],
+            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
+        if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
+            return True, ''
+        # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
+        # instance types, so we failover to lower tiers for other instance
+        # types. Reference:
+        # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
+        series = instance_type.split('-')[0]
+        if series in ['m2', 'm3', 'n2']:
+            if series == 'n2':
+                num_cpus = int(instance_type.split('-')[2])
+                if num_cpus < 64:
+                    return False, ('n2 series with less than 64 vCPUs are '
+                                   'not supported with pd-extreme.')
+            return True, ''
+        return False, (f'{series} series is not supported with pd-extreme. '
+                       'Only m2, m3 series and n2 series with 64 or more vCPUs '
+                       'are supported.')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
+        ok, msg = cls.check_disk_tier(instance_type, disk_tier)
+        if not ok:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
+
+    @classmethod
     def _get_disk_type(cls,
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls._translate_disk_tier(disk_tier)
         tier2name = {
+            resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
         return tier2name[tier]
+
+    @classmethod
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        specs: Dict[str, Any] = {'disk_tier': cls._get_disk_type(disk_tier)}
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            # Only pd-extreme supports custom iops.
+            # see https://cloud.google.com/compute/docs/disks#disk-types
+            specs['disk_iops'] = 20000
+        return specs
 
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:

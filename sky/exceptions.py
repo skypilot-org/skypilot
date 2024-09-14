@@ -100,9 +100,13 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
+
         if not command:
             message = error_msg
         else:
+            if len(command) > 100:
+                # Chunck the command to avoid overflow.
+                command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}')
         super().__init__(message)

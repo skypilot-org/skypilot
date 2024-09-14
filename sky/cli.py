@@ -29,6 +29,7 @@ import functools
 import multiprocessing
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -368,7 +369,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                 echo "{bashrc_diff}" >> ~/.bashrc'
 
         cmd = (f'(grep -q "SkyPilot" ~/.bashrc) || '
-               f'[[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd})')
+               f'([[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd}) || '
+               f'(echo "Bash must be version 4 or above." && exit 1))')
+
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
@@ -390,7 +393,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         ctx.exit()
 
     try:
-        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+        subprocess.run(cmd,
+                       shell=True,
+                       check=True,
+                       executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
         click.echo(
             'Completion will take effect once you restart the terminal: ' +
