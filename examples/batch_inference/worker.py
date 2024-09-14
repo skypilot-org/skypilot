@@ -4,18 +4,13 @@ import os
 import pathlib
 from typing import List
 
-from vllm import LLM, SamplingParams
+from .inference import DATA_PATH, OUTPUT_PATH, batch_inference
+from vllm import LLM
 
-DATA_PATH = '/data'
-OUTPUT_PATH = '/output'
-
-SAMPLING_PARAMS = SamplingParams(temperature=0.2,
-                                 max_tokens=100,
-                                 min_p=0.15,
-                                 top_p=0.85)
-BATCH_TOKEN_SIZE = 100000
 
 def continue_batch_inference(llm: LLM, data_paths: List[str]):
+    """Continue batch inference on a list of data chunks."""
+
     # Automatically skip processed data, resume the rest.
     for data_path in data_paths:
         data_name = data_path.split('/')[-1]
@@ -28,35 +23,8 @@ def continue_batch_inference(llm: LLM, data_paths: List[str]):
         mark_as_done(succeed_indicator)
 
 
-def batch_inference(llm: LLM, data_path: str):
-    print(f'Processing {data_path}...')
-    data_name = data_path.split('/')[-1]
-
-    # Read data (jsonl), each line is a json object
-    with open(data_path, 'r') as f:
-        prompts = f.readlines()
-        prompts = [json.loads(prompt.strip()) for prompt in prompts]
-
-    # Run inference
-    batch_token_size = 0
-    batch_prompts = []
-    predictions = []
-    for i, prompt in enumerate(prompts):
-        batch_token_size += len(prompt)
-        if batch_token_size > BATCH_TOKEN_SIZE:
-            predictions.extend(llm.generate(batch_prompts, SAMPLING_PARAMS))
-            batch_prompts = []
-            batch_token_size = 0
-
-        batch_prompts.append(prompt)
-
-    # Save predictions
-    with open(os.path.join(OUTPUT_PATH, data_name), 'w') as f:
-        for prediction in predictions:
-            f.write(json.dumps(prediction) + '\n')
-
-
 def mark_as_done(succeed_indicator: str):
+    """Mark data processing as done with a indicator file."""
     pathlib.Path(succeed_indicator).touch()
 
 
