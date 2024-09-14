@@ -682,7 +682,7 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    namespace = kubernetes_utils.get_namespace(provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     tag_filters = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,

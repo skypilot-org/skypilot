@@ -1777,7 +1777,7 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
                                get_current_kube_config_context_namespace())
 
 
-def filter_pods(namespace: str,
+def filter_pods(namespace: str, context: str,
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
     """Filters pods by tags and status."""
@@ -1790,7 +1790,7 @@ def filter_pods(namespace: str,
             [f'status.phase!={status}' for status in non_included_pod_statuses])
 
     label_selector = to_label_selector(tag_filters)
-    pod_list = kubernetes.core_api().list_namespaced_pod(
+    pod_list = kubernetes.core_api(context).list_namespaced_pod(
         namespace, field_selector=field_selector, label_selector=label_selector)
 
     # Don't return pods marked for deletion,
@@ -1864,7 +1864,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
     provider_config = ray_config['provider']
     namespace = get_namespace_from_config(provider_config)
-    running_pods = filter_pods(namespace, tags)
+    context = get_context_from_config(provider_config)
+    running_pods = filter_pods(namespace, context, tags)
 
     for _, pod in running_pods.items():
         if down:
