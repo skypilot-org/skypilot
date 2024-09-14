@@ -20,45 +20,33 @@ def batch_inference(llm: LLM, data_path: str):
     # Read data (jsonl), each line is a json object
     with open(data_path, 'r') as f:
         data = f.readlines()
-        dialogs = [json.loads(d.strip()) for d in data]
+        # Extract the first message from the conversation
+        messages = [json.loads(d.strip())['conversation'][0]['content'] for d in data]
 
     # Run inference
     batch_char_count = 0
     batch_messages = []
-    batch_dialog_info = []
-    predictions = []
-    for i, dialog in enumerate(dialogs):
-        conversation = dialog.pop('conversation')
-        # Remove the last message in the conversation, to let our model to
-        # generate the last response.
-        # Conversation example:
-        # [
-        #   {'role': 'user', 'content': 'Hello, how are you?'},
-        #   {'role': 'assistant', 'content': 'I am fine, thank you!'},
-        #   {'role': 'user', 'content': 'What is your name?'}
-        # ]
-        conversation = conversation[:-1]
+    generated_text = []
+    for message in messages:
         # Calculate the word count of the conversation
-        char_count = sum([len(message['content']) for message in conversation])
+        char_count = len(message)
         batch_char_count += char_count
 
         if batch_char_count > BATCH_CHAR_COUNT:
-            prediction = llm.chat(batch_messages, SAMPLING_PARAMS)
-            for info, pred in zip(batch_dialog_info, prediction):
-                info['prediction'] = pred
-                predictions.append(info)
+            outputs = llm.generate(batch_messages, SAMPLING_PARAMS)
+            generated_text = []
+            for output in outputs:
+                generated_text.append(' '.join([o.text for o in output.outputs]))
             batch_messages = []
-            batch_dialog_info = []
             batch_char_count = 0
 
-        batch_messages.append(conversation)
-        batch_dialog_info.append(dialog)
+        batch_messages.append(message)
 
     # Save predictions
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     with open(os.path.join(OUTPUT_PATH, data_name), 'w') as f:
-        for prediction in predictions:
-            f.write(json.dumps(prediction) + '\n')
+        for text in generated_text:
+            f.write(text + '\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -67,6 +55,6 @@ if __name__ == '__main__':
     parser.add_argument('--num-gpus', type=int, required=True, help='The number of GPUs to be used for inference.')
     args = parser.parse_args()
 
-    llm = LLM(args.model_name, tensor_parallel_size=args.num_gpus)
+    llm = LLM(args.model_name, tensor_parallel_size=args.num_gpus, max_seq_len=10240)
 
     batch_inference(llm, args.data_path)
