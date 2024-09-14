@@ -55,6 +55,6 @@ if __name__ == '__main__':
     parser.add_argument('--num-gpus', type=int, required=True, help='The number of GPUs to be used for inference.')
     args = parser.parse_args()
 
-    llm = LLM(args.model_name, tensor_parallel_size=args.num_gpus, max_seq_len=10240)
+    llm = LLM(args.model_name, tensor_parallel_size=args.num_gpus, max_model_len=10240)
 
     batch_inference(llm, args.data_path)
