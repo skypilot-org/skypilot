@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from tqdm import tqdm
 
 from vllm import LLM, SamplingParams
 
@@ -13,7 +14,11 @@ SAMPLING_PARAMS = SamplingParams(temperature=0.2,
                                  top_p=0.85)
 BATCH_CHAR_COUNT = 2000
 
+def create_model(model_name: str, num_gpus: int):
+    return LLM(model_name, tensor_parallel_size=num_gpus, max_model_len=10240)
+
 def batch_inference(llm: LLM, data_path: str):
+    # This can take about 1-2 hours on a L4 GPU.
     print(f'Processing {data_path}...')
     data_name = data_path.split('/')[-1]
 
@@ -27,13 +32,13 @@ def batch_inference(llm: LLM, data_path: str):
     batch_char_count = 0
     batch_messages = []
     generated_text = []
-    for message in messages:
+    for message in tqdm(messages):
         # Calculate the word count of the conversation
         char_count = len(message)
         batch_char_count += char_count
 
         if batch_char_count > BATCH_CHAR_COUNT:
-            outputs = llm.generate(batch_messages, SAMPLING_PARAMS)
+            outputs = llm.generate(batch_messages, SAMPLING_PARAMS, use_tqdm=False)
             generated_text = []
             for output in outputs:
                 generated_text.append(' '.join([o.text for o in output.outputs]))
@@ -55,6 +60,6 @@ if __name__ == '__main__':
     parser.add_argument('--num-gpus', type=int, required=True, help='The number of GPUs to be used for inference.')
     args = parser.parse_args()
 
-    llm = LLM(args.model_name, tensor_parallel_size=args.num_gpus, max_model_len=10240)
+    llm = create_model(args.model_name, args.num_gpus)
 
     batch_inference(llm, args.data_path)

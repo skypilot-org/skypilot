@@ -44,6 +44,8 @@ Start a dev machine with dataset mounted.
 
 We have a bucket on R2 that contains the splitted LMSys-1M dataset. 
 
+For complete script, see `examples/batch_inference/inference.py <https://github.com/skypilot-org/skypilot/blob/main/examples/batch_inference/inference.py>`_.
+
 .. code-block:: python
     
     from vllm import LLM
@@ -55,51 +57,40 @@ We have a bucket on R2 that contains the splitted LMSys-1M dataset.
     llm = LLM(model='meta-llama/Meta-Llama-3.1-7B-Instruct', tensor_parallel_size=1)
 
     def batch_inference(llm: LLM, data_path: str):
+        # This can take about 1-2 hours on a L4 GPU.
         print(f'Processing {data_path}...')
         data_name = data_path.split('/')[-1]
 
         # Read data (jsonl), each line is a json object
         with open(data_path, 'r') as f:
             data = f.readlines()
-            dialogs = [json.loads(d.strip()) for d in data]
+            # Extract the first message from the conversation
+            messages = [json.loads(d.strip())['conversation'][0]['content'] for d in data]
 
         # Run inference
         batch_char_count = 0
         batch_messages = []
-        batch_dialog_info = []
-        predictions = []
-        for i, dialog in enumerate(dialogs):
-            conversation = dialog.pop('conversation')
-            # Remove the last message in the conversation, to let our model to
-            # generate the last response.
-            # Conversation example:
-            # [
-            #   {'role': 'user', 'content': 'Hello, how are you?'},
-            #   {'role': 'assistant', 'content': 'I am fine, thank you!'},
-            #   {'role': 'user', 'content': 'What is your name?'}
-            # ]
-            conversation = conversation[:-1]
+        generated_text = []
+        for message in tqdm(messages):
             # Calculate the word count of the conversation
-            char_count = sum([len(message['content']) for message in conversation])
+            char_count = len(message)
             batch_char_count += char_count
 
             if batch_char_count > BATCH_CHAR_COUNT:
-                prediction = llm.chat(batch_messages, SAMPLING_PARAMS)
-                for info, pred in zip(batch_dialog_info, prediction):
-                    info['prediction'] = pred
-                    predictions.append(info)
+                outputs = llm.generate(batch_messages, SAMPLING_PARAMS, use_tqdm=False)
+                generated_text = []
+                for output in outputs:
+                    generated_text.append(' '.join([o.text for o in output.outputs]))
                 batch_messages = []
-                batch_dialog_info = []
                 batch_char_count = 0
 
-            batch_messages.append(conversation)
-            batch_dialog_info.append(dialog)
+            batch_messages.append(message)
 
         # Save predictions
         os.makedirs(OUTPUT_PATH, exist_ok=True)
         with open(os.path.join(OUTPUT_PATH, data_name), 'w') as f:
-            for prediction in predictions:
-                f.write(json.dumps(prediction) + '\n')
+            for text in generated_text:
+                f.write(text + '\n')
     
     batch_inference(llm, data_path)
 
@@ -107,11 +98,12 @@ Or, you can try it with:
 
 .. code-block:: bash
 
-    python inference.py \
-      --model-name meta-llama/Meta-Llama-3.1-7B-Instruct \
-      --num-gpus 1 \
-      --data-chunk-file /data/part_0.jsonl
+    export HF_TOKEN=...
+    sky launch -c inf ./inference.yaml \
+        --env HF_TOKEN
 
+.. TODO: make r2 bucket publically accessible
+.. tested with inference.py and inference.yaml on 2024-09-15 and works well.
 
 Scale out to Multiple Nodes
 ---------------------------
@@ -137,7 +129,7 @@ Chunk your data into multiple pieces to leverage fully distributed batch inferen
         with open(f'./chunks/{i}.txt', 'w') as f:
             f.write('\n'.join(data_chunk))
 
-We can use the chunk script to chunk data in LMSys Chat Dataset.
+On dev machine, we can use the chunk script to chunk data in LMSys Chat Dataset.
 
 .. code-block:: bash
 
@@ -152,8 +144,9 @@ With the data chunks saved, we can launch a job for each chunk.
     # Launch a job for each chunk
     NUM_CHUNKS=16
     for i in $(seq 0 $((NUM_CHUNKS - 1))); do
+        # We use & to launch jobs in parallel
         sky jobs launch -y -d -n chunk-$i worker.yaml \
-          --env DATA_CHUNK_FILE=./chunks/$i.txt
+          --env DATA_CHUNK_FILE=./chunks/$i.txt &
     done
 
 

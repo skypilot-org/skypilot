@@ -1,14 +1,15 @@
 import argparse
-import json
 import os
 import pathlib
+import typing
 from typing import List
 
-from .inference import DATA_PATH, OUTPUT_PATH, batch_inference
-from vllm import LLM
+from inference import DATA_PATH, OUTPUT_PATH, batch_inference, create_model
 
+if typing.TYPE_CHECKING:
+    from vllm import LLM
 
-def continue_batch_inference(llm: LLM, data_paths: List[str]):
+def continue_batch_inference(llm: 'LLM', data_paths: List[str]):
     """Continue batch inference on a list of data chunks."""
 
     # Automatically skip processed data, resume the rest.
@@ -36,7 +37,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Load model
-    llm = LLM(args.model_name, tensor_parallel_size=args.num_gpus)
+    llm = create_model(args.model_name, args.num_gpus)
 
     # Read data paths
     with open(args.data_chunk_file, 'r') as f:
