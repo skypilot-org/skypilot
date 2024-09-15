@@ -274,7 +274,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     assert 'n2-highcpu-4' in stdout  # GCP, 4 vCPUs, 4 GB memory
     assert 'c6i.xlarge' in stdout  # AWS, 4 vCPUs, 8 GB memory
     assert 'Standard_F4s_v2' in stdout  # Azure, 4 vCPUs, 8 GB memory
-    assert 'gpu_1x_rtx6000' in stdout  # Lambda, 14 vCPUs, 46 GB memory
+    assert 'cpu_4x_general' in stdout  # Lambda, 4 vCPUs, 16 GB memory
 
     _test_resources_launch(monkeypatch, accelerators='T4')
     stdout, _ = capfd.readouterr()
@@ -765,9 +765,16 @@ def test_optimize_disk_tier(enable_all_clouds):
         map(clouds.CLOUD_REGISTRY.get,
             ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
 
-    # Only AWS, GCP, OCI supports HIGH disk tier.
+    # Only AWS, GCP, Azure, OCI supports HIGH disk tier.
     high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
     high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
     assert high_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get,
-            ['aws', 'gcp', 'oci'])), high_tier_candidates
+            ['aws', 'gcp', 'azure', 'oci'])), high_tier_candidates
+
+    # Only AWS, GCP supports ULTRA disk tier.
+    ultra_tier_resources = sky.Resources(
+        disk_tier=resources_utils.DiskTier.ULTRA)
+    ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
+    assert ultra_tier_candidates == set(
+        map(clouds.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates

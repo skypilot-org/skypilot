@@ -125,7 +125,6 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'disk_tier': 'gp3',
         'disk_throughput': 218,
         'disk_iops': 3500,
-        'custom_disk_perf': True,
         'docker_image': None,
         'docker_container_name': 'sky_container',
         'docker_login_config': None,

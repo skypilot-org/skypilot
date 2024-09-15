@@ -82,9 +82,10 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
     clouds.GCP: 240,
-    clouds.Lambda: 150,
+    clouds.Lambda: 300,
     clouds.IBM: 160,
     clouds.OCI: 300,
+    clouds.Paperspace: 600,
     clouds.Kubernetes: 300,
     clouds.Vsphere: 240,
 }
@@ -1468,6 +1469,16 @@ class RetryingVmProvisioner(object):
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
                 num_nodes = handle.launched_nodes
+                # Some clouds, like RunPod, only support exposing ports during
+                # launch. For those clouds, we pass the ports to open in the
+                # `bulk_provision` to expose the ports during provisioning.
+                # If the `bulk_provision` is to apply on an existing cluster,
+                # it should be ignored by the underlying provisioner impl
+                # as it will only apply to newly-created instances.
+                ports_to_open_on_launch = (
+                    list(resources_utils.port_ranges_to_set(to_provision.ports))
+                    if to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
@@ -1478,7 +1489,8 @@ class RetryingVmProvisioner(object):
                         num_nodes=num_nodes,
                         cluster_yaml=handle.cluster_yaml,
                         prev_cluster_ever_up=prev_cluster_ever_up,
-                        log_dir=self.log_dir)
+                        log_dir=self.log_dir,
+                        ports_to_open_on_launch=ports_to_open_on_launch)
                     # NOTE: We will handle the logic of '_ensure_cluster_ray_started' #pylint: disable=line-too-long
                     # in 'provision_utils.post_provision_runtime_setup()' in the
                     # caller.
@@ -1921,7 +1933,7 @@ class RetryingVmProvisioner(object):
         while True:
             if (isinstance(to_provision.cloud, clouds.Azure) and
                     to_provision.accelerators is not None and
-                    'A10' in to_provision.accelerators):
+                    'A10' in to_provision.accelerators and prev_handle is None):
                 logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
                                'an A10 cluster on Azure. This may take ~20 '
                                'minutes due to driver installation.'
@@ -1933,11 +1945,12 @@ class RetryingVmProvisioner(object):
                 if dryrun:
                     cloud_user = None
                 else:
-                    cloud_user = to_provision.cloud.get_current_user_identity()
+                    cloud_user = to_provision.cloud.get_active_user_identity()
 
                 requested_features = self._requested_features.copy()
-                # Skip stop feature for Kubernetes controllers.
-                if (isinstance(to_provision.cloud, clouds.Kubernetes) and
+                # Skip stop feature for Kubernetes and RunPod controllers.
+                if (isinstance(to_provision.cloud,
+                               (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
                     assert (clouds.CloudImplementationFeatures.STOP
@@ -2247,9 +2260,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
-            use_internal_ips = self._use_internal_ips()
-            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips(
-                use_internal_ips)
+            cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
             cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
                 force_internal_ips=True)
         else:
@@ -2981,9 +2992,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(current_ports) -
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
-            with rich_utils.safe_status(
-                    '[bold cyan]Launching - Opening new ports'):
-                self._open_ports(handle)
+            cloud = handle.launched_resources.cloud
+            if not (cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+                with rich_utils.safe_status(
+                        '[bold cyan]Launching - Opening new ports'):
+                    self._open_ports(handle)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3103,7 +3117,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
-            if detach_setup or _is_command_length_over_limit(encoded_script):
+
+            def _dump_setup_script(setup_script: str) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
@@ -3112,6 +3127,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  target=remote_setup_file_name,
                                  up=True,
                                  stream_logs=False)
+
+            if detach_setup or _is_command_length_over_limit(encoded_script):
+                _dump_setup_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
@@ -3119,20 +3137,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             if detach_setup:
                 return
+
             setup_log_path = os.path.join(self.log_dir,
                                           f'setup-{runner.node_id}.log')
-            returncode = runner.run(
-                f'{create_script_code} && {setup_cmd}',
-                log_path=setup_log_path,
-                process_stream=False,
-                # We do not source bashrc for setup, since bashrc is sourced
-                # in the script already.
-                # Skip an empty line and two lines due to the /bin/bash -i and
-                # source ~/.bashrc in the setup_cmd.
-                #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
-                #   bash: no job control in this shell
-                skip_lines=3,
-            )
+
+            def _run_setup(setup_cmd: str) -> int:
+                returncode = runner.run(
+                    setup_cmd,
+                    log_path=setup_log_path,
+                    process_stream=False,
+                    # We do not source bashrc for setup, since bashrc is sourced
+                    # in the script already.
+                    # Skip an empty line and two lines due to the /bin/bash -i
+                    # and source ~/.bashrc in the setup_cmd.
+                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
+                    #   bash: no job control in this shell
+                    skip_lines=3)
+                return returncode
+
+            returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
+            if returncode == 255:
+                is_message_too_long = False
+                with open(setup_log_path, 'r', encoding='utf-8') as f:
+                    if 'too long' in f.read():
+                        is_message_too_long = True
+
+                if is_message_too_long:
+                    # If the setup script is too long, we retry it with dumping
+                    # the script to a file and running it with SSH. We use a
+                    # general length limit check before but it could be
+                    # inaccurate on some systems.
+                    logger.debug(
+                        'Failed to run setup command inline due to '
+                        'command length limit. Dumping setup script to '
+                        'file and running it with SSH.')
+                    _dump_setup_script(setup_script)
+                    returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case
@@ -3214,7 +3254,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-        if _is_command_length_over_limit(job_submit_cmd):
+
+        def _dump_code_to_file(codegen: str) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
@@ -3229,6 +3270,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+
+        if _is_command_length_over_limit(job_submit_cmd):
+            _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
         if managed_job_dag is not None:
@@ -3254,6 +3298,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        if returncode == 255 and 'too long' in stdout + stderr:
+            # If the generated script is too long, we retry it with dumping
+            # the script to a file and running it with SSH. We use a general
+            # length limit check before but it could be inaccurate on some
+            # systems.
+            logger.debug('Failed to submit job due to command length limit. '
+                         'Dumping job to file and running it with SSH.')
+            _dump_code_to_file(codegen)
+            job_submit_cmd = f'{mkdir_code} && {code}'
+            returncode, stdout, stderr = self.run_on_head(handle,
+                                                          job_submit_cmd,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
 
         # Happens when someone calls `sky exec` but remote is outdated
         # necessitating calling `sky launch`.
@@ -4089,15 +4146,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
-            # Skip auto-stop for Kubernetes clusters.
-            if (isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
-                    and not down and idle_minutes_to_autostop >= 0):
+            # Skip auto-stop for Kubernetes and RunPod clusters.
+            if (isinstance(handle.launched_resources.cloud,
+                           (clouds.Kubernetes, clouds.RunPod)) and not down and
+                    idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
-                # Kubernetes clusters.
+                # Kubernetes and RunPod clusters.
                 assert (controller_utils.Controllers.from_name(
                     handle.cluster_name) is not None), handle.cluster_name
                 logger.info('Auto-stop is not supported for Kubernetes '
-                            'clusters. Skipping.')
+                            'and RunPod clusters. Skipping.')
                 return
 
             # Check if we're stopping spot
@@ -4280,12 +4338,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Assume resources share the same ports.
             for resource in task.resources:
                 assert resource.ports == list(task.resources)[0].ports
-            all_ports = resources_utils.port_set_to_ranges(
-                resources_utils.port_ranges_to_set(
-                    handle.launched_resources.ports) |
-                resources_utils.port_ranges_to_set(
-                    list(task.resources)[0].ports))
+            requested_ports_set = resources_utils.port_ranges_to_set(
+                list(task.resources)[0].ports)
+            current_ports_set = resources_utils.port_ranges_to_set(
+                handle.launched_resources.ports)
+            all_ports = resources_utils.port_set_to_ranges(current_ports_set |
+                                                           requested_ports_set)
             to_provision = handle.launched_resources
+            if (to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+                if not requested_ports_set <= current_ports_set:
+                    current_cloud = to_provision.cloud
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            'Failed to open new ports on an existing cluster '
+                            f'with the current cloud {current_cloud} as it only'
+                            ' supports opening ports on launch of the cluster. '
+                            'Please terminate the existing cluster and launch '
+                            'a new cluster with the desired ports open.')
             if all_ports:
                 to_provision = to_provision.copy(ports=all_ports)
             return RetryingVmProvisioner.ToProvisionConfig(

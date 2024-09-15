@@ -156,6 +156,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name} already exists.')
 
+    # Add initial version information to the service state.
+    serve_state.add_or_update_version(service_name, constants.INITIAL_VERSION,
+                                      service_spec)
+
     # Create the service working directory.
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
@@ -182,16 +186,33 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
             controller_port = common_utils.find_free_port(
                 constants.CONTROLLER_PORT_START)
+
+            # We expose the controller to the public network when running
+            # inside a kubernetes cluster to allow external load balancers
+            # (example, for high availability load balancers) to communicate
+            # with the controller.
+            def _get_host():
+                if 'KUBERNETES_SERVICE_HOST' in os.environ:
+                    return '0.0.0.0'
+                # Not using localhost to avoid using ipv6 address and causing
+                # the following error:
+                # ERROR:    [Errno 99] error while attempting to bind on address
+                # ('::1', 20001, 0, 0): cannot assign requested address
+                return '127.0.0.1'
+
+            controller_host = _get_host()
+
             # Start the controller.
             controller_process = multiprocessing.Process(
                 target=controller.run_controller,
-                args=(service_name, service_spec, task_yaml, controller_port))
+                args=(service_name, service_spec, task_yaml, controller_host,
+                      controller_port))
             controller_process.start()
             serve_state.set_service_controller_port(service_name,
                                                     controller_port)
 
             # TODO(tian): Support HTTPS.
-            controller_addr = f'http://localhost:{controller_port}'
+            controller_addr = f'http://{controller_host}:{controller_port}'
             load_balancer_port = common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
 
@@ -234,6 +255,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         else:
             shutil.rmtree(service_dir)
             serve_state.remove_service(service_name)
+            serve_state.delete_all_versions(service_name)
             logger.info(f'Service {service_name} terminated successfully.')
 
 

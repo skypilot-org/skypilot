@@ -160,7 +160,7 @@ SkyPilot's scheduler serves two goals:
 2. **Minimizing resource idleness**: If a resource is idle, SkyPilot will schedule a
    queued job that can utilize that resource.
 
-We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <dnn-training>`.
+We illustrate the scheduling behavior by revisiting :ref:`Tutorial: AI Training <ai-training>`.
 In that tutorial, we have a task YAML that specifies these resource requirements:
 
 .. code-block:: yaml

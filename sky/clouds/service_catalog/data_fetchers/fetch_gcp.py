@@ -10,6 +10,7 @@ import io
 import multiprocessing
 import os
 import textwrap
+import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -19,6 +20,7 @@ import numpy as np
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -38,6 +40,9 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 # The number of digits to round the price to.
 PRICE_ROUNDING = 5
 
+# The number of retries for the TPU API.
+TPU_RETRY_CNT = 3
+
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
 # TPU v3 pods are available in us-east1-d, but hidden in the skus.
@@ -54,6 +59,110 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
+
+# TPU V5 is not visible in specific zones. We hardcode the missing zones here.
+# NOTE(dev): Keep the zones and the df in sync.
+TPU_V5_MISSING_ZONES_DF = {
+    'europe-west4-b': pd.read_csv(
+        io.StringIO(
+            textwrap.dedent("""\
+ AcceleratorName,AcceleratorCount,Region,AvailabilityZone
+ tpu-v5p-8,1,europe-west4,europe-west4-b
+ tpu-v5p-16,1,europe-west4,europe-west4-b
+ tpu-v5p-32,1,europe-west4,europe-west4-b
+ tpu-v5p-64,1,europe-west4,europe-west4-b
+ tpu-v5p-128,1,europe-west4,europe-west4-b
+ tpu-v5p-256,1,europe-west4,europe-west4-b
+ tpu-v5p-384,1,europe-west4,europe-west4-b
+ tpu-v5p-512,1,europe-west4,europe-west4-b
+ tpu-v5p-640,1,europe-west4,europe-west4-b
+ tpu-v5p-768,1,europe-west4,europe-west4-b
+ tpu-v5p-896,1,europe-west4,europe-west4-b
+ tpu-v5p-1024,1,europe-west4,europe-west4-b
+ tpu-v5p-1152,1,europe-west4,europe-west4-b
+ tpu-v5p-1280,1,europe-west4,europe-west4-b
+ tpu-v5p-1408,1,europe-west4,europe-west4-b
+ tpu-v5p-1536,1,europe-west4,europe-west4-b
+ tpu-v5p-1664,1,europe-west4,europe-west4-b
+ tpu-v5p-1792,1,europe-west4,europe-west4-b
+ tpu-v5p-1920,1,europe-west4,europe-west4-b
+ tpu-v5p-2048,1,europe-west4,europe-west4-b
+ tpu-v5p-2176,1,europe-west4,europe-west4-b
+ tpu-v5p-2304,1,europe-west4,europe-west4-b
+ tpu-v5p-2432,1,europe-west4,europe-west4-b
+ tpu-v5p-2560,1,europe-west4,europe-west4-b
+ tpu-v5p-2688,1,europe-west4,europe-west4-b
+ tpu-v5p-2816,1,europe-west4,europe-west4-b
+ tpu-v5p-2944,1,europe-west4,europe-west4-b
+ tpu-v5p-3072,1,europe-west4,europe-west4-b
+ tpu-v5p-3200,1,europe-west4,europe-west4-b
+ tpu-v5p-3328,1,europe-west4,europe-west4-b
+ tpu-v5p-3456,1,europe-west4,europe-west4-b
+ tpu-v5p-3584,1,europe-west4,europe-west4-b
+ tpu-v5p-3712,1,europe-west4,europe-west4-b
+ tpu-v5p-3840,1,europe-west4,europe-west4-b
+ tpu-v5p-3968,1,europe-west4,europe-west4-b
+ tpu-v5p-4096,1,europe-west4,europe-west4-b
+ tpu-v5p-4224,1,europe-west4,europe-west4-b
+ tpu-v5p-4352,1,europe-west4,europe-west4-b
+ tpu-v5p-4480,1,europe-west4,europe-west4-b
+ tpu-v5p-4608,1,europe-west4,europe-west4-b
+ tpu-v5p-4736,1,europe-west4,europe-west4-b
+ tpu-v5p-4864,1,europe-west4,europe-west4-b
+ tpu-v5p-4992,1,europe-west4,europe-west4-b
+ tpu-v5p-5120,1,europe-west4,europe-west4-b
+ tpu-v5p-5248,1,europe-west4,europe-west4-b
+ tpu-v5p-5376,1,europe-west4,europe-west4-b
+ tpu-v5p-5504,1,europe-west4,europe-west4-b
+ tpu-v5p-5632,1,europe-west4,europe-west4-b
+ tpu-v5p-5760,1,europe-west4,europe-west4-b
+ tpu-v5p-5888,1,europe-west4,europe-west4-b
+ tpu-v5p-6016,1,europe-west4,europe-west4-b
+ tpu-v5p-6144,1,europe-west4,europe-west4-b
+ tpu-v5p-6272,1,europe-west4,europe-west4-b
+ tpu-v5p-6400,1,europe-west4,europe-west4-b
+ tpu-v5p-6528,1,europe-west4,europe-west4-b
+ tpu-v5p-6656,1,europe-west4,europe-west4-b
+ tpu-v5p-6784,1,europe-west4,europe-west4-b
+ tpu-v5p-6912,1,europe-west4,europe-west4-b
+ tpu-v5p-7040,1,europe-west4,europe-west4-b
+ tpu-v5p-7168,1,europe-west4,europe-west4-b
+ tpu-v5p-7296,1,europe-west4,europe-west4-b
+ tpu-v5p-7424,1,europe-west4,europe-west4-b
+ tpu-v5p-7552,1,europe-west4,europe-west4-b
+ tpu-v5p-7680,1,europe-west4,europe-west4-b
+ tpu-v5p-7808,1,europe-west4,europe-west4-b
+ tpu-v5p-7936,1,europe-west4,europe-west4-b
+ tpu-v5p-8064,1,europe-west4,europe-west4-b
+ tpu-v5p-8192,1,europe-west4,europe-west4-b
+ tpu-v5p-8320,1,europe-west4,europe-west4-b
+ tpu-v5p-8448,1,europe-west4,europe-west4-b
+ tpu-v5p-8704,1,europe-west4,europe-west4-b
+ tpu-v5p-8832,1,europe-west4,europe-west4-b
+ tpu-v5p-8960,1,europe-west4,europe-west4-b
+ tpu-v5p-9216,1,europe-west4,europe-west4-b
+ tpu-v5p-9472,1,europe-west4,europe-west4-b
+ tpu-v5p-9600,1,europe-west4,europe-west4-b
+ tpu-v5p-9728,1,europe-west4,europe-west4-b
+ tpu-v5p-9856,1,europe-west4,europe-west4-b
+ tpu-v5p-9984,1,europe-west4,europe-west4-b
+ tpu-v5p-10240,1,europe-west4,europe-west4-b
+ tpu-v5p-10368,1,europe-west4,europe-west4-b
+ tpu-v5p-10496,1,europe-west4,europe-west4-b
+ tpu-v5p-10752,1,europe-west4,europe-west4-b
+ tpu-v5p-10880,1,europe-west4,europe-west4-b
+ tpu-v5p-11008,1,europe-west4,europe-west4-b
+ tpu-v5p-11136,1,europe-west4,europe-west4-b
+ tpu-v5p-11264,1,europe-west4,europe-west4-b
+ tpu-v5p-11520,1,europe-west4,europe-west4-b
+ tpu-v5p-11648,1,europe-west4,europe-west4-b
+ tpu-v5p-11776,1,europe-west4,europe-west4-b
+ tpu-v5p-11904,1,europe-west4,europe-west4-b
+ tpu-v5p-12032,1,europe-west4,europe-west4-b
+ tpu-v5p-12160,1,europe-west4,europe-west4-b
+ tpu-v5p-12288,1,europe-west4,europe-west4-b
+ """)))
+}
 # FIXME(woosuk): Remove this once the bug is fixed.
 # See https://github.com/skypilot-org/skypilot/issues/1759#issue-1619614345
 TPU_V4_HOST_DF = pd.read_csv(
@@ -414,34 +523,55 @@ def get_gpu_df(skus: List[Dict[str, Any]],
     return df
 
 
-def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
-    tpus = []
+def _get_tpu_response_for_zone(zone: str) -> list:
     parent = f'projects/{project_id}/locations/{zone}'
-    tpus_request = tpu_client.projects().locations().acceleratorTypes().list(
-        parent=parent)
-    try:
-        tpus_response = tpus_request.execute()
-        for tpu in tpus_response['acceleratorTypes']:
-            tpus.append(tpu)
-    except gcp.http_error_exception() as error:
-        if error.resp.status == 403:
-            print('  TPU API is not enabled or you don\'t have TPU access '
-                  f'to zone: {zone!r}.')
-        else:
-            print(f'  An error occurred: {error}')
+    # Sometimes the response is empty ({}) even for enabled zones. Here we
+    # retry the request for a few times.
+    backoff = common_utils.Backoff(initial_backoff=1)
+    for _ in range(TPU_RETRY_CNT):
+        tpus_request = (
+            tpu_client.projects().locations().acceleratorTypes().list(
+                parent=parent))
+        try:
+            tpus_response = tpus_request.execute()
+            if 'acceleratorTypes' in tpus_response:
+                return tpus_response['acceleratorTypes']
+        except gcp.http_error_exception() as error:
+            if error.resp.status == 403:
+                print('  TPU API is not enabled or you don\'t have TPU access '
+                      f'to zone: {zone!r}.')
+            else:
+                print(f'  An error occurred: {error}')
+            # If error happens, fail early.
+            return []
+        time_to_sleep = backoff.current_backoff()
+        print(f'  Retry zone {zone!r} in {time_to_sleep} seconds...')
+        time.sleep(time_to_sleep)
+    print(f'ERROR: Failed to fetch TPUs for zone {zone!r}.')
+    return []
+
+
+def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
+    # Use hardcoded TPU V5 data as it is invisible in some zones.
+    missing_tpus_df = pd.DataFrame(columns=[
+        'AcceleratorName', 'AcceleratorCount', 'Region', 'AvailabilityZone'
+    ])
+    if zone in TPU_V5_MISSING_ZONES_DF:
+        missing_tpus_df = TPU_V5_MISSING_ZONES_DF[zone]
+    tpus = []
+    for tpu in _get_tpu_response_for_zone(zone):
+        tpus.append(tpu)
     new_tpus = []
     for tpu in tpus:
         tpu_name = tpu['type']
-        # skip tpu v5 as we currently don't support it
-        if 'v5' in tpu_name:
-            continue
         new_tpus.append({
             'AcceleratorName': f'tpu-{tpu_name}',
             'AcceleratorCount': 1,
             'Region': zone.rpartition('-')[0],
             'AvailabilityZone': zone,
         })
-    return pd.DataFrame(new_tpus).reset_index(drop=True)
+    new_tpu_df = pd.DataFrame(new_tpus).reset_index(drop=True)
+    return pd.concat([new_tpu_df, missing_tpus_df])
 
 
 def _get_tpus() -> 'pd.DataFrame':
@@ -458,10 +588,21 @@ def _get_tpus() -> 'pd.DataFrame':
 
 
 # TODO: the TPUs fetched fails to contain us-east1
-def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
+def get_tpu_df(gce_skus: List[Dict[str, Any]],
+               tpu_skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
     df = _get_tpus()
     if df.empty:
         return df
+
+    def _get_tpu_description_str(tpu_version: str) -> str:
+        # TPU V5 has a different naming convention since it is contained in
+        # the GCE SKUs. v5p -> TpuV5p, v5litepod -> TpuV5e.
+        if tpu_version.startswith('v5'):
+            if tpu_version == 'v5p':
+                return 'TpuV5p'
+            assert tpu_version == 'v5litepod', tpu_version
+            return 'TpuV5e'
+        return f'Tpu-{tpu_version}'
 
     def get_tpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         assert row['AcceleratorCount'] == 1, row
@@ -475,9 +616,12 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
         # whether the TPU is a single device or a pod.
         # For TPU-v4, the pricing is uniform, and thus the pricing API
         # only provides the price of TPU-v4 pods.
-        is_pod = num_cores > 8 or tpu_version == 'v4'
+        # The price shown for v5 TPU is per chip hour, so there is no 'Pod'
+        # keyword in the description.
+        is_pod = ((num_cores > 8 or tpu_version == 'v4') and
+                  not tpu_version.startswith('v5'))
 
-        for sku in skus:
+        for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
                 continue
             description = sku['description']
@@ -489,7 +633,7 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
                 if 'Preemptible' in description:
                     continue
 
-            if f'Tpu-{tpu_version}' not in description:
+            if _get_tpu_description_str(tpu_version) not in description:
                 continue
             if is_pod:
                 if 'Pod' not in description:
@@ -500,7 +644,15 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> 'pd.DataFrame':
 
             unit_price = _get_unit_price(sku)
             tpu_device_price = unit_price
-            tpu_core_price = tpu_device_price / 8
+            # v5p naming convention is v$VERSION_NUMBERp-$CORES_COUNT, while
+            # v5e is v$VERSION_NUMBER-$CHIP_COUNT. In the same time, V5 price
+            # is shown as per chip price, which is 2 cores for v5p and 1 core
+            # for v5e. Reference here:
+            # https://cloud.google.com/tpu/docs/v5p#using-accelerator-type
+            # https://cloud.google.com/tpu/docs/v5e#tpu-v5e-config
+            core_per_sku = (1 if tpu_version == 'v5litepod' else
+                            2 if tpu_version == 'v5p' else 8)
+            tpu_core_price = tpu_device_price / core_per_sku
             tpu_price = num_cores * tpu_core_price
             break
 
@@ -546,7 +698,8 @@ def get_catalog_df(region_prefix: str) -> 'pd.DataFrame':
         region_prefix)] if not gpu_df.empty else gpu_df
 
     gcp_tpu_skus = get_skus(TPU_SERVICE_ID)
-    tpu_df = get_tpu_df(gcp_tpu_skus)
+    # TPU V5 SKU is not included in the TPU SKUs but in the GCE SKUs.
+    tpu_df = get_tpu_df(gcp_skus, gcp_tpu_skus)
 
     # Merge the dataframes.
     df = pd.concat([vm_df, gpu_df, tpu_df, TPU_V4_HOST_DF])

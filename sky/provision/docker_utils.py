@@ -110,8 +110,8 @@ def docker_start_cmds(
         '--cap-add=SYS_ADMIN',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
+        '--entrypoint=/bin/bash',
         image,
-        'bash',
     ]
     return ' '.join(docker_run)
 
@@ -381,7 +381,7 @@ class DockerInitializer:
         if 'nvidia-container-runtime' in runtime_output:
             try:
                 self._run('nvidia-smi', log_err_when_fail=False)
-                return run_options + ['--runtime=nvidia']
+                return run_options + ['--runtime=nvidia', '--gpus all']
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(
                     'Nvidia Container Runtime is present in the docker image'

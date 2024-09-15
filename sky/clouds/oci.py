@@ -42,7 +42,9 @@ class OCI(clouds.Cloud):
 
     _INDENT_PREFIX = '    '
 
-    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
+    _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
+                             {resources_utils.DiskTier.ULTRA})
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -414,6 +416,19 @@ class OCI(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Error details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    @classmethod
+    def check_disk_tier(
+            cls, instance_type: Optional[str],
+            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
+        del instance_type  # Unused.
+        if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
+            return True, ''
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            return False, ('OCI disk_tier=ultra is not supported now. '
+                           'Please use disk_tier={low, medium, high, best} '
+                           'instead.')
+        return True, ''
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
         oci_cfg_file = oci_adaptor.get_config_file()
@@ -440,7 +455,7 @@ class OCI(clouds.Cloud):
         return file_mounts
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         # If the user switches the compartment_ocid, the existing clusters

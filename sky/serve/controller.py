@@ -3,7 +3,6 @@
 Responsible for autoscaling and replica management.
 """
 import logging
-import os
 import threading
 import time
 import traceback
@@ -160,17 +159,7 @@ class SkyServeController:
 # TODO(tian): Probably we should support service that will stop the VM in
 # specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
-                   task_yaml: str, controller_port: int):
-    # We expose the controller to the public network when running inside a
-    # kubernetes cluster to allow external load balancers (example, for
-    # high availability load balancers) to communicate with the controller.
-    def _get_host():
-        if 'KUBERNETES_SERVICE_HOST' in os.environ:
-            return '0.0.0.0'
-        else:
-            return 'localhost'
-
-    host = _get_host()
-    controller = SkyServeController(service_name, service_spec, task_yaml, host,
-                                    controller_port)
+                   task_yaml: str, controller_host: str, controller_port: int):
+    controller = SkyServeController(service_name, service_spec, task_yaml,
+                                    controller_host, controller_port)
     controller.run()

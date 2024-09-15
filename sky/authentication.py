@@ -378,7 +378,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    namespace = config['provider'].get(
+        'namespace',
+        kubernetes_utils.get_current_kube_config_context_namespace())
+    context = config['provider'].get(
+        'context', kubernetes_utils.get_current_kube_config_context_name())
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()
@@ -399,14 +403,14 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         secret = k8s.client.V1Secret(
             metadata=k8s.client.V1ObjectMeta(**secret_metadata),
             string_data={secret_field_name: public_key})
-    if kubernetes_utils.check_secret_exists(secret_name, namespace):
+    if kubernetes_utils.check_secret_exists(secret_name, namespace, context):
         logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
-        kubernetes.core_api().patch_namespaced_secret(secret_name, namespace,
-                                                      secret)
+        kubernetes.core_api(context).patch_namespaced_secret(
+            secret_name, namespace, secret)
     else:
         logger.debug(
             f'Key {secret_name} does not exist in the cluster, creating it...')
-        kubernetes.core_api().create_namespaced_secret(namespace, secret)
+        kubernetes.core_api(context).create_namespaced_secret(namespace, secret)
 
     private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
@@ -415,13 +419,14 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Setup service for SSH jump pod. We create the SSH jump service here
         # because we need to know the service IP address and port to set the
         # ssh_proxy_command in the autoscaler config.
-        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace,
+        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, context,
                                             service_type)
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_jump_name,
             nodeport_mode,
             private_key_path=private_key_path,
-            namespace=namespace)
+            namespace=namespace,
+            context=context)
     elif network_mode == port_forward_mode:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
         # does not require a ssh jump pod.

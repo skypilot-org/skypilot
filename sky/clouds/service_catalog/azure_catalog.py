@@ -110,7 +110,8 @@ def get_default_instance_type(
         _DEFAULT_INSTANCE_FAMILY)]
 
     def _filter_disk_type(instance_type: str) -> bool:
-        return Azure.check_disk_tier(instance_type, disk_tier)[0]
+        valid, _ = Azure.check_disk_tier(instance_type, disk_tier)
+        return valid
 
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
