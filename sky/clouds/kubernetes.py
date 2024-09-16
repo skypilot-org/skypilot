@@ -146,11 +146,6 @@ class Kubernetes(clouds.Cloud):
         return self._REPR
 
     @classmethod
-    def get_port(cls, svc_name) -> int:
-        ns = kubernetes_utils.get_current_kube_config_context_namespace()
-        return kubernetes_utils.get_port(svc_name, ns)
-
-    @classmethod
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
@@ -338,6 +333,12 @@ class Kubernetes(clouds.Cloud):
             'image_id': image_id,
         }
 
+        # Add kubecontext if it is set. It may be None if SkyPilot is running
+        # inside a pod with in-cluster auth.
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context is not None:
+            deploy_vars['k8s_context'] = curr_context
+
         return deploy_vars
 
     def _get_feasible_launchable_resources(
@@ -441,21 +442,33 @@ class Kubernetes(clouds.Cloud):
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
 
-    @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.kubernetes
-        try:
-            _, current_context = k8s.config.list_kube_config_contexts()
-            if 'namespace' in current_context['context']:
-                namespace = current_context['context']['namespace']
-            else:
-                namespace = kubernetes_utils.DEFAULT_NAMESPACE
+    @staticmethod
+    def get_identity_from_context(context):
+        if 'namespace' in context['context']:
+            namespace = context['context']['namespace']
+        else:
+            namespace = kubernetes_utils.DEFAULT_NAMESPACE
+        user = context['context']['user']
+        cluster = context['context']['cluster']
+        identity_str = f'{cluster}_{user}_{namespace}'
+        return identity_str
 
-            user = current_context['context']['user']
-            cluster = current_context['context']['cluster']
-            return [f'{cluster}_{user}_{namespace}']
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        k8s = kubernetes.kubernetes
+        identities = []
+        try:
+            all_contexts, current_context = (
+                k8s.config.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
             return None
+        # Add current context at the head of the list
+        current_identity = [cls.get_identity_from_context(current_context)]
+        identities.append(current_identity)
+        for context in all_contexts:
+            identity = [cls.get_identity_from_context(context)]
+            identities.append(identity)
+        return identities
 
     @classmethod
     def is_label_valid(cls, label_key: str,

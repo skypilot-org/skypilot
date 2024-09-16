@@ -80,6 +80,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `Pixtral <https://github.com/skypilot-org/skypilot/tree/master/llm/pixtral>`_
   * `Llama 3.1 finetuning <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1-finetuning>`_ and `serving <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1>`_
   * `GPT-2 via llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`_
   * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_

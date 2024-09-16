@@ -1,15 +1,40 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+KUBE_CONTEXT=""
+KUBE_NAMESPACE=""
+
+# Parse flags
+while getopts ":c:n:" opt; do
+  case ${opt} in
+    c)
+      KUBE_CONTEXT="$OPTARG"
+      ;;
+    n)
+      KUBE_NAMESPACE="$OPTARG"
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Shift the processed options away so that $1 becomes the pod name
+shift $((OPTIND -1))
+
 # Check if pod name is passed as an argument
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <pod_name> [kube_context] [kube_namespace]" >&2
+  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
   exit 1
 fi
 
-POD_NAME="$1"  # The first argument is the name of the pod
-KUBE_CONTEXT="${2:-}"  # The second argument is the kube context, default is empty
-KUBE_NAMESPACE="${3:-}"  # The third argument is the kube namespace, default is empty
+POD_NAME="$1"  # The first positional argument is the name of the pod
 
 # Checks if socat is installed
 if ! command -v socat > /dev/null; then
