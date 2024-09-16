@@ -32,6 +32,5 @@ setup: |
 run: |
   python worker.py \
     --data-chunk-file /chunks.txt \
-    --output-path /output \
     --model-name $MODEL_NAME \
     --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE
