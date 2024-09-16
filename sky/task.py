@@ -927,10 +927,6 @@ class Task:
 
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
-            # if storage_cloud == store type read from task
-            #   storage_region = self.best_resources.region
-            # else:
-            #   storage_region = None
             storage_region = self.best_resources.region
         else:
             resources = list(self.resources)[0]
