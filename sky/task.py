@@ -927,6 +927,10 @@ class Task:
 
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
+            # if storage_cloud == store type read from task
+            #   storage_region = self.best_resources.region
+            # else:
+            #   storage_region = None
             storage_region = self.best_resources.region
         else:
             resources = list(self.resources)[0]
@@ -955,11 +959,72 @@ class Task:
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
         """
+        # for storage in self.storage_mounts.values():
+        #     if len(storage.stores) == 0:
+        #         store_type, store_region = self._get_preferred_store()
+        #         self.storage_plans[storage] = store_type
+        #         storage.add_store(store_type, store_region)
+        #     else:
+        #         # We will download the first store that is added to remote.
+        #         self.storage_plans[storage] = list(storage.stores.keys())[0]
+
+        # Things to consider
+        # 1. Created storage must respect the region from _get_preferred_store()
+        # 2. If other store type was specify from the task yaml, it should create
+        # at that cloud type.
+
+        # Perhaps, pass Storage object to _get_preferred_store() and that gets
+        # the highest priority from _get_preferred_store. And if this passed
+        # store type aligns with best_resources.cloud, then return it with the
+        # best_resources.region. If not, just return
+
+        # write a method that can read the store information from task yaml given
+        # the storage object name. Then, using this method, we can check the store type
+        # meant to be created from this task, and if this store type is identical to
+        # what _get_preferred_store type would create, we use the region value from it
+        # as well. If they are not the same, region value is set to None.
+
+        # So given the storage name, we can find the store type attempted to be created
+        # from this task. Get that store type, and if it's identical to best_resources.cloud,
+        # use best_resources.region as well.
+
+        # --> This approach requires to read the task yaml to get the init_store type, which
+        # means, we need a way to obtain the yaml path to read again, but currently, the path
+        # is not passed all the way down.
+
+        # So, why do we need the init_store from task yaml?
+        # This method currently only checks if there's already a storage created with
+        # len(storage.stores) == 0, but now this is not sufficient as it is possible to
+        # create another store with identical name(actually, need to confirm what to do with this behavior)
+
+        # Originally,
+        # if len(storage.stores) == 0:
+        # else:
+        # was good enough since create storage from task yaml was already done
+        # before reaching this point. So reaching this point with len(storage.stores) == 0
+        # was
+
+        # Approach 2:
+        # Get store_type and store_region from _get_preferred_store method.
+        # Check if this store_type is in storage.stores,
+        # if it does not exist, we run add_store(store_type, store_region)
+        # if it exists, we can
+
+        # There are two main points making this difficult to implement without knowing the store type
+        # attempted to be created from current task yaml.
+        # 1. When store type given from task yaml is different from best_resources.cloud, the storage
+        #    is created under wrong cloud provider.
+        # 2.
+
         for storage in self.storage_mounts.values():
-            if len(storage.stores) == 0:
-                store_type, store_region = self._get_preferred_store()
+            store_type, store_region = self._get_preferred_store(storage)
+            if store_type not in storage.stores:
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
+            # if len(storage.stores) == 0:
+            #     store_type, store_region = self._get_preferred_store()
+            #     self.storage_plans[storage] = store_type
+            #     storage.add_store(store_type, store_region)
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]

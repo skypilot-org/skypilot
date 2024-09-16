@@ -577,6 +577,17 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 }
             }
 
+        # Doyoung: Add comments on what kind of taint is added to TPU nodes by GCP(google.com/tpu=present:NoSchedule)
+        # and explain what those are for. And explain why we need toleration at this point to ignore that taint.
+        if 'cloud.google.com/gke-tpu-accelerator' in config.node_config['spec']['nodeSelector']:
+            tpu_toleration = {
+                'key': 'google.com/tpu',
+                'operator': 'Equal',
+                'value': 'present',
+                'effect': 'NoSchedule'
+            }
+            pod_spec['spec']['tolerations'] = [tpu_toleration]
+
         pod = kubernetes.core_api(context).create_namespaced_pod(
             namespace, pod_spec)
         created_pods[pod.metadata.name] = pod

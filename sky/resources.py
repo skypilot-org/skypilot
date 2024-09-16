@@ -564,13 +564,25 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
-                if self.cloud is None:
-                    self._cloud = clouds.GCP()
+                # Doyoung: Confirm if below two lines can be removed. Perhaps,
+                # raise an error when cloud is not specified by the user
+                # if self.cloud is None:
+                #     self._cloud = clouds.GCP()
                 assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                    clouds.GCP()) or self.cloud.is_same_cloud(clouds.Kubernetes()), 'Cloud must be GCP or Kubernetes.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                use_tpu_vm = accelerator_args.get('tpu_vm', True)
+                
+                # Doyoung: May need to understand the usage of tpu_vm and make
+                # proper adjustments to the following snippets.
+                if self.cloud.is_same_cloud(clouds.GCP()):
+                    use_tpu_vm = accelerator_args.get('tpu_vm', True)
+                else:
+                    use_tpu_vm = False
+                
+                ####
+                # use_tpu_vm = accelerator_args.get('tpu_vm', True)
+                ####
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
                         with ux_utils.print_exception_no_traceback():

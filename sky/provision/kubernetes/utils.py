@@ -183,11 +183,21 @@ class GKELabelFormatter(GPULabelFormatter):
     label, which is used to identify the GPU type.
     """
 
-    LABEL_KEY = 'cloud.google.com/gke-accelerator'
+    GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
+    TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
+    TPU_TOPOLOGY_LABEL_KEY = 'cloud.google.com/gke-tpu-topology'
 
     @classmethod
     def get_label_key(cls) -> str:
-        return cls.LABEL_KEY
+        return cls.GPU_LABEL_KEY
+
+    @classmethod
+    def is_label_key(cls, label: str) -> Tuple[str, str]:
+        return label in [cls.GPU_LABEL_KEY, cls.TPU_LABEL_KEY]
+
+    @classmethod
+    def get_tpu_topology_label_key(cls) -> str:
+        return cls.TPU_TOPOLOGY_LABEL_KEY
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -205,6 +215,10 @@ class GKELabelFormatter(GPULabelFormatter):
                 # to distinguish between a3-high and a3-mega instances
                 return 'H100'
             return acc
+        elif value.startswith('tpu-'):
+            # Doyoung: This may need some updates depending on the namings
+            # required from up/down-stream.
+            return value
         else:
             raise ValueError(
                 f'Invalid accelerator name in GKE cluster: {value}')
@@ -304,21 +318,27 @@ def detect_gpu_label_formatter(
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
     nodes = get_kubernetes_nodes()
+    is_tpu = False
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
+            if 'cloud.google.com/gke-tpu-accelerator' == label:
+                is_tpu = True
             node_labels[node.metadata.name].append((label, value))
 
     label_formatter = None
 
-    # Check if the node labels contain any of the GPU label prefixes
-    for lf in LABEL_FORMATTER_REGISTRY:
-        label_key = lf.get_label_key()
-        for _, label_list in node_labels.items():
-            for label, _ in label_list:
-                if label.startswith(label_key):
-                    label_formatter = lf()
-                    return label_formatter, node_labels
+    if is_tpu:
+        label_formatter = GKELabelFormatter()
+    else:
+        # Check if the node labels contain any of the GPU label prefixes
+        for lf in LABEL_FORMATTER_REGISTRY:
+            label_key = lf.get_label_key()
+            for _, label_list in node_labels.items():
+                for label, _ in label_list:
+                    if label.startswith(label_key):
+                        label_formatter = lf()
+                        return label_formatter, node_labels
 
     return label_formatter, node_labels
 
@@ -338,7 +358,7 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     nodes = get_kubernetes_nodes()
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_gpu = 'nvidia.com/gpu' in cluster_resources
+    has_gpu = 'nvidia.com/gpu' in cluster_resources or 'google.com/tpu' in cluster_resources
 
     return has_gpu, cluster_resources
 
@@ -523,13 +543,25 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # correctly setup and will behave as expected.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if label == label_formatter.get_label_key():
+                    if label_formatter.is_label_key(label):
                         is_valid, reason = label_formatter.validate_label_value(
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
                                 f'Node {node_name!r} in Kubernetes cluster has '
                                 f'invalid GPU label: {label}={value}. {reason}')
+            #####
+            # for node_name, label_list in node_labels.items():
+            #     for label, value in label_list:
+            #         if label == label_formatter.get_label_key():
+            #             is_valid, reason = label_formatter.validate_label_value(
+            #                 value)
+            #             if not is_valid:
+            #                 raise exceptions.ResourcesUnavailableError(
+            #                     f'Node {node_name!r} in Kubernetes cluster has '
+            #                     f'invalid GPU label: {label}={value}. {reason}')
+            #####
+            
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
@@ -543,10 +575,20 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # during scheduling.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if (label == k8s_acc_label_key and
+                    if (label_formatter.is_label_key(label) and
                             label_formatter.get_accelerator_from_label_value(
                                 value) == acc_type):
                         return label, value
+            
+            ####
+            # for node_name, label_list in node_labels.items():
+            #     for label, value in label_list:
+            #         if (label == k8s_acc_label_key and
+            #                 label_formatter.get_accelerator_from_label_value(
+            #                     value) == acc_type):
+            #             return label, value
+            ####
+
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
@@ -579,6 +621,23 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 'Please refer to the documentation on how '
                 f'to set up GPUs.{suffix}')
 
+
+def get_tpu_topology_key_value():
+    label_formatter, node_labels = detect_gpu_label_formatter()
+    for node_name, label_list in node_labels.items():
+        for label, value in label_list:
+            if label == label_formatter.get_tpu_topology_label_key():
+                is_valid, reason = label_formatter.validate_label_value(value)
+                if not is_valid:
+                    raise exceptions.ResourcesUnavailableError(
+                        f'Node {node_name!r} in Kubernetes cluster has '
+                        f'invalid GPU label: {label}={value}. {reason}')
+
+    for node_name, label_list in node_labels.items():
+        for label, value in label_list:
+            if label == label_formatter.get_tpu_topology_label_key():
+                return label, value
+                
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
                       context: Optional[str]) -> int:
