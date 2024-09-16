@@ -103,8 +103,8 @@ class TLSCredential:
 
     def dump_to_uvicorn_arguments(self) -> Dict[str, Any]:
         return {
-            'ssl_keyfile': self.keyfile,
-            'ssl_certfile': self.certfile,
+            'ssl_keyfile': os.path.expanduser(self.keyfile),
+            'ssl_certfile': os.path.expanduser(self.certfile),
         }
 
 
