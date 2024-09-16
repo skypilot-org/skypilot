@@ -1,5 +1,6 @@
 envs:
   MODEL_NAME: mistralai/Pixtral-12B-2409
+  HF_TOKEN:
 
 service:
   replicas: 2
