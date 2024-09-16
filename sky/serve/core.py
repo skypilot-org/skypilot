@@ -180,9 +180,6 @@ def up(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
 
-        service_spec = task.service
-        # Already validated in _validate_service_task
-        assert service_spec is not None, 'Service section not found.'
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,

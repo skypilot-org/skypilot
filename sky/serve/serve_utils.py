@@ -102,6 +102,9 @@ class TLSCredential:
                 raise ValueError('TLS keyfile is required if certfile is set.')
 
     def dump_to_uvicorn_arguments(self) -> Dict[str, Any]:
+        if self.keyfile is None:
+            return {}
+        assert self.certfile is not None
         return {
             'ssl_keyfile': os.path.expanduser(self.keyfile),
             'ssl_certfile': os.path.expanduser(self.certfile),
