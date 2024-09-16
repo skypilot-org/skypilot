@@ -44,13 +44,27 @@ In this guide, we use Sky Benchmark to find the GPU with the lowest $/query for 
    --------------------------------------------------------------------------------------------------------
    ```
    
-   We have defined a workload generator script `benchmark.py` that generates load to the local vLLM OpenAI API server. We use the `sky_callback.step()` context manager to mark the successful querying of one batch as one step. This allows Sky Benchmark to measure the performance and cost of each step. 
+   We have defined a workload generator script `benchmark.py` that generates load to the local vLLM OpenAI API server. We use the `sky_callback.step()` context manager to mark the successful querying of one batch as one step. This allows Sky Benchmark to measure the performance and cost of each step. By default, we use a batch size of 5 queries per batch, but you can configure this in `benchmark.py`. 
    
-   `serve.yaml` launches the vLLM API server aand invokes the `benchmark.py` script to generate the load. 
+   `serve.yaml` launches the vLLM API server and invokes the `benchmark.py` script to generate the load. 
 
-3. After the benchmark completes, view the results with `sky bench show`:
+3. After the benchmark completes, view the results with `python show_results.py <benchmark name>`. This is a simple script that reads the benchmark results from Sky Benchmark and displays them in a simpler format geared towards serving workloads:
+   
+   ```bash
+   python show_results.py gemma                 
+   Legend:
+   - #QUERIES: Number of queries sent in the benchmark.
+   - SEC/QUERY, $/QUERY: Average time and cost per query.
 
-   <!---TODO: we need to look into renaming some of the table titles to fit serving-->
+   RESOURCES  #QUERIES  SEC/QUERY  $/QUERY   
+   1x T4:1    50        0.9921     0.000145  
+   1x L4:1    50        0.8377     0.000187  
+   1x V100:1  50        0.4270     0.000363
+   ```
+
+   We see that Nvidia T4 GPU has the lowest $/query for serving Gemma with vLLM, and V100s are 2.3x faster but also cost 2.5x more than T4s.
+
+   Alternatively, you can also use the native `sky bench show` command to view detailed results:
    ```bash
    $ sky bench show gemma
    Processing 3 benchmark results ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
@@ -65,8 +79,7 @@ In this guide, we use Sky Benchmark to find the GPU with the lowest $/query for 
    sky-bench-gemma-2   1x AWS(p3.2xlarge, {'V100': 1})  FINISHED  23s       0.0199    10      2.1349    0.001815  0.01     0.02
    ```
    
-   In these results, each step corresponds to completion of a batch of 5 queries. This can be configured in `benchmark.py`.
-
-   We see that Nvidia T4 GPU has the lowest $/query for serving Gemma with vLLM, and V100s are > 2x faster but also cost nearly 3x more than T4s. 
-
+   In these results, each step corresponds to completion of a batch of 5 queries, configured in `benchmark.py`.
+   
+   
 You can customize the benchmarking script and YAML to suit your specific workload and requirements. For more information, refer to the [Sky Benchmark documentation](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html).
