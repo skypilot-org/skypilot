@@ -149,6 +149,7 @@ With the data chunks saved, we can launch a job for each chunk.
           --env DATA_CHUNK_FILE=./chunks/$i.txt &
     done
 
+.. Tested worker on 2024-09-15 with a chunk containing multiple data parts.
 
 Cut Costs by 3x with Spot Instances
 -----------------------------------
@@ -181,6 +182,7 @@ Cut Costs by 3x with Spot Instances
           --use-spot
     done
 
+.. Tested worker on 2024-09-15 with continue_batch_inference.
 
 Online Batch Inference
 ----------------------
