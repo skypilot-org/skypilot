@@ -1945,7 +1945,7 @@ class RetryingVmProvisioner(object):
                 if dryrun:
                     cloud_user = None
                 else:
-                    cloud_user = to_provision.cloud.get_current_user_identity()
+                    cloud_user = to_provision.cloud.get_active_user_identity()
 
                 requested_features = self._requested_features.copy()
                 # Skip stop feature for Kubernetes and RunPod controllers.

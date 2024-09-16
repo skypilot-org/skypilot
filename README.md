@@ -26,6 +26,7 @@
 
 ----
 :fire: *News* :fire:
+- [Sep, 2024] Run and deploy [Pixtral](./llm/pixtral), the first open-source multimodal model from Mistral AI.
 - [Jul, 2024] [Finetune](./llm/llama-3_1-finetuning/) and [serve](./llm/llama-3_1/) **Llama 3.1** on your infra
 - [Jun, 2024] Reproduce **GPT** with [llm.c](https://github.com/karpathy/llm.c/discussions/481) on any cloud: [**guide**](./llm/gpt-2/)
 - [Apr, 2024] Serve and finetune [**Llama 3**](https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html) on any cloud or Kubernetes: [**example**](./llm/llama-3/)
@@ -156,6 +157,7 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
 - LLMs on SkyPilot
+  - [Pixtral](./llm/pixtral/)
   - [Llama 3.1 finetuning](./llm/llama-3_1-finetuning/) and [serving](./llm/llama-3_1/)
   - [GPT-2 via `llm.c`](./llm/gpt-2/)
   - [Llama 3](./llm/llama-3/)

@@ -34,6 +34,7 @@ Contents
    :maxdepth: 1
    :caption: LLM Models
 
+   Pixtral (Mistral AI) <llms/pixtral>
    Mixtral (Mistral AI) <llms/mixtral>
    Mistral 7B (Mistral AI) <https://docs.mistral.ai/self-deployment/skypilot/>
    DBRX (Databricks) <llms/dbrx>
