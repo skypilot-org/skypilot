@@ -27,9 +27,9 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
-{%- if local_ssl_keyfile is not none %}
-  {{remote_ssl_keyfile}}: {{local_ssl_keyfile}}
-  {{remote_ssl_certfile}}: {{local_ssl_certfile}}
+{%- if local_tls_keyfile is not none %}
+  {{remote_tls_keyfile}}: {{local_tls_keyfile}}
+  {{remote_tls_certfile}}: {{local_tls_certfile}}
 {%- endif %}
 
 run: |
@@ -41,10 +41,6 @@ run: |
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID \
-{%- if local_ssl_keyfile is not none %}
-    --ssl-keyfile {{remote_ssl_keyfile}} \
-    --ssl-certfile {{remote_ssl_certfile}} \
-{%- endif %}
     >> {{controller_log_file}} 2>&1
 
 envs:

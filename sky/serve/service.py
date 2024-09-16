@@ -9,7 +9,7 @@ import pathlib
 import shutil
 import time
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import filelock
 
@@ -128,8 +128,7 @@ def _cleanup(service_name: str) -> bool:
     return failed
 
 
-def _start(service_name: str, tmp_task_yaml: str, job_id: int,
-           ssl_keyfile: Optional[str], ssl_certfile: Optional[str]):
+def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     """Starts the service."""
     # Generate ssh key pair to avoid race condition when multiple sky.launch
     # are executed at the same time.
@@ -225,8 +224,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int,
                 target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port, ssl_keyfile,
-                      ssl_certfile))
+                args=(controller_addr, load_balancer_port,
+                      service_spec.tls_credential))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)
@@ -275,15 +274,8 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the service job.')
-    parser.add_argument('--ssl-keyfile',
-                        type=str,
-                        help='Path to the SSL key file')
-    parser.add_argument('--ssl-certfile',
-                        type=str,
-                        help='Path to the SSL certificate file')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.task_yaml, args.job_id, args.ssl_keyfile,
-           args.ssl_certfile)
+    _start(args.service_name, args.task_yaml, args.job_id)

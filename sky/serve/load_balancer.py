@@ -28,8 +28,7 @@ class SkyServeLoadBalancer:
     """
 
     def __init__(self, controller_url: str, load_balancer_port: int,
-                 ssl_keyfile: Optional[str],
-                 ssl_certfile: Optional[str]) -> None:
+                 tls_credential: Optional[serve_utils.TLSCredential]) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -43,8 +42,8 @@ class SkyServeLoadBalancer:
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
-        self._ssl_keyfile: Optional[str] = ssl_keyfile
-        self._ssl_certfile: Optional[str] = ssl_certfile
+        self._tls_credential: Optional[serve_utils.TLSCredential] = (
+            tls_credential)
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
         # for each client. We should wait for feedback on the best max
         # connections.
@@ -221,12 +220,10 @@ class SkyServeLoadBalancer:
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
 
-        ssl_kwargs = {} if self._ssl_keyfile is None else {
-            'ssl_keyfile': self._ssl_keyfile,
-            'ssl_certfile': self._ssl_certfile,
-        }
+        ssl_kwargs = ({} if self._tls_credential is None else
+                      self._tls_credential.dump_to_uvicorn_arguments())
 
-        schema = 'https' if self._ssl_keyfile is not None else 'http'
+        schema = 'https' if self._tls_credential is not None else 'http'
 
         logger.info('SkyServe Load Balancer started on '
                     f'{schema}://0.0.0.0:{self._load_balancer_port}')
@@ -237,14 +234,13 @@ class SkyServeLoadBalancer:
                     **ssl_kwargs)
 
 
-def run_load_balancer(controller_addr: str,
-                      load_balancer_port: int,
-                      ssl_keyfile: Optional[str] = None,
-                      ssl_certfile: Optional[str] = None):
+def run_load_balancer(
+        controller_addr: str,
+        load_balancer_port: int,
+        tls_credential: Optional[serve_utils.TLSCredential] = None):
     load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
                                          load_balancer_port=load_balancer_port,
-                                         ssl_keyfile=ssl_keyfile,
-                                         ssl_certfile=ssl_certfile)
+                                         tls_credential=tls_credential)
     load_balancer.run()
 
 

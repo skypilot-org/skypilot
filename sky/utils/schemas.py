@@ -375,7 +375,7 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
-            'ssl': {
+            'tls': {
                 'type': 'object',
                 'additionalProperties': False,
                 'properties': {

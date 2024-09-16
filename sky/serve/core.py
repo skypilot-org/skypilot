@@ -90,6 +90,37 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     'Please specify the same port instead.')
 
 
+def _rewrite_tls_credential_paths(service_name: str,
+                                  task: 'sky.Task') -> Dict[str, Any]:
+    """Rewrite the paths of TLS credentials in the task.
+
+    Args:
+        service_name: Name of the service.
+        task: sky.Task to rewrite.
+
+    Returns:
+        The generated template variables for TLS.
+    """
+    service_spec = task.service
+    # Already checked by _validate_service_task
+    assert service_spec is not None
+    if service_spec.tls_credential is None:
+        return {}
+    remote_tls_keyfile = (
+        serve_utils.generate_remote_tls_keyfile_name(service_name))
+    remote_tls_certfile = (
+        serve_utils.generate_remote_tls_certfile_name(service_name))
+    tls_template_vars = {
+        'remote_tls_keyfile': remote_tls_keyfile,
+        'remote_tls_certfile': remote_tls_certfile,
+        'local_tls_keyfile': service_spec.tls_credential.keyfile,
+        'local_tls_certfile': service_spec.tls_credential.certfile,
+    }
+    service_spec.tls_credential = serve_utils.TLSCredential(
+        remote_tls_keyfile, remote_tls_certfile)
+    return tls_template_vars
+
+
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -127,6 +158,8 @@ def up(
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
+    tls_template_vars = _rewrite_tls_credential_paths(service_name, task)
+
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
             mode='w',
@@ -146,10 +179,6 @@ def up(
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
-        remote_ssl_keyfile = (
-            serve_utils.generate_remote_ssl_keyfile_name(service_name))
-        remote_ssl_certfile = (
-            serve_utils.generate_remote_ssl_certfile_name(service_name))
 
         service_spec = task.service
         # Already validated in _validate_service_task
@@ -157,15 +186,12 @@ def up(
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,
-            'remote_ssl_keyfile': remote_ssl_keyfile,
-            'remote_ssl_certfile': remote_ssl_certfile,
-            'local_ssl_keyfile': service_spec.ssl_keyfile,
-            'local_ssl_certfile': service_spec.ssl_certfile,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
@@ -326,11 +352,10 @@ def update(
     _validate_service_task(task)
 
     assert task.service is not None
-    if (task.service.ssl_keyfile is not None or
-            task.service.ssl_certfile is not None):
-        logger.warning('Updating SSL keyfile and certfile is not supported. '
+    if task.service.tls_credential is not None:
+        logger.warning('Updating TLS keyfile and certfile is not supported. '
                        'Any updates to the keyfile and certfile will not take '
-                       'effect. To update SSL keyfile and certfile, please '
+                       'effect. To update TLS keyfile and certfile, please '
                        'tear down the service and spin up a new one.')
 
     handle = backend_utils.is_controller_accessible(

@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import dataclasses
 import enum
 import os
 import pathlib
@@ -84,6 +85,27 @@ class UpdateMode(enum.Enum):
     """Update mode for updating a service."""
     ROLLING = 'rolling'
     BLUE_GREEN = 'blue_green'
+
+
+@dataclasses.dataclass
+class TLSCredential:
+    """TLS credential for the service."""
+    keyfile: Optional[str]
+    certfile: Optional[str]
+
+    def __post_init__(self) -> None:
+        if self.keyfile is not None and self.certfile is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('TLS certfile is required if keyfile is set.')
+        if self.certfile is not None and self.keyfile is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('TLS keyfile is required if certfile is set.')
+
+    def dump_to_uvicorn_arguments(self) -> Dict[str, Any]:
+        return {
+            'ssl_keyfile': self.keyfile,
+            'ssl_certfile': self.certfile,
+        }
 
 
 DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
@@ -237,16 +259,16 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
-def generate_remote_ssl_keyfile_name(service_name: str) -> str:
+def generate_remote_tls_keyfile_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'ssl_keyfile')
+    return os.path.join(dir_name, 'tls_keyfile')
 
 
-def generate_remote_ssl_certfile_name(service_name: str) -> str:
+def generate_remote_tls_certfile_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'ssl_certfile')
+    return os.path.join(dir_name, 'tls_certfile')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
