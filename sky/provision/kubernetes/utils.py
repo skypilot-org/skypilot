@@ -229,8 +229,6 @@ class GKELabelFormatter(GPULabelFormatter):
                 return 'H100'
             return acc
         elif value.startswith('tpu-'):
-            # Doyoung: This may need some updates depending on the namings
-            # required from up/down-stream.
             return value
         else:
             raise ValueError(
@@ -354,21 +352,24 @@ def detect_gpu_label_formatter(
 
 
 def detect_gpu_resource() -> Tuple[bool, Set[str]]:
-    """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
+    """Checks if the Kubernetes cluster has accelerator resource.
 
-    If nvidia.com/gpu resource is missing, that typically means that the
-    Kubernetes cluster does not have GPUs or the nvidia GPU operator and/or
-    device drivers are not installed.
+    Two types of accelerator resources are available which are each checked
+    with nvidia.com/gpu and google.com/tpu. If nvidia.com/gpu resource is
+    missing, that typically means that the Kubernetes cluster does not have
+    GPUs or the nvidia GPU operator and/or device drivers are not installed.
 
     Returns:
-        bool: True if the cluster has nvidia.com/gpu resource, False otherwise.
+        bool: True if the cluster has nvidia.com/gpu or google.com/tpu
+            resource, False otherwise.
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
     nodes = get_kubernetes_nodes()
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_gpu = 'nvidia.com/gpu' in cluster_resources or 'google.com/tpu' in cluster_resources
+    has_gpu = ('nvidia.com/gpu' in cluster_resources or
+               'google.com/tpu' in cluster_resources)
 
     return has_gpu, cluster_resources
 
@@ -560,23 +561,12 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                             raise exceptions.ResourcesUnavailableError(
                                 f'Node {node_name!r} in Kubernetes cluster has '
                                 f'invalid GPU label: {label}={value}. {reason}')
-            #####
-            # for node_name, label_list in node_labels.items():
-            #     for label, value in label_list:
-            #         if label == label_formatter.get_label_key():
-            #             is_valid, reason = label_formatter.validate_label_value(
-            #                 value)
-            #             if not is_valid:
-            #                 raise exceptions.ResourcesUnavailableError(
-            #                     f'Node {node_name!r} in Kubernetes cluster has '
-            #                     f'invalid GPU label: {label}={value}. {reason}')
-            #####
             
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
                 return '', ''
-            k8s_acc_label_key = label_formatter.get_label_key()
+
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -589,15 +579,6 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                             label_formatter.get_accelerator_from_label_value(
                                 value) == acc_type):
                         return label, value
-            
-            ####
-            # for node_name, label_list in node_labels.items():
-            #     for label, value in label_list:
-            #         if (label == k8s_acc_label_key and
-            #                 label_formatter.get_accelerator_from_label_value(
-            #                     value) == acc_type):
-            #             return label, value
-            ####
 
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
@@ -607,7 +588,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                     for node_name, label_list in node_labels.items():
                         all_labels.extend(label_list)
                     gpus_available = set(
-                        v for k, v in all_labels if k == k8s_acc_label_key)
+                        v for k, v in all_labels if label_formatter.match_label_key(k))
                     suffix = f' Available GPUs on the cluster: {gpus_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
