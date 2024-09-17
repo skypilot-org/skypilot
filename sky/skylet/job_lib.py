@@ -8,10 +8,10 @@ import json
 import os
 import pathlib
 import shlex
+import sqlite3
 import subprocess
 import time
 import typing
-import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
