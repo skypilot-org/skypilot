@@ -292,10 +292,15 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            endpoint = backend_utils.get_endpoints(
+            socket_endpoint = backend_utils.get_endpoints(
                 controller_handle.cluster_name, lb_port,
                 skip_status_check=True).get(lb_port)
-            assert endpoint is not None, 'Did not get endpoint for controller.'
+            assert socket_endpoint is not None, (
+                'Did not get endpoint for controller.')
+            # Already checked by _validate_service_task
+            assert task.service is not None
+            schema = 'http' if task.service.tls_credential is None else 'https'
+            endpoint = f'{schema}://{socket_endpoint}'
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '
@@ -563,6 +568,7 @@ def status(
               for replica (deprecated),
             'requested_resources_str': (str) str representation of
               requested resources,
+            'tls_encrypted': (bool) whether the service is TLS encrypted,
             'replica_info': (List[Dict[str, Any]]) replica information,
         }
 

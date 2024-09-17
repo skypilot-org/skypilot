@@ -68,6 +68,9 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'active_versions',
                              f'TEXT DEFAULT {json.dumps([])!r}')
+# Whether the service's load balancer is encrypted with TLS.
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'tls_encrypted',
+                             'INTEGER DEFAULT NULL')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -233,7 +236,8 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 def add_service(name: str, controller_job_id: int, policy: str,
-                requested_resources_str: str, status: ServiceStatus) -> bool:
+                requested_resources_str: str, status: ServiceStatus,
+                tls_encrypted: bool) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -246,10 +250,10 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 """\
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
-                requested_resources_str)
-                VALUES (?, ?, ?, ?, ?)""",
+                requested_resources_str, tls_encrypted)
+                VALUES (?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
-                 requested_resources_str))
+                 requested_resources_str, int(tls_encrypted)))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -316,7 +320,7 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, requested_resources,
-     requested_resources_str, _, active_versions) = row[:13]
+     requested_resources_str, _, active_versions, tls_encrypted) = row[:14]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -337,6 +341,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'requested_resources': pickle.loads(requested_resources)
                                if requested_resources is not None else None,
         'requested_resources_str': requested_resources_str,
+        'tls_encrypted': bool(tls_encrypted),
     }
 
 

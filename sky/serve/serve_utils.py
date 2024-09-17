@@ -93,16 +93,6 @@ class TLSCredential:
     keyfile: str
     certfile: str
 
-    def __post_init__(self) -> None:
-        # Check if both keyfile and certfile exist.
-        if not os.path.exists(self.keyfile):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'TLS key file {self.keyfile} does not exist.')
-        if not os.path.exists(self.certfile):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'TLS cert file {self.certfile} does not exist.')
-
     def dump_uvicorn_kwargs(self) -> Dict[str, str]:
         return {
             'ssl_keyfile': os.path.expanduser(self.keyfile),
@@ -785,7 +775,8 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if endpoint is None:
         return '-'
     assert isinstance(endpoint, str), endpoint
-    return endpoint
+    schema = 'https' if service_record['tls_encrypted'] else 'http'
+    return f'{schema}://{endpoint}'
 
 
 def format_service_table(service_records: List[Dict[str, Any]],
@@ -794,7 +785,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT',
+        'TLS_ENCRYPTED'
     ]
     if show_all:
         service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
@@ -817,6 +809,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         replicas = _get_replicas(record)
         endpoint = get_endpoint(record)
         policy = record['policy']
+        tls_encrypted = record['tls_encrypted']
         # TODO(tian): Backward compatibility.
         # Remove `requested_resources` field after 2 minor release, 0.6.0.
         if record.get('requested_resources_str') is None:
@@ -831,6 +824,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             status_str,
             replicas,
             endpoint,
+            tls_encrypted,
         ]
         if show_all:
             service_values.extend([policy, requested_resources_str])
