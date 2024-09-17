@@ -4244,6 +4244,43 @@ def test_skyserve_failures(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.serve
+def test_skyserve_https(generic_cloud: str):
+    """Test skyserve with https"""
+    name = _get_service_name()
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        keyfile = os.path.join(tempdir, 'key.pem')
+        certfile = os.path.join(tempdir, 'cert.pem')
+        subprocess_utils.run_no_outputs(
+            f'openssl req -x509 -newkey rsa:2048 -days 36500 -nodes '
+            f'-subj "/" -keyout {keyfile} -out {certfile}')
+        service_yaml_path = os.path.join(tempdir, 'service.yaml')
+        template_str = pathlib.Path(
+            f'tests/skyserve/https/service.yaml.j2').read_text()
+        template = jinja2.Template(template_str)
+        content = template.render(keyfile=keyfile, certfile=certfile)
+        with open(service_yaml_path, 'w') as f:
+            f.write(content)
+            f.flush()
+
+        test = Test(
+            f'test-skyserve-https',
+            [
+                f'sky serve up -n {name} --cloud {generic_cloud} -y {service_yaml_path}',
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl https://$endpoint -k | grep "Hi, SkyPilot here"',
+                # TODO(tian): Update this to self authenticate error message.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl https://$endpoint | grep "Hi, SkyPilot here"',
+                # TODO(tian): Update this to wrong schema error message.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            timeout=20 * 60,
+        )
+        run_one_test(test)
+
+
 # TODO(Ziming, Tian): Add tests for autoscaling.
 
 
