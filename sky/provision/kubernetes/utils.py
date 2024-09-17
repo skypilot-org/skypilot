@@ -322,7 +322,7 @@ def detect_gpu_label_formatter(
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
-            if 'cloud.google.com/gke-tpu-accelerator' == label:
+            if GKELabelFormatter.TPU_LABEL_KEY == label:
                 is_tpu = True
             node_labels[node.metadata.name].append((label, value))
 
