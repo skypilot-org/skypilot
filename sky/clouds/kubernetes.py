@@ -267,7 +267,7 @@ class Kubernetes(clouds.Cloud):
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
-            if k8s_acc_label_key == 'cloud.google.com/gke-tpu-accelerator':
+            if k8s_acc_label_key == kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY:
                 tpu_is_requested = True
 
         if tpu_is_requested:
