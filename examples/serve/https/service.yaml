@@ -2,13 +2,13 @@
 #
 # Usage:
 # Generate a self-signed certificate and key, or bring your own:
-#   openssl req -x509 -newkey rsa:2048 -days 36500 -nodes \
-#     -keyout <key-path> -out <cert-path>
+#   $ openssl req -x509 -newkey rsa:2048 -days 36500 -nodes \
+#       -keyout <key-path> -out <cert-path>
 # Then replace the <key-path> and <cert-path> in the YAML file, and:
-#   sky serve up -n https examples/serve/https/service.yaml
-# The endpoint will be printed in the console. You
-# could also check the endpoint by running:
-#   sky serve status --endpoint https
+#   $ sky serve up -n https examples/serve/https/service.yaml
+# The endpoint will be printed in the console. You could also
+# check the endpoint by running:
+#   $ sky serve status --endpoint https
 
 service:
   readiness_probe: /
