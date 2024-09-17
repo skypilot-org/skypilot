@@ -566,9 +566,9 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # detected, raise error
             with ux_utils.print_exception_no_traceback():
                 supported_formats = ', '.join(
-                    key
+                    [key
                     for f in LABEL_FORMATTER_REGISTRY
-                    for key in f.get_label_keys()
+                    for key in f.get_label_keys()]
                 )
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -592,12 +592,10 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                             raise exceptions.ResourcesUnavailableError(
                                 f'Node {node_name!r} in Kubernetes cluster has '
                                 f'invalid GPU label: {label}={value}. {reason}')
-            
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
                 return '', ''
-
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
