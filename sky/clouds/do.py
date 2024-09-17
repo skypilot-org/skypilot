@@ -77,10 +77,8 @@ class DO(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'DO')
-
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'DO')
         if region is not None:
             regions = [r for r in regions if r.name == region]
         return regions
