@@ -76,10 +76,15 @@ class GPULabelFormatter:
     """
 
     @classmethod
-    def get_label_key(cls) -> str:
+    def get_label_key(cls, accelerator: str = None) -> str:
         """Returns the label key for GPU type used by the Kubernetes cluster"""
         raise NotImplementedError
-        
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        """Returns a list of label keys for GPU used by Kubernetes cluster."""
+        pass
+
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
         """Given a GPU type, returns the label value to be used"""
@@ -139,8 +144,13 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
     LABEL_KEY = 'skypilot.co/accelerator'
 
     @classmethod
-    def get_label_key(cls) -> str:
+    def get_label_key(cls, accelerator: str = None) -> str:
+        del accelerator # Unused
         return cls.LABEL_KEY
+   
+    @classmethod
+    def get_label_keys(cls) -> str:
+        return [cls.LABEL_KEY]
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -175,8 +185,13 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
     LABEL_KEY = 'gpu.nvidia.com/class'
 
     @classmethod
-    def get_label_key(cls) -> str:
+    def get_label_key(cls, accelerator: str = None) -> str:
+        del accelerator # Unused
         return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> str:
+        return [cls.LABEL_KEY]
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -203,8 +218,14 @@ class GKELabelFormatter(GPULabelFormatter):
     TPU_TOPOLOGY_LABEL_KEY = 'cloud.google.com/gke-tpu-topology'
 
     @classmethod
-    def get_label_key(cls) -> str:
+    def get_label_key(cls, accelerator: str = None) -> str:
+        if accelerator.startswith('tpu-'):
+            return cls.TPU_LABEL_KEY
         return cls.GPU_LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> str:
+        return [cls.GPU_LABEL_KEY, cls.TPU_LABEL_KEY]
 
     @classmethod
     def match_label_key(cls, label: str) -> bool:
@@ -255,8 +276,13 @@ class GFDLabelFormatter(GPULabelFormatter):
     LABEL_KEY = 'nvidia.com/gpu.product'
 
     @classmethod
-    def get_label_key(cls) -> str:
+    def get_label_key(cls, accelerator: str = None) -> str:
+        del accelerator # Unused
         return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> str:
+        return [cls.LABEL_KEY]
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -528,7 +554,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
         assert formatter is not None, ('Unsupported autoscaler type:'
                                        f' {autoscaler_type}')
-        return formatter.get_label_key(), formatter.get_label_value(acc_type)
+        return formatter.get_label_key(acc_type), formatter.get_label_value(acc_type)
 
     has_gpus, cluster_resources = detect_gpu_resource()
     if has_gpus:
@@ -540,7 +566,10 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # detected, raise error
             with ux_utils.print_exception_no_traceback():
                 supported_formats = ', '.join(
-                    [f.get_label_key() for f in LABEL_FORMATTER_REGISTRY])
+                    key
+                    for f in LABEL_FORMATTER_REGISTRY
+                    for key in f.get_label_keys()
+                )
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'

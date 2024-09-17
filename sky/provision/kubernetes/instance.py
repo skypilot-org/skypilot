@@ -180,8 +180,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                         '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
                         f' Full error: {event_message}')
                 gpu_lf_keys = [
-                    lf.get_label_key()
+                    key
                     for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    for key in lf.get_label_keys()
                 ]
                 if pod.spec.node_selector:
                     for label_key in pod.spec.node_selector.keys():
