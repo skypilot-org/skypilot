@@ -4269,11 +4269,14 @@ def test_skyserve_https(generic_cloud: str):
             [
                 f'sky serve up -n {name} --cloud {generic_cloud} -y {service_yaml_path}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl https://$endpoint -k | grep "Hi, SkyPilot here"',
-                # TODO(tian): Update this to self authenticate error message.
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl https://$endpoint | grep "Hi, SkyPilot here"',
-                # TODO(tian): Update this to wrong schema error message.
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl https://$endpoint -k | grep "Hi, SkyPilot here"',
+                # Self signed certificate should fail without -k.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl https://$endpoint 2>&1 | grep "self signed certificate"',
+                # curl with wrong schema (http) should fail.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl http://$endpoint 2>&1 | grep "Empty reply from server"',
             ],
             _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
