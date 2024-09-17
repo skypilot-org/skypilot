@@ -4,10 +4,15 @@ Ever wondered which GPU will give you the highest performance per dollar for you
 
 [Sky Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html) is a tool for easy measurement of performance and cost of different kinds of cloud resources for your specific workload.
 
-Suppose you want to benchmark a set of hardware choices and corresponding serving configurations `[(HW1, CFG1), ...]`.
-You can see how we declare this in serve.yaml’s [`resources.candidates` field](https://github.com/skypilot-org/skypilot/blob/skybench_fixes/examples/benchmark/serving/serve.yaml#L9-L12) and [`run` commands](https://github.com/skypilot-org/skypilot/blob/skybench_fixes/examples/benchmark/serving/serve.yaml#L22-L29) by dynamically switching configuration depending on hardware choice. This effectively simulates serving config `i` for hardware `i`. You can plug in your own config list by modifying `serve.yaml`.  
 
-When you run this benchmark, SkyPilot will:
+## How Sky Benchmark works
+Suppose you want to benchmark a set of hardware choices and corresponding serving configurations `[(HW1, CFG1), ...]`.
+
+You can see how we declare this spec in serve.yaml’s [`resources.candidates` field](https://github.com/skypilot-org/skypilot/blob/skybench_fixes/examples/benchmark/serving/serve.yaml#L9-L12) and [`run` commands](https://github.com/skypilot-org/skypilot/blob/skybench_fixes/examples/benchmark/serving/serve.yaml#L22-L29). The `run` section dynamically switches configuration depending on the hardware it is running on. This effectively simulates serving config `i` for hardware `i`. 
+
+You can plug in your own configurations by modifying `serve.yaml`.  
+
+When you run this benchmark with `sky bench launch`, SkyPilot will:
 1. Automatically provision the required GPUs
 2. Run the benchmarks and collect results on each GPU
 3. Return the **query latency and $/query** for each GPU in a simple format:
