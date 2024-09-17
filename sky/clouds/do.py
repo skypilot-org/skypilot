@@ -37,7 +37,9 @@ class DO(clouds.Cloud):
             'Docker container images as runtime environments'
             f' are not supported in {_REPR}. Try using in `run`',
     }
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    # maximum node name length defined as <= 255
+    # https://docs.digitalocean.com/reference/api/api-reference/#operation/droplets_create
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 255
     _regions: List[clouds.Region] = []
 
     # Using the latest SkyPilot provisioner API to provision and check status.
