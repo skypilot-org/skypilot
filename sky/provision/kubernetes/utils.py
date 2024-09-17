@@ -79,10 +79,15 @@ class GPULabelFormatter:
     def get_label_key(cls) -> str:
         """Returns the label key for GPU type used by the Kubernetes cluster"""
         raise NotImplementedError
-
+        
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
         """Given a GPU type, returns the label value to be used"""
+        raise NotImplementedError
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        """Checks if the given label key matches the formatter's label keys"""
         raise NotImplementedError
 
     @classmethod
@@ -142,6 +147,10 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         return accelerator.lower()
 
     @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value.upper()
 
@@ -172,6 +181,10 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
         return accelerator.upper()
 
     @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value
 
@@ -192,7 +205,7 @@ class GKELabelFormatter(GPULabelFormatter):
         return cls.GPU_LABEL_KEY
 
     @classmethod
-    def is_label_key(cls, label: str) -> Tuple[str, str]:
+    def match_label_key(cls, label: str) -> bool:
         return label in [cls.GPU_LABEL_KEY, cls.TPU_LABEL_KEY]
 
     @classmethod
@@ -251,6 +264,10 @@ class GFDLabelFormatter(GPULabelFormatter):
         (e.g., A100-80GB-PCIE vs. A100-SXM4-80GB).
         As a result, we do not support get_label_value for GFDLabelFormatter."""
         raise NotImplementedError
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
@@ -318,27 +335,20 @@ def detect_gpu_label_formatter(
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
     nodes = get_kubernetes_nodes()
-    is_tpu = False
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
-            if GKELabelFormatter.TPU_LABEL_KEY == label:
-                is_tpu = True
             node_labels[node.metadata.name].append((label, value))
 
     label_formatter = None
 
-    if is_tpu:
-        label_formatter = GKELabelFormatter()
-    else:
-        # Check if the node labels contain any of the GPU label prefixes
-        for lf in LABEL_FORMATTER_REGISTRY:
-            label_key = lf.get_label_key()
-            for _, label_list in node_labels.items():
-                for label, _ in label_list:
-                    if label.startswith(label_key):
-                        label_formatter = lf()
-                        return label_formatter, node_labels
+    # Check if the node labels contain any of the GPU label prefixes
+    for lf in LABEL_FORMATTER_REGISTRY:
+        for _, label_list in node_labels.items():
+            for label, _ in label_list:
+                if lf.match_label_key(label):
+                    label_formatter = lf()
+                    return label_formatter, node_labels
 
     return label_formatter, node_labels
 
@@ -543,7 +553,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # correctly setup and will behave as expected.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if label_formatter.is_label_key(label):
+                    if label_formatter.match_label_key(label):
                         is_valid, reason = label_formatter.validate_label_value(
                             value)
                         if not is_valid:
@@ -575,7 +585,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # during scheduling.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if (label_formatter.is_label_key(label) and
+                    if (label_formatter.match_label_key(label) and
                             label_formatter.get_accelerator_from_label_value(
                                 value) == acc_type):
                         return label, value
