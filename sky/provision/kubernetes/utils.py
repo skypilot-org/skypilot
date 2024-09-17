@@ -621,9 +621,9 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                     suffix = f' Available GPUs on the cluster: {gpus_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
-                    f'with {acc_type} GPU. Please ensure at least '
-                    f'one node in the cluster has {acc_type} GPU and node '
-                    'labels are setup correctly. '
+                    f'with {acc_type}. Please ensure at least one node in the '
+                    f'cluster has {acc_type} and node labels are setup '
+                    'correctly. '
                     f'Please refer to the documentation for more. {suffix}')
     else:
         # If GPU resources are not detected, raise error
@@ -633,31 +633,54 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
             raise exceptions.ResourcesUnavailableError(
-                'Could not detect GPU resources (`nvidia.com/gpu`) in '
-                'Kubernetes cluster. If this cluster contains GPUs, please '
-                'ensure GPU drivers are installed on the node. Check if the '
-                'GPUs are setup correctly by running `kubectl describe nodes` '
-                'and looking for the nvidia.com/gpu resource. '
-                'Please refer to the documentation on how '
-                f'to set up GPUs.{suffix}')
+                'Could not detect GPU/TPU resources (`nvidia.com/gpu` or '
+                '`google.com/tpu`) in Kubernetes cluster. If this cluster '
+                'contains GPUs, please ensure GPU drivers are installed on '
+                'the node. Check if the GPUs are setup correctly by running '
+                '`kubectl describe nodes` and looking for the nvidia.com/gpu '
+                'or google.com/tpu resource. Please refer to the documentation'
+                f'on how to set up GPUs.{suffix}')
 
 
-def get_tpu_topology_label_key_value():
+def get_tpu_topology_label_key_value(accelerator: str) -> Tuple[str, str]:
+    """Returns the TPU topology label key and value for given accelerator type.
+
+    Args:
+        accelerator: The TPU accelerator type required by the task.
+
+    Returns:
+        A tuple of the TPU topology label key and value.
+
+    Raises:
+        ResourcesUnavailableError: Can be raised from the following conditions:
+            - The cluster does not have TPU labels set up correctly.
+            - The cluster doesn't have any nodes with the specified TPU
+              accelerator type.
+            - The TPU topology label is missing for the specified accelerator.
+    """
     label_formatter, node_labels = detect_gpu_label_formatter()
-    for node_name, label_list in node_labels.items():
-        for label, value in label_list:
-            if label == label_formatter.get_tpu_topology_label_key():
-                is_valid, reason = label_formatter.validate_label_value(value)
-                if not is_valid:
-                    raise exceptions.ResourcesUnavailableError(
-                        f'Node {node_name!r} in Kubernetes cluster has '
-                        f'invalid GPU label: {label}={value}. {reason}')
+    assert isinstance(label_formatter, GKELabelFormatter)
 
-    for node_name, label_list in node_labels.items():
-        for label, value in label_list:
-            if label == label_formatter.get_tpu_topology_label_key():
-                return label, value
-                
+    tpu_label_key = label_formatter.TPU_LABEL_KEY
+    tpu_topology_label_key = label_formatter.TPU_TOPOLOGY_LABEL_KEY
+
+    for labels in node_labels.values():
+        labels_dict = dict(labels)
+        if labels_dict.get(tpu_label_key) == accelerator:
+            topology_value = labels_dict.get(tpu_topology_label_key)
+            return tpu_topology_label_key, topology_value
+        
+    # If TPU labels are not detected, raise error
+    with ux_utils.print_exception_no_traceback():
+        suffix = ''
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            suffix = (' Available node labels on the cluster: '
+                        f'{node_labels}')
+        raise exceptions.ResourcesUnavailableError(
+            f'Unable to find TPU topology for accelerator {accelerator!r}. '
+            f'No node found with label `{tpu_label_key}={accelerator}` '
+            f'or missing {tpu_topology_label_key!r} label.{suffix}')
+
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
                       context: Optional[str]) -> int:
