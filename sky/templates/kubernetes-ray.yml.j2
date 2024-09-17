@@ -401,7 +401,7 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
-              {% if tpu_is_requested %}
+              {% if tpu_requested %}
               google.com/tpu: {{accelerator_count}}
               {% else %}
               nvidia.com/gpu: {{accelerator_count}}
@@ -413,7 +413,7 @@ available_node_types:
               {% endif %}
             limits:
               # Limits need to be defined for GPU/TPU requests
-              {% if tpu_is_requested %}
+              {% if tpu_requested %}
               google.com/tpu: {{accelerator_count}}
               {% else %}
               nvidia.com/gpu: {{accelerator_count}}
