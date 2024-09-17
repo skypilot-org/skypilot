@@ -90,22 +90,20 @@ class UpdateMode(enum.Enum):
 @dataclasses.dataclass
 class TLSCredential:
     """TLS credential for the service."""
-    keyfile: Optional[str]
-    certfile: Optional[str]
+    keyfile: str
+    certfile: str
 
     def __post_init__(self) -> None:
-        # TODO(tian): Maybe check this using schema?
-        if self.keyfile is not None and self.certfile is None:
+        # Check if both keyfile and certfile exist.
+        if not os.path.exists(self.keyfile):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('TLS certfile is required if keyfile is set.')
-        if self.certfile is not None and self.keyfile is None:
+                raise ValueError(f'TLS key file {self.keyfile} does not exist.')
+        if not os.path.exists(self.certfile):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('TLS keyfile is required if certfile is set.')
+                raise ValueError(
+                    f'TLS cert file {self.certfile} does not exist.')
 
-    def dump_to_uvicorn_arguments(self) -> Dict[str, Any]:
-        if self.keyfile is None:
-            return {}
-        assert self.certfile is not None
+    def dump_to_uvicorn_arguments(self) -> Dict[str, str]:
         return {
             'ssl_keyfile': os.path.expanduser(self.keyfile),
             'ssl_certfile': os.path.expanduser(self.certfile),

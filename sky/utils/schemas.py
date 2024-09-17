@@ -377,6 +377,7 @@ def get_service_schema():
             },
             'tls': {
                 'type': 'object',
+                'required': ['keyfile', 'certfile'],
                 'additionalProperties': False,
                 'properties': {
                     'keyfile': {
