@@ -221,8 +221,8 @@ class SkyServeLoadBalancer:
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
 
-        ssl_kwargs = ({} if self._tls_credential is None else
-                      self._tls_credential.dump_to_uvicorn_arguments())
+        uvicorn_tls_kwargs = ({} if self._tls_credential is None else
+                              self._tls_credential.dump_uvicorn_kwargs())
 
         schema = 'https' if self._tls_credential is not None else 'http'
 
@@ -232,7 +232,7 @@ class SkyServeLoadBalancer:
         uvicorn.run(self._app,
                     host='0.0.0.0',
                     port=self._load_balancer_port,
-                    **ssl_kwargs)
+                    **uvicorn_tls_kwargs)
 
 
 def run_load_balancer(

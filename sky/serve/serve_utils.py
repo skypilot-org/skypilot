@@ -103,7 +103,7 @@ class TLSCredential:
                 raise ValueError(
                     f'TLS cert file {self.certfile} does not exist.')
 
-    def dump_to_uvicorn_arguments(self) -> Dict[str, str]:
+    def dump_uvicorn_kwargs(self) -> Dict[str, str]:
         return {
             'ssl_keyfile': os.path.expanduser(self.keyfile),
             'ssl_certfile': os.path.expanduser(self.certfile),
