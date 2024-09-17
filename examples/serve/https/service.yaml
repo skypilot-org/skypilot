@@ -1,6 +1,7 @@
 # SkyServe YAML to run an HTTPS server.
 #
 # Usage:
+# Generate a self-signed certificate and key, or bring your own:
 #   openssl req -x509 -newkey rsa:2048 -days 36500 -nodes \
 #     -keyout <key-path> -out <cert-path>
 # Then replace the <key-path> and <cert-path> in the YAML file, and:
