@@ -34,6 +34,7 @@ class SkyServeLoadBalancer:
         Args:
             controller_url: The URL of the controller.
             load_balancer_port: The port where the load balancer listens to.
+            tls_credentials: The TLS credentials for HTTPS endpoint.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url

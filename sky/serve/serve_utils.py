@@ -94,6 +94,7 @@ class TLSCredential:
     certfile: Optional[str]
 
     def __post_init__(self) -> None:
+        # TODO(tian): Maybe check this using schema?
         if self.keyfile is not None and self.certfile is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('TLS certfile is required if keyfile is set.')
