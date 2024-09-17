@@ -4,7 +4,9 @@ Large-Scale Batch Inference
 ============================
 
 
-Offline batch inference is a process for generating model predictions on a fixed set of input data. It is a common use case for AI:
+Offline batch inference is a process for generating model predictions on a fixed set of input data. By batching multiple inputs into a single request, we can significantly improve the GPU utilization and reduce the inference cost.
+
+It is a common use case for AI:
 
 * Large-scale document understanding
 * Data pre-processing for training
@@ -20,12 +22,45 @@ SkyPilot enables large scale batch inference with a simple interface, offering t
 * Easy to use: Abstracts away the complexity of distributed computing, giving you a simple interface to manage your jobs.
 * Mounted Storage: Access data on object store as if they are local files.
 
+We now walk through the steps for developing and scaling out batch inference. We take a real-world example, LMSys-1M dataset, and the popular open-source model, Meta-Llama-3.1-7B, to showcase the process.
 
-Get Started with Single Node
-----------------------------
+TL;DR: To run batch inference on LMSys-1M dataset with Meta-Llama-3.1-7B model, you can use the following command:
+
+.. code-block:: bash
+
+    NUM_PARALLEL_GROUPS=16
+    for i in $(seq 0 $((NUM_PARALLEL_GROUPS - 1))); do
+        sky jobs launch -y -n group-$i worker.yaml \
+          --env DATA_GROUP_METADATA=./groups/$i.txt
+    done
+
+.. _split-data-into-smaller-chunks:
+
+Split Data into Smaller Chunks
+------------------------------
 
 
-Start a dev machine with dataset mounted.
+[LMSys-1M dataset](https://huggingface.co/datasets/lmsys/lmsys-chat-1m) contains 1M conversations with 6 parquet files:
+
+.. code-block::
+
+    train-00000-of-00006-*.parquet
+    train-00001-of-00006-*.parquet
+    train-00002-of-00006-*.parquet
+    train-00003-of-00006-*.parquet
+    train-00004-of-00006-*.parquet
+    train-00005-of-00006-*.parquet
+
+
+For simplicity, in order to scale out the inference to more than 6 nodes, we can firstly split the entire dataset into smaller chunks.
+
+.. note::
+
+    This step is optional, as we have a bucket on R2 that contains the splitted LMSys-1M dataset already: ``r2://skypilot-lmsys-chat-1m`` (Check it in browser `here <https://pub-109f99b93eac4c22939d0ed4385f0dcd.r2.dev>`_).
+
+.. TODO: confirm r2 bucket's public access
+
+We first start a dev machine to split the data into smaller chunks. The following command will start a small CPU machine with the current directory synced and a R2 bucket mounted.
 
 .. code-block:: bash
 
@@ -33,18 +68,44 @@ Start a dev machine with dataset mounted.
     ssh dev
     cd sky_workdir
 
+On the remote dev machine, we download the LMSys-1M dataset and split it into smaller chunks.
+
+.. code-block:: bash
+
+    python download_and_convert.py
+
+This script converts the dataset into 200 chunks of jsonl files, each containing 5000 conversations, with a metadata file containing all the paths to the data chunks:
+
+.. code-block::
+  
+    part_0.jsonl
+    part_1.jsonl
+    ...
+    part_199.jsonl
+
 .. note::
 
-    To download the LMSys-1M dataset and split it into smaller chunks, you can run the following commands:
-
-    .. code-block:: bash
-
-        python download_and_convert.py
+    We use R2 bucket as it does not charge for data egress, so we can easily scale out the inference to multiple regions/clouds without additional costs for data reading.
 
 
-We have a bucket on R2 that contains the splitted LMSys-1M dataset. 
+.. _develop-inference-script:
 
-For complete script, see `examples/batch_inference/inference.py <https://github.com/skypilot-org/skypilot/blob/main/examples/batch_inference/inference.py>`_.
+Develop Inference Script
+------------------------
+
+With the data splitted into smaller chunks, we can now develop an inference script to generate predictions for each chunk.
+
+First of all, we start another dev machine with GPUs so we can develop and debug the inference script by directly logging into the machine and running the script.
+
+.. code-block:: bash
+
+    sky launch -c dev dev.yaml --gpus L4 --workdir .
+    ssh dev
+    cd sky_workdir
+
+We now develop the inference script to generate predictions for the first turn of each conversation in LMSys-1M dataset. 
+
+The following is an example script, where we aggregate multiple inputs into a single batch for better GPU utilization, and process the entire chunk of data batch by batch:
 
 .. code-block:: python
     
@@ -91,13 +152,16 @@ For complete script, see `examples/batch_inference/inference.py <https://github.
         with open(os.path.join(OUTPUT_PATH, data_name), 'w') as f:
             for text in generated_text:
                 f.write(text + '\n')
-    
-    batch_inference(llm, data_path)
 
-Or, you can try it with:
+    batch_inference(llm, DATA_PATH)
+
+For complete script, see `examples/batch_inference/inference.py <https://github.com/skypilot-org/skypilot/blob/main/examples/batch_inference/inference.py>`_ and you can run it with ``HF_TOKEN=<your-huggingface-token> python inference.py`` to test it on the dev machine.
+
+After testing it on the dev machine, we can now compose a task yaml (`inference.yaml <https://github.com/skypilot-org/skypilot/blob/main/examples/batch_inference/inference.yaml>`) to run the inference on clouds.
 
 .. code-block:: bash
 
+    # Set HuggingFace token for accessing Llama model weights.
     export HF_TOKEN=...
     sky launch -c inf ./inference.yaml \
         --env HF_TOKEN
@@ -105,39 +169,52 @@ Or, you can try it with:
 .. TODO: make r2 bucket publically accessible
 .. tested with inference.py and inference.yaml on 2024-09-15 and works well.
 
+.. _scale-out-to-multiple-nodes:
+
 Scale out to Multiple Nodes
 ---------------------------
 
-Chunk your data into multiple pieces to leverage fully distributed batch inference on multiple machines.
+To scale out the inference to multiple machines, we can group the data chunks into multiple pieces so that each machine can process one piece.
+
+The following script (`group_data.py <https://github.com/skypilot-org/skypilot/blob/main/examples/batch_inference/group_data.py>`_) reads the metadata file and splits the path of data chunks into multiple groups. 
 
 .. code-block:: python
 
-    NUM_CHUNKS = 10
+    NUM_GROUPS = 16
 
-    def chunk_data(data_paths: str, num_chunks: int):
-        # Chunk data paths in to multiple chunks
-        data_chunks = []
-        chunk_size = len(data_paths) // num_chunks
-        for i in range(num_chunks):
-            data_chunks.append(data_paths[i * chunk_size:(i + 1) * chunk_size])
-        return data_chunks
+    def group_data(data_paths: str, num_groups: int):
+        # Chunk data paths in to multiple groups
+        data_groups = []
+        group_size = len(data_paths) // num_groups
+        for i in range(num_groups):
+            data_groups.append(data_paths[i * group_size:(i + 1) * group_size])
+        return data_groups
 
-    data_chunks = chunk_data(data_paths, NUM_CHUNKS)
+    data_groups = chunk_data(data_paths, NUM_GROUPS)
 
     # Save data chunks to different files
-    for i, data_chunk in enumerate(data_chunks):
-        with open(f'./chunks/{i}.txt', 'w') as f:
-            f.write('\n'.join(data_chunk))
+    for i, data_group in enumerate(data_groups):
+        with open(f'./groups/{i}.txt', 'w') as f:
+            f.write('\n'.join(data_group))
 
-On dev machine, we can use the chunk script to chunk data in LMSys Chat Dataset.
+
+.. code-block::
+
+    # ./groups/0.txt
+    part_0.jsonl
+    part_1.jsonl
+    ...
+    part_13.jsonl
+
+On dev machine, we can use the ``group_data.py`` script to group data chunks into the number of machines we want to scale out.
 
 .. code-block:: bash
 
-    python chunk.py \
-      --data-paths-file ./metadata.txt \
-      --num-chunks 16
+    python group_data.py \
+      --data-metadata ./metadata.txt \
+      --num-groups 16
             
-With the data chunks saved, we can launch a job for each chunk.
+After that, we can launch a job for each group to process the groups in parallel.
 
 .. code-block:: bash
 
@@ -145,11 +222,11 @@ With the data chunks saved, we can launch a job for each chunk.
     NUM_CHUNKS=16
     for i in $(seq 0 $((NUM_CHUNKS - 1))); do
         # We use & to launch jobs in parallel
-        sky jobs launch -y -d -n chunk-$i worker.yaml \
-          --env DATA_CHUNK_FILE=./chunks/$i.txt &
+        sky jobs launch -y -d -n group-$i worker.yaml \
+          --env DATA_GROUP_METADATA=./groups/$i.txt &
     done
 
-.. Tested worker on 2024-09-15 with a chunk containing multiple data parts.
+.. Tested worker on 2024-09-15 with a group containing multiple data parts.
 
 Cut Costs by 3x with Spot Instances
 -----------------------------------
