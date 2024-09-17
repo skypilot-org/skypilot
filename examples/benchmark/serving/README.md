@@ -4,11 +4,26 @@ Ever wondered which GPU will give you the highest performance per dollar for you
 
 [Sky Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html) is a tool for easy measurement of performance and cost of different kinds of cloud resources for your specific workload.
 
-* **1-click launch** large-scale benchmarks across multiple cloud providers and GPU types.
-* **Get $/query and performance metrics** for different GPUs on your specific workload.
-* **Find the right cloud resources** for your task that fit your performance goals and budget constraints.
+Suppose you want to benchmark a set of hardware choices and corresponding serving configurations `[(HW1, CFG1), ...]`.
+You can see how we declare this in serve.yaml’s [`resources.candidates` field](https://github.com/skypilot-org/skypilot/blob/skybench_fixes/examples/benchmark/serving/serve.yaml#L9-L12) and [`run` commands](https://github.com/skypilot-org/skypilot/blob/skybench_fixes/examples/benchmark/serving/serve.yaml#L22-L29) by dynamically switching configuration depending on hardware choice. This effectively simulates serving config `i` for hardware `i`. You can plug in your own config list by modifying `serve.yaml`.  
 
-In this guide, we use Sky Benchmark to find the GPU with the lowest $/query for serving Gemma on vLLM's OpenAI-compatible API server.
+When you run this benchmark, SkyPilot will:
+1. Automatically provision the required GPUs
+2. Run the benchmarks and collect results on each GPU
+3. Return the **query latency and $/query** for each GPU in a simple format:
+   ```bash 
+   Legend:
+   - #QUERIES: Number of queries sent in the benchmark.
+   - SEC/QUERY, $/QUERY: Average time and cost per query.
+
+   RESOURCES  #QUERIES  SEC/QUERY  $/QUERY   
+   1x T4:1    50        0.9921     0.000145  
+   1x L4:1    50        0.8377     0.000187  
+   1x V100:1  50        0.4270     0.000363
+   ```
+
+
+In the following guide, we use Sky Benchmark to find the GPU with the lowest $/query for serving Gemma on vLLM's OpenAI-compatible API server.
 
 ## Prerequisites
 
