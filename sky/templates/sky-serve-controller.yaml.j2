@@ -27,7 +27,7 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
-{%- if local_tls_keyfile is not none %}
+{%- if use_tls %}
   {{remote_tls_keyfile}}: {{local_tls_keyfile}}
   {{remote_tls_certfile}}: {{local_tls_certfile}}
 {%- endif %}

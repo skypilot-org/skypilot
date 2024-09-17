@@ -105,12 +105,13 @@ def _rewrite_tls_credential_paths(service_name: str,
     # Already checked by _validate_service_task
     assert service_spec is not None
     if service_spec.tls_credential is None:
-        return {}
+        return {'use_tls': False}
     remote_tls_keyfile = (
         serve_utils.generate_remote_tls_keyfile_name(service_name))
     remote_tls_certfile = (
         serve_utils.generate_remote_tls_certfile_name(service_name))
     tls_template_vars = {
+        'use_tls': True,
         'remote_tls_keyfile': remote_tls_keyfile,
         'remote_tls_certfile': remote_tls_certfile,
         'local_tls_keyfile': service_spec.tls_credential.keyfile,

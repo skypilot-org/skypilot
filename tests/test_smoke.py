@@ -3600,7 +3600,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
             f'sky serve up -n {name} -y tests/skyserve/http/{cloud}.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=timeout_minutes * 60,
@@ -3723,11 +3723,11 @@ def test_skyserve_spot_recovery():
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             _terminate_gcp_replica(name, zone, 1),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3825,7 +3825,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
+            'until curl $endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
             + _check_replica_in_status(name, [(1, False, 'READY'),
                                               (1, False, 'FAILED')]),
         ],
@@ -3873,7 +3873,7 @@ def test_skyserve_auto_restart():
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
@@ -3893,7 +3893,7 @@ def test_skyserve_auto_restart():
             '     sleep 10;'
             f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3978,7 +3978,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task_large_timeout.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3997,14 +3997,14 @@ def test_skyserve_update(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
+            'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
             # Make sure the traffic is not mixed
-            'curl http://$endpoint | grep "Hi, new SkyPilot here"',
+            'curl $endpoint | grep "Hi, new SkyPilot here"',
             # The latest 2 version should be READY and the older versions should be shutting down
             (_check_replica_in_status(name, [(2, False, 'READY'),
                                              (2, False, 'SHUTTING_DOWN')]) +
@@ -4030,14 +4030,14 @@ def test_skyserve_rolling_update(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
             # with even id will sleep 60 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
+            'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
             # The latest version should have one READY and the one of the older versions should be shutting down
             f'{single_new_replica} {_check_service_version(name, "1,2")} '
             # Check the output from the old version, immediately after the
@@ -4046,7 +4046,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # TODO(zhwu): we should have a more generalized way for checking the
             # mixed version of replicas to avoid depending on the specific
             # round robin load balancing policy.
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -4065,7 +4065,7 @@ def test_skyserve_fast_update(generic_cloud: str):
         [
             f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
             'sleep 40',
@@ -4078,7 +4078,7 @@ def test_skyserve_fast_update(generic_cloud: str):
                 _check_service_version(name, "2")),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
             _check_service_version(name, "2"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
@@ -4088,7 +4088,7 @@ def test_skyserve_fast_update(generic_cloud: str):
                                             (1, False, 'SHUTTING_DOWN')]),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "3"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
@@ -4107,7 +4107,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
@@ -4115,7 +4115,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) +
             _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here!"',
+            'curl $endpoint | grep "Hi, SkyPilot here!"',
             # Rolling Update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
             # sleep before update is registered.
@@ -4124,7 +4124,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "3"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here!"',
+            'curl $endpoint | grep "Hi, SkyPilot here!"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
@@ -4174,7 +4174,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            's=$(curl http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
+            's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             f'sleep 90',
@@ -4186,7 +4186,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             *update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             _check_replica_in_status(name, [(4, True, 'READY'),
                                             (1, False, 'READY')]),
         ],
@@ -4270,13 +4270,14 @@ def test_skyserve_https(generic_cloud: str):
                 f'sky serve up -n {name} --cloud {generic_cloud} -y {service_yaml_path}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl https://$endpoint -k | grep "Hi, SkyPilot here"',
+                'curl $endpoint -k | grep "Hi, SkyPilot here"',
                 # Self signed certificate should fail without -k.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl https://$endpoint 2>&1 | grep "self signed certificate"',
+                'curl $endpoint 2>&1 | grep "self signed certificate"',
                 # curl with wrong schema (http) should fail.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl http://$endpoint 2>&1 | grep "Empty reply from server"',
+                'http_endpoint="${endpoint/https:/http:}"; '
+                'curl $http_endpoint 2>&1 | grep "Empty reply from server"',
             ],
             _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
