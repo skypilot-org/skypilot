@@ -272,7 +272,7 @@ class Kubernetes(clouds.Cloud):
             if k8s_acc_label_key == kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY:
                 tpu_requested = True
                 k8s_tpu_topology_label_key, k8s_tpu_topology_label_value = (
-                    kubernetes_utils.get_tpu_topology_key_value())
+                    kubernetes_utils.get_tpu_topology_label_key_value())
 
         port_mode = network_utils.get_port_mode(None)
 

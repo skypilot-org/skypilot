@@ -613,7 +613,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 f'to set up GPUs.{suffix}')
 
 
-def get_tpu_topology_key_value():
+def get_tpu_topology_label_key_value():
     label_formatter, node_labels = detect_gpu_label_formatter()
     for node_name, label_list in node_labels.items():
         for label, value in label_list:
