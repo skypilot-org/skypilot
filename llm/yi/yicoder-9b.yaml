@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: 01-ai/Yi-1.5-6B-Chat
+  MODEL_NAME: 01-ai/Yi-Coder-9B-Chat
 
 service:
   # Specifying the path to the endpoint to check the readiness of the replicas.
@@ -17,7 +17,7 @@ service:
   
 
 resources:
-  accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
+  accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   disk_tier: best
   ports: 8000
 
