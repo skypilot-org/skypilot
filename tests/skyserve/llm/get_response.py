@@ -19,7 +19,7 @@ if __name__ == '__main__':
         },
     ]
 
-    url = f'http://{args.endpoint}/v1/chat/completions'
+    url = f'{args.endpoint}/v1/chat/completions'
     resp = requests.post(url,
                          json={
                              'model': 'fastchat-t5-3b-v1.0',
