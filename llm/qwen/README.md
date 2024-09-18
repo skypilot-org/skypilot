@@ -103,7 +103,7 @@ ENDPOINT=$(sky serve status --endpoint qwen)
 curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "Qwen/qwen25-72B-Instruct",
+      "model": "Qwen/Qwen2.5-72B-Instruct",
       "messages": [
         {
           "role": "system",
@@ -125,7 +125,7 @@ It is also possible to access the Qwen service with a GUI using [vLLM](https://g
 
 1. Start the chat web UI (change the `--env` flag to the model you are running):
 ```bash
-sky launch -c qwen-gui ./gui.yaml --env MODEL_NAME='Qwen/qwen25-72B-Instruct' --env ENDPOINT=$(sky serve status --endpoint qwen)
+sky launch -c qwen-gui ./gui.yaml --env MODEL_NAME='Qwen/Qwen2.5-72B-Instruct' --env ENDPOINT=$(sky serve status --endpoint qwen)
 ```
 
 2. Then, we can access the GUI at the returned gradio link:
