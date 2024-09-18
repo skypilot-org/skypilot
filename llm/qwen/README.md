@@ -82,13 +82,13 @@ sky serve status qwen
 After a while, you will see the following output:
 ```console
 Services
-NAME        VERSION  UPTIME  STATUS        REPLICAS  ENDPOINT            
+NAME  VERSION  UPTIME  STATUS        REPLICAS  ENDPOINT            
 Qwen  1        -       READY         2/2       3.85.107.228:30002  
 
 Service Replicas
-SERVICE_NAME  ID  VERSION  ENDPOINT  LAUNCHED    RESOURCES                   STATUS REGION  
-Qwen          1   1        -   2 mins ago  1x Azure({'A100-80GB': 8}) READY  eastus  
-Qwen          2   1        -   2 mins ago  1x GCP({'L4': 8})          READY  us-east4-a 
+SERVICE_NAME  ID  VERSION  ENDPOINT  LAUNCHED    RESOURCES                  STATUS REGION  
+Qwen          1   1        -         2 mins ago  1x Azure({'A100-80GB': 8}) READY  eastus  
+Qwen          2   1        -         2 mins ago  1x GCP({'L4': 8})          READY  us-east4-a 
 ```
 As shown, the service is now backed by 2 replicas, one on Azure and one on GCP, and the accelerator
 type is chosen to be **the cheapest available one** on the clouds. That said, it maximizes the
