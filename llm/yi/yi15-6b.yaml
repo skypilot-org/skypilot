@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: Qwen/Qwen2-7B-Instruct
+  MODEL_NAME: 01-ai/Yi-1.5-6B-Chat
 
 service:
   # Specifying the path to the endpoint to check the readiness of the replicas.
@@ -9,7 +9,7 @@ service:
       model: $MODEL_NAME
       messages:
         - role: user
-          content: Hello! What is your name?
+          content: Hi! What is your name?
       max_tokens: 1
     initial_delay_seconds: 1200
   # How many replicas to manage.
