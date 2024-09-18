@@ -4,6 +4,10 @@ SkyPilot can be used in an orchestration framework like Airflow to launch tasks 
 
 In this guide, we demonstrate how some simple SkyPilot operations, such as launching a cluster, getting its logs and tearing it down, can be orchestrated using Airflow.
 
+<p align="center">
+  <img src="https://i.imgur.com/BVZBaR9.png" width="800">
+</p>
+
 ## Architecture
 
 * We'll use the Airflow `KubernetesPodOperator` to run the `sky` CLI in an ephemeral pod.
@@ -158,7 +162,6 @@ with DAG(dag_id='sky_k8s_example',
 <p align="center">
   <img src="https://i.imgur.com/BVZBaR9.png" width="800">
 </p>
-
 <p align="center">
   <img src="https://i.imgur.com/GgqpSiU.png" width="800">
 </p>
