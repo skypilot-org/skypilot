@@ -330,6 +330,10 @@ def _get_service_status(
             info.to_info_dict(with_handle=True)
             for info in serve_state.get_replica_infos(service_name)
         ]
+    with open(generate_task_yaml_file_name(service_name, record['version']),
+              'r',
+              encoding='utf-8') as f:
+        record['service_yaml'] = f.read()
     return record
 
 

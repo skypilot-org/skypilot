@@ -1377,6 +1377,7 @@ def _get_managed_jobs(
 def _get_services(service_names: Optional[List[str]],
                   show_all: bool,
                   show_endpoint: bool,
+                  describe: bool,
                   is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
@@ -1444,6 +1445,17 @@ def _get_services(service_names: Optional[List[str]],
                     'an existing service to show its endpoint. Usage: '
                     'sky serve status --endpoint <service-name>')
             msg = serve_lib.get_endpoint(service_records[0])
+        elif describe:
+            if len(service_records) != 1:
+                # TODO(tian): Merge this and the above endpoint error into one.
+                plural = 's' if len(service_records) > 1 else ''
+                service_num = (str(len(service_records))
+                               if len(service_records) > 0 else 'No')
+                raise click.UsageError(
+                    f'{service_num} service{plural} found. Please specify '
+                    'an existing service to describe. Usage: '
+                    'sky serve status --describe <service-name>')
+            msg = service_records[0]['service_yaml']
         else:
             msg = serve_lib.format_service_table(service_records, show_all)
             service_not_found_msg = ''
@@ -4205,10 +4217,16 @@ def serve_update(
               is_flag=True,
               required=False,
               help='Show service endpoint.')
+@click.option('--describe',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Describe service configuration.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, endpoint: bool, service_names: List[str]):
+def serve_status(all: bool, endpoint: bool, describe: bool,
+                 service_names: List[str]):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
@@ -4305,9 +4323,10 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
         _, msg = _get_services(service_names,
                                show_all=all,
                                show_endpoint=endpoint,
+                               describe=describe,
                                is_called_by_user=True)
 
-    if not endpoint:
+    if not (endpoint or describe):
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
     click.echo(msg)

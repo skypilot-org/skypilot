@@ -522,6 +522,7 @@ def status(
             'requested_resources_str': (str) str representation of
               requested resources,
             'replica_info': (List[Dict[str, Any]]) replica information,
+            'service_yaml': (str) service yaml,
         }
 
     Each entry in replica_info has the following fields:
