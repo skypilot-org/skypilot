@@ -10,10 +10,13 @@ In this guide, we demonstrate how some simple SkyPilot operations, such as launc
 
 ## Architecture
 
+<!-- TODO: Add a figure here -->
+
 * We'll use the Airflow `KubernetesPodOperator` to run the `sky` CLI in an ephemeral pod.
 * Each task in the Airflow DAG will correspond to a SkyPilot operation, such as launching a cluster, getting logs, etc.
   * Each task will spawn a pod that runs the relevant `sky` command and then exits.
-* We will provision a persistent volume to store SkyPilot state and SSH keys across `sky` invocations which may happen in different pods.
+* We will provision a persistent volume to store SkyPilot state and SSH keys.
+  * This is used to maintain state across `sky` invocations which may happen in different pods.
 
 ## Prerequisites
 
