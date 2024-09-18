@@ -23,7 +23,11 @@ file_mounts:
 workdir: .
 
 resources:
-  accelerators: L4:1
+  accelerators: {L4, L40, A10, A10g, A100, A100-80GB}
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
 
 setup: |
   pip install vllm
