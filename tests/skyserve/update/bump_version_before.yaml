@@ -25,3 +25,4 @@ setup: |
 run: |
   cd skypilot/examples/serve/http_server
   python3 server.py --port 8081
+  
