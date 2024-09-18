@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: 01-ai/Yi-1.5-6B-Chat
+  MODEL_NAME: 01-ai/Yi-Coder-1.5B-Chat
 
 service:
   # Specifying the path to the endpoint to check the readiness of the replicas.
