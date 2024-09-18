@@ -17,13 +17,13 @@ BATCH_CHAR_COUNT = 2000
 def create_model(model_name: str, num_gpus: int):
     return LLM(model_name, tensor_parallel_size=num_gpus, max_model_len=10240)
 
-def batch_inference(llm: LLM, data_path: str):
+def batch_inference(llm: LLM, data_chunk: str):
     # This can take about 1-2 hours on a L4 GPU.
-    print(f'Processing {data_path}...')
-    data_name = data_path.split('/')[-1]
+    print(f'Processing {data_chunk}...')
+    data_name = data_chunk.split('/')[-1]
 
     # Read data (jsonl), each line is a json object
-    with open(data_path, 'r') as f:
+    with open(data_chunk, 'r') as f:
         data = f.readlines()
         # Extract the first message from the conversation
         messages = [json.loads(d.strip())['conversation'][0]['content'] for d in data]
@@ -56,10 +56,10 @@ def batch_inference(llm: LLM, data_path: str):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model-name', type=str, required=True, help='The name of the model to be used for inference.')
-    parser.add_argument('--data-path', type=str, required=True, help='The path to the data to be processed.')
+    parser.add_argument('--data-chunk', type=str, required=True, help='The path to the data to be processed.')
     parser.add_argument('--num-gpus', type=int, required=True, help='The number of GPUs to be used for inference.')
     args = parser.parse_args()
 
     llm = create_model(args.model_name, args.num_gpus)
 
-    batch_inference(llm, args.data_path)
+    batch_inference(llm, args.data_chunk)

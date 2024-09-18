@@ -13,8 +13,8 @@ for i in range(NUM_FILES):
     end_idx = (i + 1) * dataset_len // NUM_FILES
     subset = ds['train'].select(range(start_idx, end_idx))
     print(f'Processing {start_idx} to {end_idx}')
-    subset.to_json(f'data/part_{i}.jsonl', orient='records', lines=True)
-    with open(f'data/metadata.txt', 'a') as f:
-        f.write(f'part_{i}.jsonl\n')
+    subset.to_json(f'/data/part_{i}.jsonl', orient='records', lines=True)
+    with open(f'/data/metadata.txt', 'a') as f:
+        f.write(f'/data/part_{i}.jsonl\n')
 
 

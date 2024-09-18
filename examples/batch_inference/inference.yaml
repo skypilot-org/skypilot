@@ -23,5 +23,5 @@ setup: |
 run: |
   python inference.py \
     --model-name $MODEL_NAME \
-    --data-path /data/part_0.jsonl \
+    --data-chunk /data/part_0.jsonl \
     --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE

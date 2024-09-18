@@ -6,7 +6,7 @@ envs:
   # Output bucket to use for storing the results
   OUTPUT_BUCKET:
   # The file path that contains the paths to data chunks to be processed.
-  DATA_CHUNK_FILE:
+  DATA_GROUP_METADATA:
 
 
 file_mounts:
@@ -18,7 +18,7 @@ file_mounts:
     source: $OUTPUT_BUCKET
     mode: MOUNT
 
-  /chunks.txt: $DATA_CHUNK_FILE
+  /groups.txt: $DATA_GROUP_METADATA
 
 workdir: .
 
@@ -31,6 +31,6 @@ setup: |
 
 run: |
   python worker.py \
-    --data-chunk-file /chunks.txt \
+    --data-group-metadata /groups.txt \
     --model-name $MODEL_NAME \
     --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE
