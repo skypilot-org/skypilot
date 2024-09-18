@@ -1,14 +1,14 @@
 .. _offline-batch-inference:
 
-Large-Scale Batch Inference
-============================
+Large-Scale Offline Batch Inference
+===================================
 
 
-Offline batch inference is a process for generating model predictions on a fixed set of input data. By batching multiple inputs into a single request, we can significantly improve the GPU utilization and reduce the inference cost.
+Offline batch inference is a process for generating model predictions on a fixed set of input data. By batching multiple inputs into a single request, you can significantly improve the GPU utilization and reduce the total inference cost.
 
 It is a common use case for AI:
 
-* Large-scale document processing (summarization, entity retrival, etc)
+* Large-scale document processing (summarization, entity retreival, etc)
 * Data pre-processing for training
 * Synthetic data generation
 * Scientific data analysis
@@ -22,7 +22,9 @@ It is a common use case for AI:
 .. * Easy to use: Abstracts away the complexity of distributed computing, giving you a simple interface to manage your jobs.
 .. * Mounted Storage: Access data on object store as if they are local files.
 
-We now walk through the steps for developing and scaling out batch inference. We take a real-world example, LMSys-1M dataset, and the popular open-source model, Meta-Llama-3.1-7B, to showcase the process. All scripts can be found in the `examples in SkyPilot repository <>`__.
+We now walk through the steps for developing and scaling out batch inference with SkyPilot.
+We take a real-world example, LMSys-1M dataset, and a popular open-source model, Meta-Llama-3.1-7B, to showcase the process.
+All scripts can be found in the `examples in SkyPilot repository <>`__.
 
 **TL;DR:** To run batch inference on LMSys-1M dataset with Meta-Llama-3.1-7B model, you can use the following command:
 
@@ -34,6 +36,8 @@ We now walk through the steps for developing and scaling out batch inference. We
           --env DATA_GROUP_METADATA=./groups/$i.txt \
           --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct &
     done
+
+.. image:: An image for the `sky jobs queue`
 
 .. _split-data-into-smaller-chunks:
 
@@ -56,28 +60,31 @@ For simplicity, in order to scale out the inference to more than 6 nodes, we can
 
 .. note::
 
-    This step is optional, as we have a bucket on R2 that contains the splitted LMSys-1M dataset already: ``r2://skypilot-lmsys-chat-1m`` (Check it in browser `here <https://pub-109f99b93eac4c22939d0ed4385f0dcd.r2.dev>`_).
+    This step is optional. We offer a R2 bucket with LMSys-1M dataset that is already divided into smaller chunks: ``r2://skypilot-lmsys-chat-1m`` (Check it in browser `here <https://pub-109f99b93eac4c22939d0ed4385f0dcd.r2.dev>`_).
 
 .. TODO: confirm r2 bucket's public access
 
-We first start a dev machine to split the data into smaller chunks. The following command will start a small CPU machine with the current directory synced and a R2 bucket mounted.
+We first start a machine for development. The following command will start a small CPU machine with the current directory synced and a R2 bucket mounted, so we can directly operate on the data as if they are on local disk.
 
 .. code-block:: bash
 
     sky launch -c dev dev.yaml --workdir .
+    # SSH into the remote machine.
     ssh dev
+    # Running on remote machine.
     cd sky_workdir
 
-On the remote dev machine, we download the LMSys-1M dataset and split it into smaller chunks.
+On the remote dev machine, we download the LMSys-1M dataset and split it into smaller chunks, using a utility script:
 
 .. code-block:: bash
 
-    python download_and_convert.py
+    python utils/download_and_convert.py
 
-This script converts the dataset into 200 chunks of jsonl files, each containing 5000 conversations, with a metadata file containing all the paths to the data chunks:
+This script converts the dataset into 200 data chunks, each containing 5000 conversations. A metadata file is also generated with all paths to data chunks:
 
 .. code-block::
   
+    metadata.txt
     part_0.jsonl
     part_1.jsonl
     ...
@@ -85,7 +92,7 @@ This script converts the dataset into 200 chunks of jsonl files, each containing
 
 .. note::
 
-    We use R2 bucket as it does not charge for data egress, so we can easily scale out the inference to multiple regions/clouds without additional costs for data reading.
+    We use R2 bucket for its no data egress fee, so we can easily scale out the inference to multiple regions/clouds without additional costs for data reading.
 
 
 .. _develop-inference-script:
