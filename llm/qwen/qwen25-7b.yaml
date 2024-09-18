@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: Qwen/Qwen2-7B-Instruct
+  MODEL_NAME: Qwen/Qwen2.5-7B-Instruct
 
 service:
   # Specifying the path to the endpoint to check the readiness of the replicas.
