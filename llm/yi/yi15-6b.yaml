@@ -9,7 +9,7 @@ service:
       model: $MODEL_NAME
       messages:
         - role: user
-          content: Hi! What is your name?
+          content: Hello! What is your name?
       max_tokens: 1
     initial_delay_seconds: 1200
   # How many replicas to manage.
