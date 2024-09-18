@@ -3,9 +3,9 @@
 [Qwen2](https://github.com/QwenLM/Qwen2) is one of the top open LLMs.
 As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS Chatbot Arena Leaderboard](https://chat.lmsys.org/?leaderboard).
 
-📰 **Update (26 April 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [serve-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-110b.yaml) to serve the 110B model.
+📰 **Update (Jun 6 2024) -** SkyPilot now also supports the [**Qwen2**](https://qwenlm.github.io/blog/qwen2/) model! It further improves the competitive model, Qwen1.5.
 
-📰 **Update (6 Jun 2024) -** SkyPilot now also supports the [**Qwen2**](https://qwenlm.github.io/blog/qwen2/) model! It further improves the competitive model, Qwen1.5.
+📰 **Update (April 26 2024) -** SkyPilot now also supports the [**Qwen1.5-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) model! It performs competitively with Llama-3-70B across a [series of evaluations](https://qwenlm.github.io/blog/qwen1.5-110b/#model-quality). Use [qwen15-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen15-110b.yaml) to serve the 110B model.
 
 <p align="center">
     <img src="https://i.imgur.com/d7tEhAl.gif" alt="qwen" width="600"/>
@@ -27,16 +27,16 @@ As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS
 
 After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Qwen model on vLLM with SkyPilot in 1-click:
 
-1. Start serving Qwen 110B on a single instance with any available GPU in the list specified in [serve-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-110b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [serve-72b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-72b.yaml) or [serve-7b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/serve-7b.yaml) for a smaller model):
+1. Start serving Qwen 110B on a single instance with any available GPU in the list specified in [qwen15-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen15-110b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [qwen2-72b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen2-72b.yaml) or [qwen2-7b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen2-7b.yaml) for a smaller model):
 
 ```console
-sky launch -c qwen serve-110b.yaml
+sky launch -c qwen qwen15-110b.yaml
 ```
 2. Send a request to the endpoint for completion:
 ```bash
-IP=$(sky status --ip qwen)
+ENDPOINT=$(sky status --endpoint 8000 qwen)
 
-curl http://$IP:8000/v1/completions \
+curl http://$ENDPOINT/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "Qwen/Qwen1.5-110B-Chat",
@@ -47,7 +47,7 @@ curl http://$IP:8000/v1/completions \
 
 3. Send a request for chat completion:
 ```bash
-curl http://$IP:8000/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
       "model": "Qwen/Qwen1.5-110B-Chat",
@@ -69,7 +69,7 @@ curl http://$IP:8000/v1/chat/completions \
 
 1. With [SkyPilot Serving](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html), a serving library built on top of SkyPilot, scaling up the Qwen service is as simple as running:
 ```bash
-sky serve up -n qwen ./serve-72b.yaml
+sky serve up -n qwen ./qwen2-72b.yaml
 ```
 This will start the service with multiple replicas on the cheapest available locations and accelerators. SkyServe will automatically manage the replicas, monitor their health, autoscale based on load, and restart them when needed.
 
@@ -86,7 +86,7 @@ NAME        VERSION  UPTIME  STATUS        REPLICAS  ENDPOINT
 Qwen  1        -       READY         2/2       3.85.107.228:30002  
 
 Service Replicas
-SERVICE_NAME  ID  VERSION  IP  LAUNCHED    RESOURCES                   STATUS REGION  
+SERVICE_NAME  ID  VERSION  ENDPOINT  LAUNCHED    RESOURCES                   STATUS REGION  
 Qwen          1   1        -   2 mins ago  1x Azure({'A100-80GB': 8}) READY  eastus  
 Qwen          2   1        -   2 mins ago  1x GCP({'L4': 8})          READY  us-east4-a 
 ```
