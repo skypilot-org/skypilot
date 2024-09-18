@@ -1,4 +1,4 @@
-# Serving Qwen2 on Your Own Cloud
+# Serving Qwen2 on Your Own Kubernetes or Cloud
 
 [Qwen2](https://github.com/QwenLM/Qwen2) is one of the top open LLMs.
 As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS Chatbot Arena Leaderboard](https://chat.lmsys.org/?leaderboard).
@@ -18,10 +18,10 @@ As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS
 
 ## Why use SkyPilot to deploy over commercial hosted solutions?
 
-* Get the best GPU availability by utilizing multiple resources pools across multiple regions and clouds.
-* Pay absolute minimum — SkyPilot picks the cheapest resources across regions and clouds. No managed solution markups.
+* Get the best GPU availability by utilizing multiple resources pools across Kubernetes clusters and multiple regions/clouds.
+* Pay absolute minimum — SkyPilot picks the cheapest resources across Kubernetes clusters and regions/clouds. No managed solution markups.
 * Scale up to multiple replicas across different locations and accelerators, all served with a single endpoint 
-* Everything stays in your cloud account (your VMs & buckets)
+* Everything stays in your Kubernetes or cloud account (your VMs & buckets)
 * Completely private - no one else sees your chat history
 
 
