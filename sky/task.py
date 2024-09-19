@@ -1,4 +1,5 @@
 """Task: a coarse-grained stage in an application."""
+import dataclasses
 import inspect
 import json
 import os

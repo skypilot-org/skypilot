@@ -82,7 +82,7 @@ logger = sky_logging.init_logger(__name__)
 
 # The loaded config.
 _dict: Optional[Dict[str, Any]] = None
-_loaded_config_path = None
+_loaded_config_path: Optional[str] = None
 
 
 def _get_nested(configs: Optional[Dict[str, Any]], keys: Iterable[str],
@@ -208,6 +208,14 @@ def _try_load_config() -> None:
                 skip_none=False)
 
         logger.debug('Config syntax check passed.')
+
+
+def reload_config() -> None:
+    """Reloads the config from the file specified by the env var."""
+    global _dict, _loaded_config_path
+    _dict = None
+    _loaded_config_path = None
+    _try_load_config()
 
 
 def loaded_config_path() -> Optional[str]:

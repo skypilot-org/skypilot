@@ -158,7 +158,7 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag = dag_utils.convert_entrypoint_to_dag_and_apply_policy(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 

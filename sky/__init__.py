@@ -110,6 +110,8 @@ from sky.jobs.core import spot_queue
 from sky.jobs.core import spot_tail_logs
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
+from sky.policy import MutatedUserTask
+from sky.policy import UserTask
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
@@ -185,4 +187,6 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    'UserTask',
+    'MutatedUserTask',
 ]

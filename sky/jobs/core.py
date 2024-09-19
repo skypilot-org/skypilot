@@ -53,7 +53,7 @@ def launch(
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
 
-    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag = dag_utils.convert_entrypoint_to_dag_and_apply_policy(entrypoint)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '

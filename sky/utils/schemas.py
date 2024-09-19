@@ -442,6 +442,11 @@ def _experimental_task_schema() -> dict:
             'additionalProperties': False,
             'properties': {
                 'config_overrides': config_override_schema,
+                'policy': {
+                    'type': 'string',
+                    # Check regex to be a valid python module path
+                    'pattern': '^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$',
+                }
             }
         }
     }
