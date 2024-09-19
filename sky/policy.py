@@ -41,16 +41,20 @@ class Policy:
                 module_path, func_name = self.policy.rsplit('.', 1)
                 module = importlib.import_module(module_path)
             except ImportError as e:
-                raise ImportError(
-                    f'Failed to import policy module: {module_path}. Please '
-                    'check if the module is in your Python environment.') from e
+                with ux_utils.print_exception_no_traceback():
+                    raise ImportError(
+                        f'Failed to import policy module: {module_path}. '
+                        'Please check if the module is in your Python '
+                        'environment.'
+                    ) from e
             try:
                 self.policy_fn = getattr(module, func_name)
             except AttributeError as e:
-                raise AttributeError(
-                    f'Failed to get policy function: {func_name} from module: '
-                    f'{module_path}. Please check with your policy admin if '
-                    f'the function {func_name!r} is in the module.') from e
+                with ux_utils.print_exception_no_traceback():
+                    raise AttributeError(
+                        f'Failed to get policy function: {func_name} from module: '
+                        f'{module_path}. Please check with your policy admin if '
+                        f'the function {func_name!r} is in the module.') from e
 
     def apply(self, dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
         if self.policy_fn is None:

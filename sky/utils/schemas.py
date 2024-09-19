@@ -442,11 +442,6 @@ def _experimental_task_schema() -> dict:
             'additionalProperties': False,
             'properties': {
                 'config_overrides': config_override_schema,
-                'policy': {
-                    'type': 'string',
-                    # Check regex to be a valid python module path
-                    'pattern': '^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$',
-                }
             }
         }
     }
@@ -853,6 +848,15 @@ def get_config_schema():
         },
     }
 
+    policy_schema = {
+        'policy': {
+            'type': 'string',
+            # Check regex to be a valid python module path
+            'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                        r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+        }
+    }
+
     allowed_clouds = {
         # A list of cloud names that are allowed to be used
         'type': 'array',
@@ -910,6 +914,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'policy': policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             **cloud_configs,
