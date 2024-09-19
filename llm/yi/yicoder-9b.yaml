@@ -1,21 +1,6 @@
 envs:
   MODEL_NAME: 01-ai/Yi-Coder-9B-Chat
-
-service:
-  # Specifying the path to the endpoint to check the readiness of the replicas.
-  readiness_probe:
-    path: /v1/chat/completions
-    post_data:
-      model: $MODEL_NAME
-      messages:
-        - role: user
-          content: Hello! What is your name?
-      max_tokens: 1
-    initial_delay_seconds: 1200
-  # How many replicas to manage.
-  replicas: 2
   
-
 resources:
   accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   disk_tier: best
