@@ -90,7 +90,7 @@ Available fields and semantics:
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
-    # Tags to assign to all instances launched by SkyPilot (optional).
+    # Tags to assign to all instances and buckets created by SkyPilot (optional).
     #
     # Example use case: cost tracking by user/team/project.
     #

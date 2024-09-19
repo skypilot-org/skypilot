@@ -80,6 +80,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `Pixtral <https://github.com/skypilot-org/skypilot/tree/master/llm/pixtral>`_
   * `Llama 3.1 finetuning <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1-finetuning>`_ and `serving <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1>`_
   * `GPT-2 via llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`_
   * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
@@ -141,9 +142,16 @@ Read the research:
    ../examples/managed-jobs
    ../reference/job-queue
    ../examples/auto-failover
-   ../reference/kubernetes/index
    ../running-jobs/distributed-jobs
    ../running-jobs/many-jobs
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Reserved & Existing Clusters
+
+   ../reservations/reservations
+   ../reference/kubernetes/index
 
 .. toctree::
    :hidden:

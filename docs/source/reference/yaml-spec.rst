@@ -337,8 +337,8 @@ Available fields:
 
 .. _task-yaml-experimental:
 
-Experimental
-------------
+Experimental Configurations
+---------------------------
 
 .. note::
 
