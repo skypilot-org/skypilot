@@ -106,3 +106,12 @@ class Policy:
             importlib.reload(skypilot_config)
 
         return mutated_dag
+
+    def apply_to_task(self, task: 'task_lib.Task') -> 'task_lib.Task':
+        if self.policy_fn is None:
+            return task
+
+        dag = dag_lib.Dag()
+        dag.add(task)
+        dag = self.apply(dag)
+        return dag.tasks[0]

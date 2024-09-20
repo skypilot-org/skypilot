@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import colorama
 
 import sky
+from sky import policy
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
@@ -123,6 +124,8 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     _validate_service_task(task)
+
+    task = policy.Policy().apply_to_task(task)
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
