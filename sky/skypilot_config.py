@@ -210,14 +210,6 @@ def _try_load_config() -> None:
         logger.debug('Config syntax check passed.')
 
 
-def reload_config() -> None:
-    """Reloads the config from the file specified by the env var."""
-    global _dict, _loaded_config_path
-    _dict = None
-    _loaded_config_path = None
-    _try_load_config()
-
-
 def loaded_config_path() -> Optional[str]:
     """Returns the path to the loaded config file."""
     return _loaded_config_path

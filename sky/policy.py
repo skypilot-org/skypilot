@@ -1,4 +1,5 @@
 """Customize policy by users."""
+import copy
 import dataclasses
 import importlib
 import os
@@ -10,6 +11,9 @@ from sky import dag as dag_lib
 from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import ux_utils
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
@@ -59,7 +63,9 @@ class Policy:
     def apply(self, dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
         if self.policy_fn is None:
             return dag
-        config = skypilot_config.to_dict()
+        logger.info(f'Applying policy: {self.policy}')
+        original_config = skypilot_config.to_dict()
+        config = copy.deepcopy(original_config)
         mutated_dag = dag_lib.Dag()
         mutated_dag.name = dag.name
 
@@ -85,14 +91,18 @@ class Policy:
             mutated_dag.graph.add_edge(mutated_dag.tasks[u_idx],
                                        mutated_dag.tasks[v_idx])
 
-        if config != mutated_config:
+        if original_config != mutated_config:
             with tempfile.NamedTemporaryFile(
                     delete=False,
                     mode='w',
                     prefix='policy-mutated-skypilot-config-',
                     suffix='.yaml') as temp_file:
                 common_utils.dump_yaml(temp_file.name, mutated_config)
-                os.environ[
-                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
-            skypilot_config.reload_config()
+            os.environ[
+                skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+            logger.debug(f'Updated SkyPilot config: {temp_file.name}')
+            # This is not a clean way to update the SkyPilot config, because
+            # we are resetting the global context for a single DAG, which is
+            # conceptually weird.
+            importlib.reload(skypilot_config)
         return mutated_dag
