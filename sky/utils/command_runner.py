@@ -403,8 +403,8 @@ class SSHCommandRunner(CommandRunner):
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
-        # disable_control_master: Optional[bool] = False,
-        disable_control_master: Optional[bool] = True,
+        disable_control_master: Optional[bool] = False,
+        # disable_control_master: Optional[bool] = True,
     ):
         """Initialize SSHCommandRunner.
 
