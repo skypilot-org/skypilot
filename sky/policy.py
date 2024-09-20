@@ -101,8 +101,9 @@ class Policy:
             os.environ[
                 skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
             logger.debug(f'Updated SkyPilot config: {temp_file.name}')
-            # This is not a clean way to update the SkyPilot config, because
-            # we are resetting the global context for a single DAG, which is
-            # conceptually weird.
+            # TODO(zhwu): This is not a clean way to update the SkyPilot config,
+            # because we are resetting the global context for a single DAG,
+            # which is conceptually weird.
             importlib.reload(skypilot_config)
+
         return mutated_dag
