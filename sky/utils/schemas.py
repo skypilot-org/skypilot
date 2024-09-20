@@ -775,6 +775,12 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'allowed_contexts': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'networking': {
                     'type': 'string',
                     'case_insensitive_enum': [

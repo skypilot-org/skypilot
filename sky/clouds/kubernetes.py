@@ -110,16 +110,17 @@ class Kubernetes(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        return cls._regions
-
-    @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        # No notion of regions in Kubernetes - return a single region.
-        return cls.regions()
+        allowed_contexts = skypilot_config.get_nested(('kubernetes', 'allowed_contexts'), None)
+        if allowed_contexts is None:
+            return cls._regions
+        else:
+            return [
+                clouds.Region(context) for context in allowed_contexts
+            ]
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -335,7 +336,10 @@ class Kubernetes(clouds.Cloud):
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if region.name != self._SINGLETON_REGION:
+            curr_context = region.name
+        else:
+            curr_context = kubernetes_utils.get_current_kube_config_context_name()
         if curr_context is not None:
             deploy_vars['k8s_context'] = curr_context
 
