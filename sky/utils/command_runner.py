@@ -6,6 +6,7 @@ import pathlib
 import shlex
 import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
+import tempfile
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -42,9 +43,11 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
-    os.makedirs(path, exist_ok=True)
-    return path
+    with tempfile.TemporaryFile() as tmp_dir_str:
+        # path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+        path_tmp_dir = f'{tmp_dir_str}/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+        os.makedirs(path_tmp_dir, exist_ok=True)
+        return path_tmp_dir
 
 
 # Disable sudo for root user. This is useful when the command is running in a
