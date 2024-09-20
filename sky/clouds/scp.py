@@ -337,8 +337,8 @@ class SCP(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO(jgoo1): Implement get_current_user_identity for SCP
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        # TODO(jgoo1): Implement get_user_identities for SCP
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
