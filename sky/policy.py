@@ -32,7 +32,28 @@ class MutatedUserTask:
 
 
 class Policy:
-    """Customize Policy by users."""
+    """User-defined policy.
+    
+    A user-defined policy is a string to a python function that can be imported
+    from the same environment where SkyPilot is running.
+
+    It can be specified in the SkyPilot config file under the key 'policy', e.g.
+
+        policy: my_package.skypilot_policy_fn_v1
+
+    The python function is expected to have the following signature:
+
+        def skypilot_policy_fn_v1(user_task: UserTask) -> MutatedUserTask:
+            ...
+            return MutatedUserTask(task=..., skypilot_config=...)
+
+    The function can mutate both task and skypilot_config.
+    """
+
+    def skypilot_policy_fn_v1(user_task: UserTask) -> MutatedUserTask:
+        ...
+        return MutatedUserTask(task=..., skypilot_config=...)
+    """
 
     def __init__(self) -> None:
         # Policy is a string to a python function within some user provided
@@ -61,6 +82,17 @@ class Policy:
                         'module.') from e
 
     def apply(self, dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
+        """Apply user-defined policy to a DAG.
+        
+        It mutates a Dag by applying user-defined policy and also update the
+        global SkyPilot config if there is any changes made by the policy.
+
+        Args:
+            dag: The dag to be mutated by the policy.
+
+        Returns:
+            The mutated dag.
+        """
         if self.policy_fn is None:
             return dag
         logger.info(f'Applying policy: {self.policy}')
@@ -108,8 +140,17 @@ class Policy:
         return mutated_dag
 
     def apply_to_task(self, task: 'task_lib.Task') -> 'task_lib.Task':
-        if self.policy_fn is None:
-            return task
+        """Apply user-defined policy to a task.
+        
+        It mutates a task by applying user-defined policy and also update the
+        global SkyPilot config if there is any changes made by the policy.
+
+        Args:
+            task: The task to be mutated by the policy.
+
+        Returns:
+            The mutated task.
+        """
 
         dag = dag_lib.Dag()
         dag.add(task)
