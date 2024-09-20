@@ -43,11 +43,9 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    # path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        path_tmp_dir = os.path.join(tmp_dir, f'skypilot_ssh_{user_hash}', ssh_control_filename)
-        os.makedirs(os.path.dirname(path_tmp_dir), exist_ok=True)
-        return path_tmp_dir
+    path = f'~/.sky/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 # Disable sudo for root user. This is useful when the command is running in a
