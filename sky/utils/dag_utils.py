@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
 from sky import jobs
-from sky import policy
+from sky.utils import policy_utils
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -36,9 +36,9 @@ The command can then be run as:
 """.strip()
 
 
-def convert_entrypoint_to_dag_and_apply_policy(
+def convert_entrypoint_to_dag(
         entrypoint: Any) -> 'dag_lib.Dag':
-    """Convert the entrypoint to a sky.Dag and apply the policy.
+    """Converts the entrypoint to a sky.Dag and applies the policy.
 
     Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
     """
@@ -63,7 +63,7 @@ def convert_entrypoint_to_dag_and_apply_policy(
                 'Expected a sky.Task or sky.Dag but received argument of type: '
                 f'{type(entrypoint)}')
 
-    return policy.Policy().apply(converted_dag)
+    return converted_dag
 
 
 def load_chain_dag_from_yaml(

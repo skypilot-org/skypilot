@@ -1,2 +1,0 @@
-from example_policy.skypilot_policy import config_label_policy
-from example_policy.skypilot_policy import task_label_policy

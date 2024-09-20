@@ -89,11 +89,11 @@ Available fields and semantics:
 
   # Custom policy to be applied to all tasks.
   #
-  # The policy function to be applied and mutate all tasks, which can be used to
+  # The policy class to be applied and mutate all tasks, which can be used to
   # enforce certain policies on all tasks.
   #
-  # See details in: <TODO: add link to policy docs>
-  policy: my_package.skypilot_policy_fn_v1
+  # The policy class should implement the sky.AdminPolicy interface.
+  admin_policy: my_package.SkyPilotPolicyV1
 
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.

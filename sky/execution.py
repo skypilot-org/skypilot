@@ -24,6 +24,7 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import policy_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -158,7 +159,8 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    dag = dag_utils.convert_entrypoint_to_dag_and_apply_policy(entrypoint)
+    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag = policy_utils.apply(dag)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 

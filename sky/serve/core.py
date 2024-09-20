@@ -8,7 +8,7 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
-from sky import policy
+from sky.utils import policy_utils
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -125,7 +125,7 @@ def up(
 
     _validate_service_task(task)
 
-    task = policy.Policy().apply_to_task(task)
+    task = policy_utils.apply(task)
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')

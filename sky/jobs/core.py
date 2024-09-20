@@ -21,6 +21,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import policy_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -53,7 +54,8 @@ def launch(
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
 
-    dag = dag_utils.convert_entrypoint_to_dag_and_apply_policy(entrypoint)
+    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag = policy_utils.apply(dag)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '

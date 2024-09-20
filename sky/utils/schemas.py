@@ -848,13 +848,11 @@ def get_config_schema():
         },
     }
 
-    policy_schema = {
-        'policy': {
-            'type': 'string',
-            # Check regex to be a valid python module path
-            'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
-                        r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
-        }
+    admin_policy_schema = {
+        'type': 'string',
+        # Check regex to be a valid python module path
+        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
     }
 
     allowed_clouds = {
@@ -914,7 +912,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
-            'policy': policy_schema,
+            'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             **cloud_configs,
