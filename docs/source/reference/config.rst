@@ -17,6 +17,7 @@ Spec: ``~/.sky/config.yaml``
 Available fields and semantics:
 
 .. code-block:: yaml
+
   # Custom managed jobs controller resources (optional).
   #
   # These take effects only when a managed jobs controller does not already exist.
@@ -90,7 +91,8 @@ Available fields and semantics:
   #
   # The policy function to be applied and mutate all tasks, which can be used to
   # enforce certain policies on all tasks.
-  # See more details in :ref:`advanced-policy-config`
+  #
+  # See details in: <TODO: add link to policy docs>
   policy: my_package.skypilot_policy_fn_v1
 
   # Advanced AWS configurations (optional).
