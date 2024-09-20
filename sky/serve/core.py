@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import colorama
 
 import sky
-from sky import policy
 from sky import backends
 from sky import exceptions
+from sky import policy
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
