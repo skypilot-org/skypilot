@@ -568,14 +568,14 @@ class Resources:
                 # raise an error when cloud is not specified by the user
                 # if self.cloud is None:
                 #     self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()) or self.cloud.is_same_cloud(clouds.Kubernetes()), 'Cloud must be GCP or Kubernetes.'
+                # assert self.cloud.is_same_cloud(
+                #     clouds.GCP()) or self.cloud.is_same_cloud(clouds.Kubernetes()), 'Cloud must be GCP or Kubernetes.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 
                 # Doyoung: May need to understand the usage of tpu_vm and make
                 # proper adjustments to the following snippets.
-                if self.cloud.is_same_cloud(clouds.GCP()):
+                if self.cloud is not None and self.cloud.is_same_cloud(clouds.GCP()):
                     use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 else:
                     use_tpu_vm = False
