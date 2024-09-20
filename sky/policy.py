@@ -8,10 +8,10 @@ import typing
 from typing import Any, Callable, Dict, Optional
 
 from sky import dag as dag_lib
+from sky import sky_logging
 from sky import skypilot_config
 from sky.utils import common_utils
 from sky.utils import ux_utils
-from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
@@ -49,16 +49,16 @@ class Policy:
                     raise ImportError(
                         f'Failed to import policy module: {module_path}. '
                         'Please check if the module is in your Python '
-                        'environment.'
-                    ) from e
+                        'environment.') from e
             try:
                 self.policy_fn = getattr(module, func_name)
             except AttributeError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise AttributeError(
-                        f'Failed to get policy function: {func_name} from module: '
-                        f'{module_path}. Please check with your policy admin if '
-                        f'the function {func_name!r} is in the module.') from e
+                        f'Failed to get policy function: {func_name} from '
+                        f'module: {module_path}. Please check with your policy '
+                        f'admin if the function {func_name!r} is in the '
+                        'module.') from e
 
     def apply(self, dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
         if self.policy_fn is None:
@@ -98,8 +98,7 @@ class Policy:
                     prefix='policy-mutated-skypilot-config-',
                     suffix='.yaml') as temp_file:
                 common_utils.dump_yaml(temp_file.name, mutated_config)
-            os.environ[
-                skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
+            os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
             logger.debug(f'Updated SkyPilot config: {temp_file.name}')
             # TODO(zhwu): This is not a clean way to update the SkyPilot config,
             # because we are resetting the global context for a single DAG,

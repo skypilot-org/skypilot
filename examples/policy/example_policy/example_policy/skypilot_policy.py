@@ -27,5 +27,5 @@ def config_label_policy(user_task: UserTask) -> MutatedUserTask:
     labels = skypilot_config['aws'].get('labels', {})
     labels['local_user'] = local_user_name
     skypilot_config['aws']['labels'] = labels
-    
+
     return MutatedUserTask(task=user_task.task, skypilot_config=skypilot_config)
