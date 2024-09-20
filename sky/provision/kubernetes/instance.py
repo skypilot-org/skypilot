@@ -1,7 +1,7 @@
 """Kubernetes instance provisioning."""
 import copy
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import uuid
 
 from sky import exceptions
@@ -79,6 +79,74 @@ def head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
+def _formatted_resource_requirements(pod_or_spec: Union['Pod', dict]):
+    # Returns a formatted string of resource requirements for a pod.
+    resource_requirements = {}
+    
+    if isinstance(pod_or_spec, dict):
+        containers = pod_or_spec.get('spec', {}).get('containers', [])
+    else:
+        containers = pod_or_spec.spec.containers
+
+    for container in containers:
+        if isinstance(container, dict):
+            resources = container.get('resources', {})
+            requests = resources.get('requests', {})
+        else:
+            resources = container.resources
+            requests = resources.requests or {}
+            
+        for resource, value in requests.items():
+            if resource not in resource_requirements:
+                resource_requirements[resource] = 0
+            if resource == 'memory':
+                int_value = kubernetes_utils.parse_memory_resource(value)
+            else:
+                int_value = kubernetes_utils.parse_cpu_or_gpu_resource(
+                    value)
+            resource_requirements[resource] += int_value
+    return ', '.join(f'{resource}={value}'
+                        for resource, value in resource_requirements.items())
+
+
+def _formatted_node_selector(pod_or_spec: Union['Pod', dict]) -> Optional[str]:
+    # Returns a formatted string of node selectors for a pod.
+    node_selectors = []
+
+    if isinstance(pod_or_spec, dict):
+        selectors = pod_or_spec.get('spec', {}).get('nodeSelector', {})
+    else:
+        selectors = pod_or_spec.spec.node_selector
+    
+    if not selectors:
+        return None
+
+    for label_key, label_value in selectors.items():
+        node_selectors.append(f'{label_key}={label_value}')
+    return ', '.join(node_selectors)
+
+
+def _lack_resource_msg(resource: str,
+                        pod_or_spec: Union['Pod', dict],
+                        extra_msg: Optional[str] = None,
+                        details: Optional[str] = None) -> str:
+    resource_requirements = _formatted_resource_requirements(pod_or_spec)
+    node_selectors = _formatted_node_selector(pod_or_spec)
+    node_selector_str = f' and labels ({node_selectors})' if (
+        node_selectors) else ''
+    msg = (
+        f'Insufficient {resource} capacity on the cluster. '
+        f'Required resources ({resource_requirements}){node_selector_str} '
+        'were not found in a single node. Other SkyPilot tasks or pods may '
+        'be using resources. Check resource usage by running '
+        '`kubectl describe nodes`.')
+    if extra_msg:
+        msg += f' {extra_msg}'
+    if details:
+        msg += f'\nFull error: {details}'
+    return msg
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -86,52 +154,6 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
-
-    def _formatted_resource_requirements(pod):
-        # Returns a formatted string of resource requirements for a pod.
-        resource_requirements = {}
-        for container in pod.spec.containers:
-            for resource, value in container.resources.requests.items():
-                if resource not in resource_requirements:
-                    resource_requirements[resource] = 0
-                if resource == 'memory':
-                    int_value = kubernetes_utils.parse_memory_resource(value)
-                else:
-                    int_value = kubernetes_utils.parse_cpu_or_gpu_resource(
-                        value)
-                resource_requirements[resource] += int_value
-        return ', '.join(f'{resource}={value}'
-                         for resource, value in resource_requirements.items())
-
-    def _formatted_node_selector(pod) -> Optional[str]:
-        # Returns a formatted string of node selectors for a pod.
-        node_selectors = []
-        if pod.spec.node_selector is None:
-            return None
-        for label_key, label_value in pod.spec.node_selector.items():
-            node_selectors.append(f'{label_key}={label_value}')
-        return ', '.join(node_selectors)
-
-    def _lack_resource_msg(resource: str,
-                           pod,
-                           extra_msg: Optional[str] = None,
-                           details: Optional[str] = None) -> str:
-        resource_requirements = _formatted_resource_requirements(pod)
-        node_selectors = _formatted_node_selector(pod)
-        node_selector_str = f' and labels ({node_selectors})' if (
-            node_selectors) else ''
-        msg = (
-            f'Insufficient {resource} capacity on the cluster. '
-            f'Required resources ({resource_requirements}){node_selector_str} '
-            'were not found in a single node. Other SkyPilot tasks or pods may '
-            'be using resources. Check resource usage by running '
-            '`kubectl describe nodes`.')
-        if extra_msg:
-            msg += f' {extra_msg}'
-        if details:
-            msg += f'\nFull error: {details}'
-        return msg
-
     for new_node in new_nodes:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             new_node.metadata.name, namespace)
@@ -589,8 +611,19 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             }
             pod_spec['spec']['tolerations'] = [tpu_toleration]
 
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        try:
+            pod = kubernetes.core_api(context).create_namespaced_pod(
+                namespace, pod_spec)
+        except kubernetes.api_exception() as e:
+            error_msg = str(e)
+            if 'Invalid resource requests for google.com/tpu.' in error_msg:
+                extra_msg = ('Verify if the cluster has a TPU slice with a '
+                             'topology matching the number of TPU(s) '
+                             'requested.')
+                raise config_lib.KubernetesError(
+                    _lack_resource_msg('TPU', pod_spec, details=error_msg, extra_msg=extra_msg)
+                )
+            raise
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
