@@ -33,7 +33,7 @@ class MutatedUserTask:
 
 class Policy:
     """User-defined policy.
-    
+
     A user-defined policy is a string to a python function that can be imported
     from the same environment where SkyPilot is running.
 
@@ -79,7 +79,7 @@ class Policy:
 
     def apply(self, dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
         """Apply user-defined policy to a DAG.
-        
+
         It mutates a Dag by applying user-defined policy and also update the
         global SkyPilot config if there is any changes made by the policy.
 
@@ -137,7 +137,7 @@ class Policy:
 
     def apply_to_task(self, task: 'task_lib.Task') -> 'task_lib.Task':
         """Apply user-defined policy to a task.
-        
+
         It mutates a task by applying user-defined policy and also update the
         global SkyPilot config if there is any changes made by the policy.
 
