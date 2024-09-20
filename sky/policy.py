@@ -50,12 +50,8 @@ class Policy:
     The function can mutate both task and skypilot_config.
     """
 
-    def skypilot_policy_fn_v1(user_task: UserTask) -> MutatedUserTask:
-        ...
-        return MutatedUserTask(task=..., skypilot_config=...)
-    """
-
     def __init__(self) -> None:
+        """Initialize the policy from SkyPilot config."""
         # Policy is a string to a python function within some user provided
         # module.
         self.policy: Optional[str] = skypilot_config.get_nested(('policy',),
