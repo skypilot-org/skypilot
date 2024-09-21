@@ -1049,8 +1049,8 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode)
-
-        storage_obj.add_store(store_type=store.upper())
+        if store:
+            storage_obj.add_store(store_type=store.upper())
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
