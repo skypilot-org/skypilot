@@ -127,8 +127,7 @@ class StoreType(enum.Enum):
             return StoreType.AZURE
         elif cloud.lower() == str(clouds.Lambda()).lower():
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Lambda Cloud does not provide cloud storage.')
+                raise ValueError('Lambda Cloud does not provide cloud storage.')
         elif cloud.lower() == str(clouds.SCP()).lower():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('SCP does not provide cloud storage.')
@@ -292,6 +291,12 @@ class AbstractStore:
           StorageBucketCreateError: If bucket creation fails
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
+        """
+        pass
+
+    def sync_bucket(self, region: Optional[str] = None):
+        """Fetches bucket if exists, or creates it if
+        it does not.
         """
         pass
 
@@ -965,8 +970,7 @@ class Storage(object):
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
-                    global_user_state.set_storage_handle(
-                        self.name, self.handle)
+                    global_user_state.set_storage_handle(self.name, self.handle)
             elif self.force_delete:
                 store.delete()
             # Remove store from bookkeeping
@@ -1013,8 +1017,7 @@ class Storage(object):
 
         # Upload succeeded - update state
         if store.is_sky_managed:
-            global_user_state.set_storage_status(
-                self.name, StorageStatus.READY)
+            global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
@@ -1227,11 +1230,10 @@ class S3Store(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and we should
-                # set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
-            
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1648,8 +1650,8 @@ class GcsStore(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and we should
-                # set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state) and
+                #  we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
 
@@ -2171,6 +2173,9 @@ class AzureBlobStore(AbstractStore):
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
+
+    def sync_bucket(self, region: Optional[str] = None):
+        pass
 
     def _get_storage_account_and_resource_group(
             self) -> Tuple[str, Optional[str]]:
@@ -2767,8 +2772,8 @@ class R2Store(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and we should
-                # set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state) and
+                #  we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
 
@@ -3197,8 +3202,8 @@ class IBMCosStore(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and we should
-                # set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state) and
+                #  we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
 
