@@ -48,3 +48,27 @@ class RejectAllPolicy(sky.AdminPolicy):
         """Reject all user requests."""
         del user_request
         raise RuntimeError('Reject all policy')
+
+
+class EnforceAutostopPolicy(sky.AdminPolicy):
+    """Example policy: enforce autostop for all tasks."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Enforce autostop for all tasks."""
+        operation_args = user_request.operation_args
+        if operation_args is None:
+            return sky.MutatedUserRequest(
+                task=user_request.task,
+                skypilot_config=user_request.skypilot_config)
+        idle_minutes_to_autostop = operation_args.idle_minutes_to_autostop
+        # Enforce autostop/down to be set for all tasks for new clusters.
+        if not operation_args.cluster_exists and (
+                idle_minutes_to_autostop is None or
+                idle_minutes_to_autostop < 0):
+            raise RuntimeError('Autostop/down must be set for all newly '
+                               'launched clusters.')
+        return sky.MutatedUserRequest(
+            task=user_request.task,
+            skypilot_config=user_request.skypilot_config)

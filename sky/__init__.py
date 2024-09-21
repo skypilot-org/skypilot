@@ -113,6 +113,7 @@ from sky.optimizer import OptimizeTarget
 # Admin Policy interfaces
 from sky.policy import AdminPolicy
 from sky.policy import MutatedUserRequest
+from sky.policy import OperationArgs
 from sky.policy import UserRequest
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
@@ -195,4 +196,5 @@ __all__ = [
     'MutatedUserRequest',
     'AdminPolicy',
     'NestedConfig',
+    'OperationArgs',
 ]

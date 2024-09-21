@@ -13,6 +13,7 @@ from sky import backends
 from sky import clouds
 from sky import global_user_state
 from sky import optimizer
+from sky import policy
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
@@ -159,17 +160,6 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag = policy_utils.apply(dag)
-    assert len(dag) == 1, f'We support 1 task for now. {dag}'
-    task = dag.tasks[0]
-
-    if any(r.job_recovery is not None for r in task.resources):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Job recovery is specified in the task. To launch a '
-                'managed job, please use: sky jobs launch')
-
     cluster_exists = False
     if cluster_name is not None:
         existing_handle = global_user_state.get_handle_from_cluster_name(
@@ -178,6 +168,25 @@ def _execute(
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
+
+    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag = policy_utils.apply(
+        dag,
+        operation_args=policy.OperationArgs(
+            cluster_name=cluster_name,
+            cluster_exists=cluster_exists,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            dryrun=dryrun,
+        ))
+    assert len(dag) == 1, f'We support 1 task for now. {dag}'
+    task = dag.tasks[0]
+
+    if any(r.job_recovery is not None for r in task.resources):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Job recovery is specified in the task. To launch a '
+                'managed job, please use: sky jobs launch')
 
     stages = stages if stages is not None else list(Stage)
 

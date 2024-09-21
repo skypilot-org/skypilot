@@ -65,7 +65,7 @@ policy should follow the following interface:
     class UserRequest:
         task: sky.Task
         skypilot_config: sky.NestedConfig
-        # More fields can be added in the future.
+        operation_args: sky.OperationArgs
 
     class MutatedUserRequest:
         task: sky.Task
@@ -136,3 +136,34 @@ Always Disable Public IP for AWS Tasks
 .. code-block:: yaml
 
     admin_policy: examples.admin_policy.disable_public_ip.DisablePublicIPPolicy
+
+
+Enforce Autostop for all Tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    class EnforceAutostopPolicy(sky.AdminPolicy):
+        @classmethod
+        def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+            operation_args = user_request.operation_args
+            # Operation args can be None for jobs and services, for which we
+            # don't need to enforce autostop, as they are already managed.
+            if operation_args is None:
+                return sky.MutatedUserRequest(
+                    task=user_request.task,
+                    skypilot_config=user_request.skypilot_config)
+            idle_minutes_to_autostop = operation_args.idle_minutes_to_autostop
+            # Enforce autostop/down to be set for all tasks for new clusters.
+            if not operation_args.cluster_exists and (
+                    idle_minutes_to_autostop is None or
+                    idle_minutes_to_autostop < 0):
+                raise RuntimeError('Autostop/down must be set for all newly '
+                                'launched clusters.')
+            return sky.MutatedUserRequest(
+                task=user_request.task,
+                skypilot_config=user_request.skypilot_config)
+
+.. code-block:: yaml
+
+    admin_policy: examples.admin_policy.enforce_autostop.EnforceAutostopPolicy

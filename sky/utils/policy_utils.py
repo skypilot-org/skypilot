@@ -53,6 +53,7 @@ def _get_policy_cls(policy: Optional[str]) -> Optional[policy_lib.AdminPolicy]:
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: Literal[True] = True,
+    execution_args: Optional[policy_lib.OperationArgs] = None,
 ) -> 'dag_lib.Dag':
     ...
 
@@ -61,6 +62,7 @@ def apply(
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: Literal[False],
+    execution_args: Optional[policy_lib.OperationArgs] = None,
 ) -> Tuple['dag_lib.Dag', skypilot_config.NestedConfig]:
     ...
 
@@ -68,10 +70,11 @@ def apply(
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: bool = True,
+    operation_args: Optional[policy_lib.OperationArgs] = None,
 ) -> Union['dag_lib.Dag', Tuple['dag_lib.Dag', skypilot_config.NestedConfig]]:
     """Applies user-defined policy to a DAG or a task.
 
-    It mutates a Dag by applying user-defined policy and also update the
+    It mutates a Dag by applying user-defined policy and also updates the
     global SkyPilot config if there is any changes made by the policy.
 
     Args:
@@ -106,7 +109,7 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = policy_lib.UserRequest(task, config)
+        user_request = policy_lib.UserRequest(task, config, operation_args)
         try:
             mutated_user_request = policy_cls.validate_and_mutate(user_request)
         except Exception as e:  # pylint: disable=broad-except

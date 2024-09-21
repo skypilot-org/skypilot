@@ -1,6 +1,7 @@
 import importlib
 import os
 import sys
+from typing import Optional
 
 import pytest
 
@@ -22,11 +23,21 @@ def add_example_policy_paths():
     sys.path.append(os.path.join(POLICY_PATH, 'example_policy'))
 
 
-def _load_task_and_apply_policy(config_path) -> sky.Dag:
+def _load_task_and_apply_policy(
+        config_path: str,
+        idle_minutes_to_autostop: Optional[int] = None) -> sky.Dag:
     os.environ['SKYPILOT_CONFIG'] = config_path
     importlib.reload(skypilot_config)
     task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-    return policy_utils.apply(task)
+    return policy_utils.apply(
+        task,
+        operation_args=sky.OperationArgs(
+            cluster_name='test',
+            cluster_exists=False,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=False,
+            dryrun=False,
+        ))
 
 
 def test_task_level_changes_policy(add_example_policy_paths):
@@ -47,3 +58,14 @@ def test_reject_all_policy(add_example_policy_paths):
                        match='Reject all policy'):
         _load_task_and_apply_policy(
             os.path.join(POLICY_PATH, 'reject_all_config.yaml'))
+
+
+def test_enforce_autostop_policy(add_example_policy_paths):
+    _load_task_and_apply_policy(os.path.join(POLICY_PATH,
+                                             'enforce_autostop.yaml'),
+                                idle_minutes_to_autostop=10)
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match='Autostop/down must be set'):
+        _load_task_and_apply_policy(os.path.join(POLICY_PATH,
+                                                 'enforce_autostop.yaml'),
+                                    idle_minutes_to_autostop=None)
