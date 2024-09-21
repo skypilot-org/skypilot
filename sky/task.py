@@ -23,6 +23,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+import zipfile
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -960,6 +961,94 @@ class Task:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
+            else:
+                # We will download the first store that is added to remote.
+                self.storage_plans[storage] = list(storage.stores.keys())[0]
+
+        storage_mounts = self.storage_mounts
+        storage_plans = self.storage_plans
+        for mnt_path, storage in storage_mounts.items():
+            if storage.mode == storage_lib.StorageMode.COPY:
+                store_type = storage_plans[storage]
+                if store_type is storage_lib.StoreType.S3:
+                    # TODO: allow for Storage mounting of different clouds
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('s3://'):
+                        blob_path = storage.source
+                    else:
+                        assert storage.name is not None, storage
+                        blob_path = 's3://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.GCS:
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('gs://'):
+                        blob_path = storage.source
+                    else:
+                        assert storage.name is not None, storage
+                        blob_path = 'gs://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.AZURE:
+                    if (isinstance(storage.source, str) and
+                            data_utils.is_az_container_endpoint(
+                                storage.source)):
+                        blob_path = storage.source
+                    else:
+                        assert storage.name is not None, storage
+                        store_object = storage.stores[
+                            storage_lib.StoreType.AZURE]
+                        assert isinstance(store_object,
+                                          storage_lib.AzureBlobStore)
+                        storage_account_name = store_object.storage_account_name
+                        blob_path = data_utils.AZURE_CONTAINER_URL.format(
+                            storage_account_name=storage_account_name,
+                            container_name=storage.name)
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.R2:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('r2://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'r2://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.IBM:
+                    if isinstance(storage.source,
+                                  str) and storage.source.startswith('cos://'):
+                        # source is a cos bucket's uri
+                        blob_path = storage.source
+                    else:
+                        # source is a bucket name.
+                        assert storage.name is not None, storage
+                        # extract region from rclone.conf
+                        cos_region = data_utils.Rclone.get_region_from_rclone(
+                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                        blob_path = f'cos://{cos_region}/{storage.name}'
+                    self.update_file_mounts({mnt_path: blob_path})
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Storage Type {store_type} '
+                                         'does not exist!')
+    
+    def compress_local_sync_storage_mounts(self) -> None:
+        """(INTERNAL) Eagerly syncs local storage mounts to cloud storage after compressing
+
+        After syncing up, COPY-mode storage mounts are translated into regular
+        file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
+        }``.
+        """
+        for storage in self.storage_mounts.values():
+            if len(storage.stores) == 0:
+                store_type, store_region = self._get_preferred_store()
+                self.storage_plans[storage] = store_type
+                storage.add_store(store_type, store_region, True)
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]

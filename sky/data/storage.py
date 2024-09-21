@@ -9,7 +9,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
-
+import zipfile
 import colorama
 
 from sky import check as sky_check
@@ -848,7 +848,8 @@ class Storage(object):
 
     def add_store(self,
                   store_type: Union[str, StoreType],
-                  region: Optional[str] = None) -> AbstractStore:
+                  region: Optional[str] = None,
+                  compress_local: bool = False) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -922,7 +923,10 @@ class Storage(object):
         self._add_store(store)
 
         # Upload source to store
-        self._sync_store(store)
+        if compress_local:
+            self._compress_sync_store(store)
+        else:
+            self._sync_store(store)
 
         return store
 
@@ -985,6 +989,50 @@ class Storage(object):
         """Syncs the source and destinations of all stores in the Storage"""
         for _, store in self.stores.items():
             self._sync_store(store)
+    
+    def _compress_sync_store(self, store: AbstractStore):
+        """
+        TODO: WARRICK HE
+        Compresses everything in source and uploads that, specific to local->bucket
+        """
+        zip_filename = os.getcwd()+"/skypilot-source-files.zip" #can change name later
+        filepaths = self.source
+        if type(self.source) == str:
+            filepaths = [self.source]
+        try:
+            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filepath in filepaths:
+                    if os.path.isdir(filepath):
+                        for root, dirs, files in os.walk(filepath):
+                            for file in files:
+                                zipf.write(os.path.join(root, file), os.path.join(root.replace(filepath, '', 1), file) + '/')
+                    else:
+                        zipf.write(filepath, filepath.replace(os.path.sep, '/'))
+        except:
+            if os.path.exists(zip_filename):
+                os.remove(zip_filename)
+            raise
+        try:
+            # overwrite source temporarily!
+            store.source = zip_filename
+            store.upload()
+            store.source = filepaths
+        except exceptions.StorageUploadError:
+            if os.path.exists(zip_filename):
+                os.remove(zip_filename)
+            self.source = filepaths
+            logger.error(f'Could not upload {self.source!r} to store '
+                         f'name {store.name!r}.')
+            if store.is_sky_managed:
+                global_user_state.set_storage_status(
+                    self.name, StorageStatus.UPLOAD_FAILED)
+            raise
+        if os.path.exists(zip_filename):
+            os.remove(zip_filename)
+        # Upload succeeded - update state
+        if store.is_sky_managed:
+            global_user_state.set_storage_status(self.name, StorageStatus.READY)
+
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
