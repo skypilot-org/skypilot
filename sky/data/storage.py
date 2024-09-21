@@ -2174,9 +2174,6 @@ class AzureBlobStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
-    def sync_bucket(self, region: Optional[str] = None):
-        pass
-
     def _get_storage_account_and_resource_group(
             self) -> Tuple[str, Optional[str]]:
         """Get storage account and resource group to be used for AzureBlobStore
