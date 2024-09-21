@@ -37,3 +37,14 @@ class ConfigLabelPolicy(sky.AdminPolicy):
                                    local_user_name)
         return sky.MutatedUserRequest(task=user_request.task,
                                       skypilot_config=skypilot_config)
+
+
+class RejectAllPolicy(sky.AdminPolicy):
+    """Example policy: reject all user requests."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Reject all user requests."""
+        del user_request
+        raise RuntimeError('Reject all policy')

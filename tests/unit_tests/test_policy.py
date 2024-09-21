@@ -5,6 +5,7 @@ import sys
 import pytest
 
 import sky
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.utils import policy_utils
@@ -12,7 +13,7 @@ from sky.utils import policy_utils
 logger = sky_logging.init_logger(__name__)
 
 POLICY_PATH = os.path.join(os.path.dirname(os.path.dirname(sky.__file__)),
-                           'examples', 'policy')
+                           'examples', 'admin_policy')
 
 
 @pytest.fixture
@@ -29,12 +30,20 @@ def _load_task_and_apply_policy(config_path) -> sky.Dag:
 
 
 def test_task_level_changes_policy(add_example_policy_paths):
-    task = _load_task_and_apply_policy(
+    dag = _load_task_and_apply_policy(
         os.path.join(POLICY_PATH, 'task_label_config.yaml'))
-    assert 'local_user' in list(task.resources)[0].labels
+    assert 'local_user' in list(dag.tasks[0].resources)[0].labels
 
 
 def test_config_level_changes_policy(add_example_policy_paths):
     _load_task_and_apply_policy(
         os.path.join(POLICY_PATH, 'config_label_config.yaml'))
-    assert 'local_user' in skypilot_config.get_nested(('aws', 'labels'), {})
+    print(skypilot_config._dict)
+    assert 'local_user' in skypilot_config.get_nested(('gcp', 'labels'), {})
+
+
+def test_reject_all_policy(add_example_policy_paths):
+    with pytest.raises(exceptions.UserRequestRejectedByPolicy,
+                       match='Reject all policy'):
+        _load_task_and_apply_policy(
+            os.path.join(POLICY_PATH, 'reject_all_config.yaml'))

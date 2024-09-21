@@ -26,9 +26,11 @@ def _reload_config() -> None:
     skypilot_config._loaded_config_path = None
     skypilot_config._try_load_config()
 
+
 def _check_empty_config() -> None:
     """Check that the config is empty."""
-    assert not skypilot_config.loaded(), (skypilot_config._dict, skypilot_config._loaded_config_path)
+    assert not skypilot_config.loaded(), (skypilot_config._dict,
+                                          skypilot_config._loaded_config_path)
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
@@ -103,9 +105,14 @@ def test_nested_config(monkeypatch) -> None:
     config.set_nested(('aws', 'ssh_proxy_command'), 'value')
     assert config == {'aws': {'ssh_proxy_command': 'value'}}
 
-    assert config.get_nested(('admin_policy', ), 'default') == 'default'
+    assert config.get_nested(('admin_policy',), 'default') == 'default'
     config.set_nested(('aws', 'use_internal_ips'), True)
-    assert config == {'aws': {'ssh_proxy_command': 'value', 'use_internal_ips': True}}
+    assert config == {
+        'aws': {
+            'ssh_proxy_command': 'value',
+            'use_internal_ips': True
+        }
+    }
 
 
 def test_no_config(monkeypatch) -> None:

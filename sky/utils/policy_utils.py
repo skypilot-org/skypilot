@@ -7,6 +7,7 @@ import typing
 from typing import Literal, Optional, Tuple, Union
 
 from sky import dag as dag_lib
+from sky import exceptions
 from sky import policy as policy_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -103,20 +104,27 @@ def apply(
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
 
-    mutated_config = skypilot_config.NestedConfig()
+    mutated_config = None
     for task in dag.tasks:
         user_request = policy_lib.UserRequest(task, config)
-        mutated_user_request = policy_cls.validate_and_mutate(user_request)
-        if not mutated_config:
+        try:
+            mutated_user_request = policy_cls.validate_and_mutate(user_request)
+        except Exception as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.UserRequestRejectedByPolicy(
+                    f'User request rejected by policy {policy}, due to error: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+        if mutated_config is None:
             mutated_config = mutated_user_request.skypilot_config
         else:
             if mutated_config != mutated_user_request.skypilot_config:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
+                    raise exceptions.UserRequestRejectedByPolicy(
                         'All tasks must have the same skypilot '
                         'config after applying the policy. Please'
                         'check with your policy admin for details.')
         mutated_dag.add(mutated_user_request.task)
+    assert mutated_config is not None, dag
 
     # Update the new_dag's graph with the old dag's graph
     for u, v in dag.graph.edges:
@@ -132,7 +140,7 @@ def apply(
                 prefix='policy-mutated-skypilot-config-',
                 suffix='.yaml') as temp_file:
 
-            common_utils.dump_yaml(temp_file.name, dict(**config))
+            common_utils.dump_yaml(temp_file.name, dict(**mutated_config))
             os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
             logger.debug(f'Updated SkyPilot config: {temp_file.name}')
             # TODO(zhwu): This is not a clean way to update the SkyPilot config,
