@@ -109,7 +109,7 @@ def apply(
         user_request = policy_lib.UserRequest(task, config)
         try:
             mutated_user_request = policy_cls.validate_and_mutate(user_request)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(
                     f'User request rejected by policy {policy}, due to error: '
