@@ -8,7 +8,6 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
-from sky.utils import policy_utils
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -20,6 +19,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import policy_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -125,7 +125,9 @@ def up(
 
     _validate_service_task(task)
 
-    task = policy_utils.apply(task)
+    dag, mutated_user_config = policy_utils.apply(task,
+                                                  apply_skypilot_config=False)
+    task = dag.tasks[0]
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -161,6 +163,7 @@ def up(
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
+                local_user_config=mutated_user_config,
             ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,

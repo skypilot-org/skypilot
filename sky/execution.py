@@ -19,12 +19,12 @@ from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
+from sky.utils import policy_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils import policy_utils
 
 logger = sky_logging.init_logger(__name__)
 

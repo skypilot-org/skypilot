@@ -55,7 +55,10 @@ def launch(
     dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag = policy_utils.apply(dag)
+    # TODO(zhwu): We should only apply policy to dag and save the config file,
+    # instead of having the config file actually being used.
+    dag, mutated_user_config = policy_utils.apply(dag,
+                                                  apply_skypilot_config=False)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -105,6 +108,7 @@ def launch(
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
+                local_user_config=mutated_user_config,
             ),
         }
 

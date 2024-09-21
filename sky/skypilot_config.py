@@ -51,6 +51,7 @@ then:
 import copy
 import os
 import pprint
+import typing
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import yaml
@@ -60,6 +61,38 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+
+K = typing.TypeVar('K')
+V = typing.TypeVar('V')
+
+
+class NestedConfig(Dict[str, Any]):
+    """A nested dictionary that allows for setting and getting values."""
+
+    def get_nested(self,
+                   keys: Tuple[str, ...],
+                   default_value: Any,
+                   override_configs: Optional[Dict[str, Any]] = None) -> Any:
+        """Gets a nested key."""
+        config = copy.deepcopy(self)
+        if override_configs is not None:
+            config = _recursive_update(config, override_configs)
+        return _get_nested(config, keys, default_value)
+
+    def set_nested(self, keys: Tuple[str, ...], value: Any) -> None:
+        """Sets a nested key."""
+        override = {}
+        for i, key in enumerate(reversed(keys)):
+            if i == 0:
+                override = {key: value}
+            else:
+                override = {key: override}
+        _recursive_update(self, override)
+
+    @classmethod
+    def from_dict(cls, config: Dict[str, Any]) -> 'NestedConfig':
+        return cls(**config)
+
 
 # The config path is discovered in this order:
 #
@@ -81,7 +114,7 @@ CONFIG_PATH = '~/.sky/config.yaml'
 logger = sky_logging.init_logger(__name__)
 
 # The loaded config.
-_dict: Optional[Dict[str, Any]] = None
+_dict = NestedConfig()
 _loaded_config_path: Optional[str] = None
 
 
@@ -131,17 +164,11 @@ def get_nested(keys: Tuple[str, ...],
     ), (f'Override configs must not be provided when keys {keys} is not within '
         'constants.OVERRIDEABLE_CONFIG_KEYS: '
         f'{constants.OVERRIDEABLE_CONFIG_KEYS}')
-    config: Dict[str, Any] = {}
-    if _dict is not None:
-        config = copy.deepcopy(_dict)
-    if override_configs is None:
-        override_configs = {}
-    config = _recursive_update(config, override_configs)
-    return _get_nested(config, keys, default_value)
+    return _dict.get_nested(keys, default_value, override_configs)
 
 
-def _recursive_update(base_config: Dict[str, Any],
-                      override_config: Dict[str, Any]) -> Dict[str, Any]:
+def _recursive_update(base_config: NestedConfig,
+                      override_config: Dict[str, Any]) -> NestedConfig:
     """Recursively updates base configuration with override configuration"""
     for key, value in override_config.items():
         if (isinstance(value, dict) and key in base_config and
@@ -157,22 +184,14 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
-    _check_loaded_or_die()
-    assert _dict is not None
-    override = {}
-    for i, key in enumerate(reversed(keys)):
-        if i == 0:
-            override = {key: value}
-        else:
-            override = {key: override}
-    return _recursive_update(copy.deepcopy(_dict), override)
+    copied_dict = copy.deepcopy(_dict)
+    copied_dict.set_nested(keys, value)
+    return copied_dict
 
 
-def to_dict() -> Dict[str, Any]:
+def to_dict() -> NestedConfig:
     """Returns a deep-copied version of the current config."""
-    if _dict is not None:
-        return copy.deepcopy(_dict)
-    return {}
+    return copy.deepcopy(_dict)
 
 
 def _try_load_config() -> None:
@@ -192,13 +211,13 @@ def _try_load_config() -> None:
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
-        _loaded_config_path = config_path
         try:
-            _dict = common_utils.read_yaml(config_path)
+            _dict = NestedConfig.from_dict(common_utils.read_yaml(config_path))
+            _loaded_config_path = config_path
             logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
-        if _dict is not None:
+        if _dict:
             common_utils.validate_schema(
                 _dict,
                 schemas.get_config_schema(),
@@ -219,14 +238,6 @@ def loaded_config_path() -> Optional[str]:
 _try_load_config()
 
 
-def _check_loaded_or_die():
-    """Checks loaded() is true; otherwise raises RuntimeError."""
-    if _dict is None:
-        raise RuntimeError(
-            f'No user configs loaded. Check {CONFIG_PATH} exists and '
-            'can be loaded.')
-
-
 def loaded() -> bool:
     """Returns if the user configurations are loaded."""
-    return _dict is not None
+    return _loaded_config_path is not None

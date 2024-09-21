@@ -2,26 +2,27 @@
 import abc
 import dataclasses
 import typing
-from typing import Any, Dict
 
 if typing.TYPE_CHECKING:
-    from sky import task as task_lib
+    import sky
 
 
 @dataclasses.dataclass
 class UserRequest:
-    task: 'task_lib.Task'
-    skypilot_config: Dict[str, Any]
+    task: 'sky.Task'
+    skypilot_config: 'sky.NestedConfig'
 
 
 @dataclasses.dataclass
 class MutatedUserRequest:
-    task: 'task_lib.Task'
-    skypilot_config: Dict[str, Any]
+    task: 'sky.Task'
+    skypilot_config: 'sky.NestedConfig'
 
+
+# pylint: disable=line-too-long
 class AdminPolicy:
     """Interface for admin-defined policy for user requests.
-    
+
     A user-defined policy is a string to a python function that can be imported
     from the same environment where SkyPilot is running.
 
@@ -30,7 +31,7 @@ class AdminPolicy:
         policy: my_package.SkyPilotPolicyV1
 
     The AdminPolicy class is expected to have the following signature:
-    
+
         import sky
 
         class SkyPilotPolicyV1(sky.AdminPolicy):
@@ -43,5 +44,7 @@ class AdminPolicy:
 
     @classmethod
     @abc.abstractmethod
-    def validate_and_mutate(cls, user_request: UserRequest) -> MutatedUserRequest:
-        raise NotImplementedError('Your policy must implement validate_and_mutate')
+    def validate_and_mutate(cls,
+                            user_request: UserRequest) -> MutatedUserRequest:
+        raise NotImplementedError(
+            'Your policy must implement validate_and_mutate')

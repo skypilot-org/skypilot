@@ -110,14 +110,15 @@ from sky.jobs.core import spot_queue
 from sky.jobs.core import spot_tail_logs
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
+# Admin Policy interfaces
+from sky.policy import AdminPolicy
+from sky.policy import MutatedUserRequest
+from sky.policy import UserRequest
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
+from sky.skypilot_config import NestedConfig
 from sky.status_lib import ClusterStatus
 from sky.task import Task
-# Admin Policy interfaces
-from sky.policy import UserRequest
-from sky.policy import MutatedUserRequest
-from sky.policy import AdminPolicy
 
 # Aliases.
 IBM = clouds.IBM
@@ -189,6 +190,8 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
-    'UserTask',
-    'MutatedUserTask',
+    'UserRequest',
+    'MutatedUserRequest',
+    'AdminPolicy',
+    'NestedConfig',
 ]
