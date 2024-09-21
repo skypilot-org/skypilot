@@ -53,7 +53,7 @@ def _get_policy_cls(policy: Optional[str]) -> Optional[policy_lib.AdminPolicy]:
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: Literal[True] = True,
-    execution_args: Optional[policy_lib.OperationArgs] = None,
+    operation_args: Optional[policy_lib.OperationArgs] = None,
 ) -> 'dag_lib.Dag':
     ...
 
@@ -62,7 +62,7 @@ def apply(
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: Literal[False],
-    execution_args: Optional[policy_lib.OperationArgs] = None,
+    operation_args: Optional[policy_lib.OperationArgs] = None,
 ) -> Tuple['dag_lib.Dag', skypilot_config.NestedConfig]:
     ...
 
