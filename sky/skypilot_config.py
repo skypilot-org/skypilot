@@ -51,7 +51,6 @@ then:
 import copy
 import os
 import pprint
-import typing
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import yaml
@@ -61,9 +60,6 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-
-K = typing.TypeVar('K')
-V = typing.TypeVar('V')
 
 
 class NestedConfig(Dict[str, Any]):

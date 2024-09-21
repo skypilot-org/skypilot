@@ -17,9 +17,8 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_policy_cls() -> Optional[policy_lib.AdminPolicy]:
+def _get_policy_cls(policy: Optional[str]) -> Optional[policy_lib.AdminPolicy]:
     """Get admin-defined policy."""
-    policy = skypilot_config.get_nested(('admin_policy',), None)
     if policy is None:
         return None
     try:
@@ -90,7 +89,8 @@ def apply(
     else:
         dag = entrypoint
 
-    policy_cls = _get_policy_cls()
+    policy = skypilot_config.get_nested(('admin_policy',), None)
+    policy_cls = _get_policy_cls(policy)
     if policy_cls is None:
         if apply_skypilot_config:
             return dag
@@ -132,7 +132,7 @@ def apply(
                 prefix='policy-mutated-skypilot-config-',
                 suffix='.yaml') as temp_file:
 
-            common_utils.dump_yaml(temp_file.name, config)
+            common_utils.dump_yaml(temp_file.name, dict(**config))
             os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_file.name
             logger.debug(f'Updated SkyPilot config: {temp_file.name}')
             # TODO(zhwu): This is not a clean way to update the SkyPilot config,
