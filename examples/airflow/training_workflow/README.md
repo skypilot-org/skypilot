@@ -1,18 +1,23 @@
 <!-- # Airflow made easy: take your dev workflows to production in 2 steps with SkyPilot -->
 # Easily go from dev to prod in Airflow with SkyPilot
 
-In AI workflows, **the transition from development to production is not easy**. Workflow development happens ad-hoc, with a lot of interaction required 
+In AI workflows, **the transition from development to production is not easy**. 
+
+Workflow development happens ad-hoc, with a lot of interaction required 
 with the code and data. When moving this to an Airflow DAG in production, managing dependencies, environments and the 
 infra requirements of the workflow gets complex. Porting the code to an airflow requires significant time to test and 
 validate any changes, often requiring re-writing the code as Airflow operators.
 
-**SkyPilot seamlessly bridges the dev -> production gap**. SkyPilot can operate on any of your infra, allowing you to run the same code that you ran during development on a
+**SkyPilot seamlessly bridges the dev -> production gap**. 
+
+SkyPilot can operate on any of your infra, allowing you to run the same code that you ran during development on a
 production Airflow cluster. Behind the scenes, SkyPilot handles environment setup, dependency management, and infra orchestration, allowing you to focus on your code.
 
 Here's how you can use SkyPilot to take your dev workflows to production in Airflow:
 1. **Define and test your workflow as SkyPilot tasks**.
     - Use `sky launch` and [Sky VSCode integration](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#dev-vscode) to run, debug and iterate on your code.
 2. **Orchestrate SkyPilot tasks in Airflow** by invoking `sky launch` on their YAMLs as a task in the Airflow DAG.
+    - Airflow does the scheduling, logging, and monitoring, while SkyPilot handles the infra setup and task execution.
 
 In this guide, we show how a training workflow involving data preprocessing, training and evaluation can be first easily developed with SkyPilot, and then orchestrated in Airflow.
 
