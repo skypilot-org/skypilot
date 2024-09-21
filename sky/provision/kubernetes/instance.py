@@ -606,7 +606,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # on TPU nodes.
         # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
         tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
-        if tpu_label in config.node_config['spec']['nodeSelector']:
+        if tpu_label in config.node_config.get('spec', {}).get('nodeSelector', {}):
             tpu_toleration = {
                 'key': 'google.com/tpu',
                 'operator': 'Equal',
