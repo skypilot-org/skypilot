@@ -300,7 +300,7 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path) -> Dict[str, Any]:
+def read_yaml(path: str) -> Dict[str, Any]:
     with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
