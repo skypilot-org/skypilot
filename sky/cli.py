@@ -3086,8 +3086,8 @@ def show_gpus(
         for node_name, node_info in node_info_dict.items():
             node_table.add_row([
                 node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                node_info.total['accelerator_count'],
+                node_info.free['accelerators_available']
             ])
         return node_table
 

@@ -84,7 +84,7 @@ def list_accelerators_realtime(
         return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
-    key = label_formatter.get_label_key()
+    keys = label_formatter.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes()
     # Get the pods to get the real-time GPU usage
     pods = kubernetes_utils.get_kubernetes_pods()
@@ -95,56 +95,65 @@ def list_accelerators_realtime(
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
     for node in nodes:
-        if key in node.metadata.labels:
-            allocated_qty = 0
-            accelerator_name = label_formatter.get_accelerator_from_label_value(
-                node.metadata.labels.get(key))
+        for key in keys:
+            if key in node.metadata.labels:
+                allocated_qty = 0
+                accelerator_name = label_formatter.get_accelerator_from_label_value(
+                    node.metadata.labels.get(key))
 
-            # Check if name_filter regex matches the accelerator_name
-            regex_flags = 0 if case_sensitive else re.IGNORECASE
-            if name_filter and not re.match(
-                    name_filter, accelerator_name, flags=regex_flags):
-                continue
+                # Check if name_filter regex matches the accelerator_name
+                regex_flags = 0 if case_sensitive else re.IGNORECASE
+                if name_filter and not re.match(
+                        name_filter, accelerator_name, flags=regex_flags):
+                    continue
 
-            accelerator_count = int(
-                node.status.allocatable.get('nvidia.com/gpu', 0))
+                accelerator_count = 0
+                if 'nvidia.com/gpu' in node.status.allocatable:
+                    accelerator_count = int(
+                        node.status.allocatable['nvidia.com/gpu'])
+                elif 'google.com/tpu' in node.status.allocatable:
+                    accelerator_count = int(
+                        node.status.allocatable['google.com/tpu'])
 
-            # Generate the GPU quantities for the accelerators
-            if accelerator_name and accelerator_count > 0:
-                for count in range(1, accelerator_count + 1):
-                    accelerators_qtys.add((accelerator_name, count))
+                # Generate the GPU quantities for the accelerators
+                if accelerator_name and accelerator_count > 0:
+                    for count in range(1, accelerator_count + 1):
+                        accelerators_qtys.add((accelerator_name, count))
 
-            for pod in pods:
-                # Get all the pods running on the node
-                if (pod.spec.node_name == node.metadata.name and
-                        pod.status.phase in ['Running', 'Pending']):
-                    # Iterate over all the containers in the pod and sum the
-                    # GPU requests
-                    for container in pod.spec.containers:
-                        if container.resources.requests:
-                            allocated_qty += int(
-                                container.resources.requests.get(
-                                    'nvidia.com/gpu', 0))
+                for pod in pods:
+                    # Get all the pods running on the node
+                    if (pod.spec.node_name == node.metadata.name and
+                            pod.status.phase in ['Running', 'Pending']):
+                        # Iterate over all the containers in the pod and sum the
+                        # GPU requests
+                        for container in pod.spec.containers:
+                            if container.resources.requests:
+                                allocated_qty += int(
+                                    container.resources.requests.get(
+                                        'nvidia.com/gpu', 0))
+                                allocated_qty += int(
+                                    container.resources.requests.get(
+                                        'google.com/tpu', 0))
 
-            accelerators_available = accelerator_count - allocated_qty
+                accelerators_available = accelerator_count - allocated_qty
 
-            if accelerator_count >= min_quantity_filter:
-                quantized_count = (min_quantity_filter *
-                                   (accelerator_count // min_quantity_filter))
-                if accelerator_name not in total_accelerators_capacity:
-                    total_accelerators_capacity[
-                        accelerator_name] = quantized_count
-                else:
-                    total_accelerators_capacity[
-                        accelerator_name] += quantized_count
+                if accelerator_count >= min_quantity_filter:
+                    quantized_count = (min_quantity_filter *
+                                    (accelerator_count // min_quantity_filter))
+                    if accelerator_name not in total_accelerators_capacity:
+                        total_accelerators_capacity[
+                            accelerator_name] = quantized_count
+                    else:
+                        total_accelerators_capacity[
+                            accelerator_name] += quantized_count
 
-            if accelerator_name not in total_accelerators_available:
-                total_accelerators_available[accelerator_name] = 0
-            if accelerators_available >= min_quantity_filter:
-                quantized_availability = min_quantity_filter * (
-                    accelerators_available // min_quantity_filter)
-                total_accelerators_available[
-                    accelerator_name] += quantized_availability
+                if accelerator_name not in total_accelerators_available:
+                    total_accelerators_available[accelerator_name] = 0
+                if accelerators_available >= min_quantity_filter:
+                    quantized_availability = min_quantity_filter * (
+                        accelerators_available // min_quantity_filter)
+                    total_accelerators_available[
+                        accelerator_name] += quantized_availability
 
     result = []
 

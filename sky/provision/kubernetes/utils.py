@@ -1812,40 +1812,51 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
     if not label_formatter:
         label_key = None
     else:
-        label_key = label_formatter.get_label_key()
+        label_keys = label_formatter.get_label_keys()
 
     node_info_dict: Dict[str, KubernetesNodeInfo] = {}
 
-    for node in nodes:
-        allocated_qty = 0
-        if label_formatter is not None and label_key in node.metadata.labels:
-            accelerator_name = label_formatter.get_accelerator_from_label_value(
-                node.metadata.labels.get(label_key))
-        else:
-            accelerator_name = None
+    for label_key in label_keys:
+        for node in nodes:
+            allocated_qty = 0
+            if label_formatter is not None and label_key in node.metadata.labels:
+                accelerator_name = label_formatter.get_accelerator_from_label_value(
+                    node.metadata.labels.get(label_key))
+            else:
+                accelerator_name = None
 
-        accelerator_count = int(node.status.allocatable.get(
-            'nvidia.com/gpu', 0))
+            accelerator_count = 0
+            if 'nvidia.com/gpu' in node.status.allocatable:
+                accelerator_count = int(
+                    node.status.allocatable['nvidia.com/gpu'])
+            elif 'google.com/tpu' in node.status.allocatable:
+                accelerator_count = int(
+                    node.status.allocatable['google.com/tpu'])
 
-        for pod in pods:
-            # Get all the pods running on the node
-            if (pod.spec.node_name == node.metadata.name and
-                    pod.status.phase in ['Running', 'Pending']):
-                # Iterate over all the containers in the pod and sum the
-                # GPU requests
-                for container in pod.spec.containers:
-                    if container.resources.requests:
-                        allocated_qty += int(
-                            container.resources.requests.get(
-                                'nvidia.com/gpu', 0))
+            for pod in pods:
+                # Get all the pods running on the node
+                if (pod.spec.node_name == node.metadata.name and
+                        pod.status.phase in ['Running', 'Pending']):
+                    # Iterate over all the containers in the pod and sum the
+                    # GPU requests
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            if 'nvidia.com/gpu' in container.resources.requests:
+                                allocated_qty += int(
+                                    container.resources.requests.get(
+                                        'nvidia.com/gpu', 0))
+                            elif 'google.com/tpu' in container.resources.requests:
+                                allocated_qty += int(
+                                    container.resources.requests.get(
+                                        'google.com/tpu', 0))                            
 
-        accelerators_available = accelerator_count - allocated_qty
+            accelerators_available = accelerator_count - allocated_qty
 
-        node_info_dict[node.metadata.name] = KubernetesNodeInfo(
-            name=node.metadata.name,
-            gpu_type=accelerator_name,
-            total={'nvidia.com/gpu': int(accelerator_count)},
-            free={'nvidia.com/gpu': int(accelerators_available)})
+            node_info_dict[node.metadata.name] = KubernetesNodeInfo(
+                name=node.metadata.name,
+                gpu_type=accelerator_name,
+                total={'accelerator_count': int(accelerator_count)},
+                free={'accelerators_available': int(accelerators_available)})
 
     return node_info_dict
 
