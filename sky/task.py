@@ -965,9 +965,9 @@ class Task:
                 # We will download the first store that is added to remote.
                 for store_type, store in storage.stores.items():
                     if store_type != storage_lib.StoreType.AZURE:
-                        preferred_store_type, preferred_store_region = self._get_preferred_store()
-                        if store_type == preferred_store_type:
-                            store.sync_bucket(preferred_store_region)
+                        p_store_type, p_store_region = self._get_preferred_store()
+                        if store_type == p_store_type:
+                            store.sync_bucket(p_store_region)
                         else:
                             store.sync_bucket()
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
