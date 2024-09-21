@@ -1,7 +1,7 @@
 .. _advanced-policy-config:
 
-Advanced Admin Policy Enforcement
-=================================
+Admin Policy Enforcement
+========================
 
 
 SkyPilot allows admins to enforce policies on users' SkyPilot usage by applying
