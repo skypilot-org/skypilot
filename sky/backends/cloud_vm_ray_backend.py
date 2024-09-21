@@ -151,6 +151,19 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # might be added during ssh.
 _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 
+# The summarized reason for each type of exception
+_EXCEPTION_SUMMARY_MESSAGE = {
+    exceptions.InvalidClusterNameError: 'Cluster name is invalid.',
+    exceptions.NotSupportedError: 'Cloud does not support requested features.',
+    exceptions.CloudUserIdentityError: 'Cloud user identity is invalid.',
+    exceptions.ResourcesUnavailableError: 'Requested resources cannot be '
+                                          'satisfied on this cloud.',
+}
+
+_RESOURCES_UNAVAILABLE_LOG = (
+    'The reasons for the infeasibility of each resource are summarized below. '
+    'For detailed explanations, please refer to the log above.')
+
 
 def _is_command_length_over_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
@@ -1926,6 +1939,7 @@ class RetryingVmProvisioner(object):
                                        self._optimize_target is None)
 
         failover_history: List[Exception] = list()
+        resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
 
         style = colorama.Style
         fore = colorama.Fore
@@ -2016,6 +2030,7 @@ class RetryingVmProvisioner(object):
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
                 _add_to_blocked_resources(self._blocked_resources, to_provision)
+                resource_exceptions[to_provision] = failover_history[-1]
             else:
                 # If we reach here, it means that the existing cluster must have
                 # a previous status of INIT, because other statuses (UP,
@@ -2052,7 +2067,16 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                raise e.with_failover_history(failover_history)
+                table = log_utils.create_table(['Resource', 'Reason'])
+                for (resource, exception) in resource_exceptions.items():
+                    table.add_row([
+                        resource,
+                        _EXCEPTION_SUMMARY_MESSAGE[exception.__class__]
+                    ])
+                raise exceptions.ResourcesUnavailableError(
+                    _RESOURCES_UNAVAILABLE_LOG + '\n' +
+                    table.get_string(),
+                    failover_history=failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
@@ -2805,7 +2829,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         '`--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message,
+                            error_message + '\n' + str(e),
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
