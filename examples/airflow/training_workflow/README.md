@@ -1,7 +1,7 @@
 <!-- # Airflow made easy: take your dev workflows to production in 2 steps with SkyPilot -->
 # Easily go from dev to prod in Airflow with SkyPilot
 
-In AI workflows, **the transition from development to production is not easy**. 
+In AI workflows, **the transition from development to production is hard**. 
 
 Workflow development happens ad-hoc, with a lot of interaction required 
 with the code and data. When moving this to an Airflow DAG in production, managing dependencies, environments and the 
