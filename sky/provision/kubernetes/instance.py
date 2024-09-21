@@ -600,9 +600,13 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 }
             }
 
-        # Doyoung: Add comments on what kind of taint is added to TPU nodes by GCP(google.com/tpu=present:NoSchedule)
-        # and explain what those are for. And explain why we need toleration at this point to ignore that taint.
-        if kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY in config.node_config['spec']['nodeSelector']:
+        # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
+        # This is to prevent from non-TPU workloads from being scheduled on TPU
+        # slice nodes. We need this toleration to allow the pod to be scheduled
+        # on TPU nodes.
+        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
+        tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+        if tpu_label in config.node_config['spec']['nodeSelector']:
             tpu_toleration = {
                 'key': 'google.com/tpu',
                 'operator': 'Equal',
@@ -617,12 +621,14 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         except kubernetes.api_exception() as e:
             error_msg = str(e)
             if 'Invalid resource requests for google.com/tpu.' in error_msg:
-                extra_msg = ('Verify if the cluster has a TPU slice with a '
-                             'topology matching the number of TPU(s) '
+                extra_msg = ('Verify if the cluster has a TPU slice node with '
+                             'a topology matching the number of TPU(s) '
                              'requested.')
                 raise config_lib.KubernetesError(
-                    _lack_resource_msg('TPU', pod_spec, details=error_msg, extra_msg=extra_msg)
-                )
+                    _lack_resource_msg('TPU',
+                                       pod_spec,
+                                       details=error_msg,
+                                       extra_msg=extra_msg))
             raise
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
