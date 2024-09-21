@@ -19,7 +19,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _get_policy_cls(policy: Optional[str]) -> Optional[policy_lib.AdminPolicy]:
-    """Get admin-defined policy."""
+    """Gets admin-defined policy."""
     if policy is None:
         return None
     try:
@@ -69,7 +69,7 @@ def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: bool = True,
 ) -> Union['dag_lib.Dag', Tuple['dag_lib.Dag', skypilot_config.NestedConfig]]:
-    """Apply user-defined policy to a DAG or a task.
+    """Applies user-defined policy to a DAG or a task.
 
     It mutates a Dag by applying user-defined policy and also update the
     global SkyPilot config if there is any changes made by the policy.

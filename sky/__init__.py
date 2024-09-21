@@ -190,6 +190,7 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # Admin Policy
     'UserRequest',
     'MutatedUserRequest',
     'AdminPolicy',
