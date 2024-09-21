@@ -97,7 +97,7 @@ def apply(
         else:
             return dag, skypilot_config.to_dict()
 
-    logger.info(f'Applying policy: {policy_cls}')
+    logger.info(f'Applying policy: {policy}')
     original_config = skypilot_config.to_dict()
     config = copy.deepcopy(original_config)
     mutated_dag = dag_lib.Dag()
