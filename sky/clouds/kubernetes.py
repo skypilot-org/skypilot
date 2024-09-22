@@ -114,12 +114,11 @@ class Kubernetes(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        allowed_contexts = skypilot_config.get_nested(('kubernetes', 'allowed_contexts'), None)
+        allowed_contexts = skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
             return cls._regions
-        regions = [
-            clouds.Region(context) for context in allowed_contexts
-        ]
+        regions = [clouds.Region(context) for context in allowed_contexts]
         if region is not None:
             regions = [r for r in regions if r.name == region]
         return regions
@@ -338,12 +337,14 @@ class Kubernetes(clouds.Cloud):
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
+        resource_context = None
         if region.name != self._SINGLETON_REGION:
-            curr_context = region.name
+            resource_context = region.name
         else:
-            curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        if curr_context is not None:
-            deploy_vars['k8s_context'] = curr_context
+            resource_context = kubernetes_utils.get_current_kube_config_context_name(
+            )
+        if resource_context is not None:
+            deploy_vars['k8s_context'] = resource_context
 
         return deploy_vars
 
