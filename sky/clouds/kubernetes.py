@@ -341,8 +341,8 @@ class Kubernetes(clouds.Cloud):
         if region.name != self._SINGLETON_REGION:
             resource_context = region.name
         else:
-            resource_context = kubernetes_utils.get_current_kube_config_context_name(
-            )
+            resource_context = (
+                kubernetes_utils.get_current_kube_config_context_name())
         if resource_context is not None:
             deploy_vars['k8s_context'] = resource_context
 
@@ -442,6 +442,8 @@ class Kubernetes(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # TODO(zhwu): or not in allowed_contexts
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
+        if all_contexts is None:
+            all_contexts = []
         if region != self._SINGLETON_REGION and region not in all_contexts:
             raise ValueError(
                 'Kubernetes only supports context names as regions. '
