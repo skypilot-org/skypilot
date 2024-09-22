@@ -120,7 +120,8 @@ def apply(
         mutated_dag.graph.add_edge(mutated_dag.tasks[u_idx],
                                    mutated_dag.tasks[v_idx])
 
-    if (update_skypilot_config_for_current_request and original_config != mutated_config):
+    if (update_skypilot_config_for_current_request and
+            original_config != mutated_config):
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 mode='w',
