@@ -166,10 +166,11 @@ def _execute(
     if cluster_name is not None:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_exists = cluster_record is not None
-        cluster_running = cluster_exists and cluster_record['status'] in [
-            status_lib.ClusterStatus.UP,
-            status_lib.ClusterStatus.INIT,
-        ]
+        cluster_running = (cluster_record is not None and
+                           cluster_record['status'] in [
+                               status_lib.ClusterStatus.UP,
+                               status_lib.ClusterStatus.INIT,
+                           ])
 
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,

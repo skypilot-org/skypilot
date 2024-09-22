@@ -137,5 +137,4 @@ def apply(
             importlib.reload(skypilot_config)
 
     logger.debug(f'Mutated user request: {mutated_user_request}')
-    logger.info(f'Applied policy: {policy}')
     return mutated_dag, mutated_config

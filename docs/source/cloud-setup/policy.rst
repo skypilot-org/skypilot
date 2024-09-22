@@ -129,8 +129,11 @@ Reject All
 .. code-block:: python
 
     class RejectAllPolicy(sky.AdminPolicy):
+        """Example policy: rejects all user requests."""
+
         @classmethod
         def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+            """Rejects all user requests."""
             raise RuntimeError("This policy rejects all user requests.")
 
 .. code-block:: yaml
@@ -144,6 +147,8 @@ Add Kubernetes Labels for all Tasks
 .. code-block:: python
 
     class AddLabelsPolicy(sky.AdminPolicy):
+        """Example policy: adds a kubernetes label for skypilot_config."""
+
         @classmethod
         def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:            
             config = user_request.skypilot_config
@@ -163,6 +168,8 @@ Always Disable Public IP for AWS Tasks
 .. code-block:: python
 
     class DisablePublicIPPolicy(sky.AdminPolicy):
+        """Example policy: disables public IP for all tasks."""
+
         @classmethod
         def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
             config = user_request.skypilot_config
@@ -185,18 +192,22 @@ Enforce Autostop for all Tasks
 .. code-block:: python
 
     class EnforceAutostopPolicy(sky.AdminPolicy):
+        """Example policy: enforce autostop for all tasks."""
+
         @classmethod
-        def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            operation_args = user_request.operation_args
-            # Operation args can be None for jobs and services, for which we
-            # don't need to enforce autostop, as they are already managed.
-            if operation_args is None:
+        def validate_and_mutate(
+                cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+            """Enforces autostop for all tasks."""
+            request_options = user_request.request_options
+            # Request options is None when a task is executed with `jobs launch` or
+            # `sky serve up`.
+            if request_options is None:
                 return sky.MutatedUserRequest(
                     task=user_request.task,
                     skypilot_config=user_request.skypilot_config)
-            idle_minutes_to_autostop = operation_args.idle_minutes_to_autostop
+            idle_minutes_to_autostop = request_options.idle_minutes_to_autostop
             # Enforce autostop/down to be set for all tasks for new clusters.
-            if not operation_args.cluster_exists and (
+            if not request_options.cluster_running and (
                     idle_minutes_to_autostop is None or
                     idle_minutes_to_autostop < 0):
                 raise RuntimeError('Autostop/down must be set for all newly '
@@ -204,6 +215,7 @@ Enforce Autostop for all Tasks
             return sky.MutatedUserRequest(
                 task=user_request.task,
                 skypilot_config=user_request.skypilot_config)
+
 
 .. code-block:: yaml
 
