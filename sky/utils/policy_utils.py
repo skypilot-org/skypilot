@@ -1,4 +1,4 @@
-"""Customize policy by users."""
+"""Admin policy utils."""
 import copy
 import importlib
 import os
