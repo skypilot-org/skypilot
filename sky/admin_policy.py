@@ -10,8 +10,18 @@ if typing.TYPE_CHECKING:
 
 @dataclasses.dataclass
 class RequestOptions:
+    """Request options for admin policy.
+
+    Args:
+        cluster_name: Name of the cluster to create/reuse.
+        cluster_running: Whether the cluster is running.
+        idle_minutes_to_autostop: If provided, the cluster will be set to
+            autostop after this many minutes of idleness.
+        down: Whether to down the cluster.
+        dryrun: Whether to dryrun the request.
+    """
     cluster_name: Optional[str]
-    cluster_exists: bool
+    cluster_running: bool
     idle_minutes_to_autostop: Optional[int]
     down: bool
     dryrun: bool

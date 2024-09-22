@@ -66,7 +66,7 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
                 skypilot_config=user_request.skypilot_config)
         idle_minutes_to_autostop = request_options.idle_minutes_to_autostop
         # Enforce autostop/down to be set for all tasks for new clusters.
-        if not request_options.cluster_exists and (
+        if not request_options.cluster_running and (
                 idle_minutes_to_autostop is None or
                 idle_minutes_to_autostop < 0):
             raise RuntimeError('Autostop/down must be set for all newly '
