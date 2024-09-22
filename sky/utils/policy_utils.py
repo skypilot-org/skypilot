@@ -115,8 +115,10 @@ def apply(
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(
-                    f'User request rejected by policy {policy}, due to error: '
-                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                    f'User request rejected by policy {policy!r}, due to '
+                    'error: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
         if mutated_config is None:
             mutated_config = mutated_user_request.skypilot_config
         else:
