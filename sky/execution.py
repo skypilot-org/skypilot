@@ -9,18 +9,18 @@ from typing import List, Optional, Tuple, Union
 import colorama
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import global_user_state
 from sky import optimizer
-from sky import policy
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
-from sky.utils import policy_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -170,9 +170,9 @@ def _execute(
         # unlike `gpus`.
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag = policy_utils.apply(
+    dag, _ = admin_policy_utils.apply(
         dag,
-        operation_args=policy.OperationArgs(
+        operation_args=admin_policy.OperationArgs(
             cluster_name=cluster_name,
             cluster_exists=cluster_exists,
             idle_minutes_to_autostop=idle_minutes_to_autostop,

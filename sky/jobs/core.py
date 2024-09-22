@@ -18,10 +18,10 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import policy_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -57,8 +57,8 @@ def launch(
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     # TODO(zhwu): We should only apply policy to dag and save the config file,
     # instead of having the config file actually being used.
-    dag, mutated_user_config = policy_utils.apply(dag,
-                                                  apply_skypilot_config=False)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, apply_skypilot_config=False)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '

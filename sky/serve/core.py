@@ -17,9 +17,9 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.utils import policy_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -125,8 +125,8 @@ def up(
 
     _validate_service_task(task)
 
-    dag, mutated_user_config = policy_utils.apply(task,
-                                                  apply_skypilot_config=False)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        task, apply_skypilot_config=False)
     task = dag.tasks[0]
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,

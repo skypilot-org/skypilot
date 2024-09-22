@@ -3,14 +3,13 @@ import copy
 import importlib
 import os
 import tempfile
-import typing
-from typing import Literal, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import colorama
 
+from sky import admin_policy
 from sky import dag as dag_lib
 from sky import exceptions
-from sky import policy as policy_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
@@ -20,7 +19,8 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_policy_cls(policy: Optional[str]) -> Optional[policy_lib.AdminPolicy]:
+def _get_policy_cls(
+        policy: Optional[str]) -> Optional[admin_policy.AdminPolicy]:
     """Gets admin-defined policy."""
     if policy is None:
         return None
@@ -43,37 +43,19 @@ def _get_policy_cls(policy: Optional[str]) -> Optional[policy_lib.AdminPolicy]:
                 'Please check with your policy admin for details.') from e
 
     # Check if the module implements the AdminPolicy interface.
-    if not issubclass(policy_cls, policy_lib.AdminPolicy):
+    if not issubclass(policy_cls, admin_policy.AdminPolicy):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'Policy module {policy} does not implement the AdminPolicy '
+                f'Policy class {policy!r} does not implement the AdminPolicy '
                 'interface. Please check with your policy admin for details.')
     return policy_cls
-
-
-@typing.overload
-def apply(
-    entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
-    apply_skypilot_config: Literal[True] = True,
-    operation_args: Optional[policy_lib.OperationArgs] = None,
-) -> 'dag_lib.Dag':
-    ...
-
-
-@typing.overload
-def apply(
-    entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
-    apply_skypilot_config: Literal[False],
-    operation_args: Optional[policy_lib.OperationArgs] = None,
-) -> Tuple['dag_lib.Dag', skypilot_config.NestedConfig]:
-    ...
 
 
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     apply_skypilot_config: bool = True,
-    operation_args: Optional[policy_lib.OperationArgs] = None,
-) -> Union['dag_lib.Dag', Tuple['dag_lib.Dag', skypilot_config.NestedConfig]]:
+    operation_args: Optional[admin_policy.OperationArgs] = None,
+) -> Tuple['dag_lib.Dag', skypilot_config.NestedConfig]:
     """Applies user-defined policy to a DAG or a task.
 
     It mutates a Dag by applying user-defined policy and also updates the
@@ -83,11 +65,11 @@ def apply(
         dag: The dag to be mutated by the policy.
         apply_skypilot_config: Whether to apply the skypilot config changes to
             the global skypilot config.
+        operation_args: Additional arguments user passed in SkyPilot operations.
 
     Returns:
-        The mutated dag or task.
-        Or, a tuple of the mutated dag and path to the mutated skypilot
-        config, if apply_skypilot_config is set to False.
+        - The mutated dag or task.
+        - The mutated skypilot config.
     """
     if isinstance(entrypoint, task_lib.Task):
         dag = dag_lib.Dag()
@@ -98,10 +80,7 @@ def apply(
     policy = skypilot_config.get_nested(('admin_policy',), None)
     policy_cls = _get_policy_cls(policy)
     if policy_cls is None:
-        if apply_skypilot_config:
-            return dag
-        else:
-            return dag, skypilot_config.to_dict()
+        return dag, skypilot_config.to_dict()
 
     logger.info(f'Applying policy: {policy}')
     original_config = skypilot_config.to_dict()
@@ -111,7 +90,7 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = policy_lib.UserRequest(task, config, operation_args)
+        user_request = admin_policy.UserRequest(task, config, operation_args)
         try:
             mutated_user_request = policy_cls.validate_and_mutate(user_request)
         except Exception as e:  # pylint: disable=broad-except
@@ -156,7 +135,4 @@ def apply(
             importlib.reload(skypilot_config)
 
     logger.debug(f'Mutated user request: {mutated_user_request}')
-    if apply_skypilot_config:
-        return mutated_dag
-    else:
-        return mutated_dag, mutated_config
+    return mutated_dag, mutated_config

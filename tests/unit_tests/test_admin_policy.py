@@ -1,7 +1,7 @@
 import importlib
 import os
 import sys
-from typing import Optional
+from typing import Optional, Tuple
 
 import pytest
 
@@ -9,7 +9,7 @@ import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.utils import policy_utils
+from sky.utils import admin_policy_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -24,12 +24,13 @@ def add_example_policy_paths():
 
 
 def _load_task_and_apply_policy(
-        config_path: str,
-        idle_minutes_to_autostop: Optional[int] = None) -> sky.Dag:
+    config_path: str,
+    idle_minutes_to_autostop: Optional[int] = None
+) -> Tuple[sky.Dag, skypilot_config.NestedConfig]:
     os.environ['SKYPILOT_CONFIG'] = config_path
     importlib.reload(skypilot_config)
     task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-    return policy_utils.apply(
+    return admin_policy_utils.apply(
         task,
         operation_args=sky.OperationArgs(
             cluster_name='test',
@@ -41,7 +42,7 @@ def _load_task_and_apply_policy(
 
 
 def test_task_level_changes_policy(add_example_policy_paths):
-    dag = _load_task_and_apply_policy(
+    dag, _ = _load_task_and_apply_policy(
         os.path.join(POLICY_PATH, 'task_label_config.yaml'))
     assert 'local_user' in list(dag.tasks[0].resources)[0].labels
 
