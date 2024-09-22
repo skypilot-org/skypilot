@@ -38,8 +38,15 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
+
+# The resource keys used by Kubernetes to track NVIDIA GPUs and Google TPUs on
+# nodes. These keys are typically used in the node's status.allocatable 
+# or status.capacity fields to indicate the available resources on the node.
+GPU_RESOURCE_KEY = 'nvidia.com/gpu'
+TPU_RESOURCE_KEY = 'google.com/tpu'
+
 NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '
-                       'nvidia.com/gpu resource is available on the nodes and '
+                       f'{GPU_RESOURCE_KEY} resource is available on the nodes and '
                        'the node labels for identifying GPUs '
                        '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
@@ -388,7 +395,7 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     GPUs or the nvidia GPU operator and/or device drivers are not installed.
 
     Returns:
-        bool: True if the cluster has nvidia.com/gpu or google.com/tpu
+        bool: True if the cluster has GPU_RESOURCE_KEY or TPU_RESOURCE_KEY
             resource, False otherwise.
     """
     # Get the set of resources across all nodes
@@ -396,8 +403,8 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     nodes = get_kubernetes_nodes()
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_gpu = ('nvidia.com/gpu' in cluster_resources or
-               'google.com/tpu' in cluster_resources)
+    has_gpu = (GPU_RESOURCE_KEY in cluster_resources or
+               TPU_RESOURCE_KEY in cluster_resources)
 
     return has_gpu, cluster_resources
 
@@ -633,12 +640,12 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
             raise exceptions.ResourcesUnavailableError(
-                'Could not detect GPU/TPU resources (`nvidia.com/gpu` or '
-                '`google.com/tpu`) in Kubernetes cluster. If this cluster '
+                f'Could not detect GPU/TPU resources (`{GPU_RESOURCE_KEY}` or '
+                f'`{TPU_RESOURCE_KEY}`) in Kubernetes cluster. If this cluster '
                 'contains GPUs, please ensure GPU drivers are installed on '
                 'the node. Check if the GPUs are setup correctly by running '
-                '`kubectl describe nodes` and looking for the nvidia.com/gpu '
-                'or google.com/tpu resource. Please refer to the documentation'
+                f'`kubectl describe nodes` and looking for the {GPU_RESOURCE_KEY!r} '
+                f'or {TPU_RESOURCE_KEY!r} resource. Please refer to the documentation'
                 f'on how to set up GPUs.{suffix}')
 
 
@@ -1826,12 +1833,12 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
                 accelerator_name = None
 
             accelerator_count = 0
-            if 'nvidia.com/gpu' in node.status.allocatable:
+            if GPU_RESOURCE_KEY in node.status.allocatable:
                 accelerator_count = int(
-                    node.status.allocatable['nvidia.com/gpu'])
-            elif 'google.com/tpu' in node.status.allocatable:
+                    node.status.allocatable[GPU_RESOURCE_KEY])
+            elif TPU_RESOURCE_KEY in node.status.allocatable:
                 accelerator_count = int(
-                    node.status.allocatable['google.com/tpu'])
+                    node.status.allocatable[TPU_RESOURCE_KEY])
 
             for pod in pods:
                 # Get all the pods running on the node
@@ -1841,14 +1848,14 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
                     # GPU requests
                     for container in pod.spec.containers:
                         if container.resources.requests:
-                            if 'nvidia.com/gpu' in container.resources.requests:
+                            if GPU_RESOURCE_KEY in container.resources.requests:
                                 allocated_qty += int(
                                     container.resources.requests.get(
-                                        'nvidia.com/gpu', 0))
-                            elif 'google.com/tpu' in container.resources.requests:
+                                        GPU_RESOURCE_KEY, 0))
+                            elif TPU_RESOURCE_KEY in container.resources.requests:
                                 allocated_qty += int(
                                     container.resources.requests.get(
-                                        'google.com/tpu', 0))                            
+                                        TPU_RESOURCE_KEY, 0))                            
 
             accelerators_available = accelerator_count - allocated_qty
 

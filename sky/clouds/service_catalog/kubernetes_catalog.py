@@ -108,12 +108,12 @@ def list_accelerators_realtime(
                     continue
 
                 accelerator_count = 0
-                if 'nvidia.com/gpu' in node.status.allocatable:
+                if kubernetes_utils.GPU_RESOURCE_KEY in node.status.allocatable:
                     accelerator_count = int(
-                        node.status.allocatable['nvidia.com/gpu'])
-                elif 'google.com/tpu' in node.status.allocatable:
+                        node.status.allocatable[kubernetes_utils.GPU_RESOURCE_KEY])
+                elif kubernetes_utils.TPU_RESOURCE_KEY in node.status.allocatable:
                     accelerator_count = int(
-                        node.status.allocatable['google.com/tpu'])
+                        node.status.allocatable[kubernetes_utils.TPU_RESOURCE_KEY])
 
                 # Generate the GPU quantities for the accelerators
                 if accelerator_name and accelerator_count > 0:
@@ -130,10 +130,10 @@ def list_accelerators_realtime(
                             if container.resources.requests:
                                 allocated_qty += int(
                                     container.resources.requests.get(
-                                        'nvidia.com/gpu', 0))
+                                        kubernetes_utils.GPU_RESOURCE_KEY, 0))
                                 allocated_qty += int(
                                     container.resources.requests.get(
-                                        'google.com/tpu', 0))
+                                        kubernetes_utils.TPU_RESOURCE_KEY, 0))
 
                 accelerators_available = accelerator_count - allocated_qty
 
