@@ -441,6 +441,16 @@ setup_commands:
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
+  {% if tpu_requested %}
+  # The /tmp/tpu_logs directory is where TPU-related logs, specifically logs
+  # from the TPU runtime (such as the TPU driver), are written. These logs
+  # capture important runtime information about the TPU execution, including
+  # any warnings, errors, or general activity of the TPU driver.
+  # By default, the /tmp/tpu_logs directory is created with 755 permissions,
+  # and user of the provisioned pod is not necessarily a root. Hence, we need
+  # to update the write permission so the logs can be properly written.
+  - sudo chmod 777 /tmp/tpu_logs;
+  {% endif %}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
