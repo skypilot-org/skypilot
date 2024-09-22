@@ -1,4 +1,5 @@
 """Customize policy by users."""
+import colorama
 import copy
 import importlib
 import os
@@ -115,8 +116,8 @@ def apply(
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.UserRequestRejectedByPolicy(
-                    f'User request rejected by policy {policy!r}, due to '
-                    'error: '
+                    f'{colorama.Fore.RED}User request rejected by policy '
+                    f'{policy!r}{colorama.Fore.RESET}: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
         if mutated_config is None:
