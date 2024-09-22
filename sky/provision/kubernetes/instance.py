@@ -620,6 +620,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 namespace, pod_spec)
         except kubernetes.api_exception() as e:
             error_msg = str(e)
+            # Unlike other errors from resource lackage on CPU/GPU/Memory, TPU
+            # lackage error is raised when pod is attemtped to be created.
             if 'Invalid resource requests for google.com/tpu.' in error_msg:
                 extra_msg = ('Verify if the cluster has a TPU slice node with '
                              'a topology matching the number of TPU(s) '
