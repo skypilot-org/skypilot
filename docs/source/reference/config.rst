@@ -87,7 +87,7 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
-  # Custom policy to be applied to all tasks.
+  # Custom admin policy to be applied to all tasks.
   #
   # The policy class to be applied and mutate all tasks, which can be used to
   # enforce certain policies on all tasks.
