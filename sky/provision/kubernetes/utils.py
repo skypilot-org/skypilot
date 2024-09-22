@@ -773,6 +773,19 @@ def get_current_kube_config_context_name() -> Optional[str]:
     except k8s.config.config_exception.ConfigException:
         return None
 
+def get_all_kube_config_context_names() -> Optional[List[str]]:
+    """Get all kubernetes context names from the kubeconfig file
+
+    Returns:
+        List[str] | None: The list of kubernetes context names if it exists,
+            None otherwise
+    """
+    k8s = kubernetes.kubernetes
+    try:
+        all_contexts, _ = k8s.config.list_kube_config_contexts()
+        return [context['name'] for context in all_contexts]
+    except k8s.config.config_exception.ConfigException:
+        return None
 
 def get_current_kube_config_context_namespace() -> str:
     """Get the current kubernetes context namespace from the kubeconfig file

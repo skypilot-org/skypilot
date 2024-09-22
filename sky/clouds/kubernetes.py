@@ -117,10 +117,12 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_nested(('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
             return cls._regions
-        else:
-            return [
-                clouds.Region(context) for context in allowed_contexts
-            ]
+        regions = [
+            clouds.Region(context) for context in allowed_contexts
+        ]
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        return regions
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -202,9 +204,9 @@ class Kubernetes(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[clouds.Zone]]]:
-        del num_nodes, region, instance_type, accelerators, use_spot  # Unused.
-        for r in cls.regions():
-            yield r.zones
+        # Always yield None for zones, since Kubernetes does not have zones, and
+        # we should allow any region get to this point.
+        yield None
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -437,10 +439,12 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region != self._SINGLETON_REGION:
+        # TODO(zhwu): or not in allowed_contexts
+        all_contexts = kubernetes_utils.get_all_kube_config_context_names()
+        if region != self._SINGLETON_REGION and region not in all_contexts:
             raise ValueError(
-                'Kubernetes support does not support setting region.'
-                ' Cluster used is determined by the kubeconfig.')
+                'Kubernetes only supports context names as regions. '
+                f'Allowed contexts: {all_contexts}')
         if zone is not None:
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')
