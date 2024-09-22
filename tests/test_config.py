@@ -22,7 +22,7 @@ PROVISION_TIMEOUT = 600
 
 
 def _reload_config() -> None:
-    skypilot_config._dict = skypilot_config.NestedConfig()
+    skypilot_config._dict = skypilot_config.Config()
     skypilot_config._loaded_config_path = None
     skypilot_config._try_load_config()
 
@@ -101,7 +101,7 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
 
 def test_nested_config(monkeypatch) -> None:
     """Test that the nested config works."""
-    config = skypilot_config.NestedConfig()
+    config = skypilot_config.Config()
     config.set_nested(('aws', 'ssh_proxy_command'), 'value')
     assert config == {'aws': {'ssh_proxy_command': 'value'}}
 

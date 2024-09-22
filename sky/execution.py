@@ -172,7 +172,7 @@ def _execute(
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     dag, _ = admin_policy_utils.apply(
         dag,
-        operation_args=admin_policy.OperationArgs(
+        operation_args=admin_policy.RequestOptions(
             cluster_name=cluster_name,
             cluster_exists=cluster_exists,
             idle_minutes_to_autostop=idle_minutes_to_autostop,

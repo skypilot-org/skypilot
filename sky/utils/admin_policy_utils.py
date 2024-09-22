@@ -53,13 +53,14 @@ def _get_policy_cls(
 
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
-    apply_skypilot_config: bool = True,
-    operation_args: Optional[admin_policy.OperationArgs] = None,
-) -> Tuple['dag_lib.Dag', skypilot_config.NestedConfig]:
+    update_skypilot_config_for_current_request: bool = True,
+    operation_args: Optional[admin_policy.RequestOptions] = None,
+) -> Tuple['dag_lib.Dag', skypilot_config.Config]:
     """Applies an admin policy (if registered) to a DAG or a task.
 
-    It mutates a Dag by applying user-defined policy and also updates the
-    global SkyPilot config if there is any changes made by the policy.
+    It mutates a Dag by applying any registered admin policy and also
+    potentially updates (controlled by `apply_skypilot_config`) the global
+    SkyPilot config if there is any changes made by the policy.
 
     Args:
         dag: The dag to be mutated by the policy.
@@ -68,8 +69,8 @@ def apply(
         operation_args: Additional arguments user passed in SkyPilot operations.
 
     Returns:
-        - The mutated dag or task.
-        - The mutated skypilot config.
+        - The new copy of dag after applying the policy
+        - The new copy of skypilot config after applying the policy.
     """
     if isinstance(entrypoint, task_lib.Task):
         dag = dag_lib.Dag()
@@ -119,7 +120,7 @@ def apply(
         mutated_dag.graph.add_edge(mutated_dag.tasks[u_idx],
                                    mutated_dag.tasks[v_idx])
 
-    if apply_skypilot_config and original_config != mutated_config:
+    if (update_skypilot_config_for_current_request and original_config != mutated_config):
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 mode='w',

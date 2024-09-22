@@ -55,10 +55,8 @@ def launch(
     dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    # TODO(zhwu): We should only apply policy to dag and save the config file,
-    # instead of having the config file actually being used.
     dag, mutated_user_config = admin_policy_utils.apply(
-        dag, apply_skypilot_config=False)
+        dag, update_skypilot_config_for_current_request=False)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '

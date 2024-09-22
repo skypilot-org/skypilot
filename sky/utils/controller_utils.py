@@ -44,8 +44,11 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
 
-# The placeholder for the local skypilot config path in file mounts.
-_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX_IDENTIFIER = (
+# The suffix for local skypilot config path for a job/service in file mounts
+# that tells the controller logic to update the config with specific settings,
+# e.g., removing the ssh_proxy_command when a job/service is launched in a same
+# cloud as controller.
+_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
 
 
@@ -356,11 +359,13 @@ def shared_controller_vars_to_fill(
     if not local_user_config:
         local_user_config_path = None
     else:
+        # Remove admin_policy from local_user_config so that it is not applied
+        # again on the controller. This is required since admin_policy is not
+        # installed on the controller.
         local_user_config.pop('admin_policy', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
-                suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX_IDENTIFIER
-        ) as temp_file:
+                suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
             common_utils.dump_yaml(temp_file.name, dict(**local_user_config))
         local_user_config_path = temp_file.name
 
@@ -495,7 +500,7 @@ def get_controller_resources(
 
 def _setup_proxy_command_on_controller(
         controller_launched_cloud: 'clouds.Cloud',
-        user_config: Dict[str, Any]) -> skypilot_config.NestedConfig:
+        user_config: Dict[str, Any]) -> skypilot_config.Config:
     """Sets up proxy command on the controller.
 
     This function should be called on the controller (remote cluster), which
@@ -529,7 +534,7 @@ def _setup_proxy_command_on_controller(
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    config = skypilot_config.NestedConfig.from_dict(user_config)
+    config = skypilot_config.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
     ssh_proxy_command = config.get_nested(proxy_command_key, None)
@@ -560,7 +565,7 @@ def replace_skypilot_config_path_in_file_mounts(
         if local_path is None:
             del file_mounts[remote_path]
             continue
-        if _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX_IDENTIFIER in local_path:
+        if local_path.endswith(_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX):
             with tempfile.NamedTemporaryFile('w', delete=False) as f:
                 user_config = common_utils.read_yaml(local_path)
                 config = _setup_proxy_command_on_controller(cloud, user_config)
@@ -568,9 +573,8 @@ def replace_skypilot_config_path_in_file_mounts(
                 file_mounts[remote_path] = f.name
                 replaced = True
     if replaced:
-        logger.debug(
-            f'Replaced {_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX_IDENTIFIER} '
-            f'with the real path in file mounts: {file_mounts}')
+        logger.debug(f'Replaced {_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX} '
+                     f'with the real path in file mounts: {file_mounts}')
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',

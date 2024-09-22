@@ -26,13 +26,13 @@ def add_example_policy_paths():
 def _load_task_and_apply_policy(
     config_path: str,
     idle_minutes_to_autostop: Optional[int] = None
-) -> Tuple[sky.Dag, skypilot_config.NestedConfig]:
+) -> Tuple[sky.Dag, skypilot_config.Config]:
     os.environ['SKYPILOT_CONFIG'] = config_path
     importlib.reload(skypilot_config)
     task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
     return admin_policy_utils.apply(
         task,
-        operation_args=sky.OperationArgs(
+        operation_args=sky.RequestOptions(
             cluster_name='test',
             cluster_exists=False,
             idle_minutes_to_autostop=idle_minutes_to_autostop,

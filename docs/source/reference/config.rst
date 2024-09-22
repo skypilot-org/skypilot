@@ -87,10 +87,12 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
-  # Custom policy to be applied to all tasks.
+  # Custom policy to be applied to all tasks. (optional).
   #
-  # The policy class to be applied and mutate all tasks, which can be used to
-  # enforce certain policies on all tasks.
+  # The policy class to be applied to all tasks, which can be used to validate
+  # and mutate user requests.
+  # This is useful for enforcing certain policies on all tasks, e.g.,
+  # add custom labels; enforce certain resource limits; etc.
   #
   # The policy class should implement the sky.AdminPolicy interface.
   admin_policy: my_package.SkyPilotPolicyV1

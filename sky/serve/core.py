@@ -126,7 +126,7 @@ def up(
     _validate_service_task(task)
 
     dag, mutated_user_config = admin_policy_utils.apply(
-        task, apply_skypilot_config=False)
+        task, update_skypilot_config_for_current_request=False)
     task = dag.tasks[0]
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,

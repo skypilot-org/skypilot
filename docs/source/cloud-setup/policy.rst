@@ -63,13 +63,24 @@ policy should follow the following interface:
 .. code-block:: python
 
     class UserRequest:
+        """User request to the policy.
+
+        It is a combination of a task, request options, and the global skypilot
+        config used to run a task, including `sky launch / exec / jobs launch / ..`.
+
+        Args:
+            task: User specified task.
+            skypilot_config: Global skypilot config to be used in this request.
+            request_options: Request options. It can be None for jobs and
+                services.
+        """
         task: sky.Task
-        skypilot_config: sky.NestedConfig
-        operation_args: sky.OperationArgs
+        skypilot_config: sky.Config
+        operation_args: sky.RequestOptions
 
     class MutatedUserRequest:
         task: sky.Task
-        skypilot_config: sky.NestedConfig
+        skypilot_config: sky.Config
 
 That said, an ``AdminPolicy`` can mutate any fields of a user request, including
 the :ref:`task <yaml-spec>` and the :ref:`global skypilot config <config-yaml>`,
@@ -77,6 +88,36 @@ giving admins a lot of flexibility to control user's SkyPilot usage.
 
 An ``AdminPolicy`` is responsible to both validate and mutate user requests. If
 a request should be rejected, the policy should raise an exception.
+
+The ``sky.Config`` and ``sky.RequestOptions`` are defined as follows:
+
+.. code-block:: python
+
+    class Config:
+        def get_nested(self,
+                       keys: Tuple[str, ...],
+                       default_value: Any,
+                       override_configs: Optional[Dict[str, Any]] = None,
+            ) -> Any:
+            """Gets a value with nested keys.
+            
+            If override_configs is provided, it value will be merged on top of
+            the current config.
+            """
+            ...
+
+        def set_nested(self, keys: Tuple[str, ...], value: Any) -> None:
+            """Sets a value with nested keys."""
+            ...
+
+    @dataclass
+    class RequestOptions:
+        """Options a user specified in their request to SkyPilot."""
+        cluster_name: Optional[str]
+        cluster_exists: bool
+        idle_minutes_to_autostop: Optional[int]
+        down: bool
+        dryrun: bool
 
 
 Example Policies    

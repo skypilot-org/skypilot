@@ -289,5 +289,5 @@ class PortDoesNotExistError(Exception):
 
 
 class UserRequestRejectedByPolicy(Exception):
-    """Raised when a user request is rejected by policy."""
+    """Raised when a user request is rejected by an admin policy."""
     pass

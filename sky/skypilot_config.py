@@ -81,8 +81,8 @@ ENV_VAR_SKYPILOT_CONFIG = 'SKYPILOT_CONFIG'
 CONFIG_PATH = '~/.sky/config.yaml'
 
 
-class NestedConfig(Dict[str, Any]):
-    """A nested dictionary that allows for setting and getting values."""
+class Config(Dict[str, Any]):
+    """SkyPilot config that supports setting/getting values with nested keys."""
 
     def get_nested(self,
                    keys: Tuple[str, ...],
@@ -108,7 +108,7 @@ class NestedConfig(Dict[str, Any]):
         return _get_nested(config, keys, default_value)
 
     def set_nested(self, keys: Tuple[str, ...], value: Any) -> None:
-        """Returns a deep-copied config with the nested key set to value.
+        """In-place sets a nested key to value.
 
         Like get_nested(), if any key is not found, this will not raise an
         error.
@@ -122,14 +122,14 @@ class NestedConfig(Dict[str, Any]):
         _recursive_update(self, override)
 
     @classmethod
-    def from_dict(cls, config: Optional[Dict[str, Any]]) -> 'NestedConfig':
+    def from_dict(cls, config: Optional[Dict[str, Any]]) -> 'Config':
         if config is None:
             return cls()
         return cls(**config)
 
 
 # The loaded config.
-_dict = NestedConfig()
+_dict = Config()
 _loaded_config_path: Optional[str] = None
 
 
@@ -182,8 +182,8 @@ def get_nested(keys: Tuple[str, ...],
     return _dict.get_nested(keys, default_value, override_configs)
 
 
-def _recursive_update(base_config: NestedConfig,
-                      override_config: Dict[str, Any]) -> NestedConfig:
+def _recursive_update(base_config: Config,
+                      override_config: Dict[str, Any]) -> Config:
     """Recursively updates base configuration with override configuration"""
     for key, value in override_config.items():
         if (isinstance(value, dict) and key in base_config and
@@ -204,7 +204,7 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
     return dict(**copied_dict)
 
 
-def to_dict() -> NestedConfig:
+def to_dict() -> Config:
     """Returns a deep-copied version of the current config."""
     return copy.deepcopy(_dict)
 
@@ -228,7 +228,7 @@ def _try_load_config() -> None:
         logger.debug(f'Using config path: {config_path}')
         try:
             config = common_utils.read_yaml(config_path)
-            _dict = NestedConfig.from_dict(config)
+            _dict = Config.from_dict(config)
             _loaded_config_path = config_path
             logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
