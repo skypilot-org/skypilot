@@ -1,11 +1,12 @@
 """Customize policy by users."""
-import colorama
 import copy
 import importlib
 import os
 import tempfile
 import typing
 from typing import Literal, Optional, Tuple, Union
+
+import colorama
 
 from sky import dag as dag_lib
 from sky import exceptions
