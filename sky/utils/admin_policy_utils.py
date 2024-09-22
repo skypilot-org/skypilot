@@ -1,4 +1,4 @@
-"""Customize policy by users."""
+"""Admin policy utils."""
 import copy
 import importlib
 import os
@@ -56,7 +56,7 @@ def apply(
     apply_skypilot_config: bool = True,
     operation_args: Optional[admin_policy.OperationArgs] = None,
 ) -> Tuple['dag_lib.Dag', skypilot_config.NestedConfig]:
-    """Applies user-defined policy to a DAG or a task.
+    """Applies an admin policy (if registered) to a DAG or a task.
 
     It mutates a Dag by applying user-defined policy and also updates the
     global SkyPilot config if there is any changes made by the policy.
