@@ -1,4 +1,4 @@
-"""Example module for SkyPilot admin policies."""
+"""Example admin policy module and prebuilt policies."""
 
 from example_policy.skypilot_policy import ConfigLabelPolicy
 from example_policy.skypilot_policy import EnforceAutostopPolicy
