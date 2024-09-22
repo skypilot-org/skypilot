@@ -995,31 +995,40 @@ class Storage(object):
         TODO: WARRICK HE
         Compresses everything in source and uploads that, specific to local->bucket
         """
-        zip_filename = os.getcwd()+"/skypilot-source-files.zip" #can change name later
+        zip_filepath = os.path.join(os.getcwd(),f'{store.name}-compressed')
+        zip_filename = os.path.join(zip_filepath,f'skypilot-filemounts.zip') #can change name later
         filepaths = self.source
         if type(self.source) == str:
             filepaths = [self.source]
         try:
-            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if not os.path.exists(zip_filepath):
+                os.mkdir(zip_filepath)
+            with zipfile.ZipFile(os.path.join(zip_filepath,zip_filename), 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for filepath in filepaths:
-                    if os.path.isdir(filepath):
+                    logger.info(f"Filepath: {filepath}")
+                    if os.path.isdir(os.path.expanduser(filepath)):
                         for root, dirs, files in os.walk(filepath):
                             for file in files:
+                                if file == "skypilot-filemounts.zip":
+                                    continue
                                 zipf.write(os.path.join(root, file), os.path.join(root.replace(filepath, '', 1), file) + '/')
                     else:
+                        logger.info(f"Filepath Zipping {filepath}")
                         zipf.write(filepath, filepath.replace(os.path.sep, '/'))
         except:
             if os.path.exists(zip_filename):
                 os.remove(zip_filename)
+                os.rmdir(zip_filepath)
             raise
         try:
-            # overwrite source temporarily!
-            store.source = zip_filename
+            # overwrite source with zip
+            store.source = zip_filepath
             store.upload()
             store.source = filepaths
         except exceptions.StorageUploadError:
             if os.path.exists(zip_filename):
                 os.remove(zip_filename)
+                os.rmdir(zip_filepath)
             self.source = filepaths
             logger.error(f'Could not upload {self.source!r} to store '
                          f'name {store.name!r}.')
@@ -1029,6 +1038,7 @@ class Storage(object):
             raise
         if os.path.exists(zip_filename):
             os.remove(zip_filename)
+            os.rmdir(zip_filepath)
         # Upload succeeded - update state
         if store.is_sky_managed:
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
