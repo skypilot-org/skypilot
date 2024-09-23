@@ -67,6 +67,35 @@ curl http://$ENDPOINT/v1/chat/completions \
   }' | jq -r '.choices[0].message.content'
 ```
 
+## Running Multimodal Qwen2-VL
+
+
+1. Start serving Qwen2-VL:
+
+```console
+sky launch -c qwen2-vl qwen2-vl-7b.yaml
+```
+2. Send a multimodalrequest to the endpoint for completion:
+```bash
+ENDPOINT=$(sky status --endpoint 8000 qwen2-vl)
+
+curl http://$ENDPOINT/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer token' \
+    --data '{
+        "model": "Qwen/Qwen2-VL-7B-Instruct",
+        "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type" : "text", "text": "Covert this logo to ASCII art"},
+                {"type": "image_url", "image_url": {"url": "https://pbs.twimg.com/profile_images/1584596138635632640/HWexMoH5_400x400.jpg"}}
+            ]
+        }],
+        "max_tokens": 1024
+    }' | jq .
+```
+
 ## Scale up the service with SkyServe
 
 1. With [SkyPilot Serving](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html), a serving library built on top of SkyPilot, scaling up the Qwen service is as simple as running:
