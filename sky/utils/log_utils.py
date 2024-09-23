@@ -129,6 +129,80 @@ class SkyLocalUpLineProcessor(LineProcessor):
         self.status_display.stop()
 
 
+class SkyRemoteUpLineProcessor(LineProcessor):
+    """A processor for deploy_remote_cluster.sh log lines."""
+
+    def __enter__(self):
+        status = rich_utils.safe_status('[bold cyan]Creating remote cluster')
+        self.status_display = status
+        self.status_display.start()
+
+    def process_line(self, log_line):
+        # Pre-flight checks
+        if 'SSH connection successful' in log_line:
+            logger.info(f'{colorama.Fore.GREEN}SSH connection established.'
+                        f'{colorama.Style.RESET_ALL}')
+
+        # Kubernetes installation steps
+        if 'Deploying Kubernetes on head node' in log_line:
+            self.status_display.update('[bold cyan]Creating remote cluster - '
+                                       'deploying Kubernetes on head node')
+        if 'K3s deployed on head node.' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}K3s successfully deployed on head node.'
+                f'{colorama.Style.RESET_ALL}')
+
+        # Worker nodes
+        if 'Deploying Kubernetes on worker node' in log_line:
+            self.status_display.update('[bold cyan]Creating remote cluster - '
+                                       'deploying Kubernetes on worker nodes')
+        if 'Kubernetes deployed on worker node' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}K3s successfully deployed on worker node.'
+                f'{colorama.Style.RESET_ALL}')
+
+        # Cluster configuration
+        if 'Configuring local kubectl to connect to the cluster...' in log_line:
+            self.status_display.update('[bold cyan]Creating remote cluster - '
+                                       'configuring local kubectl')
+        if 'kubectl configured to connect to the cluster.' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}kubectl configured for the remote cluster.'
+                f'{colorama.Style.RESET_ALL}')
+
+        # GPU operator installation
+        if 'GPU detected in the cluster. Installing Nvidia GPU Operator...' in log_line:
+            self.status_display.update('[bold cyan]Creating remote cluster - '
+                                       'installing Nvidia GPU Operator')
+        if 'GPU Operator installed.' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}Nvidia GPU Operator installed successfully.'
+                f'{colorama.Style.RESET_ALL}')
+
+        # Cleanup steps
+        if 'Cleaning up head node' in log_line:
+            self.status_display.update('[bold cyan]Cleaning up head node')
+        if 'Node cleaned up successfully' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}Head node cleaned up successfully.'
+                f'{colorama.Style.RESET_ALL}')
+        if 'Cleaning up node' in log_line:
+            self.status_display.update('[bold cyan]Cleaning up worker node')
+        if 'Node cleaned up successfully' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}Worker node cleaned up successfully.'
+                f'{colorama.Style.RESET_ALL}')
+
+        # Final status
+        if 'Cluster deployment completed.' in log_line:
+            logger.info(
+                f'{colorama.Fore.GREEN}Remote cluster deployment done.'
+                f'{colorama.Style.RESET_ALL}')
+
+    def __exit__(self, except_type, except_value, traceback):
+        del except_type, except_value, traceback  # unused
+        self.status_display.stop()
+
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""
     border = kwargs.pop('border', False)

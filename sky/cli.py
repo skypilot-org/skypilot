@@ -5072,15 +5072,7 @@ def local():
     pass
 
 
-@click.option('--gpus/--no-gpus',
-              default=True,
-              is_flag=True,
-              help='Launch cluster without GPU support even '
-              'if GPUs are detected on the host.')
-@local.command('up', cls=_DocumentedCodeCommand)
-@usage_lib.entrypoint
-def local_up(gpus: bool):
-    """Creates a local cluster."""
+def deploy_local_cluster(gpus: bool):
     cluster_created = False
 
     # Check if GPUs are available on the host
@@ -5204,6 +5196,110 @@ def local_up(gpus: bool):
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
             f'{gpu_hint}')
+
+
+def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
+    success = False
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                  'deploy_remote_cluster.sh')
+    # Get directory of script and run it from there
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+
+    if cleanup:
+        deploy_command = f'{up_script_path} {ip_file} {ssh_username} {ssh_key_path} --cleanup'
+    else:
+        deploy_command = f'{up_script_path} {ip_file} {ssh_username} {ssh_key_path}'
+
+    # Convert the command to a format suitable for subprocess
+    deploy_command = shlex.split(deploy_command)
+
+    # Setup logging paths
+    run_timestamp = backend_utils.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'local_up.log')
+    tail_cmd = 'tail -n100 -f ' + log_path
+
+    # Check if ~/.kube/config exists:
+    if os.path.exists(os.path.expanduser('~/.kube/config')):
+        click.echo('Found existing kube config. It will be backed up to ~/.kube/config.bak.')
+    style = colorama.Style
+    click.echo('To view detailed progress: '
+               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+    if cleanup:
+        msg_str = 'Cleaning up remote cluster...'
+    else:
+        msg_str = 'Deploying remote cluster...'
+    with rich_utils.safe_status(f'[bold cyan]{msg_str}'):
+        returncode, _, stderr = log_lib.run_with_log(
+            cmd=deploy_command,
+            log_path=log_path,
+            require_outputs=True,
+            stream_logs=False,
+            line_processor=log_utils.SkyRemoteUpLineProcessor(),
+            cwd=cwd)
+    if returncode == 0:
+        success = True
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to deploy remote cluster. '
+                f'Full log: {log_path}'
+                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
+
+    if success:
+        if cleanup:
+            click.echo(
+                f'\n{colorama.Fore.GREEN}Remote cluster cleaned up successfully.'
+                f'{style.RESET_ALL}')
+        else:
+            click.echo(
+                f'\n{colorama.Fore.GREEN}Remote cluster deployed '
+                f'successfully. {style.RESET_ALL}\nYou can now run tasks on '
+                'this cluster with sky launch.')
+
+
+@click.option('--gpus/--no-gpus',
+              default=True,
+              is_flag=True,
+              help='Launch cluster without GPU support even '
+                   'if GPUs are detected on the host.')
+@click.option('--ips', type=str, required=False,
+              help="Path to the file containing IP addresses of remote machines.")
+@click.option('--username', type=str, required=False,
+              help="SSH username for accessing remote machines.")
+@click.option('--key-path', type=str, required=False,
+              help="Path to the SSH private key.")
+@click.option('--cleanup', is_flag=True,
+              help="Clean up the remote cluster instead of deploying it.")
+@local.command('up', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_up(gpus: bool, ips: str, username: str, key_path: str, cleanup: bool):
+    """Creates a local or remote cluster."""
+
+    def _validate_args(ips, username, key_path, gpus, cleanup):
+        # If any of --ips, --username, or --key-path is specified, all must be specified
+        if bool(ips) or bool(username) or bool(key_path):
+            if not (ips and username and key_path):
+                raise click.BadParameter(
+                    "All --ips, --username, and --key-path must be specified together.")
+
+        # --cleanup can only be specified if --ips, --username, and --key-path are all provided
+        if cleanup and not (ips and username and key_path):
+            raise click.BadParameter(
+                "--cleanup can only be used with --ips, --username, and --key-path.")
+
+    _validate_args(ips, username, key_path, gpus, cleanup)
+
+    # If remote deployment arguments are specified, run remote cluster deployment
+    if ips and username and key_path:
+        # Convert ips and key_path to absolute paths
+        ips = os.path.abspath(ips)
+        key_path = os.path.abspath(key_path)
+        deploy_remote_cluster(ips, username, key_path, cleanup)
+    else:
+        # Run local deployment if no remote args are specified
+        deploy_local_cluster(gpus)
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
