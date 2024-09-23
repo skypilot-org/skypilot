@@ -31,9 +31,18 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
     acc, _ = list(resources.accelerators.items())[0]
     return acc.startswith('tpu')
 
+def is_tpu_pod_slice(resources: Optional['resources_lib.Resources']) -> bool:
+    if not is_tpu(resources):
+        return False
+    assert resources is not None
+    acc, _ = list(resources.accelerators.items())[0]
+    # Reference on Accelerator names for TPU Pod slices: https://cloud.google.com/kubernetes-engine/docs/how-to/tpus#workload_preparation # pylint: disable=line-too-long
+    return acc.endswith('-podslice') or acc.endswith('-device')
 
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu(resources):
+        return False
+    elif is_tpu_pod_slice(resources):
         return False
     assert resources is not None
     if resources.accelerator_args is None:
