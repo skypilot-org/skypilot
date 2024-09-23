@@ -191,7 +191,8 @@ class DO(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+            self, resources: 'resources_lib.Resources'
+            ) -> resources_utils.FeasibleResources:
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             # TODO: Add hints to all return values in this method to help
