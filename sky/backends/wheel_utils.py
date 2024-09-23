@@ -60,82 +60,80 @@ def _get_latest_wheel() -> pathlib.Path:
 
 def _build_sky_wheel() -> pathlib.Path:
     """Build a wheel for SkyPilot and return the path to the wheel."""
-    tmp_dir_str = tempfile.mkdtemp(dir='/dev/shm')
-    # with tempfile.TemporaryDirectory() as tmp_dir_str:
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
         # prepare files
-    tmp_dir = pathlib.Path(tmp_dir_str)
-    sky_tmp_dir = tmp_dir / 'sky'
-    sky_tmp_dir.mkdir()
-    for item in SKY_PACKAGE_PATH.iterdir():
-        target = sky_tmp_dir / item.name
-        if item.name != '__init__.py':
-            # We do not symlink `sky/__init__.py` as we need to
-            # modify the commit hash in the file later.
-            # Symlink other files/folders.
-            target.symlink_to(item, target_is_directory=item.is_dir())
-    setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
-
-    setup_content = (setup_files_dir / 'setup.py').read_text()
-    # Replace the package name with skypilot. This is important as the
-    # package could be installed with pip install skypilot-nightly.
-    setup_content = re.sub(r'\bname=[\'"](.*?)[\'"],',
-                           f'name=\'{_PACKAGE_WHEEL_NAME}\',',
-                           setup_content)
-    (tmp_dir / 'setup.py').write_text(setup_content)
-
-    for f in setup_files_dir.iterdir():
-        if f.is_file() and f.name != 'setup.py':
-            shutil.copy(str(f), str(tmp_dir))
-
-    init_file_path = SKY_PACKAGE_PATH / '__init__.py'
-    init_file_content = init_file_path.read_text()
-    # Replace the commit hash with the current commit hash.
-    init_file_content = re.sub(
-        r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
-        f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'', init_file_content)
-    (tmp_dir / 'sky' / '__init__.py').write_text(init_file_content)
-
-    # It is important to normalize the path, otherwise 'pip wheel' would
-    # treat the directory as a file and generate an empty wheel.
-    norm_path = str(tmp_dir) + os.sep
-    try:
-        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
-        # of the output.
-        subprocess.run([
-            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
-            str(tmp_dir)
-        ],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE,
-                       check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError('Failed to build pip wheel for SkyPilot. '
-                           f'Error message: {e.stderr.decode()}') from e
-
-    try:
-        wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
-    except StopIteration:
-        raise RuntimeError(
-            f'Failed to find pip wheel for SkyPilot under {tmp_dir} with '
-            f'glob pattern {_WHEEL_PATTERN!r}. '
-            f'Found: {list(map(str, tmp_dir.glob("*")))}.'
-            'No wheel file is generated.') from None
-
-    # Use a unique temporary dir per wheel hash, because there may be many
-    # concurrent 'sky launch' happening.  The path should be stable if the
-    # wheel content hash doesn't change.
-    with open(wheel_path, 'rb') as f:
-        contents = f.read()
-    hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
-
-    wheel_dir = WHEEL_DIR / hash_of_latest_wheel
-    wheel_dir.mkdir(parents=True, exist_ok=True)
-    print('Wheel path: ' + str(wheel_path))
-    print('Wheel dir: ' + str(wheel_dir))
-    shutil.move(str(wheel_path), wheel_dir)
-    shutil.rmtree(tmp_dir_str)
-    # if not os.path.exists(os.path.join(wheel_dir, os.path.basename(wheel_path))):
-        # shutil.move(str(wheel_path), wheel_dir)
+        tmp_dir = pathlib.Path(tmp_dir_str)
+        sky_tmp_dir = tmp_dir / 'sky'
+        sky_tmp_dir.mkdir()
+        for item in SKY_PACKAGE_PATH.iterdir():
+            target = sky_tmp_dir / item.name
+            if item.name != '__init__.py':
+                # We do not symlink `sky/__init__.py` as we need to
+                # modify the commit hash in the file later.
+                # Symlink other files/folders.
+                target.symlink_to(item, target_is_directory=item.is_dir())
+        setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
+    
+        setup_content = (setup_files_dir / 'setup.py').read_text()
+        # Replace the package name with skypilot. This is important as the
+        # package could be installed with pip install skypilot-nightly.
+        setup_content = re.sub(r'\bname=[\'"](.*?)[\'"],',
+                               f'name=\'{_PACKAGE_WHEEL_NAME}\',',
+                               setup_content)
+        (tmp_dir / 'setup.py').write_text(setup_content)
+    
+        for f in setup_files_dir.iterdir():
+            if f.is_file() and f.name != 'setup.py':
+                shutil.copy(str(f), str(tmp_dir))
+    
+        init_file_path = SKY_PACKAGE_PATH / '__init__.py'
+        init_file_content = init_file_path.read_text()
+        # Replace the commit hash with the current commit hash.
+        init_file_content = re.sub(
+            r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
+            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'', init_file_content)
+        (tmp_dir / 'sky' / '__init__.py').write_text(init_file_content)
+    
+        # It is important to normalize the path, otherwise 'pip wheel' would
+        # treat the directory as a file and generate an empty wheel.
+        norm_path = str(tmp_dir) + os.sep
+        try:
+            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
+            # of the output.
+            subprocess.run([
+                'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+                str(tmp_dir)
+            ],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE,
+                           check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError('Failed to build pip wheel for SkyPilot. '
+                               f'Error message: {e.stderr.decode()}') from e
+    
+        try:
+            wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
+        except StopIteration:
+            raise RuntimeError(
+                f'Failed to find pip wheel for SkyPilot under {tmp_dir} with '
+                f'glob pattern {_WHEEL_PATTERN!r}. '
+                f'Found: {list(map(str, tmp_dir.glob("*")))}.'
+                'No wheel file is generated.') from None
+    
+        # Use a unique temporary dir per wheel hash, because there may be many
+        # concurrent 'sky launch' happening.  The path should be stable if the
+        # wheel content hash doesn't change.
+        with open(wheel_path, 'rb') as f:
+            contents = f.read()
+        hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
+    
+        wheel_dir = WHEEL_DIR / hash_of_latest_wheel
+        wheel_dir.mkdir(parents=True, exist_ok=True)
+        print('Wheel path: ' + str(wheel_path))
+        print('Wheel dir: ' + str(wheel_dir))
+        shutil.copy2(str(wheel_path), wheel_dir)
+        # if not os.path.exists(os.path.join(wheel_dir, os.path.basename(wheel_path))):
+            # shutil.move(str(wheel_path), wheel_dir)
     return wheel_dir / wheel_path.name
 
 
