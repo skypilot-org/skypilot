@@ -4,13 +4,22 @@ Admin Policy Enforcement
 ========================
 
 
-SkyPilot allows admins to enforce policies on users' SkyPilot usage by applying
-custom validation and mutation logic on user's task and SkyPilot config.
+SkyPilot provides an **admin policy** mechanism that admins can use to enforce certain policies on users' SkyPilot usage. An admin policy applies
+custom validation and mutation logic to a user's tasks and SkyPilot config.
 
-In short, admins offers a Python package with a customized inheritance of SkyPilot's
-``AdminPolicy`` interface, and a user just needs to set the ``admin_policy`` field in
-the SkyPilot config ``~/.sky/config.yaml`` to enforce the policy to all their
-tasks.
+Example usage:
+
+  - Adds custom labels to all tasks [Link to below, fix case]
+  - Always Disable Public IP for AWS Tasks [Link to below]
+  - Enforce Autostop for all Tasks [Link to below]
+ 
+To implement and use an admin policy:
+
+- Admins writes a simple Python package with a policy class that implements SkyPilot's
+``sky.AdminPolicy`` interface; 
+- Admins distributes this package to users;
+- Users simply set the ``admin_policy`` field in
+the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
 
 Overview
 --------
@@ -32,7 +41,7 @@ For example:
 .. hint::
 
     SkyPilot loads the policy from the given package in the same Python environment.
-    You can test the existance of the policy by running:
+    You can test the existence of the policy by running:
 
     .. code-block:: bash
 
@@ -42,7 +51,7 @@ For example:
 Admin-Side
 ~~~~~~~~~~
 
-An admin can distribute the Python package to users with pre-defined policy. The
+An admin can distribute the Python package to users with a pre-defined policy. The
 policy should follow the following interface:
 
 .. code-block:: python
@@ -52,7 +61,7 @@ policy should follow the following interface:
     class MyPolicy(sky.AdminPolicy):
         @classmethod
         def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            # Logics for validate and modify user requests.
+            # Logic for validate and modify user requests.
             ...
             return sky.MutatedUserRequest(user_request.task,
                                           user_request.skypilot_config)

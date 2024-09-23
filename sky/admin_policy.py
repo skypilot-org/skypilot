@@ -17,8 +17,8 @@ class RequestOptions:
         cluster_running: Whether the cluster is running.
         idle_minutes_to_autostop: If provided, the cluster will be set to
             autostop after this many minutes of idleness.
-        down: Whether to down the cluster.
-        dryrun: Whether to dryrun the request.
+        down: If true, use autodown rather than autostop.
+        dryrun: Is the request a dryrun?
     """
     cluster_name: Optional[str]
     cluster_running: bool
@@ -68,7 +68,7 @@ class AdminPolicy:
                 ...
                 return MutatedUserRequest(task=..., skypilot_config=...)
 
-    The policy can mutate both task and skypilot_config.
+    The policy can mutate both task and skypilot_config. Admins then distribute a simple module that contains this implementation, installable in a way that it can be imported by users from the same Python environment where SkyPilot is running.
 
     Users can register a subclass of AdminPolicy in the SkyPilot config file
     under the key 'admin_policy', e.g.
