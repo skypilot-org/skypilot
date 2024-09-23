@@ -16,8 +16,8 @@ Example usage:
 
 To implement and use an admin policy:
 
-    - Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface; 
-    - Admins distributes this package to users;
+    - Admins write a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface; 
+    - Admins distribute this package to users;
     - Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
 
 
