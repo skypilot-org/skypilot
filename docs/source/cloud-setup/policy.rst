@@ -52,7 +52,7 @@ Admin-Side
 ~~~~~~~~~~
 
 An admin can distribute the Python package to users with a pre-defined policy. The
-policy should follow the following interface:
+policy should implement the `sky.AdminPolicy` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
 
 .. code-block:: python
 
@@ -67,29 +67,37 @@ policy should follow the following interface:
                                           user_request.skypilot_config)
 
 
-``UserRequest`` and ``MutatedUserRequest`` are defined as follows:
+``UserRequest`` and ``MutatedUserRequest`` are defined as follows (see `source code <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_ for more details):
 
 .. code-block:: python
 
     class UserRequest:
-        """User request to the policy.
+        """A user request.
 
-        It is a combination of a task, request options, and the global skypilot
-        config used to run a task, including `sky launch / exec / jobs launch / ..`.
+        A "user request" is defined as a `sky launch / exec` command or its API
+        equivalent.
+
+        `sky jobs launch / serve up` involves multiple launch requests, including
+        the launch of controller and clusters for a job (which can have multiple
+        tasks if it is a pipeline) or service replicas. Each launch is a separate
+        request.
+
+        This class wraps the underlying task, the global skypilot config used to run
+        a task, and the request options.
 
         Args:
             task: User specified task.
             skypilot_config: Global skypilot config to be used in this request.
-            request_options: Request options. It can be None for jobs and
-                services.
+            request_options: Request options. It is None for jobs and services.
         """
-        task: sky.Task
-        skypilot_config: sky.Config
-        operation_args: sky.RequestOptions
+        task: 'sky.Task'
+        skypilot_config: 'sky.Config'
+        request_options: Optional['RequestOptions'] = None
+
 
     class MutatedUserRequest:
-        task: sky.Task
-        skypilot_config: sky.Config
+        task: 'sky.Task'
+        skypilot_config: 'sky.Config'
 
 That said, an ``AdminPolicy`` can mutate any fields of a user request, including
 the :ref:`task <yaml-spec>` and the :ref:`global skypilot config <config-yaml>`,
