@@ -127,11 +127,19 @@ The ``sky.Config`` and ``sky.RequestOptions`` are defined as follows:
             """Sets a value with nested keys."""
             ...
 
-    @dataclass
     class RequestOptions:
-        """Options a user specified in their request to SkyPilot."""
+        """Request options for admin policy.
+
+        Args:
+            cluster_name: Name of the cluster to create/reuse.
+            cluster_running: Whether the cluster is running.
+            idle_minutes_to_autostop: If provided, the cluster will be set to
+                autostop after this many minutes of idleness.
+            down: If true, use autodown rather than autostop.
+            dryrun: Is the request a dryrun?
+        """
+        # Cluster name is None if not specified by the user.
         cluster_name: Optional[str]
-        cluster_exists: bool
         idle_minutes_to_autostop: Optional[int]
         down: bool
         dryrun: bool
