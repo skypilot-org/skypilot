@@ -51,7 +51,7 @@ For example:
 Admin-Side
 ~~~~~~~~~~
 
-An admin can distribute the Python package to users with pre-defined policy. The
+An admin can distribute the Python package to users with a pre-defined policy. The
 policy should follow the following interface:
 
 .. code-block:: python
