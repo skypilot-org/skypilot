@@ -87,10 +87,11 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
-  # Custom policy to be applied to all tasks. (optional).
+  # Admin policy to be applied to all tasks. (optional).
   #
   # The policy class to be applied to all tasks, which can be used to validate
   # and mutate user requests.
+  #
   # This is useful for enforcing certain policies on all tasks, e.g.,
   # add custom labels; enforce certain resource limits; etc.
   #
