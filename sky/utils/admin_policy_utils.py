@@ -59,9 +59,8 @@ def apply(
     """Applies an admin policy (if registered) to a DAG or a task.
 
     It mutates a Dag by applying any registered admin policy and also
-    potentially updates (controlled by
-    `update_skypilot_config_for_current_request`) the global SkyPilot config
-    if there is any changes made by the policy.
+    potentially updates (controlled by `use_mutated_config_in_current_request`)
+    the global SkyPilot config if there is any changes made by the policy.
 
     Args:
         dag: The dag to be mutated by the policy.
