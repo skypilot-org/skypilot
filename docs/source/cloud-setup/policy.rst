@@ -61,7 +61,7 @@ policy should follow the following interface:
     class MyPolicy(sky.AdminPolicy):
         @classmethod
         def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            # Logics for validate and modify user requests.
+            # Logic for validate and modify user requests.
             ...
             return sky.MutatedUserRequest(user_request.task,
                                           user_request.skypilot_config)
