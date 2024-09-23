@@ -6,7 +6,7 @@ import uuid
 
 from sky import sky_logging
 from sky import status_lib
-from sky.adaptors.do import azure
+from sky.adaptors import do
 from sky.provision import common
 from sky.provision.do import constants
 from sky.provision.do import utils
@@ -205,7 +205,7 @@ def terminate_instances(
         try:
             utils.client().droplets.destroy_with_associated_resources_dangerous(
                 droplet_id=instance_meta['id'], x_dangerous=True)
-        except azure.exceptions().HttpResponseError as err:
+        except do.exceptions().HttpResponseError as err:
             logger.warning('Error: {0} {1}: {2}'.format(err.status_code,
                                                         err.reason,
                                                         err.error.message))
