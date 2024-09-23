@@ -133,7 +133,7 @@ def _build_sky_wheel() -> pathlib.Path:
     print('Wheel path: ' + str(wheel_path))
     print('Wheel dir: ' + str(wheel_dir))
     shutil.move(str(wheel_path), wheel_dir)
-    os.rmdir(tmp_dir_str)
+    shutil.rmtree(tmp_dir_str)
     # if not os.path.exists(os.path.join(wheel_dir, os.path.basename(wheel_path))):
         # shutil.move(str(wheel_path), wheel_dir)
     return wheel_dir / wheel_path.name
