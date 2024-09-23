@@ -33,13 +33,12 @@ class DO(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            'Docker container images as runtime environments'
-            f' are not supported in {_REPR}. Try using in `run`',
     }
-    # maximum node name length defined as <= 255
+    # DO maximum node name length defined as <= 255
     # https://docs.digitalocean.com/reference/api/api-reference/#operation/droplets_create
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 255
+    # 255 - 8 = 247 characters since
+    # our provisioner adds additional `-worker`.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 247
     _regions: List[clouds.Region] = []
 
     # Using the latest SkyPilot provisioner API to provision and check status.
