@@ -8,6 +8,7 @@ shared across multiple clouds.GCP() objects.
 import copy
 import dataclasses
 import json
+import math
 import time
 import typing
 from typing import List, Optional, Set
@@ -53,8 +54,13 @@ def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:
     if resources is None or not is_tpu(resources):
         raise ValueError('resources must be a valid TPU resource.')
     acc, _ = list(resources.accelerators.items())[0]
-    num_tpu_devices = int(int(acc.split('-')[2]) / 8)
-    return num_tpu_devices
+    _, tpu_version, tpu_core_cnt = acc.split('-')
+    # TODO(tian): Check TPU V5 core count.
+    if tpu_version == 'v6e':
+        num_cores_per_vm = 4
+    else:
+        num_cores_per_vm = 8
+    return math.ceil(int(tpu_core_cnt) / num_cores_per_vm)
 
 
 @dataclasses.dataclass
