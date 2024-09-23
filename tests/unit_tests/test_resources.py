@@ -24,12 +24,12 @@ GLOBAL_INVALID_LABELS = {
 
 
 def test_get_reservations_available_resources():
-    mock = mock.Mock()
-    r = Resources(cloud=mock, instance_type="instance_type")
+    mock_cloud = mock.Mock()
+    r = Resources(cloud=mock_cloud, instance_type="instance_type")
     r._region = "region"
     r._zone = "zone"
     r.get_reservations_available_resources()
-    mock.get_reservations_available_resources.assert_called_once_with(
+    mock_cloud.get_reservations_available_resources.assert_called_once_with(
         "instance_type", "region", "zone", set())
 
 
