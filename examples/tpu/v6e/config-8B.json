@@ -24,4 +24,4 @@
     "transformers_version": "4.40.0.dev0",
     "use_cache": true,
     "vocab_size": 128256
-  }
+}
