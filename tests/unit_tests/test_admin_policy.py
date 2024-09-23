@@ -64,8 +64,7 @@ def test_use_spot_for_all_gpus_policy(add_example_policy_paths, task):
     task.set_resources([
         sky.Resources(accelerators={'A100': 1}),
         sky.Resources(accelerators={'L4': 1}, use_spot=True),
-        sky.Resources(instance_type='n1-standard-2'),
-        sky.Resources(instance_type='n1-standard-2'),
+        sky.Resources(cpus='2+'),
     ])
     dag, _ = _load_task_and_apply_policy(
         task, os.path.join(POLICY_PATH, 'use_spot_for_gpu.yaml'))
