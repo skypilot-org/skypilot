@@ -425,8 +425,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             ssh_jump_name,
             nodeport_mode,
             private_key_path=private_key_path,
-            namespace=namespace,
-            context=context)
+            context=context,
+            namespace=namespace)
     elif network_mode == port_forward_mode:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
         # does not require a ssh jump pod.
@@ -441,7 +441,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   on GKE.
         ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target, port_forward_mode, private_key_path=private_key_path)
+            ssh_target,
+            port_forward_mode,
+            private_key_path=private_key_path,
+            context=context,
+            namespace=namespace)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')

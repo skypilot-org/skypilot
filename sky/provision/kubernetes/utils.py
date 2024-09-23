@@ -987,11 +987,12 @@ def construct_ssh_jump_command(
 
 
 def get_ssh_proxy_command(
-        k8s_ssh_target: str,
-        network_mode: kubernetes_enums.KubernetesNetworkingMode,
-        private_key_path: Optional[str] = None,
-        namespace: Optional[str] = None,
-        context: Optional[str] = None) -> str:
+    k8s_ssh_target: str,
+    network_mode: kubernetes_enums.KubernetesNetworkingMode,
+    private_key_path: str,
+    context: str,
+    namespace: str,
+) -> str:
     """Generates the SSH proxy command to connect to the pod.
 
     Uses a jump pod if the network mode is NODEPORT, and direct port-forwarding
@@ -1048,8 +1049,6 @@ def get_ssh_proxy_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
-        current_context = get_current_kube_config_context_name()
-        current_namespace = get_current_kube_config_context_namespace()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
@@ -1059,8 +1058,8 @@ def get_ssh_proxy_command(
             # We embed both the current context and namespace to the SSH proxy
             # command to make sure SSH still works when the current
             # context/namespace is changed by the user.
-            current_kube_context=current_context,
-            current_kube_namespace=current_namespace)
+            current_kube_context=context,
+            current_kube_namespace=namespace)
     return ssh_jump_proxy_command
 
 
