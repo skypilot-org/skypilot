@@ -32,7 +32,7 @@ def _load_task_and_apply_policy(
     task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
     return admin_policy_utils.apply(
         task,
-        operation_args=sky.admin_policy.RequestOptions(
+        request_options=sky.admin_policy.RequestOptions(
             cluster_name='test',
             cluster_running=False,
             idle_minutes_to_autostop=idle_minutes_to_autostop,

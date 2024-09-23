@@ -1,19 +1,14 @@
+import os
 import pathlib
-from typing import Dict
-from unittest.mock import Mock
 from unittest.mock import patch
-
-import pytest
 
 from sky import clouds
 from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.resources import Resources
-from sky.resources import resources_utils
 
 
-@patch.object(skypilot_config, 'CONFIG_PATH',
-              './tests/test_yamls/test_aws_config.yaml')
+# Set env var to test config file.
 @patch.object(skypilot_config, '_dict', None)
 @patch.object(skypilot_config, '_loaded_config_path', None)
 @patch('sky.clouds.service_catalog.instance_type_exists', return_value=True)
@@ -29,6 +24,7 @@ from sky.resources import resources_utils
 @patch('sky.utils.common_utils.fill_template')
 def test_write_cluster_config_w_remote_identity(mock_fill_template,
                                                 *mocks) -> None:
+    os.environ['SKYPILOT_CONFIG'] = './tests/test_yamls/test_aws_config.yaml'
     skypilot_config._try_load_config()
 
     cloud = clouds.AWS()

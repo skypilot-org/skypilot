@@ -53,20 +53,21 @@ def _get_policy_cls(
 
 def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
-    update_skypilot_config_for_current_request: bool = True,
-    operation_args: Optional[admin_policy.RequestOptions] = None,
+    use_mutated_config_in_current_request: bool = True,
+    request_options: Optional[admin_policy.RequestOptions] = None,
 ) -> Tuple['dag_lib.Dag', skypilot_config.Config]:
     """Applies an admin policy (if registered) to a DAG or a task.
 
     It mutates a Dag by applying any registered admin policy and also
-    potentially updates (controlled by `apply_skypilot_config`) the global
-    SkyPilot config if there is any changes made by the policy.
+    potentially updates (controlled by
+    `update_skypilot_config_for_current_request`) the global SkyPilot config
+    if there is any changes made by the policy.
 
     Args:
         dag: The dag to be mutated by the policy.
         apply_skypilot_config: Whether to apply the skypilot config changes to
             the global skypilot config.
-        operation_args: Additional arguments user passed in SkyPilot operations.
+        request_options: Additional arguments user passed in SkyPilot operations.
 
     Returns:
         - The new copy of dag after applying the policy
@@ -91,7 +92,7 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, operation_args)
+        user_request = admin_policy.UserRequest(task, config, request_options)
         try:
             mutated_user_request = policy_cls.validate_and_mutate(user_request)
         except Exception as e:  # pylint: disable=broad-except
@@ -120,7 +121,7 @@ def apply(
         mutated_dag.graph.add_edge(mutated_dag.tasks[u_idx],
                                    mutated_dag.tasks[v_idx])
 
-    if (update_skypilot_config_for_current_request and
+    if (use_mutated_config_in_current_request and
             original_config != mutated_config):
         with tempfile.NamedTemporaryFile(
                 delete=False,
