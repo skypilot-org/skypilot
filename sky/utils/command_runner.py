@@ -402,7 +402,6 @@ class SSHCommandRunner(CommandRunner):
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
         disable_control_master: Optional[bool] = False,
-        # disable_control_master: Optional[bool] = True,
     ):
         """Initialize SSHCommandRunner.
 
