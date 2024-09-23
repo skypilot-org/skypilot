@@ -7,7 +7,7 @@ envs:
 workdir: examples/tpu/v6e
 
 setup: |
- # Setup runtime for training
+  # Setup runtime for training
   git clone -b flash_attention https://github.com/pytorch-tpu/transformers.git
   cd transformers
   pip3 install -e .
