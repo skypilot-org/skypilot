@@ -5,6 +5,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky.adaptors import do
 from sky.clouds import service_catalog
 from sky.provision.do import utils as do_utils
 from sky.utils import resources_utils
@@ -251,7 +252,7 @@ class DO(clouds.Cloud):
         try:
             # attempt to make a CURL request for listing instances
             do_utils.client().droplets.list()
-        except Exception as e:  # pylint: disable=broad-except
+        except do.exceptions().HttpResponseError as err:
             return False, str(e)
 
         return True, None
