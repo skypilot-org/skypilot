@@ -41,7 +41,7 @@ For example:
 .. hint::
 
     SkyPilot loads the policy from the given package in the same Python environment.
-    You can test the existance of the policy by running:
+    You can test the existence of the policy by running:
 
     .. code-block:: bash
 
