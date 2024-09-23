@@ -264,6 +264,8 @@ def query_instances(
     non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """See sky/provision/__init__.py"""
+    # terminated instances are not retrieved by the
+    # API making `non_terminated_only` argument moot.
     del non_terminated_only
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = utils.filter_instances(cluster_name_on_cloud,
