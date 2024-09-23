@@ -68,7 +68,7 @@ class AdminPolicy:
                 ...
                 return MutatedUserRequest(task=..., skypilot_config=...)
 
-    The policy can mutate both task and skypilot_config.
+    The policy can mutate both task and skypilot_config. Admins then distribute a simple module that contains this implementation, installable in a way that it can be imported by users from the same Python environment where SkyPilot is running.
 
     Users can register a subclass of AdminPolicy in the SkyPilot config file
     under the key 'admin_policy', e.g.
