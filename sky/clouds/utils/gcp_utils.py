@@ -50,19 +50,6 @@ def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
     return not acc.endswith('-8')
 
 
-def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:
-    if resources is None or not is_tpu(resources):
-        raise ValueError('resources must be a valid TPU resource.')
-    acc, _ = list(resources.accelerators.items())[0]
-    _, tpu_version, tpu_core_cnt = acc.split('-')
-    # TODO(tian): Check TPU V5 core count.
-    if tpu_version == 'v6e':
-        num_cores_per_vm = 4
-    else:
-        num_cores_per_vm = 8
-    return math.ceil(int(tpu_core_cnt) / num_cores_per_vm)
-
-
 @dataclasses.dataclass
 class SpecificReservation:
     count: int
