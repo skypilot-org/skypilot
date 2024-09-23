@@ -4,7 +4,7 @@ resources:
 envs:
   HF_TOKEN: # fill in your huggingface token
 
-workdir: examples/tpu/v6e
+workdir: .
 
 setup: |
   # Setup runtime for training
