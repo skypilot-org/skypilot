@@ -135,6 +135,7 @@ class DO(clouds.Cloud):
         zone: Optional[str] = None,
     ) -> float:
         """Returns the hourly cost of the accelerators, in dollars/hour."""
+        # the acc price is include in the instance price.
         del accelerators, use_spot, region, zone  # unused
         return 0.0
 
