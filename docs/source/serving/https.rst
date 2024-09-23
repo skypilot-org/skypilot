@@ -35,7 +35,7 @@ To deploy the service, run the following command:
 
 .. code-block:: bash
 
-  sky serve up https.yaml -n https
+  $ sky serve up https.yaml -n https
 
 If you are using a self-signed certificate, you may need to add the :code:`-k` flag to the :code:`curl` command to bypass certificate:
 
