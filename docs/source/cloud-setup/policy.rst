@@ -13,13 +13,13 @@ Example usage:
   - Always Disable Public IP for AWS Tasks [Link to below]
   - Enforce Autostop for all Tasks [Link to below]
  
+
 To implement and use an admin policy:
 
-- Admins writes a simple Python package with a policy class that implements SkyPilot's
-``sky.AdminPolicy`` interface; 
-- Admins distributes this package to users;
-- Users simply set the ``admin_policy`` field in
-the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
+    - Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface; 
+    - Admins distributes this package to users;
+    - Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
+
 
 Overview
 --------

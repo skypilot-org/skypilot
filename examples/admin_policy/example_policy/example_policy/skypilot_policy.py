@@ -64,13 +64,25 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
             return sky.MutatedUserRequest(
                 task=user_request.task,
                 skypilot_config=user_request.skypilot_config)
+        cluster_record = sky.status(request_options.cluster_name, refresh=True)
+        need_autostop = False
+        if not cluster_record:
+            # Cluster does not exist
+            need_autostop = True
+        elif cluster_record[0]['status'] == sky.ClusterStatus.STOPPED:
+            # Cluster is stopped
+            need_autostop = True
+        elif cluster_record[0]['autostop'] < 0:
+            # Cluster is running but autostop is not set
+            need_autostop = True
+
+        is_setting_autostop = False
         idle_minutes_to_autostop = request_options.idle_minutes_to_autostop
-        # Enforce autostop/down to be set for all tasks for new clusters.
-        if not request_options.cluster_running and (
-                idle_minutes_to_autostop is None or
-                idle_minutes_to_autostop < 0):
-            raise RuntimeError('Autostop/down must be set for all newly '
-                               'launched clusters.')
+        is_setting_autostop = (idle_minutes_to_autostop is not None and
+                               idle_minutes_to_autostop >= 0)
+        if need_autostop and not is_setting_autostop:
+            raise RuntimeError('Autostop/down must be set for all clusters.')
+
         return sky.MutatedUserRequest(
             task=user_request.task,
             skypilot_config=user_request.skypilot_config)

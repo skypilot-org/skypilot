@@ -65,9 +65,9 @@ def apply(
 
     Args:
         dag: The dag to be mutated by the policy.
-        apply_skypilot_config: Whether to apply the skypilot config changes to
-            the global skypilot config.
-        request_options: Additional arguments user passed in SkyPilot operations.
+        use_mutated_config_in_current_request: Whether to use the mutated
+            config in the current request.
+        request_options: Additional options user passed for the current request.
 
     Returns:
         - The new copy of dag after applying the policy
