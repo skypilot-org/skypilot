@@ -6,7 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.provision.do import utils
+from sky.provision.do import utils as do_utils
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -223,8 +223,6 @@ class DO(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
-            if default_instance_type is None:
-                return resources_utils.FeasibleResources([], [], None)
             return resources_utils.FeasibleResources(
                 _make([default_instance_type]), [], None)
 
@@ -252,15 +250,15 @@ class DO(clouds.Cloud):
         """Verify that the user has valid credentials for DO."""
         try:
             # attempt to make a CURL request for listing instances
-            utils.client().droplets.list()
+            do_utils.client().droplets.list()
         except Exception as e:  # pylint: disable=broad-except
             return False, str(e)
 
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        utils.client()
-        return {f'~/.config/doctl/{_CREDENTIAL_FILE}': utils.CREDENTIALS_PATH}
+        do_utils.client()
+        return {f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
