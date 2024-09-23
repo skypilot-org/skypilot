@@ -112,9 +112,9 @@ def apply(
                 # allowing overriding required global config in task YAML.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.UserRequestRejectedByPolicy(
-                        'All tasks must have the same skypilot '
-                        'config after applying the policy. Please'
-                        'check with your policy admin for details.')
+                        'All tasks must have the same SkyPilot config after '
+                        'applying the policy. Please check with your policy '
+                        'admin for details.')
         mutated_dag.add(mutated_user_request.task)
     assert mutated_config is not None, dag
 
