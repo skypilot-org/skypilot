@@ -15,7 +15,6 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -162,16 +161,9 @@ def _execute(
         if dryrun.
     """
     cluster_exists = False
-    cluster_running = False
     if cluster_name is not None:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_exists = cluster_record is not None
-        cluster_running = (cluster_record is not None and
-                           cluster_record['status'] in [
-                               status_lib.ClusterStatus.UP,
-                               status_lib.ClusterStatus.INIT,
-                           ])
-
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -181,7 +173,6 @@ def _execute(
         dag,
         request_options=admin_policy.RequestOptions(
             cluster_name=cluster_name,
-            cluster_running=cluster_running,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             down=down,
             dryrun=dryrun,

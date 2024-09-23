@@ -132,6 +132,14 @@ The ``sky.Config`` and ``sky.RequestOptions`` are defined as follows:
 Example Policies    
 ----------------
 
+We have provided a few example policies in `examples/admin_policy/example_policy <https://github.com/skypilot-org/skypilot/tree/master/examples/admin_policy/example_policy>`_. You can test these policies by installing the example policy package in your Python environment.
+
+.. code-block:: bash
+
+    git clone https://github.com/skypilot-org/skypilot.git
+    cd skypilot
+    pip install examples/admin_policy/example_policy
+
 Reject All
 ~~~~~~~~~~
 
@@ -147,7 +155,7 @@ Reject All
 
 .. code-block:: yaml
 
-    admin_policy: examples.admin_policy.reject_all.RejectAllPolicy
+    admin_policy: example_policy.RejectAllPolicy
 
 
 Add Kubernetes Labels for all Tasks
@@ -168,7 +176,7 @@ Add Kubernetes Labels for all Tasks
 
 .. code-block:: yaml
 
-    admin_policy: examples.admin_policy.add_labels.AddLabelsPolicy
+    admin_policy: example_policy.AddLabelsPolicy
 
 
 Always Disable Public IP for AWS Tasks
@@ -192,7 +200,7 @@ Always Disable Public IP for AWS Tasks
 
 .. code-block:: yaml
 
-    admin_policy: examples.admin_policy.disable_public_ip.DisablePublicIPPolicy
+    admin_policy: example_policy.DisablePublicIPPolicy
 
 
 Enforce Autostop for all Tasks
@@ -206,21 +214,46 @@ Enforce Autostop for all Tasks
         @classmethod
         def validate_and_mutate(
                 cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            """Enforces autostop for all tasks."""
+            """Enforces autostop for all tasks.
+            
+            Note that with this policy enforced, users can still change the autostop
+            setting for an existing cluster by using `sky autostop`.
+            """
             request_options = user_request.request_options
+
             # Request options is None when a task is executed with `jobs launch` or
             # `sky serve up`.
             if request_options is None:
                 return sky.MutatedUserRequest(
                     task=user_request.task,
                     skypilot_config=user_request.skypilot_config)
+
+            # Get the cluster record to operate on.
+            cluster_record = sky.status(request_options.cluster_name, refresh=True)
+
+            # Check if the user request should specify autostop settings.
+            need_autostop = False
+            if not cluster_record:
+                # Cluster does not exist
+                need_autostop = True
+            elif cluster_record[0]['status'] == sky.ClusterStatus.STOPPED:
+                # Cluster is stopped
+                need_autostop = True
+            elif cluster_record[0]['autostop'] < 0:
+                # Cluster is running but autostop is not set
+                need_autostop = True
+
+            # Check if the user request is setting autostop settings.
+            is_setting_autostop = False
             idle_minutes_to_autostop = request_options.idle_minutes_to_autostop
-            # Enforce autostop/down to be set for all tasks for new clusters.
-            if not request_options.cluster_running and (
-                    idle_minutes_to_autostop is None or
-                    idle_minutes_to_autostop < 0):
-                raise RuntimeError('Autostop/down must be set for all newly '
-                                'launched clusters.')
+            is_setting_autostop = (idle_minutes_to_autostop is not None and
+                                idle_minutes_to_autostop >= 0)
+
+            # If the cluster requires autostop but the user request is not setting
+            # autostop settings, raise an error.
+            if need_autostop and not is_setting_autostop:
+                raise RuntimeError('Autostop/down must be set for all clusters.')
+
             return sky.MutatedUserRequest(
                 task=user_request.task,
                 skypilot_config=user_request.skypilot_config)
@@ -228,4 +261,4 @@ Enforce Autostop for all Tasks
 
 .. code-block:: yaml
 
-    admin_policy: examples.admin_policy.enforce_autostop.EnforceAutostopPolicy
+    admin_policy: example_policy.EnforceAutostopPolicy

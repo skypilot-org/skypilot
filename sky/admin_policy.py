@@ -20,8 +20,8 @@ class RequestOptions:
         down: If true, use autodown rather than autostop.
         dryrun: Is the request a dryrun?
     """
+    # Cluster name is None if not specified by the user.
     cluster_name: Optional[str]
-    cluster_running: bool
     idle_minutes_to_autostop: Optional[int]
     down: bool
     dryrun: bool
@@ -29,16 +29,23 @@ class RequestOptions:
 
 @dataclasses.dataclass
 class UserRequest:
-    """User request to the policy.
+    """A user request.
 
-    It is a combination of a task, request options, and the global skypilot
-    config used to run a task, including `sky launch / exec / jobs launch / ..`.
+    A "user request" is defined as a `sky launch / exec` command or its API
+    equivalent.
+
+    `sky jobs launch / serve up` involves multiple launch requests, including
+    the launch of controller and clusters for a job (which can have multiple
+    tasks if it is a pipeline) or service replicas. Each launch is a separate
+    request.
+
+    This class wraps the underlying task, the global skypilot config used to run
+    a task, and the request options.
 
     Args:
         task: User specified task.
         skypilot_config: Global skypilot config to be used in this request.
-        request_options: Request options. It can be None for jobs and
-            services.
+        request_options: Request options. It is None for jobs and services.
     """
     task: 'sky.Task'
     skypilot_config: 'sky.Config'
@@ -55,10 +62,6 @@ class MutatedUserRequest:
 class AdminPolicy:
     """Abstract interface of an admin-defined policy for all user requests.
 
-    A policy is a string to a python class inheriting from AdminPolicy that can
-    be imported from the same environment where SkyPilot is running.
-
-
     Admins can implement a subclass of AdminPolicy with the following signature:
 
         import sky
@@ -68,7 +71,10 @@ class AdminPolicy:
                 ...
                 return MutatedUserRequest(task=..., skypilot_config=...)
 
-    The policy can mutate both task and skypilot_config. Admins then distribute a simple module that contains this implementation, installable in a way that it can be imported by users from the same Python environment where SkyPilot is running.
+    The policy can mutate both task and skypilot_config. Admins then distribute
+    a simple module that contains this implementation, installable in a way
+    that it can be imported by users from the same Python environment where
+    SkyPilot is running.
 
     Users can register a subclass of AdminPolicy in the SkyPilot config file
     under the key 'admin_policy', e.g.
@@ -88,7 +94,6 @@ class AdminPolicy:
 
         Returns:
             MutatedUserRequest: The mutated user request.
-                MutatedUserRequest contains (sky.Task, sky.Config)
 
         Raises:
             Exception to throw if the user request failed the validation.
