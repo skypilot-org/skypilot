@@ -105,6 +105,11 @@ def apply(
             mutated_config = mutated_user_request.skypilot_config
         else:
             if mutated_config != mutated_user_request.skypilot_config:
+                # In the case of a pipeline of tasks, the mutated config
+                # generated should remain the same for all tasks for now for
+                # simplicity.
+                # TODO(zhwu): We should support per-task mutated config or
+                # allowing overriding required global config in task YAML.
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.UserRequestRejectedByPolicy(
                         'All tasks must have the same skypilot '
