@@ -37,7 +37,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     while True:
         instances = utils.filter_instances(cluster_name_on_cloud,
                                            pending_status)
-        if len(instances) == 0:
+        if not instances:
             break
         instance_statuses = [
             instance['status'] for instance in instances.values()
