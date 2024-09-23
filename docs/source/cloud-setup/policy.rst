@@ -99,14 +99,14 @@ policy should implement the `sky.AdminPolicy` `interface <https://github.com/sky
         task: 'sky.Task'
         skypilot_config: 'sky.Config'
 
-That said, an ``AdminPolicy`` can mutate any fields of a user request, including
+In other words, an ``AdminPolicy`` can mutate any fields of a user request, including
 the :ref:`task <yaml-spec>` and the :ref:`global skypilot config <config-yaml>`,
 giving admins a lot of flexibility to control user's SkyPilot usage.
 
-An ``AdminPolicy`` is responsible to both validate and mutate user requests. If
+An ``AdminPolicy`` can be used to both validate and mutate user requests. If
 a request should be rejected, the policy should raise an exception.
 
-The ``sky.Config`` and ``sky.RequestOptions`` are defined as follows:
+The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
 
 .. code-block:: python
 
