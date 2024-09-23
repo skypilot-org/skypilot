@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newItems = [
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
         { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
+        { selector: '.toctree-l1 > a', text: 'HTTPS Encryption' },
         { selector: '.toctree-l1 > a', text: 'Llama-3.1 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Pixtral (Mistral AI)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
