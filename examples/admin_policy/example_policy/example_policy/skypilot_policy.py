@@ -73,6 +73,10 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         
         Note that with this policy enforced, users can still change the autostop
         setting for an existing cluster by using `sky autostop`.
+
+        Since we refresh the cluster status with `sky.status` whenever this
+        policy is applied, we should expect a few seconds latency when a user
+        run a request.
         """
         request_options = user_request.request_options
 
