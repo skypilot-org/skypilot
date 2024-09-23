@@ -26,8 +26,8 @@ class AddLabelsPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(user_request.task, config)
 
 
-class DisablePublicIPPolicy(sky.AdminPolicy):
-    """Example policy: disables public IP for all tasks."""
+class DisablePublicIpPolicy(sky.AdminPolicy):
+    """Example policy: disables public IP for all AWS tasks."""
 
     @classmethod
     def validate_and_mutate(
@@ -42,7 +42,7 @@ class DisablePublicIPPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(user_request.task, config)
 
 
-class UseSpotForGPUPolicy(sky.AdminPolicy):
+class UseSpotForGpuPolicy(sky.AdminPolicy):
     """Example policy: use spot instances for all GPU tasks."""
 
     @classmethod

@@ -9,16 +9,17 @@ custom validation and mutation logic to a user's tasks and SkyPilot config.
 
 Example usage:
 
-  - Adds custom labels to all tasks [Link to below, fix case]
-  - Always Disable Public IP for AWS Tasks [Link to below]
-  - Enforce Autostop for all Tasks [Link to below]
+- :ref:`kubernetes-labels-policy`
+- :ref:`disable-public-ip-policy`
+- :ref:`use-spot-for-gpu-policy`
+- :ref:`enforce-autostop-policy`
  
 
 To implement and use an admin policy:
 
-    - Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface; 
-    - Admins distributes this package to users;
-    - Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
+- Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface; 
+- Admins distributes this package to users;
+- Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
 
 
 Overview
@@ -52,7 +53,16 @@ Admin-Side
 ~~~~~~~~~~
 
 An admin can distribute the Python package to users with a pre-defined policy. The
-policy should implement the `sky.AdminPolicy` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
+policy should implement the ``sky.AdminPolicy`` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
+
+
+.. literalinclude:: ../../../sky/admin_policy.py
+    :language: python
+    :pyobject: AdminPolicy
+    :caption: `AdminPolicy Interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
+
+
+Your custom admin policy should look like this:
 
 .. code-block:: python
 
@@ -69,35 +79,17 @@ policy should implement the `sky.AdminPolicy` `interface <https://github.com/sky
 
 ``UserRequest`` and ``MutatedUserRequest`` are defined as follows (see `source code <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_ for more details):
 
-.. code-block:: python
 
-    class UserRequest:
-        """A user request.
+.. literalinclude:: ../../../sky/admin_policy.py
+    :language: python
+    :pyobject: UserRequest
+    :caption: `UserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
-        A "user request" is defined as a `sky launch / exec` command or its API
-        equivalent.
+.. literalinclude:: ../../../sky/admin_policy.py
+    :language: python
+    :pyobject: MutatedUserRequest
+    :caption: `MutatedUserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
-        `sky jobs launch / serve up` involves multiple launch requests, including
-        the launch of controller and clusters for a job (which can have multiple
-        tasks if it is a pipeline) or service replicas. Each launch is a separate
-        request.
-
-        This class wraps the underlying task, the global skypilot config used to run
-        a task, and the request options.
-
-        Args:
-            task: User specified task.
-            skypilot_config: Global skypilot config to be used in this request.
-            request_options: Request options. It is None for jobs and services.
-        """
-        task: 'sky.Task'
-        skypilot_config: 'sky.Config'
-        request_options: Optional['RequestOptions'] = None
-
-
-    class MutatedUserRequest:
-        task: 'sky.Task'
-        skypilot_config: 'sky.Config'
 
 In other words, an ``AdminPolicy`` can mutate any fields of a user request, including
 the :ref:`task <yaml-spec>` and the :ref:`global skypilot config <config-yaml>`,
@@ -106,43 +98,19 @@ giving admins a lot of flexibility to control user's SkyPilot usage.
 An ``AdminPolicy`` can be used to both validate and mutate user requests. If
 a request should be rejected, the policy should raise an exception.
 
+
 The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
 
-.. code-block:: python
+.. literalinclude:: ../../../sky/skypilot_config.py
+    :language: python
+    :pyobject: Config
+    :caption: `Config Class <https://github.com/skypilot-org/skypilot/blob/master/sky/skypilot_config.py>`_
 
-    class Config:
-        def get_nested(self,
-                       keys: Tuple[str, ...],
-                       default_value: Any,
-                       override_configs: Optional[Dict[str, Any]] = None,
-            ) -> Any:
-            """Gets a value with nested keys.
-            
-            If override_configs is provided, it value will be merged on top of
-            the current config.
-            """
-            ...
 
-        def set_nested(self, keys: Tuple[str, ...], value: Any) -> None:
-            """Sets a value with nested keys."""
-            ...
-
-    class RequestOptions:
-        """Request options for admin policy.
-
-        Args:
-            cluster_name: Name of the cluster to create/reuse.
-            cluster_running: Whether the cluster is running.
-            idle_minutes_to_autostop: If provided, the cluster will be set to
-                autostop after this many minutes of idleness.
-            down: If true, use autodown rather than autostop.
-            dryrun: Is the request a dryrun?
-        """
-        # Cluster name is None if not specified by the user.
-        cluster_name: Optional[str]
-        idle_minutes_to_autostop: Optional[int]
-        down: bool
-        dryrun: bool
+.. literalinclude:: ../../../sky/admin_policy.py
+    :language: python
+    :pyobject: RequestOptions
+    :caption: `RequestOptions Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
 
 Example Policies    
@@ -159,122 +127,69 @@ We have provided a few example policies in `examples/admin_policy/example_policy
 Reject All
 ~~~~~~~~~~
 
-.. code-block:: python
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: RejectAllPolicy
+    :caption: `RejectAllPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
-    class RejectAllPolicy(sky.AdminPolicy):
-        """Example policy: rejects all user requests."""
+.. literalinclude:: ../../../examples/admin_policy/reject_all.yaml
+    :language: yaml
+    :caption: `Config YAML for using RejectAllPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/reject_all.yaml>`_
 
-        @classmethod
-        def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            """Rejects all user requests."""
-            raise RuntimeError("This policy rejects all user requests.")
+.. _kubernetes-labels-policy:
 
-.. code-block:: yaml
+Add Labels for all Tasks on Kubernetes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    admin_policy: example_policy.RejectAllPolicy
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: AddLabelsPolicy
+    :caption: `AddLabelsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
-
-Add Kubernetes Labels for all Tasks
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    class AddLabelsPolicy(sky.AdminPolicy):
-        """Example policy: adds a kubernetes label for skypilot_config."""
-
-        @classmethod
-        def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:            
-            config = user_request.skypilot_config
-            labels = config.get_nested(('kubernetes', 'labels'), {})
-            labels['app'] = 'skypilot'
-            config.set_nested(('kubernetes', 'labels'), labels)
-            return sky.MutatedUserRequest(user_request.task, config)
-
-.. code-block:: yaml
-
-    admin_policy: example_policy.AddLabelsPolicy
+.. literalinclude:: ../../../examples/admin_policy/add_labels.yaml
+    :language: yaml
+    :caption: `Config YAML for using AddLabelsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/add_labels.yaml>`_
 
 
+.. _disable-public-ip-policy:
+    
 Always Disable Public IP for AWS Tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: DisablePublicIpPolicy
+    :caption: `DisablePublicIpPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
-    class DisablePublicIPPolicy(sky.AdminPolicy):
-        """Example policy: disables public IP for all tasks."""
+.. literalinclude:: ../../../examples/admin_policy/disable_public_ip.yaml
+    :language: yaml
+    :caption: `Config YAML for using DisablePublicIpPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/disable_public_ip.yaml>`_
 
-        @classmethod
-        def validate_and_mutate(cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            config = user_request.skypilot_config
-            config.set_nested(('aws', 'use_internal_ip'), True)
-            if config.get_nested(('aws', 'vpc_name'), None) is None:
-                # If no VPC name is specified, it is likely a mistake. We should
-                # reject the request
-                raise RuntimeError('VPC name should be set. Check organization '
-                                   'wiki for more information.')
-            return sky.MutatedUserRequest(user_request.task, config)
+.. _use-spot-for-gpu-policy:
 
-.. code-block:: yaml
+Use Spot for all GPU Tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    admin_policy: example_policy.DisablePublicIPPolicy
+..
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: UseSpotForGpuPolicy
+    :caption: `UseSpotForGpuPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
+.. literalinclude:: ../../../examples/admin_policy/use_spot_for_gpu.yaml
+    :language: yaml
+    :caption: `Config YAML for using UseSpotForGpuPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/use_spot_for_gpu.yaml>`_
+
+.. _enforce-autostop-policy:
 
 Enforce Autostop for all Tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: EnforceAutostopPolicy
+    :caption: `EnforceAutostopPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
 
-    class EnforceAutostopPolicy(sky.AdminPolicy):
-        """Example policy: enforce autostop for all tasks."""
-
-        @classmethod
-        def validate_and_mutate(
-                cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
-            """Enforces autostop for all tasks.
-            
-            Note that with this policy enforced, users can still change the autostop
-            setting for an existing cluster by using `sky autostop`.
-            """
-            request_options = user_request.request_options
-
-            # Request options is None when a task is executed with `jobs launch` or
-            # `sky serve up`.
-            if request_options is None:
-                return sky.MutatedUserRequest(
-                    task=user_request.task,
-                    skypilot_config=user_request.skypilot_config)
-
-            # Get the cluster record to operate on.
-            cluster_record = sky.status(request_options.cluster_name, refresh=True)
-
-            # Check if the user request should specify autostop settings.
-            need_autostop = False
-            if not cluster_record:
-                # Cluster does not exist
-                need_autostop = True
-            elif cluster_record[0]['status'] == sky.ClusterStatus.STOPPED:
-                # Cluster is stopped
-                need_autostop = True
-            elif cluster_record[0]['autostop'] < 0:
-                # Cluster is running but autostop is not set
-                need_autostop = True
-
-            # Check if the user request is setting autostop settings.
-            is_setting_autostop = False
-            idle_minutes_to_autostop = request_options.idle_minutes_to_autostop
-            is_setting_autostop = (idle_minutes_to_autostop is not None and
-                                idle_minutes_to_autostop >= 0)
-
-            # If the cluster requires autostop but the user request is not setting
-            # autostop settings, raise an error.
-            if need_autostop and not is_setting_autostop:
-                raise RuntimeError('Autostop/down must be set for all clusters.')
-
-            return sky.MutatedUserRequest(
-                task=user_request.task,
-                skypilot_config=user_request.skypilot_config)
-
-
-.. code-block:: yaml
-
-    admin_policy: example_policy.EnforceAutostopPolicy
+.. literalinclude:: ../../../examples/admin_policy/enforce_autostop.yaml
+    :language: yaml
+    :caption: `Config YAML for using EnforceAutostopPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/enforce_autostop.yaml>`_

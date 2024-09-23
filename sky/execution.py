@@ -160,13 +160,6 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    cluster_exists = False
-    if cluster_name is not None:
-        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_exists = cluster_record is not None
-        # TODO(woosuk): If the cluster exists, print a warning that
-        # `cpus` and `memory` are not used as a job scheduling constraint,
-        # unlike `gpus`.
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     dag, _ = admin_policy_utils.apply(
@@ -185,6 +178,14 @@ def _execute(
             raise ValueError(
                 'Job recovery is specified in the task. To launch a '
                 'managed job, please use: sky jobs launch')
+
+    cluster_exists = False
+    if cluster_name is not None:
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        cluster_exists = cluster_record is not None
+        # TODO(woosuk): If the cluster exists, print a warning that
+        # `cpus` and `memory` are not used as a job scheduling constraint,
+        # unlike `gpus`.
 
     stages = stages if stages is not None else list(Stage)
 

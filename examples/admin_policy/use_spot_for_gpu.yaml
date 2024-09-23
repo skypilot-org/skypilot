@@ -1,1 +1,1 @@
-admin_policy: example_policy.UseSpotForGPUPolicy
+admin_policy: example_policy.UseSpotForGpuPolicy

@@ -1,1 +1,1 @@
-admin_policy: example_policy.DisablePublicIPPolicy
+admin_policy: example_policy.DisablePublicIpPolicy

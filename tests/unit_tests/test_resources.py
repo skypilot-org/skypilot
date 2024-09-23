@@ -1,8 +1,7 @@
 import importlib
 import os
 from typing import Dict
-from unittest.mock import Mock
-from unittest.mock import patch
+from unittest import mock
 
 import pytest
 
@@ -25,7 +24,7 @@ GLOBAL_INVALID_LABELS = {
 
 
 def test_get_reservations_available_resources():
-    mock = Mock()
+    mock = mock.Mock()
     r = Resources(cloud=mock, instance_type="instance_type")
     r._region = "region"
     r._zone = "zone"
@@ -93,12 +92,13 @@ def test_kubernetes_labels_resources():
     _run_label_test(allowed_labels, invalid_labels, cloud)
 
 
-@patch('sky.clouds.service_catalog.instance_type_exists', return_value=True)
-@patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
-       return_value={'fake-acc': 2})
-@patch('sky.clouds.service_catalog.get_image_id_from_tag',
-       return_value='fake-image')
-@patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
+@mock.patch('sky.clouds.service_catalog.instance_type_exists',
+            return_value=True)
+@mock.patch('sky.clouds.service_catalog.get_accelerators_from_instance_type',
+            return_value={'fake-acc': 2})
+@mock.patch('sky.clouds.service_catalog.get_image_id_from_tag',
+            return_value='fake-image')
+@mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
     os.environ['SKYPILOT_CONFIG'] = './tests/test_yamls/test_aws_config.yaml'
     importlib.reload(skypilot_config)
