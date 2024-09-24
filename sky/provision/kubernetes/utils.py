@@ -344,12 +344,17 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     return has_gpu, cluster_resources
 
 
-def get_kubernetes_nodes() -> List[Any]:
-    # TODO(romilb): Calling kube API can take between 10-100ms depending on
-    #  the control plane. Consider caching calls to this function (using
-    #  kubecontext hash as key).
+@functools.lru_cache()
+def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
+    """Gets the kubernetes nodes in the context.
+
+    If context is None, gets the nodes in the current context.
+    """
+    if context is None:
+        context = get_current_kube_config_context_name()
+
     try:
-        nodes = kubernetes.core_api().list_node(
+        nodes = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
@@ -359,15 +364,20 @@ def get_kubernetes_nodes() -> List[Any]:
     return nodes
 
 
-def get_kubernetes_pods() -> List[Any]:
+def get_kubernetes_pods(context: Optional[str] = None,
+                        namespace: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes pods in the current namespace and current context.
 
     Used for computing cluster resource usage.
     """
+    if context is None:
+        context = get_current_kube_config_context_name()
+    if namespace is None:
+        namespace = get_kube_config_context_namespace()
+
     try:
-        ns = get_kube_config_context_namespace()
-        pods = kubernetes.core_api().list_namespaced_pod(
-            ns, _request_timeout=kubernetes.API_TIMEOUT).items
+        pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get pod info from Kubernetes cluster. '
@@ -376,7 +386,8 @@ def get_kubernetes_pods() -> List[Any]:
     return pods
 
 
-def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
+def check_instance_fits(context: str,
+                        instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
     If the instance has GPU requirements, checks if the GPU type is
@@ -420,7 +431,7 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -1721,7 +1732,9 @@ class KubernetesNodeInfo:
     free: Dict[str, int]
 
 
-def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
+def get_kubernetes_node_info(
+        context: Optional[str] = None,
+        namespace: Optional[str] = None) -> Dict[str, KubernetesNodeInfo]:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1732,9 +1745,9 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
         Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
             key and the KubernetesNodeInfo object as value
     """
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     # Get the pods to get the real-time resource usage
-    pods = get_kubernetes_pods()
+    pods = get_kubernetes_pods(context, namespace)
 
     label_formatter, _ = detect_gpu_label_formatter()
     if not label_formatter:

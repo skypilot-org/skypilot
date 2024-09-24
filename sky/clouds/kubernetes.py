@@ -116,13 +116,42 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
-            return [
+            regions = [
                 clouds.Region(
                     kubernetes_utils.get_current_kube_config_context_name())
             ]
-        regions = [clouds.Region(context) for context in allowed_contexts]
+        else:
+            regions = [clouds.Region(context) for context in allowed_contexts]
+
         if region is not None:
             regions = [r for r in regions if r.name == region]
+
+        # Check if requested instance type will fit in the cluster.
+        # TODO(zhwu,romilb): autoscaler type needs to be regional (per
+        # kubernetes cluster/context).
+        regions_to_return = []
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if autoscaler_type is None and instance_type is not None:
+            # If autoscaler is not set, check if the instance type fits in the
+            # cluster. Else, rely on the autoscaler to provision the right
+            # instance type without running checks. Worst case, if autoscaling
+            # fails, the pod will be stuck in pending state until
+            # provision_timeout, after which failover will be triggered.
+            for r in regions:
+                context = r.name
+                fits, reason = kubernetes_utils.check_instance_fits(
+                    context, instance_type)
+                if fits:
+                    regions_to_return.append(r)
+                    break
+                else:
+                    logger.debug(
+                        f'Instance type {instance_type} does '
+                        'not fit in the Kubernetes cluster with context: '
+                        f'{context}. Reason: {reason}')
+        else:
+            regions_to_return = regions
+
         return regions
 
     def instance_type_to_hourly_cost(self,
@@ -354,6 +383,14 @@ class Kubernetes(clouds.Cloud):
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            regions = self.regions_with_offering(
+                resources.instance_type,
+                accelerators=resources.accelerators,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone)
+            if not regions:
+                return resources_utils.FeasibleResources([], [], None)
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources],
                                                      fuzzy_candidate_list, None)
@@ -398,23 +435,19 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_utils.KubernetesInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
-        # Check if requested instance type will fit in the cluster.
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if autoscaler_type is None:
-            # If autoscaler is not set, check if the instance type fits in the
-            # cluster. Else, rely on the autoscaler to provision the right
-            # instance type without running checks. Worst case, if autoscaling
-            # fails, the pod will be stuck in pending state until
-            # provision_timeout, after which failover will be triggered.
-            fits, reason = kubernetes_utils.check_instance_fits(
-                chosen_instance_type)
-            if not fits:
-                logger.debug(f'Instance type {chosen_instance_type} does '
-                             'not fit in the Kubernetes cluster. '
-                             f'Reason: {reason}')
-                return resources_utils.FeasibleResources([], [], reason)
-
+        # Check the availability of the specified instance type in all contexts.
+        available_regions = self.regions_with_offering(
+            chosen_instance_type,
+            accelerators=None,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone)
+        if not available_regions:
+            return resources_utils.FeasibleResources([], [], None)
         # No fuzzy lists for Kubernetes
+        # We don't set the resources returned with regions, because the
+        # optimizer will further find the valid region (context) for the
+        # resources.
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
 
