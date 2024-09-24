@@ -1,6 +1,6 @@
 # TPU v6e
 
-Trillium (also refers to v6e) is Cloud TPU’s latest generation AI accelerator. SkyPilot support TPU v6e with provisioning, training and inferencing.
+Trillium (also refers to v6e) is Cloud TPU’s latest generation AI accelerator. SkyPilot support TPU v6e with provisioning, training and serving.
 
 ## Catalogs
 
@@ -52,8 +52,7 @@ $ ssh tpu-v6e
 Examples in this directory (`train-llama3-8b.yaml`) shows how to use TPU v6e to train a Llama3 8b model, using PyTorch (XLA) on the wikitext dataset. To start the training, use the following command:
 
 ```bash
-cd examples/tpu/v6e
-HF_TOKEN=hf_xxx sky launch train-llama3-8b.yaml -c train-llama3-8b --env HF_TOKEN
+$ HF_TOKEN=hf_xxx sky launch train-llama3-8b.yaml -c train-llama3-8b --env HF_TOKEN
 ```
 
 The training should finished in ~10 minutes for a `tpu-v6e-8` instance:
@@ -70,4 +69,42 @@ The training should finished in ~10 minutes for a `tpu-v6e-8` instance:
 (task, pid=17499) [INFO|modelcard.py:450] 2024-09-23 17:49:49,776 >> Dropping the following result as it does not have all the necessary fields:
 (task, pid=17499) {'task': {'name': 'Causal Language Modeling', 'type': 'text-generation'}, 'dataset': {'name': 'wikitext wikitext-2-raw-v1', 'type': 'wikitext', 'args': 'wikitext-2-raw-v1'}}
 INFO: Job finished (status: SUCCEEDED).
+```
+
+# Serving
+
+TPU v6e also supports serving. Examples in this directory (`serve-llama2-7b.yaml`) shows how to use TPU v6e to serve a Llama2 7b model, using PyTorch (XLA) and the JetStream lib. To start the serving, use the following command:
+
+```bash
+$ HF_TOKEN=hf_xxx sky launch serve-llama2-7b.yaml -c serve-llama2-7b --env HF_TOKEN
+```
+
+After the server is ready, you should see the following message:
+
+```bash
+(task, pid=26431) 2024-09-24 19:58:15,160 - root - INFO - Starting server on port 9000 with 64 threads
+(task, pid=26431) I0924 19:58:15.160293 140454572087296 server_lib.py:155] Starting server on port 9000 with 64 threads
+(task, pid=26431) 2024-09-24 19:58:15,161 - root - INFO - Not starting JAX profiler server: False
+(task, pid=26431) I0924 19:58:15.161907 140454572087296 server_lib.py:164] Not starting JAX profiler server: False
+(task, pid=26431) Started jetstream_server....
+```
+
+You can now start a benchmark to test the serving performance:
+
+```bash
+$ sky exec serve-llama2-7b benchmark-llama2-7b.yaml
+... (emitted logs)
+(task, pid=25491) Successful requests: 100
+(task, pid=25491) Benchmark duration: 8.753792 s
+(task, pid=25491) Total input tokens: 21888
+(task, pid=25491) Total generated tokens: 18803
+(task, pid=25491) Request throughput: 11.42 requests/s
+(task, pid=25491) Input token throughput: 2500.40 tokens/s
+(task, pid=25491) Output token throughput: 2147.98 tokens/s
+(task, pid=25491) Mean TTFT: 1981.93 ms
+(task, pid=25491) Median TTFT: 1829.33 ms
+(task, pid=25491) P99 TTFT: 4511.95 ms
+(task, pid=25491) Mean TPOT: 130.71 ms
+(task, pid=25491) Median TPOT: 18.88 ms
+(task, pid=25491) P99 TPOT: 2487.37 ms
 ```
