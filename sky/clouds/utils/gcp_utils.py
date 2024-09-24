@@ -17,6 +17,7 @@ import cachetools
 from sky import sky_logging
 from sky import skypilot_config
 from sky.provision.gcp import constants
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -36,8 +37,7 @@ def is_tpu_pod_slice(resources: Optional['resources_lib.Resources']) -> bool:
         return False
     assert resources is not None
     acc, _ = list(resources.accelerators.items())[0]
-    # Reference on Accelerator names for TPU Pod slices: https://cloud.google.com/kubernetes-engine/docs/how-to/tpus#workload_preparation # pylint: disable=line-too-long
-    return acc.endswith('-podslice') or acc.endswith('-device')
+    return acc in kubernetes_utils.GKE_TPU_ACCELERATOR_TO_GENERATION
 
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu(resources):

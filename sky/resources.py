@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import common_utils
@@ -565,8 +566,7 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    # Reference on names of TPU Pod slices available on GKE: https://cloud.google.com/kubernetes-engine/docs/how-to/tpus#workload_preparation # pylint: disable=line-too-long
-                    if acc.endswith('-podslice') or acc.endswith('-device'):
+                    if acc in kubernetes_utils.GKE_TPU_ACCELERATOR_TO_GENERATION:
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -576,13 +576,30 @@ class Resources:
                 if accelerator_args is None:
                     accelerator_args = {}
 
-                # Supported TPU Podslice versions on GKE are v4 <= and those
-                # versions default the architecture to be TPU-VM.
-                # Reference: https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu_architectures
-                use_tpu_vm = True
+                use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if self.cloud.is_same_cloud(clouds.GCP()):
-                    use_tpu_vm = accelerator_args.get('tpu_vm', True)                    
+                    if 'runtime_version' not in accelerator_args:
 
+                        def _get_default_runtime_version() -> str:
+                            if not use_tpu_vm:
+                                return '2.12.0'
+                            # TPU V5 requires a newer runtime version.
+                            if acc.startswith('tpu-v5'):
+                                return 'v2-alpha-tpuv5'
+                            return 'tpu-vm-base'
+
+                        accelerator_args['runtime_version'] = (
+                            _get_default_runtime_version())
+                        logger.info(
+                            'Missing runtime_version in accelerator_args, using'
+                            f' default ({accelerator_args["runtime_version"]})')
+                    
+                    if self.instance_type is not None and use_tpu_vm:
+                        if self.instance_type != 'TPU-VM':
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError(
+                                    'Cannot specify instance type'
+                                    f' (got "{self.instance_type}") for TPU VM.')
                 if self.cloud.is_same_cloud(
                     clouds.GCP()) and self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
@@ -590,21 +607,6 @@ class Resources:
                             raise ValueError(
                                 'Cannot specify instance type'
                                 f' (got "{self.instance_type}") for TPU VM.')
-                if 'runtime_version' not in accelerator_args:
-
-                    def _get_default_runtime_version() -> str:
-                        if not use_tpu_vm:
-                            return '2.12.0'
-                        # TPU V5 requires a newer runtime version.
-                        if acc.startswith('tpu-v5'):
-                            return 'v2-alpha-tpuv5'
-                        return 'tpu-vm-base'
-
-                    accelerator_args['runtime_version'] = (
-                        _get_default_runtime_version())
-                    logger.info(
-                        'Missing runtime_version in accelerator_args, using'
-                        f' default ({accelerator_args["runtime_version"]})')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args

@@ -71,6 +71,15 @@ PORT_FORWARD_PROXY_CMD_VERSION = 2
 PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
                                f'v{PORT_FORWARD_PROXY_CMD_VERSION}.sh')
 
+# Mapping used to get generation for TPU accelerator name.
+# https://cloud.google.com/kubernetes-engine/docs/how-to/tpus#run
+GKE_TPU_ACCELERATOR_TO_GENERATION = {
+    "tpu-v4-podslice": "v4",
+    "tpu-v5-lite-device": "v5e",
+    "tpu-v5-lite-podslice": "v5e",
+    "tpu-v5p-slice": "v5p",
+}
+
 logger = sky_logging.init_logger(__name__)
 
 
