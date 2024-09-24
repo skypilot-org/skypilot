@@ -1900,6 +1900,8 @@ def test_tpu_pod_slice_gke():
             f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --cloud kubernetes --gpus tpu-v5-lite-podslice',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "conda activate flax; python -c \'import jax; print(jax.devices()[0].platform);\' | grep tpu | exit 1;"', # Ensure TPU is reachable.
+            f'sky logs {name} 2 --status'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
