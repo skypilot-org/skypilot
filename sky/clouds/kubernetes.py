@@ -143,7 +143,6 @@ class Kubernetes(clouds.Cloud):
                     context, instance_type)
                 if fits:
                     regions_to_return.append(r)
-                    break
                 else:
                     logger.debug(
                         f'Instance type {instance_type} does '
@@ -152,7 +151,7 @@ class Kubernetes(clouds.Cloud):
         else:
             regions_to_return = regions
 
-        return regions
+        return regions_to_return
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
