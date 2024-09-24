@@ -280,7 +280,11 @@ class Kubernetes(clouds.Cloud):
 
         if resources.image_id is not None:
             # Use custom image specified in resources
-            image_id = resources.image_id['kubernetes']
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert resources.region in resources.image_id, resources.image_id
+                image_id = resources.image_id[resources.region]
             if image_id.startswith('docker:'):
                 image_id = image_id[len('docker:'):]
         else:

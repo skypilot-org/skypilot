@@ -431,14 +431,17 @@ class OCI(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
-        oci_cfg_file = oci_adaptor.get_config_file()
-        # Pass-in a profile parameter so that multiple profile in oci
-        # config file is supported (2023/06/09).
-        oci_cfg = oci_adaptor.get_oci_config(
-            profile=oci_utils.oci_config.get_profile())
-        api_key_file = oci_cfg[
-            'key_file'] if 'key_file' in oci_cfg else 'BadConf'
-        sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        try:
+            oci_cfg_file = oci_adaptor.get_config_file()
+            # Pass-in a profile parameter so that multiple profile in oci
+            # config file is supported (2023/06/09).
+            oci_cfg = oci_adaptor.get_oci_config(
+                profile=oci_utils.oci_config.get_profile())
+            api_key_file = oci_cfg[
+                'key_file'] if 'key_file' in oci_cfg else 'BadConf'
+            sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        except ImportError:
+            return {}
 
         # OCI config and API key file are mandatory
         credential_files = [oci_cfg_file, api_key_file]
