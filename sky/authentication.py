@@ -378,11 +378,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    namespace = config['provider'].get(
-        'namespace',
-        kubernetes_utils.get_current_kube_config_context_namespace())
     context = config['provider'].get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
+    namespace = config['provider'].get(
+        'namespace',
+        kubernetes_utils.get_kube_config_context_namespace(context))
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()

@@ -52,8 +52,7 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
-    _SINGLETON_REGION = 'kubernetes'
-    _regions: List[clouds.Region] = [clouds.Region(_SINGLETON_REGION)]
+    _LEGACY_SINGLETON_REGION = 'kubernetes'
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -117,7 +116,10 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
-            return cls._regions
+            return [
+                clouds.Region(
+                    kubernetes_utils.get_current_kube_config_context_name())
+            ]
         regions = [clouds.Region(context) for context in allowed_contexts]
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -227,7 +229,9 @@ class Kubernetes(clouds.Cloud):
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
         if region is None:
-            region = self._regions[0]
+            context = kubernetes_utils.get_current_kube_config_context_name()
+        else:
+            context = region.name
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -311,13 +315,10 @@ class Kubernetes(clouds.Cloud):
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
-            'region': region.name,
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
-            'k8s_namespace':
-                kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
@@ -337,20 +338,19 @@ class Kubernetes(clouds.Cloud):
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
-        resource_context = None
-        if region.name != self._SINGLETON_REGION:
-            resource_context = region.name
-        else:
-            resource_context = (
-                kubernetes_utils.get_current_kube_config_context_name())
-        if resource_context is not None:
-            deploy_vars['k8s_context'] = resource_context
+        if context is not None:
+            deploy_vars['k8s_context'] = context
+
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+        deploy_vars['k8s_namespace'] = namespace
 
         return deploy_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
+        # TODO(zhwu): This needs to be updated to return the correct region
+        # (context) that has enough resources.
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -440,14 +440,20 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        # TODO(zhwu): or not in allowed_contexts
+        if region == self._LEGACY_SINGLETON_REGION:
+            # For backward compatibility, we allow the region to be set to the
+            # legacy singletonton region.
+            # TODO: Remove this after 0.9.0.
+            return region, zone
+
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
         if all_contexts is None:
             all_contexts = []
-        if region != self._SINGLETON_REGION and region not in all_contexts:
+        if region not in all_contexts:
             raise ValueError(
-                'Kubernetes only supports context names as regions. '
-                f'Allowed contexts: {all_contexts}')
+                f'Context {region} not found in kubeconfig. Kubernetes only '
+                'supports context names as regions. Available '
+                f'contexts: {all_contexts}')
         if zone is not None:
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')

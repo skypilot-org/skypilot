@@ -2081,7 +2081,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
             self,
@@ -2514,6 +2514,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
+
+        if version < 9:
+            # For backward compatibility, we should update the region of a
+            # SkyPilot cluster on Kubernetes to the actual context it is using.
+            # pylint: disable=import-outside-toplevel
+            from sky.provision.kubernetes import utils as kubernetes_utils
+            launched_resources = state['launched_resources']
+            if isinstance(launched_resources.cloud, clouds.Kubernetes):
+                yaml_config = common_utils.read_yaml(state['_cluster_yaml'])
+                context = kubernetes_utils.get_context_from_config(
+                    yaml_config['provider'])
+                state['launched_resources'] = launched_resources.copy(
+                    region=context)
 
         self.__dict__.update(state)
 

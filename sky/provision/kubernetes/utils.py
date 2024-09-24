@@ -1,5 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
+import functools
 import json
 import math
 import os
@@ -364,7 +365,7 @@ def get_kubernetes_pods() -> List[Any]:
     Used for computing cluster resource usage.
     """
     try:
-        ns = get_current_kube_config_context_namespace()
+        ns = get_kube_config_context_namespace()
         pods = kubernetes.core_api().list_namespaced_pod(
             ns, _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
@@ -389,6 +390,9 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         bool: True if the instance fits on the cluster, False otherwise.
         Optional[str]: Error message if the instance does not fit.
     """
+
+    # TODO(zhwu): this should check the node for specific context, instead
+    # of the default context to make failover fully functional.
 
     def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
                            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
@@ -629,7 +633,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        ns = get_current_kube_config_context_namespace()
+        ns = get_kube_config_context_namespace()
         context = get_current_kube_config_context_name()
         kubernetes.core_api(context).list_namespaced_pod(
             ns, _request_timeout=timeout)
@@ -760,6 +764,7 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
     return False, None
 
 
+@functools.lru_cache()
 def get_current_kube_config_context_name() -> Optional[str]:
     """Get the current kubernetes context from the kubeconfig file
 
@@ -774,6 +779,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
         return None
 
 
+@functools.lru_cache()
 def get_all_kube_config_context_names() -> Optional[List[str]]:
     """Get all kubernetes context names from the kubeconfig file
 
@@ -789,7 +795,9 @@ def get_all_kube_config_context_names() -> Optional[List[str]]:
         return None
 
 
-def get_current_kube_config_context_namespace() -> str:
+@functools.lru_cache()
+def get_kube_config_context_namespace(
+        context_name: Optional[str] = None) -> str:
     """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
@@ -804,9 +812,17 @@ def get_current_kube_config_context_namespace() -> str:
             return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
-        if 'namespace' in current_context['context']:
-            return current_context['context']['namespace']
+        contexts, current_context = k8s.config.list_kube_config_contexts()
+        if context_name is None:
+            context = current_context
+        else:
+            context = next((c for c in contexts if c['name'] == context_name),
+                           None)
+            if context is None:
+                return DEFAULT_NAMESPACE
+
+        if 'namespace' in context['context']:
+            return context['context']['namespace']
         else:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
@@ -1763,8 +1779,9 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
 
 
 def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
+    context = get_context_from_config(provider_config)
     return provider_config.get('namespace',
-                               get_current_kube_config_context_namespace())
+                               get_kube_config_context_namespace(context))
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> str:

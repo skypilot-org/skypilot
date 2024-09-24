@@ -220,10 +220,11 @@ def ingress_controller_exists(context: str,
 
 
 def get_ingress_external_ip_and_ports(
+    context: str,
     namespace: str = 'ingress-nginx'
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
     ingress_services = [
         item for item in core_api.list_namespaced_service(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
@@ -257,11 +258,12 @@ def get_ingress_external_ip_and_ports(
     return external_ip, None
 
 
-def get_loadbalancer_ip(namespace: str,
+def get_loadbalancer_ip(context: str,
+                        namespace: str,
                         service_name: str,
                         timeout: int = 0) -> Optional[str]:
     """Returns the IP address of the load balancer."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
 
     ip = None
 
@@ -282,9 +284,9 @@ def get_loadbalancer_ip(namespace: str,
     return ip
 
 
-def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
+def get_pod_ip(context: str, namespace: str, pod_name: str) -> Optional[str]:
     """Returns the IP address of the pod."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
     pod = core_api.read_namespaced_pod(pod_name,
                                        namespace,
                                        _request_timeout=kubernetes.API_TIMEOUT)
