@@ -1,5 +1,3 @@
-<!-- # Airflow made easy: take your dev workflows to production in 2 steps with SkyPilot -->
-<!-- Easily go from dev to prod in Airflow with SkyPilot -->
 # Running SkyPilot tasks in Airflow
 
 
