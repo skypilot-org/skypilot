@@ -87,6 +87,17 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
+  # Admin policy to be applied to all tasks. (optional).
+  #
+  # The policy class to be applied to all tasks, which can be used to validate
+  # and mutate user requests.
+  #
+  # This is useful for enforcing certain policies on all tasks, e.g.,
+  # add custom labels; enforce certain resource limits; etc.
+  #
+  # The policy class should implement the sky.AdminPolicy interface.
+  admin_policy: my_package.SkyPilotPolicyV1
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:

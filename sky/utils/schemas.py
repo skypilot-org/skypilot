@@ -854,6 +854,13 @@ def get_config_schema():
         },
     }
 
+    admin_policy_schema = {
+        'type': 'string',
+        # Check regex to be a valid python module path
+        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+    }
+
     allowed_clouds = {
         # A list of cloud names that are allowed to be used
         'type': 'array',
@@ -911,6 +918,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             **cloud_configs,
