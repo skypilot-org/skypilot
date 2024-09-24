@@ -279,7 +279,6 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-
         image_id_dict = resources.image_id
         if image_id_dict is not None:
             # Use custom image specified in resources
