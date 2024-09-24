@@ -375,6 +375,15 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'vpn': {
+                'type': 'object',
+                'additionalProperties': False,
+                'properties': {
+                    'tailscale_auth_key': {
+                        'type': 'string',
+                    },
+                }
+            },
         }
     }
 
