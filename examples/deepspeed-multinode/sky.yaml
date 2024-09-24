@@ -18,6 +18,7 @@ resources:
   # accelerators: A100-80GB:1  # Azure, GCP, SCP
   # accelerators: A10G:1  # AWS. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
   # accelerators: T4:1  # AWS, Azure, GCP. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
+
 num_nodes: 2
 
 envs:
@@ -25,7 +26,6 @@ envs:
   MY_VAR_2: "world"
   # List of env vars to propagate to all nodes in deepspeed. If you add an env above, add it to this list.
   DEEPSPEED_ENVS: "MY_VAR_1,MY_VAR_2,SKYPILOT_NODE_RANK"
-
 
 setup: |
   git clone https://github.com/microsoft/DeepSpeedExamples.git || true
