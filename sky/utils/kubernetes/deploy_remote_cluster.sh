@@ -210,7 +210,7 @@ if [ "$INSTALL_GPU" == "true" ]; then
         ./get_helm.sh &&
         helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
         kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
-        sudo ln -s /sbin/ldconfig /sbin/ldconfig.real &&
+        sudo ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
         helm install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \
         --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
         --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \

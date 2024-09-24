@@ -5222,7 +5222,9 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
 
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
-        click.echo('Found existing kube config. It will be backed up to ~/.kube/config.bak.')
+        click.echo(
+            'Found existing kube config. It will be backed up to ~/.kube/config.bak.'
+        )
     style = colorama.Style
     click.echo('To view detailed progress: '
                f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -5253,26 +5255,33 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
                 f'{colorama.Fore.GREEN}🎉 Remote cluster cleaned up successfully.'
                 f'{style.RESET_ALL}')
         else:
-            click.echo(
-                'Cluster deployment done. You can now run tasks on '
-                'this cluster.\nE.g., run a task with: '
-                'sky launch --cloud kubernetes -- echo hello world.'
-                f'\n{colorama.Fore.GREEN}🎉 Remote cluster deployed '
-                f'successfully. {style.RESET_ALL}')
+            click.echo('Cluster deployment done. You can now run tasks on '
+                       'this cluster.\nE.g., run a task with: '
+                       'sky launch --cloud kubernetes -- echo hello world.'
+                       f'\n{colorama.Fore.GREEN}🎉 Remote cluster deployed '
+                       f'successfully. {style.RESET_ALL}')
 
 
 @click.option('--gpus/--no-gpus',
               default=True,
               is_flag=True,
               help='Launch cluster without GPU support even '
-                   'if GPUs are detected on the host.')
-@click.option('--ips', type=str, required=False,
-              help="Path to the file containing IP addresses of remote machines.")
-@click.option('--username', type=str, required=False,
+              'if GPUs are detected on the host.')
+@click.option(
+    '--ips',
+    type=str,
+    required=False,
+    help="Path to the file containing IP addresses of remote machines.")
+@click.option('--username',
+              type=str,
+              required=False,
               help="SSH username for accessing remote machines.")
-@click.option('--key-path', type=str, required=False,
+@click.option('--key-path',
+              type=str,
+              required=False,
               help="Path to the SSH private key.")
-@click.option('--cleanup', is_flag=True,
+@click.option('--cleanup',
+              is_flag=True,
               help="Clean up the remote cluster instead of deploying it.")
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
@@ -5284,12 +5293,14 @@ def local_up(gpus: bool, ips: str, username: str, key_path: str, cleanup: bool):
         if bool(ips) or bool(username) or bool(key_path):
             if not (ips and username and key_path):
                 raise click.BadParameter(
-                    "All --ips, --username, and --key-path must be specified together.")
+                    "All --ips, --username, and --key-path must be specified together."
+                )
 
         # --cleanup can only be specified if --ips, --username, and --key-path are all provided
         if cleanup and not (ips and username and key_path):
             raise click.BadParameter(
-                "--cleanup can only be used with --ips, --username, and --key-path.")
+                "--cleanup can only be used with --ips, --username, and --key-path."
+            )
 
     _validate_args(ips, username, key_path, gpus, cleanup)
 

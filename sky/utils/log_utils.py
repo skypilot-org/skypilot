@@ -182,26 +182,22 @@ class SkyRemoteUpLineProcessor(LineProcessor):
         # Cleanup steps
         if 'Cleaning up head node' in log_line:
             self.status_display.update('[bold cyan]Cleaning up head node')
-        if 'Node cleaned up successfully' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}✔ Head node cleaned up successfully.'
-                f'{colorama.Style.RESET_ALL}')
         if 'Cleaning up node' in log_line:
             self.status_display.update('[bold cyan]Cleaning up worker node')
-        if 'Node cleaned up successfully' in log_line:
+        if 'cleaned up successfully' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}✔ Worker node cleaned up successfully.'
-                f'{colorama.Style.RESET_ALL}')
+                f'{colorama.Fore.GREEN}{log_line.strip()}{colorama.Style.RESET_ALL}'
+            )
 
         # Final status
         if 'Cluster deployment completed.' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}✔ Remote k3s is running.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Fore.GREEN}✔ Remote k3s is running.'
+                        f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
+
 
 def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""

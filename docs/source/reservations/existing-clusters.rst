@@ -6,23 +6,24 @@ Deploy SkyPilot on existing clusters
 This page will help you deploy SkyPilot on your existing clusters - whether it's on-premises machines or reserved instances on a cloud provider.
 
 **Given a list of IP addresses and SSH keys,**
-the `deploy.sh <https://github.com/skypilot-org/skypilot/blob/master/examples/existing_infra/deploy.sh>`_
-script will install necessary dependencies on the remote machines and configure
-SkyPilot to run jobs and services on the cluster.
+SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
 
-At the end of this guide, you will be able to use SkyPilot to run jobs or services
-on your own preexisting cluster.
+At the end of this guide, you will be able to use SkyPilot to run jobs or services on your own preexisting cluster.
+
+..
+   Figure v1: https://docs.google.com/drawings/d/1Jp1tTu1kxF-bIrS6LRMqoJ1dnxlFvn-iobVsXElXfAg/edit?usp=sharing
+   Figure v2: https://docs.google.com/drawings/d/1hMvOe1HX0ESoUbCvUowla2zO5YBacsdruo0dFqML9vo/edit?usp=sharing
 
 .. figure:: ../images/sky-existing-infra-workflow.png
    :width: 85%
    :align: center
    :alt: Deploying SkyPilot on existing clusters
 
-   Given a list of IP addresses and SSH keys, ``deploy.sh`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
+   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
 
 .. note::
 
-    Behind the scenes, the script deploys a lightweight Kubernetes cluster on the remote machines using `k3s <https://k3s.io/>`_.
+    Behind the scenes, SkyPilot deploys a lightweight Kubernetes cluster on the remote machines using `k3s <https://k3s.io/>`_.
 
     **Note that no Kubernetes knowledge is required for running this guide.** SkyPilot abstracts away the complexity of Kubernetes and provides a simple interface to run your jobs and services.
 
@@ -41,8 +42,8 @@ Prerequisites
 * All machines must use the same SSH key and username
 * Port 6443 must be accessible on at least one node from your local machine
 
-Deployment steps
-----------------
+Deploying SkyPilot
+------------------
 
 1. Create a file ``ips.txt`` with the IP addresses of your machines with one IP per line.
    The first node will be used as the head node - this node must have port 6443 accessible from your local machine.
@@ -57,27 +58,21 @@ Deployment steps
 
    In this example, the first node (``192.168.1.1``) has port 6443 open and will be used as the head node.
 
-2. Get the deployment script:
-
-   .. code-block:: bash
-
-      wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/existing_infra/deploy.sh
-      chmod +x deploy.sh
-
-2. Run ``./deploy.sh`` and pass the ``ips.txt`` file, SSH username, and SSH keys as arguments:
+2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH keys as arguments:
 
    .. code-block:: bash
 
       IP_FILE=ips.txt
       SSH_USERNAME=username
       SSH_KEY=path/to/ssh/key
-      ./deploy.sh $IP_FILE $SSH_USERNAME $SSH_KEY
+      sky local up --ip $IP_FILE --username $SSH_USERNAME --key-path $SSH_KEY
 
-3. The script will deploy a Kubernetes cluster on the remote machines, setup GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
+   SkyPilot will deploy a Kubernetes cluster on the remote machines, setup GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
-   At the end, you should see a message like this:
+   Example output of ``sky local up``:
 
-   .. code-block:: bash
+   .. code-block:: console
+
       $ sky local up --ips ips.txt --username gcpuser --key-path ~/.ssh/id_rsa
       Found existing kube config. It will be backed up to ~/.kube/config.bak.
       To view detailed progress: tail -n100 -f ~/sky_logs/sky-2024-09-23-18-53-14-165534/local_up.log
@@ -97,7 +92,7 @@ Deployment steps
 
       sky check kubernetes
 
-   You can now use SkyPilot to launch your :ref:`development clusters <dev-cluster>` and `training jobs <ai-training>` on your own infrastructure.
+   You can now use SkyPilot to launch your :ref:`development clusters <dev-cluster>` and :ref:`training jobs <ai-training>` on your own infrastructure.
 
    .. code-block:: console
 
@@ -124,13 +119,13 @@ Deployment steps
 Cleanup
 -------
 
-To clean up all state created by ``deploy.sh`` on your cluster, use the ``--cleanup`` flag:
+To clean up all state created by SkyPilot on your cluster, use the ``--cleanup`` flag:
 
 .. code-block:: bash
 
     IP_FILE=ips.txt
     SSH_USERNAME=username
     SSH_KEY=path/to/ssh/key
-    ./deploy.sh $IP_FILE $SSH_USERNAME $SSH_KEY --cleanup
+    sky local up --ip $IP_FILE --username $SSH_USERNAME --key-path $SSH_KEY --cleanup
 
 This will stop all Kubernetes services on the remote machines.
