@@ -1,6 +1,15 @@
 <!-- # Airflow made easy: take your dev workflows to production in 2 steps with SkyPilot -->
-# Easily go from dev to prod in Airflow with SkyPilot
+<!-- Easily go from dev to prod in Airflow with SkyPilot -->
+# Running SkyPilot tasks in Airflow
 
+
+In this guide, we show how a training workflow involving data preprocessing, training and evaluation can be first easily developed with SkyPilot, and then orchestrated in Airflow.
+
+<p align="center">
+  <img src="https://i.imgur.com/mcMghXM.png" width="800">
+</p>
+
+## Why use SkyPilot with Airflow?
 In AI workflows, **the transition from development to production is hard**. 
 
 Workflow development happens ad-hoc, with a lot of interaction required 
@@ -19,11 +28,6 @@ Here's how you can use SkyPilot to take your dev workflows to production in Airf
 2. **Orchestrate SkyPilot tasks in Airflow** by invoking `sky launch` on their YAMLs as a task in the Airflow DAG.
     - Airflow does the scheduling, logging, and monitoring, while SkyPilot handles the infra setup and task execution.
 
-In this guide, we show how a training workflow involving data preprocessing, training and evaluation can be first easily developed with SkyPilot, and then orchestrated in Airflow.
-
-<p align="center">
-  <img src="https://i.imgur.com/mcMghXM.png" width="800">
-</p>
 
 ## Prerequisites
 
