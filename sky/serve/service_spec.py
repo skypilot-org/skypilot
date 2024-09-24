@@ -36,6 +36,7 @@ class SkyServiceSpec:
         # Deprecated: replaced by the target_qps_per_replica.
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
+        tailscale_auth_key: Optional[str] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -91,6 +92,7 @@ class SkyServiceSpec:
             int] = base_ondemand_fallback_replicas
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
+        self._tailscale_auth_key: Optional[str] = tailscale_auth_key
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -177,6 +179,13 @@ class SkyServiceSpec:
                     'base_ondemand_fallback_replicas', None)
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
+        
+        vpn_section: Dict[str, Any] = config.get('vpn', None)
+        if vpn_section is not None:
+            # Get the tailscale auth key from the environment.
+            tailscale_auth_key = vpn_section.get('tailscale_auth_key', None)
+            if tailscale_auth_key is not None:
+                service_config['tailscale_auth_key'] = tailscale_auth_key
 
         return SkyServiceSpec(**service_config)
 
@@ -233,6 +242,7 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        add_if_not_none('vpn', 'tailscale_auth_key', self.tailscale_auth_key)
         return config
 
     def probe_str(self):
@@ -334,6 +344,10 @@ class SkyServiceSpec:
     @property
     def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
+    
+    @property
+    def tailscale_auth_key(self) -> Optional[str]:
+        return self._tailscale_auth_key
 
     @property
     def use_ondemand_fallback(self) -> bool:
