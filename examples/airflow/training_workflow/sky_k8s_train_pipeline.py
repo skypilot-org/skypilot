@@ -1,7 +1,7 @@
 from airflow import DAG
-from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
+from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import (
+    KubernetesPodOperator)
 from airflow.utils.dates import days_ago
-
 from kubernetes.client import models as k8s
 
 default_args = {
@@ -13,13 +13,14 @@ default_args = {
 def get_skypilot_task(task_id: str, sky_command: str):
     INIT_COMMANDS = (
         # Install gcloud CLI and source the bashrc for accessing buckets in tasks
-        'sudo conda install -y -c conda-forge google-cloud-sdk '
-    )
+        'sudo conda install -y -c conda-forge google-cloud-sdk ')
 
     # Install SkyPilot and clone the mock train workflow repo
     # In your workflow, you can have skypilot and the code baked into the image
-    SETUP_COMMAND = ("pip install skypilot-nightly[kubernetes,gcp] &&"
-                     "git clone https://github.com/romilbhardwaj/mock_train_workflow.git /home/sky/mock_train_workflow")
+    SETUP_COMMAND = (
+        "pip install skypilot-nightly[kubernetes,gcp] &&"
+        "git clone https://github.com/romilbhardwaj/mock_train_workflow.git /home/sky/mock_train_workflow"
+    )
 
     # Command to extract the gcloud secrets tarball
     EXTRACT_GCLOUD = (
@@ -31,7 +32,8 @@ def get_skypilot_task(task_id: str, sky_command: str):
         task_id=task_id,
         name="skypilot-pod",
         namespace="default",
-        image="us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:20240613",
+        image=
+        "us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:20240613",
         cmds=["/bin/bash", "-i", "-c"],
         arguments=[
             f"{INIT_COMMANDS} && "
@@ -65,15 +67,21 @@ with DAG(dag_id='sky_k8s_train_pipeline',
     bucket_url = "gs://sky-data-demo"
 
     # Launch data preprocessing task. We use --down to clean up the SkyPilot cluster after the task is done.
-    data_preprocess = get_skypilot_task("sky_data_preprocess",
-                                        f"sky launch -y -c data --down --cloud kubernetes --env DATA_BUCKET_URL={bucket_url} mock_train_workflow/data_preprocessing.yaml")
+    data_preprocess = get_skypilot_task(
+        "sky_data_preprocess",
+        f"sky launch -y -c data --down --cloud kubernetes --env DATA_BUCKET_URL={bucket_url} mock_train_workflow/data_preprocessing.yaml"
+    )
 
     # Task to train the model
-    train = get_skypilot_task("sky_train",
-                              f"sky launch -y -c train --down --cloud kubernetes --env DATA_BUCKET_URL={bucket_url} mock_train_workflow/train.yaml")
+    train = get_skypilot_task(
+        "sky_train",
+        f"sky launch -y -c train --down --cloud kubernetes --env DATA_BUCKET_URL={bucket_url} mock_train_workflow/train.yaml"
+    )
 
     # Task to evaluate the trained model. This can optionally be run on the same cluster as the training task using `sky exec`
-    eval = get_skypilot_task("sky_eval",
-                             f"sky launch -y -c eval --down --cloud kubernetes --env DATA_BUCKET_URL={bucket_url} mock_train_workflow/eval.yaml")
+    eval = get_skypilot_task(
+        "sky_eval",
+        f"sky launch -y -c eval --down --cloud kubernetes --env DATA_BUCKET_URL={bucket_url} mock_train_workflow/eval.yaml"
+    )
 
     data_preprocess >> train >> eval
