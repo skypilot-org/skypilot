@@ -75,6 +75,12 @@ def enable_all_clouds_in_monkeypatch(
     monkeypatch.setattr(
         'sky.clouds.kubernetes.Kubernetes.regions_with_offering',
         lambda *_args, **_kwargs: [clouds.Region('my-k8s-cluster-context')])
+
+    def kubernetes_validate_region_zone(self, region, zone):
+        if region == 'my-k8s-cluster-context':
+            return region, zone
+        raise ValueError(f'Invalid region: {region}, zone: {zone}')
+
     monkeypatch.setattr(
         'sky.clouds.kubernetes.Kubernetes.validate_region_zone',
-        lambda *_args, **_kwargs: ['my-k8s-cluster-context', None])
+        kubernetes_validate_region_zone)
