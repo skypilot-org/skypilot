@@ -362,7 +362,7 @@ def shared_controller_vars_to_fill(
         'sky_python_cmd': constants.SKY_PYTHON_CMD,
     }
     env_vars: Dict[str, str] = {
-        env.value: str(int(env.get())) for env in env_options.Options
+        str(env): str(int(env.get())) for env in env_options.Options
     }
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
@@ -370,7 +370,7 @@ def shared_controller_vars_to_fill(
         constants.USER_ENV_VAR: getpass.getuser(),
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
-        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value[0]: '1',
+        str(env_options.Options.SKIP_CLOUD_IDENTITY_CHECK): '1',
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.

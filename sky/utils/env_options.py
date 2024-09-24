@@ -22,6 +22,9 @@ class Options(enum.Enum):
         self.env_var = env_var
         self.default = default
 
+    def __repr__(self) -> str:
+        return self.env_var
+
     def get(self):
         """Check if an environment variable is set to True."""
         return os.getenv(self.env_var,
