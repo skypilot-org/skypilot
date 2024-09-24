@@ -253,13 +253,20 @@ def get_default_instance_type(
     instance_type_prefix = tuple(
         f'{family}-' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _df[_df['InstanceType'].notna()]
-    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
 
     def _filter_disk_type(instance_type: str) -> bool:
         valid, _ = GCP.check_disk_tier(instance_type, disk_tier)
         return valid
 
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
+
+    default_instance_type_df = df[df['InstanceType'].str.startswith(
+        instance_type_prefix)]
+    default_instance_type = common.get_instance_type_for_cpus_mem_impl(
+        default_instance_type_df, cpus, memory_gb_or_ratio)
+    if default_instance_type is not None:
+        return default_instance_type
+
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
 

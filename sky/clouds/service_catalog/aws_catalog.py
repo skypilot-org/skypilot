@@ -238,7 +238,14 @@ def get_default_instance_type(
     instance_type_prefix = tuple(
         f'{family}.' for family in _DEFAULT_INSTANCE_FAMILY)
     df = _get_df()
-    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+
+    default_instance_type_df = df[df['InstanceType'].str.startswith(
+        instance_type_prefix)]
+    default_instance_type = common.get_instance_type_for_cpus_mem_impl(
+        default_instance_type_df, cpus, memory_gb_or_ratio)
+    if default_instance_type is not None:
+        return default_instance_type
+
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
 
