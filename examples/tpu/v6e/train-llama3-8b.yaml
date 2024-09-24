@@ -7,13 +7,11 @@ envs:
 workdir: .
 
 setup: |
-  # Setup runtime for training
-  git clone -b flash_attention https://github.com/pytorch-tpu/transformers.git
-  cd transformers
-  pip3 install -e .
-  pip3 install datasets evaluate scikit-learn accelerate cloud-tpu-client
+  pip3 install huggingface_hub
   python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
   # Setup TPU
+  pip3 install cloud-tpu-client
   sudo apt update
   sudo apt install -y libopenblas-base
   pip3 install --pre torch==2.6.0.dev20240916+cpu torchvision==0.20.0.dev20240916+cpu \
@@ -23,6 +21,12 @@ setup: |
   pip install torch_xla[pallas] \
     -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html \
     -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
+
+  # Setup runtime for training
+  git clone -b flash_attention https://github.com/pytorch-tpu/transformers.git
+  cd transformers
+  pip3 install -e .
+  pip3 install datasets evaluate scikit-learn accelerate
 
 run: |
   unset LD_PRELOAD
