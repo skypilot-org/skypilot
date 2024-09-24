@@ -565,6 +565,7 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
+                    # Reference on names of TPU Pod slices available on GKE: https://cloud.google.com/kubernetes-engine/docs/how-to/tpus#workload_preparation # pylint: disable=line-too-long
                     if acc.endswith('-podslice') or acc.endswith('-device'):
                         self._cloud = clouds.Kubernetes()
                     else:
