@@ -57,4 +57,4 @@ jobs:
           pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
 
       - name: Run tests with pytest
-        run: SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 1 --dist no ${{ matrix.test-path }}
+        run: SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 -s --dist no ${{ matrix.test-path }}

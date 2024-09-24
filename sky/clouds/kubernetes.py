@@ -116,12 +116,12 @@ class Kubernetes(clouds.Cloud):
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
-            regions = [
-                clouds.Region(
-                    kubernetes_utils.get_current_kube_config_context_name())
-            ]
-        else:
-            regions = [clouds.Region(context) for context in allowed_contexts]
+            current_context = kubernetes_utils.get_current_kube_config_context_name()
+            allowed_contexts = []
+            if current_context is not None:
+                allowed_contexts = [current_context]
+
+        regions = [clouds.Region(context) for context in allowed_contexts]
 
         if region is not None:
             regions = [r for r in regions if r.name == region]

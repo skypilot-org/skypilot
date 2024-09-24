@@ -70,3 +70,9 @@ def enable_all_clouds_in_monkeypatch(
                         lambda *_args, **_kwargs: [True, ''])
     monkeypatch.setattr('sky.provision.kubernetes.utils.get_spot_label',
                         lambda *_args, **_kwargs: [None, None])
+
+    # monkeypatch class Kubernetes.
+    monkeypatch.setattr('sky.clouds.kubernetes.Kubernetes.regions_with_offering',
+                        lambda *_args, **_kwargs: [clouds.Region('my-k8s-cluster-context')])
+    monkeypatch.setattr('sky.clouds.kubernetes.Kubernetes.validate_region_zone',
+                        lambda *_args, **_kwargs: ['my-k8s-cluster-context', None])
