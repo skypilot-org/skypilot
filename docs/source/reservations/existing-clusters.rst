@@ -37,7 +37,7 @@ Prerequisites
 **Remote machines (your cluster, optionally with GPUs):**
 
 * Debian-based OS (tested on Debian 11)
-* SSH access with key-based authentication
+* SSH access with key-based authentication and passwordless sudo
 * All machines must use the same SSH key and username
 * Port 6443 must be accessible on at least one node from your local machine
 
@@ -68,7 +68,6 @@ Deployment steps
 
    .. code-block:: bash
 
-      chmod +x deploy.sh
       IP_FILE=ips.txt
       SSH_USERNAME=username
       SSH_KEY=path/to/ssh/key
@@ -78,10 +77,19 @@ Deployment steps
 
    At the end, you should see a message like this:
 
-   .. code-block:: text
+   .. code-block:: bash
+      $ sky local up --ips ips.txt --username gcpuser --key-path ~/.ssh/id_rsa
+      Found existing kube config. It will be backed up to ~/.kube/config.bak.
+      To view detailed progress: tail -n100 -f ~/sky_logs/sky-2024-09-23-18-53-14-165534/local_up.log
+      ✔ K3s successfully deployed on head node.
+      ✔ K3s successfully deployed on worker node.
+      ✔ kubectl configured for the remote cluster.
+      ✔ Remote k3s is running.
+      ✔ Nvidia GPU Operator installed successfully.
+      Cluster deployment done. You can now run tasks on this cluster.
+      E.g., run a task with: sky launch --cloud kubernetes -- echo hello world.
+      🎉 Remote cluster deployed successfully.
 
-      ✔ SkyPilot configured successfully.
-      ==== 🎉 Kubernetes cluster deployment completed successfully 🎉 ====
 
 4. To verify that the cluster is running, run:
 

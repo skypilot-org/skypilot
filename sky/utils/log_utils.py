@@ -149,7 +149,7 @@ class SkyRemoteUpLineProcessor(LineProcessor):
                                        'deploying Kubernetes on head node')
         if 'K3s deployed on head node.' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}K3s successfully deployed on head node.'
+                f'{colorama.Fore.GREEN}✔ K3s successfully deployed on head node.'
                 f'{colorama.Style.RESET_ALL}')
 
         # Worker nodes
@@ -158,7 +158,7 @@ class SkyRemoteUpLineProcessor(LineProcessor):
                                        'deploying Kubernetes on worker nodes')
         if 'Kubernetes deployed on worker node' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}K3s successfully deployed on worker node.'
+                f'{colorama.Fore.GREEN}✔ K3s successfully deployed on worker node.'
                 f'{colorama.Style.RESET_ALL}')
 
         # Cluster configuration
@@ -167,7 +167,7 @@ class SkyRemoteUpLineProcessor(LineProcessor):
                                        'configuring local kubectl')
         if 'kubectl configured to connect to the cluster.' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}kubectl configured for the remote cluster.'
+                f'{colorama.Fore.GREEN}✔ kubectl configured for the remote cluster.'
                 f'{colorama.Style.RESET_ALL}')
 
         # GPU operator installation
@@ -176,7 +176,7 @@ class SkyRemoteUpLineProcessor(LineProcessor):
                                        'installing Nvidia GPU Operator')
         if 'GPU Operator installed.' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}Nvidia GPU Operator installed successfully.'
+                f'{colorama.Fore.GREEN}✔ Nvidia GPU Operator installed successfully.'
                 f'{colorama.Style.RESET_ALL}')
 
         # Cleanup steps
@@ -184,19 +184,19 @@ class SkyRemoteUpLineProcessor(LineProcessor):
             self.status_display.update('[bold cyan]Cleaning up head node')
         if 'Node cleaned up successfully' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}Head node cleaned up successfully.'
+                f'{colorama.Fore.GREEN}✔ Head node cleaned up successfully.'
                 f'{colorama.Style.RESET_ALL}')
         if 'Cleaning up node' in log_line:
             self.status_display.update('[bold cyan]Cleaning up worker node')
         if 'Node cleaned up successfully' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}Worker node cleaned up successfully.'
+                f'{colorama.Fore.GREEN}✔ Worker node cleaned up successfully.'
                 f'{colorama.Style.RESET_ALL}')
 
         # Final status
         if 'Cluster deployment completed.' in log_line:
             logger.info(
-                f'{colorama.Fore.GREEN}Remote cluster deployment done.'
+                f'{colorama.Fore.GREEN}✔ Remote k3s is running.'
                 f'{colorama.Style.RESET_ALL}')
 
     def __exit__(self, except_type, except_value, traceback):

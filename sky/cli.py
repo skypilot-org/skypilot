@@ -5250,13 +5250,15 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
     if success:
         if cleanup:
             click.echo(
-                f'\n{colorama.Fore.GREEN}Remote cluster cleaned up successfully.'
+                f'{colorama.Fore.GREEN}🎉 Remote cluster cleaned up successfully.'
                 f'{style.RESET_ALL}')
         else:
             click.echo(
-                f'\n{colorama.Fore.GREEN}Remote cluster deployed '
-                f'successfully. {style.RESET_ALL}\nYou can now run tasks on '
-                'this cluster with sky launch.')
+                'Cluster deployment done. You can now run tasks on '
+                'this cluster.\nE.g., run a task with: '
+                'sky launch --cloud kubernetes -- echo hello world.'
+                f'\n{colorama.Fore.GREEN}🎉 Remote cluster deployed '
+                f'successfully. {style.RESET_ALL}')
 
 
 @click.option('--gpus/--no-gpus',
