@@ -300,7 +300,7 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path) -> Dict[str, Any]:
+def read_yaml(path: str) -> Dict[str, Any]:
     with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
@@ -316,12 +316,13 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return configs
 
 
-def dump_yaml(path, config) -> None:
+def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
+                                       Dict[str, Any]]) -> None:
     with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
-def dump_yaml_str(config):
+def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -331,9 +332,9 @@ def dump_yaml_str(config):
                 super().write_line_break()
 
     if isinstance(config, list):
-        dump_func = yaml.dump_all
+        dump_func = yaml.dump_all  # type: ignore
     else:
-        dump_func = yaml.dump
+        dump_func = yaml.dump  # type: ignore
     return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
