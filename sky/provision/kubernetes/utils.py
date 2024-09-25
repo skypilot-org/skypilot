@@ -267,7 +267,7 @@ class GKELabelFormatter(GPULabelFormatter):
                 # to distinguish between a3-high and a3-mega instances
                 return 'H100'
             return acc
-        elif value.startswith('tpu-'):
+        elif is_tpu_pod_slice(value):
             return value
         else:
             raise ValueError(
