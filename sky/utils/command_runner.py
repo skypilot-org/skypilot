@@ -85,8 +85,9 @@ def ssh_options_list(
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
         'IdentitiesOnly': 'yes',
-        # Add the current private key to the agent so that agent forwarding will forward the key
-        # used for authentication instead of the system default in the user's home directory.
+        # Add the current private key to the agent so that agent forwarding
+        # will forward the key used for authentication instead of the system
+        # default in the user's home directory.
         'AddKeysToAgent': 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
