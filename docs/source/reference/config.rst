@@ -497,11 +497,13 @@ Available fields and semantics:
 
     # Allowed context names to use for Kubernetes clusters (optional).
     #
-    # SkyPilot will try provisioning and fail over Kubernetes contexts in the same order 
-    # as they are specified here. E.g., SkyPilot will try using context1 first. 
-    # If it is out of resources or unreachable, it will fail over and try context2.
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
     #
-    # If not specified, only the current active context is used for launching new clusters.
+    # If not specified, only the current active context is used for launching
+    # new clusters.
     allowed_contexts:
       - context1
       - context2

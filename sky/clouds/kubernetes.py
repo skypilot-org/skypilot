@@ -109,10 +109,12 @@ class Kubernetes(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def _existing_allowed_contexts(cls) -> List[str]:
+        all_contexts = kubernetes_utils.get_all_kube_config_context_names()
+        if all_contexts is None:
+            return []
+        all_contexts = set(all_contexts)
+
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
@@ -122,7 +124,24 @@ class Kubernetes(clouds.Cloud):
             if current_context is not None:
                 allowed_contexts = [current_context]
 
-        regions = [clouds.Region(context) for context in allowed_contexts]
+        existing_contexts = []
+        for context in allowed_contexts:
+            if context in all_contexts:
+                existing_contexts.append(context)
+            else:
+                logger.warning(f'Kubernetes context {context!r} specified in '
+                               '"allowed_contexts" not found in kubeconfig. '
+                               'Ignoring this context.')
+        return existing_contexts
+
+    @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        existing_contexts = cls._existing_allowed_contexts()
+
+        regions = [clouds.Region(context) for context in existing_contexts]
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -460,16 +479,19 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # Test using python API
-        allowed_contexts = skypilot_config.get_nested(
-            ('kubernetes', 'allowed_contexts'), None)
-        if allowed_contexts is None:
-            current_context = (
-                kubernetes_utils.get_current_kube_config_context_name())
-            if current_context is None:
-                return (False, 'No context found in kubeconfig')
-            allowed_contexts = [current_context]
+        existing_allowed_contexts = cls._existing_allowed_contexts()
+        if not existing_allowed_contexts:
+            if skypilot_config.loaded_config_path() is None:
+                check_skypilot_config_msg = ''
+            else:
+                check_skypilot_config_msg = (
+                    ' and check "allowed_contexts" in your '
+                    f'{skypilot_config.loaded_config_path()} file.')
+            return (False, 'No available context found in kubeconfig. '
+                    'Check if you have a valid kubeconfig file' +
+                    check_skypilot_config_msg)
         reasons = []
-        for context in allowed_contexts:
+        for context in existing_allowed_contexts:
             try:
                 check_result = kubernetes_utils.check_credentials(context)
                 if check_result[0]:
