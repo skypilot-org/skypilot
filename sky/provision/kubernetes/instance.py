@@ -79,10 +79,10 @@ def head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
-def _formatted_resource_requirements(pod_or_spec: Union['Pod', dict]) -> str:
+def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
     # Returns a formatted string of resource requirements for a pod.
     resource_requirements = {}
-    
+
     if isinstance(pod_or_spec, dict):
         containers = pod_or_spec.get('spec', {}).get('containers', [])
     else:
@@ -95,21 +95,20 @@ def _formatted_resource_requirements(pod_or_spec: Union['Pod', dict]) -> str:
         else:
             resources = container.resources
             requests = resources.requests or {}
-            
+
         for resource, value in requests.items():
             if resource not in resource_requirements:
                 resource_requirements[resource] = 0
             if resource == 'memory':
                 int_value = kubernetes_utils.parse_memory_resource(value)
             else:
-                int_value = kubernetes_utils.parse_cpu_or_gpu_resource(
-                    value)
-            resource_requirements[resource] += int_value
+                int_value = kubernetes_utils.parse_cpu_or_gpu_resource(value)
+            resource_requirements[resource] += int(int_value)
     return ', '.join(f'{resource}={value}'
-                        for resource, value in resource_requirements.items())
+                     for resource, value in resource_requirements.items())
 
 
-def _formatted_node_selector(pod_or_spec: Union['Pod', dict]) -> Optional[str]:
+def _formatted_node_selector(pod_or_spec: Union[Any, dict]) -> Optional[str]:
     # Returns a formatted string of node selectors for a pod.
     node_selectors = []
 
@@ -117,7 +116,7 @@ def _formatted_node_selector(pod_or_spec: Union['Pod', dict]) -> Optional[str]:
         selectors = pod_or_spec.get('spec', {}).get('nodeSelector', {})
     else:
         selectors = pod_or_spec.spec.node_selector
-    
+
     if not selectors:
         return None
 
@@ -127,19 +126,18 @@ def _formatted_node_selector(pod_or_spec: Union['Pod', dict]) -> Optional[str]:
 
 
 def _lack_resource_msg(resource: str,
-                        pod_or_spec: Union['Pod', dict],
-                        extra_msg: Optional[str] = None,
-                        details: Optional[str] = None) -> str:
+                       pod_or_spec: Union[Any, dict],
+                       extra_msg: Optional[str] = None,
+                       details: Optional[str] = None) -> str:
     resource_requirements = _formatted_resource_requirements(pod_or_spec)
     node_selectors = _formatted_node_selector(pod_or_spec)
     node_selector_str = f' and labels ({node_selectors})' if (
         node_selectors) else ''
-    msg = (
-        f'Insufficient {resource} capacity on the cluster. '
-        f'Required resources ({resource_requirements}){node_selector_str} '
-        'were not found in a single node. Other SkyPilot tasks or pods may '
-        'be using resources. Check resource usage by running '
-        '`kubectl describe nodes`.')
+    msg = (f'Insufficient {resource} capacity on the cluster. '
+           f'Required resources ({resource_requirements}){node_selector_str} '
+           'were not found in a single node. Other SkyPilot tasks or pods may '
+           'be using resources. Check resource usage by running '
+           '`kubectl describe nodes`.')
     if extra_msg:
         msg += f' {extra_msg}'
     if details:
@@ -202,8 +200,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                         '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
                         f' Full error: {event_message}')
                 gpu_lf_keys = [
-                    key
-                    for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     for key in lf.get_label_keys()
                 ]
                 if pod.spec.node_selector:
@@ -606,7 +603,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # on TPU nodes.
         # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
         tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
-        if tpu_label in config.node_config.get('spec', {}).get('nodeSelector', {}):
+        if tpu_label in config.node_config.get('spec',
+                                               {}).get('nodeSelector', {}):
             tpu_toleration = {
                 'key': kubernetes_utils.TPU_RESOURCE_KEY,
                 'operator': 'Equal',

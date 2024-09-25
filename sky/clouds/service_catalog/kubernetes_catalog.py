@@ -79,12 +79,12 @@ def list_accelerators_realtime(
     if not has_gpu:
         return {}, {}, {}
 
-    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter()
-    if not label_formatter:
+    lf, _ = kubernetes_utils.detect_gpu_label_formatter()
+    if not lf:
         return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
-    keys = label_formatter.get_label_keys()
+    keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes()
     # Get the pods to get the real-time GPU usage
     pods = kubernetes_utils.get_kubernetes_pods()
@@ -98,7 +98,7 @@ def list_accelerators_realtime(
         for key in keys:
             if key in node.metadata.labels:
                 allocated_qty = 0
-                accelerator_name = label_formatter.get_accelerator_from_label_value(
+                accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(key))
 
                 # Check if name_filter regex matches the accelerator_name
@@ -109,11 +109,12 @@ def list_accelerators_realtime(
 
                 accelerator_count = 0
                 if kubernetes_utils.GPU_RESOURCE_KEY in node.status.allocatable:
-                    accelerator_count = int(
-                        node.status.allocatable[kubernetes_utils.GPU_RESOURCE_KEY])
-                elif kubernetes_utils.TPU_RESOURCE_KEY in node.status.allocatable:
-                    accelerator_count = int(
-                        node.status.allocatable[kubernetes_utils.TPU_RESOURCE_KEY])
+                    accelerator_count = int(node.status.allocatable[
+                        kubernetes_utils.GPU_RESOURCE_KEY])
+                elif (kubernetes_utils.TPU_RESOURCE_KEY
+                      in node.status.allocatable):
+                    accelerator_count = int(node.status.allocatable[
+                        kubernetes_utils.TPU_RESOURCE_KEY])
 
                 # Generate the GPU quantities for the accelerators
                 if accelerator_name and accelerator_count > 0:
@@ -138,8 +139,9 @@ def list_accelerators_realtime(
                 accelerators_available = accelerator_count - allocated_qty
 
                 if accelerator_count >= min_quantity_filter:
-                    quantized_count = (min_quantity_filter *
-                                    (accelerator_count // min_quantity_filter))
+                    quantized_count = (
+                        min_quantity_filter *
+                        (accelerator_count // min_quantity_filter))
                     if accelerator_name not in total_accelerators_capacity:
                         total_accelerators_capacity[
                             accelerator_name] = quantized_count

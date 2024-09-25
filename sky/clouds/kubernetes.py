@@ -269,7 +269,8 @@ class Kubernetes(clouds.Cloud):
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
-            if k8s_acc_label_key == kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY:
+            if (k8s_acc_label_key ==
+                    kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
                 k8s_tpu_topology_label_key, k8s_tpu_topology_label_value = (
                     kubernetes_utils.get_tpu_topology_label_key_value(acc_type))

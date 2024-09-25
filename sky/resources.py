@@ -570,8 +570,9 @@ class Resources:
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
-                assert (self.cloud.is_same_cloud(
-                    clouds.GCP()) or self.cloud.is_same_cloud(clouds.Kubernetes())), 'Cloud must be GCP or Kubernetes.'
+                assert (self.cloud.is_same_cloud(clouds.GCP()) or
+                        self.cloud.is_same_cloud(clouds.Kubernetes())
+                       ), 'Cloud must be GCP or Kubernetes.'
 
                 if accelerator_args is None:
                     accelerator_args = {}
@@ -593,13 +594,14 @@ class Resources:
                         logger.info(
                             'Missing runtime_version in accelerator_args, using'
                             f' default ({accelerator_args["runtime_version"]})')
-                    
+
                     if self.instance_type is not None and use_tpu_vm:
                         if self.instance_type != 'TPU-VM':
                             with ux_utils.print_exception_no_traceback():
                                 raise ValueError(
                                     'Cannot specify instance type'
-                                    f' (got "{self.instance_type}") for TPU VM.')
+                                    f' (got "{self.instance_type}") for TPU VM.'
+                                )
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
