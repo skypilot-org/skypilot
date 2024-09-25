@@ -18,7 +18,7 @@ class Options(enum.Enum):
     # robustness.
     SKIP_CLOUD_IDENTITY_CHECK = ('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', False)
 
-    def __init__(self, env_var, default):
+    def __init__(self, env_var: str, default: bool) -> None:
         self.env_var = env_var
         self.default = default
 
