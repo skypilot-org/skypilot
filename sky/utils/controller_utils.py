@@ -293,9 +293,9 @@ def _get_cloud_dependencies_installation_commands(
         commands.append('curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | '
                         'sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null')
         commands.append('curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | '
-                        'sudo tee /etc/apt/sources.list.d/tailscale.list')
-        commands.append('sudo apt-get update > /dev/null 2>&1 && '
-                        'sudo apt-get install tailscale -y > /dev/null 2>&1')
+                        'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null')
+        commands.append('sudo apt-get update > /dev/null 2>&1')
+        commands.append('sudo apt-get install tailscale -y > /dev/null 2>&1')
         commands.append(f'sudo tailscale login --auth-key {tailscale_auth_key}')
 
     commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '

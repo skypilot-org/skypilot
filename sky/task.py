@@ -43,6 +43,15 @@ _RUN_FN_CHECK_FAIL_MSG = (
     'run command generator must take exactly 2 arguments: node_rank (int) and'
     'a list of node ip addresses (List[str]). Got {run_sig}')
 
+_TAILSCALE_SETUP_CMD = (
+    'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | '
+    'sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null; '
+    'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | '
+    'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null; '
+    'sudo apt-get update > /dev/null 2>&1; '
+    'sudo apt-get install tailscale -y > /dev/null 2>&1'
+    'sudo tailscale login --auth-key {tailscale_auth_key}'
+)
 
 def _is_valid_name(name: Optional[str]) -> bool:
     """Checks if the task name is valid.
@@ -167,6 +176,11 @@ def _with_docker_login_config(
         new_resources.append(_add_docker_login_config(r))
     return type(resources)(new_resources)
 
+def _append_setup_command(setup: Optional[str], command: str) -> str:
+    """Appends a command to a setup command."""
+    if setup is None:
+        return command
+    return f'{setup}; {command}'
 
 class Task:
     """Task: a computation to be run on the cloud."""
@@ -485,6 +499,10 @@ class Task:
         service = config.pop('service', None)
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
+            if service.tailscale_auth_key is not None:
+                tailscale_setup = _TAILSCALE_SETUP_CMD.format(
+                    tailscale_auth_key=service.tailscale_auth_key)
+                task.setup = _append_setup_command(task.setup, tailscale_setup)
         task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
