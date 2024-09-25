@@ -85,7 +85,7 @@ run: |
 
 You can also get the full YAML file [here](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_2/llama3_2.yaml).
 
-## Point and Launch Llama 3.2: single instance
+## Point and Launch Llama 3.2
 
 Launch a single spot instance to serve Llama 3.2 on your infra:
 ```console
@@ -180,7 +180,7 @@ To shut down all resources:
 sky down llama3_2
 ```
 
-## Serving a Vision Llama and chat with it
+## Point and Launch Vision Llama 3.2
 
 Let's launch a vision llama now! The multimodal capacity of Llama-3.2 could open up a lot of new use cases. We will go with the largest 90B model here.
 
@@ -207,7 +207,7 @@ $ HF_TOKEN=xxx sky launch llama3_2-vision-90b.yaml -c llama3_2-vision --env HF_T
 ```
 
 
-### Chat with Vision Llama 3.2 with OpenAI API
+### Chat with Vision Llama 3.2
 
 ```console
 ENDPOINT=$(sky status --endpoint 8081 llama3_2-vision)
