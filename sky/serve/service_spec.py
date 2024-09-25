@@ -179,7 +179,7 @@ class SkyServiceSpec:
                     'base_ondemand_fallback_replicas', None)
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
-        
+
         vpn_section: Dict[str, Any] = config.get('vpn', None)
         if vpn_section is not None:
             # Get the tailscale auth key from the environment.
@@ -344,7 +344,7 @@ class SkyServiceSpec:
     @property
     def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
-    
+
     @property
     def tailscale_auth_key(self) -> Optional[str]:
         return self._tailscale_auth_key

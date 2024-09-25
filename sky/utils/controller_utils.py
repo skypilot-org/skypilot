@@ -51,6 +51,16 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
 
+# The command to install tailscale VPN on the controller.
+TAILSCALE_SETUP_CMD = (
+    'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | '
+    'sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null; '
+    'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | '  # pylint: disable=line-too-long
+    'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null; '
+    'sudo apt-get update > /dev/null 2>&1; '
+    'sudo apt-get install tailscale -y > /dev/null 2>&1; '
+    'sudo tailscale login --auth-key {tailscale_auth_key}')
+
 
 @dataclasses.dataclass
 class _ControllerSpec:
@@ -188,7 +198,8 @@ class Controllers(enum.Enum):
 # can be cleaned up by another process.
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
-        controller: Controllers, task_config: Dict[str, Any]) -> List[str]:
+        controller: Controllers, 
+        task_config: Optional[Dict[str, Any]]) -> List[str]:
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
@@ -286,17 +297,15 @@ def _get_cloud_dependencies_installation_commands(
                         aws_dependencies_installation)
 
     # install tailscale VPN if needed
-    vpn_section: Dict[str, Any] = task_config.get('service', {}).get('vpn', None)
-    if vpn_section:
-        tailscale_auth_key = vpn_section.get('tailscale_auth_key', None)
-        assert tailscale_auth_key
-        commands.append('curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | '
-                        'sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null')
-        commands.append('curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | '
-                        'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null')
-        commands.append('sudo apt-get update > /dev/null 2>&1')
-        commands.append('sudo apt-get install tailscale -y > /dev/null 2>&1')
-        commands.append(f'sudo tailscale login --auth-key {tailscale_auth_key}')
+    if task_config is not None:
+        vpn_section: Dict[str, Any] = task_config.get('service',
+                                                      {}).get('vpn', None)
+        if vpn_section:
+            tailscale_auth_key = vpn_section.get('tailscale_auth_key', None)
+            assert tailscale_auth_key
+            commands.append(
+                TAILSCALE_SETUP_CMD.format(
+                    tailscale_auth_key=tailscale_auth_key))
 
     commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
                     'clouds."')
@@ -368,8 +377,10 @@ def download_and_stream_latest_job_log(
 
 
 def shared_controller_vars_to_fill(
-        controller: Controllers, remote_user_config_path: str,
-        local_user_config: Dict[str, Any], task_config: Dict[str, Any]) -> Dict[str, str]:
+        controller: Controllers,
+        remote_user_config_path: str,
+        local_user_config: Dict[str, Any],
+        task_config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     if not local_user_config:
         local_user_config_path = None
     else:
@@ -385,7 +396,8 @@ def shared_controller_vars_to_fill(
 
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(controller, task_config),
+            _get_cloud_dependencies_installation_commands(
+                controller, task_config),
         # We need to activate the python environment on the controller to ensure
         # cloud SDKs are installed in SkyPilot runtime environment and can be
         # accessed.
