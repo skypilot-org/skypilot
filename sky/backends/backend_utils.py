@@ -428,6 +428,7 @@ class SSHConfigHelper(object):
               HostName {ip}
               User {username}
               IdentityFile {ssh_key_path}
+              AddKeysToAgent yes
               IdentitiesOnly yes
               ForwardAgent yes
               StrictHostKeyChecking no
