@@ -3,7 +3,7 @@
 Deploy SkyPilot on existing clusters
 ====================================
 
-This page will help you deploy SkyPilot on your existing clusters - whether it's on-premises machines or reserved instances on a cloud provider.
+This guide will help you deploy SkyPilot on your existing clusters - whether it's on-premises machines or reserved instances on a cloud provider.
 
 **Given a list of IP addresses and SSH keys,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
@@ -11,7 +11,7 @@ SkyPilot will install necessary dependencies on the remote machines and configur
 At the end of this guide, you will be able to use SkyPilot to run jobs or services on your own preexisting cluster.
 
 ..
-   Figure v1: https://docs.google.com/drawings/d/1Jp1tTu1kxF-bIrS6LRMqoJ1dnxlFvn-iobVsXElXfAg/edit?usp=sharing
+   Figure v1 (for deploy.sh): https://docs.google.com/drawings/d/1Jp1tTu1kxF-bIrS6LRMqoJ1dnxlFvn-iobVsXElXfAg/edit?usp=sharing
    Figure v2: https://docs.google.com/drawings/d/1hMvOe1HX0ESoUbCvUowla2zO5YBacsdruo0dFqML9vo/edit?usp=sharing
    Figure v2 Dark: https://docs.google.com/drawings/d/1Bo--2227CH0r4UBkj4TGY3I3ZfpOdh4SfeheE95ZBvU/edit?usp=sharing
 
@@ -51,6 +51,7 @@ Prerequisites
 * Debian-based OS (tested on Debian 11)
 * SSH access with key-based authentication and passwordless sudo
 * All machines must use the same SSH key and username
+* All machines must have network access to each other
 * Port 6443 must be accessible on at least one node from your local machine
 
 Deploying SkyPilot
