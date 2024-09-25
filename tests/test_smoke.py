@@ -3374,11 +3374,15 @@ def test_gcp_disk_tier():
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
+        instance_type_option = ''
+        if disk_tier == resources_utils.DiskTier.BEST:
+            # Ultra disk tier requires a specific instance type.
+            instance_type_option = '--instance-type n2-standard-64'
         test = Test(
             'gcp-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier.value} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} {instance_type_option} ',
                 f'name=`gcloud compute instances list --filter='
                 f'"labels.ray-cluster-name:{name_on_cloud}" '
                 '--format="value(name)"`; '
