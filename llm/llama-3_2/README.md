@@ -1,5 +1,5 @@
 <!-- $REMOVE -->
-# Point, Launch, and Serve Llama 3.2 on Kubernetes or Any Cloud with SkyPilot
+# Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud with SkyPilot
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
@@ -17,7 +17,7 @@
 
 ## Why use SkyPilot?
 
-* Point and launch: simply point to the cloud/kubernetes cluster you have access to, and launch the model there with a single command.
+* Point, launch, and serve: simply point to the cloud/kubernetes cluster you have access to, and launch the model there with a single command.
 * No lock-in: run on any supported cloud - AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
@@ -39,8 +39,6 @@
 <summary>Click to see the full recipe YAML</summary>
 
 ```yaml
-
-
 envs:
   MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
   # MODEL_NAME: meta-llama/Llama-3.2-3B-Vision
