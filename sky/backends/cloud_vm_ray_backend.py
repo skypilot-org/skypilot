@@ -2074,8 +2074,7 @@ class RetryingVmProvisioner(object):
                         _EXCEPTION_SUMMARY_MESSAGE[exception.__class__]
                     ])
                 raise exceptions.ResourcesUnavailableError(
-                    _RESOURCES_UNAVAILABLE_LOG + '\n' +
-                    table.get_string(),
+                    _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
