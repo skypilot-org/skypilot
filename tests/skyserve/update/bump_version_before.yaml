@@ -20,9 +20,8 @@ resources:
   cpus: 2+
 
 setup: |
-  git clone https://github.com/skypilot-org/skypilot.git
+  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
 
 run: |
-  cd skypilot/examples/serve/http_server
   python3 server.py --port 8081
   
