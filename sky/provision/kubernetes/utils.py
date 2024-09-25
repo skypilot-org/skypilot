@@ -1864,8 +1864,8 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
                                 allocated_qty += int(
                                     container.resources.requests.get(
                                         GPU_RESOURCE_KEY, 0))
-                            elif (TPU_RESOURCE_KEY in
-                                  container.resources.requests):
+                            elif (TPU_RESOURCE_KEY
+                                  in container.resources.requests):
                                 allocated_qty += int(
                                     container.resources.requests.get(
                                         TPU_RESOURCE_KEY, 0))
