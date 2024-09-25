@@ -79,7 +79,7 @@ def head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
-def _formatted_resource_requirements(pod_or_spec: Union['Pod', dict]):
+def _formatted_resource_requirements(pod_or_spec: Union['Pod', dict]) -> str:
     # Returns a formatted string of resource requirements for a pod.
     resource_requirements = {}
     
