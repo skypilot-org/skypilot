@@ -6,10 +6,9 @@
 <img src="https://i.imgur.com/1NEZs9f.png" alt="Llama-3 x SkyPilot" style="width: 50%;">
 </p>
 
-[Llama 3.2]() is out on the date of Sep 25th 2024. It not only includes the latest models for chat, but also includes the multimodal models. Let's point and launch it with SkyPilot.
+[Llama 3.2](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/) is out on the date of Sep 25th 2024. It not only includes the latest models for chat, but also includes the multimodal models. Let's point and launch it with SkyPilot.
 
-* [Llama 3.2 release]()
-* [Llama 3.2 blog]()
+* [Llama 3.2 release](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/)
 
 
 
@@ -336,7 +335,7 @@ curl http://$ENDPOINT/v1/chat/completions \
         {
             "role": "user",
             "content": [
-                {"type" : "text", "text": "Turn this logo into ASCII art."},
+                {"type" : "text", "text": "Covert this logo to ASCII art"},
                 {"type": "image_url", "image_url": {"url": "https://pbs.twimg.com/profile_images/1584596138635632640/HWexMoH5_400x400.jpg"}}
             ]
         }],
