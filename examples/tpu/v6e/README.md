@@ -55,7 +55,9 @@ Examples in this directory (`train-llama3-8b.yaml`) shows how to use TPU v6e to 
 $ HF_TOKEN=hf_xxx sky launch train-llama3-8b.yaml -c train-llama3-8b --env HF_TOKEN
 ```
 
-The training should finished in ~10 minutes for a `tpu-v6e-8` instance:
+### Single-Host Training
+
+The training throughput for a `tpu-v6e-8` instance should around 0.5 samples/s:
 
 ```bash
 (task, pid=17499) ***** train metrics *****
@@ -66,8 +68,50 @@ The training should finished in ~10 minutes for a `tpu-v6e-8` instance:
 (task, pid=17499)   train_samples            =         282
 (task, pid=17499)   train_samples_per_second =       0.476
 (task, pid=17499)   train_steps_per_second   =        0.03
-(task, pid=17499) [INFO|modelcard.py:450] 2024-09-23 17:49:49,776 >> Dropping the following result as it does not have all the necessary fields:
-(task, pid=17499) {'task': {'name': 'Causal Language Modeling', 'type': 'text-generation'}, 'dataset': {'name': 'wikitext wikitext-2-raw-v1', 'type': 'wikitext', 'args': 'wikitext-2-raw-v1'}}
+INFO: Job finished (status: SUCCEEDED).
+```
+
+### Multi-Host Training
+
+By changing the TPU type to `tpu-v6e-16` and the `--per_device_train_batch_size` to `32`, the training throughput increased to around 1 samples/s:
+
+```bash
+(head, rank=0, pid=17894) ***** train metrics *****
+(head, rank=0, pid=17894)   epoch                    =         2.5
+(head, rank=0, pid=17894)   total_flos               = 219870840GF
+(head, rank=0, pid=17894)   train_loss               =     10.1527
+(head, rank=0, pid=17894)   train_runtime            =  0:11:13.18
+(head, rank=0, pid=17894)   train_samples            =         282
+(head, rank=0, pid=17894)   train_samples_per_second =       0.951
+(head, rank=0, pid=17894)   train_steps_per_second   =        0.03
+
+(worker1, rank=1, pid=15406, ip=10.164.0.57) ***** train metrics *****
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   epoch                    =         2.5
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   total_flos               = 219870840GF
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   train_loss               =     10.1527
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   train_runtime            =  0:11:15.08
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   train_samples            =         282
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   train_samples_per_second =       0.948
+(worker1, rank=1, pid=15406, ip=10.164.0.57)   train_steps_per_second   =        0.03
+
+(worker2, rank=2, pid=16552, ip=10.164.0.58) ***** train metrics *****
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   epoch                    =         2.5
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   total_flos               = 219870840GF
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   train_loss               =     10.1527
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   train_runtime            =  0:11:15.61
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   train_samples            =         282
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   train_samples_per_second =       0.947
+(worker2, rank=2, pid=16552, ip=10.164.0.58)   train_steps_per_second   =        0.03
+
+(worker3, rank=3, pid=17469, ip=10.164.0.59) ***** train metrics *****
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   epoch                    =         2.5
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   total_flos               = 219870840GF
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   train_loss               =     10.1527
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   train_runtime            =  0:11:15.10
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   train_samples            =         282
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   train_samples_per_second =       0.948
+(worker3, rank=3, pid=17469, ip=10.164.0.59)   train_steps_per_second   =        0.03
+
 INFO: Job finished (status: SUCCEEDED).
 ```
 
