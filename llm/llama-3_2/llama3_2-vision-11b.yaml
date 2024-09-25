@@ -73,8 +73,7 @@ service:
       max_tokens: 1
 
 resources:
-  accelerators: {L40S, A10G, A100, A100-80GB, H100}
-  cpus: 32+
+  accelerators: {L40, L40S, A100, A100-80GB, H100}
   disk_size: 1000  # Ensure model checkpoints can fit.
   disk_tier: best
   ports: 8081  # Expose to internet traffic.

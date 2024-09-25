@@ -189,21 +189,22 @@ $ HF_TOKEN=xxx sky launch llama3_2-vision-11b.yaml -c llama3_2-vision --env HF_T
 ```
 
 ```console
----------------------------------------------------------------------------------------------------------------------
- CLOUD        INSTANCE                          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
----------------------------------------------------------------------------------------------------------------------
- Kubernetes   2CPU--8GB--8H100                  2       8         H100:8         kubernetes      0.00          ✔     
- Fluidstack   A100_PCIE_80GB::8                 252     1440      A100-80GB:8    CANADA          14.00               
- RunPod       8x_A100-80GB_SECURE               64      640       A100-80GB:8    CA              15.92               
- Fluidstack   H100_PCIE_80GB::8                 252     1440      H100:8         CANADA          23.12               
- Cudo         sapphire-rapids-h100_8x64v128gb   64      128       H100:8         ca-montreal-3   23.45               
- Azure        Standard_ND96amsr_A100_v4         96      1800      A100-80GB:8    eastus          32.77               
- RunPod       8x_H100_SECURE                    128     640       H100:8         CA              35.92               
- GCP          a2-ultragpu-8g                    96      1360      A100-80GB:8    us-central1-a   40.22               
- AWS          p4de.24xlarge                     96      1152      A100-80GB:8    us-east-1       40.97               
- GCP          a3-highgpu-8g                     208     1872      H100:8         us-central1-a   87.83               
- AWS          p5.48xlarge                       192     2048      H100:8         us-east-1       98.32               
----------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------
+ CLOUD        INSTANCE                       vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+------------------------------------------------------------------------------------------------------------------
+ Kubernetes   2CPU--8GB--1H100               2       8         H100:1         kubernetes      0.00          ✔     
+ RunPod       1x_L40_SECURE                  16      48        L40:1          CA              1.14                
+ Fluidstack   L40_48GB::1                    32      60        L40:1          CANADA          1.15                
+ AWS          g6e.xlarge                     4       32        L40S:1         us-east-1       1.86                
+ RunPod       1x_A100-80GB_SECURE            8       80        A100-80GB:1    CA              1.99                
+ Cudo         sapphire-rapids-h100_1x2v4gb   2       4         H100:1         ca-montreal-3   2.83                
+ Fluidstack   H100_PCIE_80GB::1              28      180       H100:1         CANADA          2.89                
+ GCP          a2-highgpu-1g                  12      85        A100:1         us-central1-a   3.67                
+ Azure        Standard_NC24ads_A100_v4       24      220       A100-80GB:1    eastus          3.67                
+ RunPod       1x_H100_SECURE                 16      80        H100:1         CA              4.49                
+ GCP          a2-ultragpu-1g                 12      170       A100-80GB:1    us-central1-a   5.03                
+ Azure        Standard_NC40ads_H100_v5       40      320       H100:1         eastus          6.98                
+------------------------------------------------------------------------------------------------------------------
 ```
 
 
