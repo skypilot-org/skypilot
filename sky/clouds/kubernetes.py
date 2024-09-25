@@ -464,8 +464,7 @@ class Kubernetes(clouds.Cloud):
             ('kubernetes', 'allowed_contexts'), None)
         if allowed_contexts is None:
             current_context = (
-                kubernetes_utils.get_current_kube_config_context_name()
-            )
+                kubernetes_utils.get_current_kube_config_context_name())
             if current_context is None:
                 return (False, 'No context found in kubeconfig')
             allowed_contexts = [current_context]
