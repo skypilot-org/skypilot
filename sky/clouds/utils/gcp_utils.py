@@ -32,17 +32,12 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
     acc, _ = list(resources.accelerators.items())[0]
     return acc.startswith('tpu')
 
-def is_tpu_pod_slice(resources: Optional['resources_lib.Resources']) -> bool:
-    if not is_tpu(resources):
-        return False
-    assert resources is not None
-    acc, _ = list(resources.accelerators.items())[0]
-    return acc in kubernetes_utils.GKE_TPU_ACCELERATOR_TO_GENERATION
 
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
+    acc, _ = list(resources.accelerators.items())[0]
     if not is_tpu(resources):
         return False
-    elif is_tpu_pod_slice(resources):
+    elif kubernetes_utils.is_tpu_pod_slice(acc):
         return False
     assert resources is not None
     if resources.accelerator_args is None:

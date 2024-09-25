@@ -566,7 +566,7 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    if acc in kubernetes_utils.GKE_TPU_ACCELERATOR_TO_GENERATION:
+                    if kubernetes_utils.is_tpu_pod_slice(acc):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()
@@ -600,13 +600,6 @@ class Resources:
                                 raise ValueError(
                                     'Cannot specify instance type'
                                     f' (got "{self.instance_type}") for TPU VM.')
-                if self.cloud.is_same_cloud(
-                    clouds.GCP()) and self.instance_type is not None and use_tpu_vm:
-                    if self.instance_type != 'TPU-VM':
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                'Cannot specify instance type'
-                                f' (got "{self.instance_type}") for TPU VM.')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args

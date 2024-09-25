@@ -1885,3 +1885,6 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
 def get_context_from_config(provider_config: Dict[str, Any]) -> str:
     return provider_config.get('context',
                                get_current_kube_config_context_name())
+
+def is_tpu_pod_slice(accelerator: str) -> bool:
+    return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
