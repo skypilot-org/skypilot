@@ -29,7 +29,7 @@
 
 ## Prerequisites
 
-- Go to the [HuggingFace model page](https://huggingface.co/meta-llama/) and request access to the model [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruc  t) and [meta-llama/Llama-3.2-11B-Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision).
+- Go to the [HuggingFace model page](https://huggingface.co/meta-llama/) and request access to the model [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) and [meta-llama/Llama-3.2-11B-Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision).
 - Check that you have installed SkyPilot ([docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
@@ -85,11 +85,12 @@ run: |
 
 You can also get the full YAML file [here](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_2/llama3_2.yaml).
 
-## Serving Llama 3.2: single instance
+## Point and Launch Llama 3.2: single instance
 
 Launch a single spot instance to serve Llama 3.2 on your infra:
 ```console
 $ HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --env HF_TOKEN
+```
 
 ```console
 ...
