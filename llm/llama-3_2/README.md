@@ -1,7 +1,7 @@
 <!-- $REMOVE -->
 # Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
+<!-- $UNCOMMENT# Vision Llama-3.2 (Meta) -->
 
 
 <p align="center">
@@ -182,10 +182,10 @@ sky down llama3_2
 
 ## Point and Launch Vision Llama 3.2
 
-Let's launch a vision llama now! The multimodal capacity of Llama-3.2 could open up a lot of new use cases. We will go with the largest 90B model here.
+Let's launch a vision llama now! The multimodal capacity of Llama-3.2 could open up a lot of new use cases. We will go with the largest 11B model here.
 
 ```console
-$ HF_TOKEN=xxx sky launch llama3_2-vision-90b.yaml -c llama3_2-vision --env HF_TOKEN
+$ HF_TOKEN=xxx sky launch llama3_2-vision-11b.yaml -c llama3_2-vision --env HF_TOKEN
 ```
 
 ```console
@@ -216,7 +216,7 @@ curl http://$ENDPOINT/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -H 'Authorization: Bearer token' \
     --data '{
-        "model": "meta-llama/Llama-3.2-90B-Vision-Instruct",
+        "model": "meta-llama/Llama-3.2-11B-Vision-Instruct",
         "messages": [
         {
             "role": "user",
@@ -229,12 +229,64 @@ curl http://$ENDPOINT/v1/chat/completions \
     }' | jq .
 ```
 
-Example output:
+Example output (parsed):
 
+1. Output 1
 ```console
-
+-------------
+-        -
+-   -   -
+-   -   -
+-        -
+-------------
 ```
 
+2. Output 2
+```
+        ^_________
+       /          \\
+      /            \\
+     /______________\\
+     |               |
+     |               |
+     |_______________|
+       \\            /
+        \\          /
+         \\________/
+```
+
+<details>
+<summary>Raw output</summary>
+
+```console
+{
+  "id": "chat-c341b8a0b40543918f3bb2fef68b0952",
+  "object": "chat.completion",
+  "created": 1727295337,
+  "model": "meta-llama/Llama-3.2-11B-Vision-Instruct",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Sure, here is the logo in ASCII art:\n\n------------- \n-        - \n-   -   - \n-   -   - \n-        - \n------------- \n\nNote that this is a very simple representation and does not capture all the details of the original logo.",
+        "tool_calls": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18,
+    "total_tokens": 73,
+    "completion_tokens": 55
+  },
+  "prompt_logprobs": null
+}
+```
+
+</details>
 
 
 ## Serving Llama-3: scaling up with SkyServe
@@ -243,7 +295,7 @@ After playing with the model, you can deploy the model with autoscaling and load
 
 With no change to the YAML, launch a fully managed service on your infra:
 ```console
-HF_TOKEN=xxx sky serve up llama3_2-vision-90b.yaml -n llama3_2 --env HF_TOKEN
+HF_TOKEN=xxx sky serve up llama3_2-vision-11b.yaml -n llama3_2 --env HF_TOKEN
 ```
 
 Wait until the service is ready:
@@ -280,7 +332,7 @@ curl http://$ENDPOINT/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -H 'Authorization: Bearer token' \
     --data '{
-        "model": "meta-llama/Llama-3.2-90B-Vision-Instruct",
+        "model": "meta-llama/Llama-3.2-11B-Vision-Instruct",
         "messages": [
         {
             "role": "user",
