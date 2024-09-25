@@ -148,36 +148,36 @@ class SkyRemoteUpLineProcessor(LineProcessor):
             self.status_display.update('[bold cyan]Creating remote cluster - '
                                        'deploying Kubernetes on head node')
         if 'K3s deployed on head node.' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}✔ K3s successfully deployed on head node.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Fore.GREEN}'
+                        '✔ K3s successfully deployed on head node.'
+                        f'{colorama.Style.RESET_ALL}')
 
         # Worker nodes
         if 'Deploying Kubernetes on worker node' in log_line:
             self.status_display.update('[bold cyan]Creating remote cluster - '
                                        'deploying Kubernetes on worker nodes')
         if 'Kubernetes deployed on worker node' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}✔ K3s successfully deployed on worker node.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Fore.GREEN}'
+                        '✔ K3s successfully deployed on worker node.'
+                        f'{colorama.Style.RESET_ALL}')
 
         # Cluster configuration
         if 'Configuring local kubectl to connect to the cluster...' in log_line:
             self.status_display.update('[bold cyan]Creating remote cluster - '
                                        'configuring local kubectl')
         if 'kubectl configured to connect to the cluster.' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}✔ kubectl configured for the remote cluster.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Fore.GREEN}'
+                        '✔ kubectl configured for the remote cluster.'
+                        f'{colorama.Style.RESET_ALL}')
 
         # GPU operator installation
-        if 'GPU detected in the cluster. Installing Nvidia GPU Operator...' in log_line:
+        if 'Installing Nvidia GPU Operator...' in log_line:
             self.status_display.update('[bold cyan]Creating remote cluster - '
                                        'installing Nvidia GPU Operator')
         if 'GPU Operator installed.' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}✔ Nvidia GPU Operator installed successfully.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Fore.GREEN}'
+                        '✔ Nvidia GPU Operator installed successfully.'
+                        f'{colorama.Style.RESET_ALL}')
 
         # Cleanup steps
         if 'Cleaning up head node' in log_line:
@@ -185,9 +185,8 @@ class SkyRemoteUpLineProcessor(LineProcessor):
         if 'Cleaning up node' in log_line:
             self.status_display.update('[bold cyan]Cleaning up worker node')
         if 'cleaned up successfully' in log_line:
-            logger.info(
-                f'{colorama.Fore.GREEN}{log_line.strip()}{colorama.Style.RESET_ALL}'
-            )
+            logger.info(f'{colorama.Fore.GREEN}'
+                        f'{log_line.strip()}{colorama.Style.RESET_ALL}')
 
         # Final status
         if 'Cluster deployment completed.' in log_line:

@@ -5206,10 +5206,9 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
 
+    deploy_command = f'{up_script_path} {ip_file} {ssh_username} {ssh_key_path}'
     if cleanup:
-        deploy_command = f'{up_script_path} {ip_file} {ssh_username} {ssh_key_path} --cleanup'
-    else:
-        deploy_command = f'{up_script_path} {ip_file} {ssh_username} {ssh_key_path}'
+        deploy_command += ' --cleanup'
 
     # Convert the command to a format suitable for subprocess
     deploy_command = shlex.split(deploy_command)
@@ -5222,9 +5221,8 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
 
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
-        click.echo(
-            'Found existing kube config. It will be backed up to ~/.kube/config.bak.'
-        )
+        click.echo('Found existing kube config. '
+                   'It will be backed up to ~/.kube/config.bak.')
     style = colorama.Style
     click.echo('To view detailed progress: '
                f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -5251,9 +5249,9 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
 
     if success:
         if cleanup:
-            click.echo(
-                f'{colorama.Fore.GREEN}🎉 Remote cluster cleaned up successfully.'
-                f'{style.RESET_ALL}')
+            click.echo(f'{colorama.Fore.GREEN}'
+                       '🎉 Remote cluster cleaned up successfully.'
+                       f'{style.RESET_ALL}')
         else:
             click.echo('Cluster deployment done. You can now run tasks on '
                        'this cluster.\nE.g., run a task with: '
@@ -5271,47 +5269,48 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
     '--ips',
     type=str,
     required=False,
-    help="Path to the file containing IP addresses of remote machines.")
+    help='Path to the file containing IP addresses of remote machines.')
 @click.option('--username',
               type=str,
               required=False,
-              help="SSH username for accessing remote machines.")
+              help='SSH username for accessing remote machines.')
 @click.option('--key-path',
               type=str,
               required=False,
-              help="Path to the SSH private key.")
+              help='Path to the SSH private key.')
 @click.option('--cleanup',
               is_flag=True,
-              help="Clean up the remote cluster instead of deploying it.")
+              help='Clean up the remote cluster instead of deploying it.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, username: str, key_path: str, cleanup: bool):
     """Creates a local or remote cluster."""
 
-    def _validate_args(ips, username, key_path, gpus, cleanup):
-        # If any of --ips, --username, or --key-path is specified, all must be specified
+    def _validate_args(ips, username, key_path, cleanup):
+        # If any of --ips, --username, or --key-path is specified,
+        # all must be specified
         if bool(ips) or bool(username) or bool(key_path):
             if not (ips and username and key_path):
                 raise click.BadParameter(
-                    "All --ips, --username, and --key-path must be specified together."
-                )
+                    'All --ips, --username, and --key-path '
+                    'must be specified together.')
 
-        # --cleanup can only be specified if --ips, --username, and --key-path are all provided
+        # --cleanup can only be specified if --ips, --username and --key-path
+        # are all provided
         if cleanup and not (ips and username and key_path):
-            raise click.BadParameter(
-                "--cleanup can only be used with --ips, --username, and --key-path."
-            )
+            raise click.BadParameter('--cleanup can only be used with '
+                                     '--ips, --username and --key-path.')
 
-    _validate_args(ips, username, key_path, gpus, cleanup)
+    _validate_args(ips, username, key_path, cleanup)
 
-    # If remote deployment arguments are specified, run remote cluster deployment
+    # If remote deployment arguments are specified, run remote up script
     if ips and username and key_path:
         # Convert ips and key_path to absolute paths
         ips = os.path.abspath(ips)
         key_path = os.path.abspath(key_path)
         deploy_remote_cluster(ips, username, key_path, cleanup)
     else:
-        # Run local deployment if no remote args are specified
+        # Run local deployment (kind) if no remote args are specified
         deploy_local_cluster(gpus)
 
 
