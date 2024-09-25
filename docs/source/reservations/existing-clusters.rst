@@ -5,7 +5,7 @@ Deploy SkyPilot on existing clusters
 
 This guide will help you deploy SkyPilot on your existing clusters - whether it's on-premises machines or reserved instances on a cloud provider.
 
-**Given a list of IP addresses and SSH keys,**
+**Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
 
 At the end of this guide, you will be able to use SkyPilot to run jobs or services on your own preexisting cluster.
@@ -15,19 +15,19 @@ At the end of this guide, you will be able to use SkyPilot to run jobs or servic
    Figure v2: https://docs.google.com/drawings/d/1hMvOe1HX0ESoUbCvUowla2zO5YBacsdruo0dFqML9vo/edit?usp=sharing
    Figure v2 Dark: https://docs.google.com/drawings/d/1Bo--2227CH0r4UBkj4TGY3I3ZfpOdh4SfeheE95ZBvU/edit?usp=sharing
 
-.. figure:: ../images/sky-existing-infra-workflow-dark.png
-   :width: 85%
-   :align: center
-   :alt: Deploying SkyPilot on existing clusters
-   :class: no-scaled-link, only-dark
-
-   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster..
-
 .. figure:: ../images/sky-existing-infra-workflow-light.png
    :width: 85%
    :align: center
    :alt: Deploying SkyPilot on existing clusters
    :class: no-scaled-link, only-light
+
+   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster..
+
+.. figure:: ../images/sky-existing-infra-workflow-dark.png
+   :width: 85%
+   :align: center
+   :alt: Deploying SkyPilot on existing clusters
+   :class: no-scaled-link, only-dark
 
    Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster..
 
@@ -126,7 +126,7 @@ Deploying SkyPilot
 
    .. tip::
 
-     You can also use ``kubectl`` to interact with the cluster.
+     You can also use ``kubectl`` to interact and perform administrative operations on the cluster.
 
 Cleanup
 -------
