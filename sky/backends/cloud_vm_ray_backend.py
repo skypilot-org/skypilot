@@ -4147,10 +4147,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
                 # Kubernetes and RunPod clusters.
-                controller = controller_utils.Controllers.from_name(handle.cluster_name)
+                controller = controller_utils.Controllers.from_name(
+                    handle.cluster_name)
                 assert (controller is not None), handle.cluster_name
-                if (controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER and
-                    isinstance(handle.launched_resources.cloud, clouds.Kubernetes)):
+                if (controller
+                        == controller_utils.Controllers.SKY_SERVE_CONTROLLER and
+                        isinstance(handle.launched_resources.cloud,
+                                   clouds.Kubernetes)):
                     # For SkyServe controllers on Kubernetes: override autostop
                     # behavior to force autodown (instead of no-op)
                     # to avoid dangling controllers.
