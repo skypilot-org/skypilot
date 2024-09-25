@@ -1,7 +1,5 @@
-<!-- $REMOVE -->
-# Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
-<!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Vision Llama-3.2 (Meta) -->
+
+# Vision Llama-3.2 (Meta) 
 
 
 <p align="center">
