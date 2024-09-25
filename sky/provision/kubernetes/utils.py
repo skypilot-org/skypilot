@@ -293,7 +293,9 @@ AUTOSCALER_TO_LABEL_FORMATTER = {
 }
 
 
+@functools.lru_cache()
 def detect_gpu_label_formatter(
+    context: str
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
@@ -304,7 +306,7 @@ def detect_gpu_label_formatter(
     """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -324,7 +326,8 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
-def detect_gpu_resource() -> Tuple[bool, Set[str]]:
+@functools.lru_cache()
+def detect_gpu_resource(context: str) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
 
     If nvidia.com/gpu resource is missing, that typically means that the
@@ -336,7 +339,7 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_gpu = 'nvidia.com/gpu' in cluster_resources
@@ -344,7 +347,6 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     return has_gpu, cluster_resources
 
 
-@functools.lru_cache()
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
 
@@ -439,7 +441,8 @@ def check_instance_fits(context: str,
         # If GPUs are requested, check if GPU type is available, and if so,
         # check if CPU and memory requirements on the specific node are met.
         try:
-            gpu_label_key, gpu_label_val = get_gpu_label_key_value(acc_type)
+            gpu_label_key, gpu_label_val = get_gpu_label_key_value(
+                context, acc_type)
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -471,7 +474,9 @@ def check_instance_fits(context: str,
         return fits, reason
 
 
-def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
+def get_gpu_label_key_value(context: str,
+                            acc_type: str,
+                            check_mode=False) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
 
     Args:
@@ -512,11 +517,11 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                                        f' {autoscaler_type}')
         return formatter.get_label_key(), formatter.get_label_value(acc_type)
 
-    has_gpus, cluster_resources = detect_gpu_resource()
+    has_gpus, cluster_resources = detect_gpu_resource(context)
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
         label_formatter, node_labels = \
-            detect_gpu_label_formatter()
+            detect_gpu_label_formatter(context)
         if label_formatter is None:
             # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
             # detected, raise error
@@ -632,7 +637,7 @@ def get_external_ip(network_mode: Optional[
     return parsed_url.hostname
 
 
-def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
+def check_credentials(context: str, timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -644,10 +649,9 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        ns = get_kube_config_context_namespace()
-        context = get_current_kube_config_context_name()
+        namespace = get_kube_config_context_namespace(context)
         kubernetes.core_api(context).list_namespaced_pod(
-            ns, _request_timeout=timeout)
+            namespace, _request_timeout=timeout)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
@@ -685,7 +689,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
     try:
-        _, _ = get_gpu_label_key_value(acc_type='', check_mode=True)
+        _, _ = get_gpu_label_key_value(context, acc_type='', check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
@@ -1749,7 +1753,7 @@ def get_kubernetes_node_info(
     # Get the pods to get the real-time resource usage
     pods = get_kubernetes_pods(context, namespace)
 
-    label_formatter, _ = detect_gpu_label_formatter()
+    label_formatter, _ = detect_gpu_label_formatter(context)
     if not label_formatter:
         label_key = None
     else:

@@ -81,6 +81,5 @@ def enable_all_clouds_in_monkeypatch(
             return region, zone
         raise ValueError(f'Invalid region: {region}, zone: {zone}')
 
-    monkeypatch.setattr(
-        'sky.clouds.kubernetes.Kubernetes.validate_region_zone',
-        kubernetes_validate_region_zone)
+    monkeypatch.setattr('sky.clouds.kubernetes.Kubernetes.validate_region_zone',
+                        kubernetes_validate_region_zone)

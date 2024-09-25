@@ -261,6 +261,7 @@ class Kubernetes(clouds.Cloud):
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
             context = region.name
+        assert context is not None, 'No context found in kubeconfig'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -305,7 +306,7 @@ class Kubernetes(clouds.Cloud):
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(acc_type)
+                kubernetes_utils.get_gpu_label_key_value(context, acc_type)
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -459,11 +460,27 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # Test using python API
-        try:
-            return kubernetes_utils.check_credentials()
-        except Exception as e:  # pylint: disable=broad-except
-            return (False, 'Credential check failed: '
-                    f'{common_utils.format_exception(e)}')
+        allowed_contexts = skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'), None)
+        if allowed_contexts is None:
+            current_context = (
+                kubernetes_utils.get_current_kube_config_context_name()
+            )
+            if current_context is None:
+                return (False, 'No context found in kubeconfig')
+            allowed_contexts = [current_context]
+        reasons = []
+        for context in allowed_contexts:
+            try:
+                check_result = kubernetes_utils.check_credentials(context)
+                if check_result[0]:
+                    return check_result
+                reasons.append(f'{context}: {check_result[1]}')
+            except Exception as e:  # pylint: disable=broad-except
+                return (False, f'Credential check failed for {context}: '
+                        f'{common_utils.format_exception(e)}')
+        return (False, 'Failed to find available context with working '
+                'credentials. Details:\n' + '\n'.join(reasons))
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):

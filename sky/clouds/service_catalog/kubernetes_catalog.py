@@ -68,18 +68,27 @@ def list_accelerators_realtime(
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
+    # TODO(zhwu): this should return all accelerators in multiple kubernetes
+    # clusters defined by allowed_contexts.
+    if region_filter is None:
+        context = kubernetes_utils.get_current_kube_config_context_name()
+    else:
+        context = region_filter
+    if context is None:
+        return {}, {}, {}
+
     k8s_cloud = Kubernetes()
     if not any(
             map(k8s_cloud.is_same_cloud,
                 sky_check.get_cached_enabled_clouds_or_refresh())
-    ) or not kubernetes_utils.check_credentials()[0]:
+    ) or not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
-    has_gpu = kubernetes_utils.detect_gpu_resource()
+    has_gpu = kubernetes_utils.detect_gpu_resource(context)
     if not has_gpu:
         return {}, {}, {}
 
-    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter()
+    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(context)
     if not label_formatter:
         return {}, {}, {}
 
