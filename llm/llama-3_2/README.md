@@ -1,5 +1,5 @@
 <!-- $REMOVE -->
-# Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud with SkyPilot
+# Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
 <!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
 
