@@ -119,3 +119,28 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(
             task=user_request.task,
             skypilot_config=user_request.skypilot_config)
+
+
+class DynamicKubernetesContextsUpdatePolicy(sky.AdminPolicy):
+    """Example policy: update the kubernetes context to use."""
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Updates the kubernetes context to use."""
+        # Append any new kubernetes clusters in local kubeconfig. An example
+        # implementation of this method can be:
+        #  1. Query an organization's internal Kubernetes cluster registry,
+        #     which can be some internal API, or a secret vault.
+        #  2. Append the new credentials to the local kubeconfig.
+        update_current_kubernetes_clusters_from_registry()
+        # Get the allowed contexts for the user. Similarly, it can retrieve
+        # the latest allowed contexts from an organization's internal API.
+        allowed_contexts = get_allowed_contexts()
+
+        # Update the kubernetes allowed contexts in skypilot config.
+        config = user_request.skypilot_config
+        config.set_nested(('kubernetes', 'allowed_contexts'),
+                          allowed_contexts)
+        return sky.MutatedUserRequest(
+            task=user_request.task, skypilot_config=config)
