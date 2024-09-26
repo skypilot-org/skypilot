@@ -3376,7 +3376,7 @@ def test_gcp_disk_tier():
         region = 'us-west2'
         instance_type_option = ''
         if disk_tier == resources_utils.DiskTier.BEST:
-            # Ultra disk tier requires a specific instance type.
+            # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
             instance_type_option = '--instance-type n2-standard-64'
         test = Test(
             'gcp-disk-tier-' + disk_tier.value,
