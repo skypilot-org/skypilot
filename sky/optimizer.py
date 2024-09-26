@@ -965,10 +965,10 @@ class Optimizer:
                             f'Multiple {cloud} instances satisfy '
                             f'{acc_name}:{int(acc_count)}. '
                             f'The cheapest {candidate_list[0]!r} is considered '
-                            f'among:\n{instance_list}.')
+                            f'among:\n{instance_list}.\n')
             if is_multi_instances:
                 logger.info(
-                    f'To list more details, run: sky show-gpus {acc_name}\n')
+                    f'To list more details, run \'sky show-gpus {acc_name}\'.')
 
     @staticmethod
     def _optimize_dag(
@@ -1101,7 +1101,8 @@ class Optimizer:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
                                            node_to_cost_map, minimize_cost)
-            Optimizer._print_candidates(local_node_to_candidate_map)
+            if not env_options.Options.MINIMIZE_LOGGING.get():
+                Optimizer._print_candidates(local_node_to_candidate_map)
         return best_plan
 
 

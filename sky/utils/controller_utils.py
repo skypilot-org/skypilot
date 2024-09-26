@@ -380,7 +380,7 @@ def shared_controller_vars_to_fill(
         'local_user_config_path': local_user_config_path,
     }
     env_vars: Dict[str, str] = {
-        str(env): str(int(env.get())) for env in env_options.Options
+        env.value: '1' for env in env_options.Options if env.get()
     }
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
@@ -388,7 +388,7 @@ def shared_controller_vars_to_fill(
         constants.USER_ENV_VAR: getpass.getuser(),
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
-        str(env_options.Options.SKIP_CLOUD_IDENTITY_CHECK): '1',
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
