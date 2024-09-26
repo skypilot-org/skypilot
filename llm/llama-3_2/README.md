@@ -14,8 +14,8 @@
 
 ## Why use SkyPilot?
 
-* Point, launch, and serve: simply point to the cloud/kubernetes cluster you have access to, and launch the model there with a single command.
-* No lock-in: run on any supported cloud - AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI
+* **Point, launch, and serve**: simply point to the cloud/Kubernetes cluster you have access to, and launch the model there with a single command.
+* No lock-in: run on any supported cloud — AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI
 * Everything stays in your cloud account (your VMs & buckets)
 * No one else sees your chat history
 * Pay absolute minimum — no managed solution markups
