@@ -66,7 +66,6 @@ setup: |
   pip install git+https://github.com/huggingface/transformers.git@f0eabf6c7da2afbe8425546c092fa3722f9f219e
   pip install vllm==0.6.2
 
-
 run: |
   echo 'Starting vllm api server...'
 
