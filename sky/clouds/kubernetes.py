@@ -129,13 +129,16 @@ class Kubernetes(clouds.Cloud):
                 allowed_contexts = [current_context]
 
         existing_contexts = []
+        skipped_contexts = []
         for context in allowed_contexts:
             if context in all_contexts:
                 existing_contexts.append(context)
             else:
-                logger.warning(f'Kubernetes context {context!r} specified in '
-                               '"allowed_contexts" not found in kubeconfig. '
-                               'Ignoring this context.')
+                skipped_contexts.append(context)
+        if skipped_contexts:
+            logger.warning(f'Kubernetes contexts {skipped_contexts!r} specified in '
+                           '"allowed_contexts" not found in kubeconfig. '
+                           'Ignoring these contexts.')
         return existing_contexts
 
     @classmethod
@@ -143,6 +146,7 @@ class Kubernetes(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
+        del accelerators, zone, use_spot  # unused
         existing_contexts = cls._existing_allowed_contexts()
 
         regions = [clouds.Region(context) for context in existing_contexts]

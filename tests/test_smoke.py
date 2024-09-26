@@ -5582,3 +5582,72 @@ def test_sky_bench(generic_cloud: str):
         f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_context_failover():
+    """Test if the kubernetes context failover works.
+    
+    This test requires two kubernetes clusters:
+    - kind-skypilot: the local cluster with mock labels for 8 H100 GPUs.
+    - another accessible cluster: with enough CPUs
+    To start the first cluster, run:
+      sky local up
+      # Add mock label for accelerator
+      kubectl label node --overwrite skypilot-control-plane skypilot.co/accelerator=h100 --context kind-skypilot
+      # Get the token for the cluster in context kind-skypilot
+      TOKEN=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.users[0].user.token}\')
+      # Get the API URL for the cluster in context kind-skypilot
+      API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
+      # Add mock capacity for GPU
+      curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+    """
+    # Get context that is not kind-skypilot
+    contexts = subprocess.check_output('kubectl config get-contexts -o name',
+                                       shell=True).decode('utf-8').split('\n')
+    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    config = textwrap.dedent(f"""\
+    kubernetes:
+      allowed_contexts:
+        - kind-skypilot
+        - {context}
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(config.encode('utf-8'))
+        f.flush()
+        name = _get_cluster_name()
+        test = Test(
+            'kubernetes-context-failover',
+            [
+                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
+                # Get contexts and set current context to the other cluster that is not kind-skypilot
+                f'kubectl config use-context {context}',
+                # H100 should not in the current context
+                '! sky show-gpus --cloud kubernetes | grep H100',
+                f'sky launch -y -c {name}-1 --cpus 1 echo hi',
+                f'sky logs {name}-1 --status',
+                # It should be launched not on kind-skypilot
+                f'sky status -a {name}-1 | grep "{context}"',
+                # Test failure for launching H100 on other cluster
+                f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --cloud kubernetes --region {context} echo hi && exit 1 || true',
+                # Test failover
+                f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --cloud kubernetes echo hi',
+                f'sky logs {name}-3 --status',
+                # It should be launched on kind-skypilot
+                f'sky status -a {name}-3 | grep "kind-skypilot"',
+                # Should be 7 free GPUs
+                f'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "  7"',
+                # Remove the line with "kind-skypilot"
+                f'sed -i "/kind-skypilot/d" {f.name}',
+                # Should still be able to exec and launch on existing cluster
+                f'sky exec {name}-3 "echo hi"',
+                f'sky logs {name}-3 --status',
+                f'sky status -r {name}-3 | grep UP',
+                f'sky launch -c {name}-3 --gpus h100 echo hi',
+                f'sky logs {name}-3 --status',
+                f'sky status -r {name}-3 | grep UP',
+            ],
+            f'sky down -y {name}-1 {name}-3',
+            env={'SKYPILOT_CONFIG': f.name},
+        )
+        run_one_test(test)
