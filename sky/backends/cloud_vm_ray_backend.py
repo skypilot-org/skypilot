@@ -48,6 +48,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -4179,6 +4180,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
+
+        # Add/Remove autodown annotations to/from Kubernetes pods.
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            kubernetes_utils.set_autodown_annotations(
+                handle=handle,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down)
 
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,
