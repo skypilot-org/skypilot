@@ -326,7 +326,7 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
-@functools.lru_cache()
+@functools.lru_cache(maxsize=10)
 def detect_gpu_resource(context: str) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
 
@@ -346,7 +346,7 @@ def detect_gpu_resource(context: str) -> Tuple[bool, Set[str]]:
 
     return has_gpu, cluster_resources
 
-
+@functools.lru_cache(maxsize=10)
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
 
@@ -366,20 +366,16 @@ def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     return nodes
 
 
-def get_kubernetes_pods(context: Optional[str] = None,
-                        namespace: Optional[str] = None) -> List[Any]:
-    """Gets the kubernetes pods in the current namespace and current context.
+def get_all_pods_in_kubernetes_cluster(context: Optional[str] = None) -> List[Any]:
+    """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
     """
     if context is None:
         context = get_current_kube_config_context_name()
-    if namespace is None:
-        namespace = get_kube_config_context_namespace()
-
+    
     try:
-        pods = kubernetes.core_api(context).list_namespaced_pod(
-            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
+        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(_request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get pod info from Kubernetes cluster. '
@@ -1737,8 +1733,7 @@ class KubernetesNodeInfo:
 
 
 def get_kubernetes_node_info(
-        context: Optional[str] = None,
-        namespace: Optional[str] = None) -> Dict[str, KubernetesNodeInfo]:
+        context: Optional[str] = None) -> Dict[str, KubernetesNodeInfo]:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1751,7 +1746,7 @@ def get_kubernetes_node_info(
     """
     nodes = get_kubernetes_nodes(context)
     # Get the pods to get the real-time resource usage
-    pods = get_kubernetes_pods(context, namespace)
+    pods = get_all_pods_in_kubernetes_cluster(context)
 
     label_formatter, _ = detect_gpu_label_formatter(context)
     if not label_formatter:
