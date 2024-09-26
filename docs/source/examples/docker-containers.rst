@@ -20,7 +20,7 @@ Running Containers as Tasks
 
 .. note::
 
-    On Kubernetes, running docker runtime in a pod is not recommended. Instead, :ref:`use your container as a runtime environment <docker-containers-as-runtime-environments>`.
+    On Kubernetes, running Docker runtime in a pod is not recommended. Instead, :ref:`use your container as a runtime environment <docker-containers-as-runtime-environments>`.
 
 SkyPilot can run containerized applications directly as regular tasks. The default VM images provided by SkyPilot already have the Docker runtime pre-configured.
 
@@ -179,7 +179,7 @@ Private Registries
 
 .. note::
 
-    These instructions do not apply to Kubernetes clusters. See :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
+    These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
 When using this mode, to access Docker images hosted on private registries,
 you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
