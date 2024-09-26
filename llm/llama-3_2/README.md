@@ -351,6 +351,6 @@ sky serve down llama3
 See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
 
 
-## Development and Finetuning Llama 3 series
+## Developing and Finetuning Llama 3 series
 
 SkyPilot also simplifies the development and finetuning of Llama 3 series. Check out the development and finetuning guides: [Develop](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_1/README.md) and [Finetune](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_1-finetuning/README.md).
