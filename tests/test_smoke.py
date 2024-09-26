@@ -5601,6 +5601,10 @@ def test_kubernetes_context_failover():
       API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
       # Add mock capacity for GPU
       curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+      # Add a new namespace to test the handling of namespaces
+      kubectl create namespace test-namespace --context kind-skypilot
+      # Set the namespace to test-namespace
+      kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
     """
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
@@ -5623,8 +5627,13 @@ def test_kubernetes_context_failover():
                 'NODE_INFO=$(kubectl get nodes -o yaml --context kind-skypilot) && '
                 'echo "$NODE_INFO" | grep nvidia.com/gpu | grep 8 && '
                 'echo "$NODE_INFO" | grep skypilot.co/accelerator | grep h100 || '
-                'echo "kind-skypilot does not exist '
-                'or does not have mock labels for GPUs. Check the instructions in tests/test_smoke.py::test_kubernetes_context_failover."',
+                '{ echo "kind-skypilot does not exist '
+                'or does not have mock labels for GPUs. Check the instructions in '
+                'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
+                # Check namespace for kind-skypilot is test-namespace
+                'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
+                '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
+                'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
                 'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
@@ -5639,6 +5648,8 @@ def test_kubernetes_context_failover():
                 # Test failover
                 f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --cloud kubernetes echo hi',
                 f'sky logs {name}-3 --status',
+                # Test pods
+                f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
                 # It should be launched on kind-skypilot
                 f'sky status -a {name}-3 | grep "kind-skypilot"',
                 # Should be 7 free GPUs
