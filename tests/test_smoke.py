@@ -3369,30 +3369,37 @@ def test_aws_disk_tier():
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
-        type = GCP._get_disk_type(disk_tier)
+        disk_types = [GCP._get_disk_type(disk_tier)]
         name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
-        instance_type_option = ''
+        instance_type_options = ['']
         if disk_tier == resources_utils.DiskTier.BEST:
             # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
-            instance_type_option = '--instance-type n2-standard-64'
-        test = Test(
-            'gcp-disk-tier-' + disk_tier.value,
-            [
-                f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier.value} {instance_type_option} ',
-                f'name=`gcloud compute instances list --filter='
-                f'"labels.ray-cluster-name:{name_on_cloud}" '
-                '--format="value(name)"`; '
-                f'gcloud compute disks list --filter="name=$name" '
-                f'--format="value(type)" | grep {type} '
-            ],
-            f'sky down -y {name}',
-            timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
-        )
-        run_one_test(test)
+            # If using default instance type, it will only enable the high disk tier.
+            disk_types = [
+                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+            ]
+            instance_type_options.append('--instance-type n2-standard-64')
+        for disk_type, instance_type_option in zip(disk_types,
+                                                   instance_type_options):
+            test = Test(
+                'gcp-disk-tier-' + disk_tier.value,
+                [
+                    f'sky launch -y -c {name} --cloud gcp --region {region} '
+                    f'--disk-tier {disk_tier.value} {instance_type_option} ',
+                    f'name=`gcloud compute instances list --filter='
+                    f'"labels.ray-cluster-name:{name_on_cloud}" '
+                    '--format="value(name)"`; '
+                    f'gcloud compute disks list --filter="name=$name" '
+                    f'--format="value(type)" | grep {disk_type} '
+                ],
+                f'sky down -y {name}',
+                timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
+            )
+            run_one_test(test)
 
 
 @pytest.mark.azure
