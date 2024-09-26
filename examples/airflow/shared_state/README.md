@@ -12,7 +12,8 @@ In this guide, we demonstrate how some simple SkyPilot operations, such as launc
 
 * Airflow installed on a [Kubernetes cluster](https://airflow.apache.org/docs/helm-chart/stable/index.html) or [locally](https://airflow.apache.org/docs/apache-airflow/stable/start.html) (`SequentialExecutor`)
 * A Kubernetes cluster to run tasks on. We'll use GKE in this example.
-  * A persistent volume storage class should be available that supports at least `ReadWriteOnce` access mode.
+  * You can use our guide on [setting up a Kubernetes cluster](https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html).
+  * A persistent volume storage class should be available that supports at least `ReadWriteOnce` access mode. GKE has this supported by default.
 
 ## Preparing the Kubernetes Cluster
 
@@ -161,8 +162,8 @@ with DAG(dag_id='sky_k8s_example',
 
 ## Tips
 
-1. **Persistent Volume**: If you have many concurrent tasks, you may want to use a storage class that supports `ReadWriteMany` access mode.
-2. **Cloud credentials**: If you wish to run tasks on different clouds, you can configure cloud credentials in Kubernetes secrets and mount them in the Sky pod defined in the DAG.
+1. **Persistent Volume**: If you have many concurrent tasks, you may want to use a storage class that supports [`ReadWriteMany`](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes) access mode.
+2. **Cloud credentials**: If you wish to run tasks on different clouds, you can configure cloud credentials in Kubernetes secrets and mount them in the Sky pod defined in the DAG. See [SkyPilot docs on setting up cloud credentials](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloud-account-setup) for more on how to configure credentials in the pod.
 3. **Logging**: All SkyPilot logs are written to container stdout, which is captured as task logs in Airflow and displayed in the UI. You can also write logs to a file and read them in subsequent tasks.
 
 ## Future work: a native Airflow Executor built on SkyPilot

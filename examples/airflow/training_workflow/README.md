@@ -7,6 +7,8 @@ In this guide, we show how a training workflow involving data preprocessing, tra
   <img src="https://i.imgur.com/mcMghXM.png" width="800">
 </p>
 
+**💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#job-pipelines) for more information. 
+
 ## Why use SkyPilot with Airflow?
 In AI workflows, **the transition from development to production is hard**. 
 
@@ -17,7 +19,7 @@ validate any changes, often requiring re-writing the code as Airflow operators.
 
 **SkyPilot seamlessly bridges the dev -> production gap**. 
 
-SkyPilot can operate on any of your infra, allowing you to run the same code that you ran during development on a
+SkyPilot can operate on any of your infra, allowing you to package and run the same code that you ran during development on a
 production Airflow cluster. Behind the scenes, SkyPilot handles environment setup, dependency management, and infra orchestration, allowing you to focus on your code.
 
 Here's how you can use SkyPilot to take your dev workflows to production in Airflow:
