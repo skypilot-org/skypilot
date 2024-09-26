@@ -5619,6 +5619,12 @@ def test_kubernetes_context_failover():
         test = Test(
             'kubernetes-context-failover',
             [
+                # Check if kind-skypilot is provisioned with H100 annotations already
+                'NODE_INFO=$(kubectl get nodes -o yaml --context kind-skypilot) && '
+                'echo "$NODE_INFO" | grep nvidia.com/gpu | grep 8 && '
+                'echo "$NODE_INFO" | grep skypilot.co/accelerator | grep h100 || '
+                'echo "kind-skypilot does not exist '
+                'or does not have mock labels for GPUs. Check the instructions in tests/test_smoke.py::test_kubernetes_context_failover."',
                 'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
