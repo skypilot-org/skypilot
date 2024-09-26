@@ -1,9 +1,9 @@
-.. _existing-clusters:
+.. _existing-machines:
 
-Deploy SkyPilot on existing clusters
+Deploy SkyPilot on existing machines
 ====================================
 
-This guide will help you deploy SkyPilot on your existing clusters - whether it's on-premises machines or reserved instances on a cloud provider.
+This guide will help you deploy SkyPilot on your existing machines - whether they are on-premisesc or reserved instances on a cloud provider.
 
 **Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
@@ -16,7 +16,7 @@ SkyPilot will install necessary dependencies on the remote machines and configur
 .. figure:: ../images/sky-existing-infra-workflow-light.png
    :width: 85%
    :align: center
-   :alt: Deploying SkyPilot on existing clusters
+   :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-light
 
    Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
@@ -24,7 +24,7 @@ SkyPilot will install necessary dependencies on the remote machines and configur
 .. figure:: ../images/sky-existing-infra-workflow-dark.png
    :width: 85%
    :align: center
-   :alt: Deploying SkyPilot on existing clusters
+   :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-dark
 
    Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
@@ -141,7 +141,7 @@ When you run ``sky local up``, SkyPilot runs the following operations:
 Cleanup
 -------
 
-To clean up all state created by SkyPilot on your cluster, use the ``--cleanup`` flag:
+To clean up all state created by SkyPilot on your machines, use the ``--cleanup`` flag:
 
 .. code-block:: bash
 
