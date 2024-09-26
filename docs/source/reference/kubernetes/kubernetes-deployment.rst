@@ -196,7 +196,7 @@ Deploying on Amazon EKS
 Deploying on on-prem clusters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you have a list of IP addresses and the SSH credentials for your on-prem cluster, you follow our
+If you have a list of IP addresses and the SSH credentials for your on-prem cluster, you can follow our
 :ref:`Using Existing Clusters <existing-clusters>` guide to set up SkyPilot on your on-prem cluster.
 
 Alternatively, you can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,

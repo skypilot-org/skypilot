@@ -8,8 +8,6 @@ This guide will help you deploy SkyPilot on your existing clusters - whether it'
 **Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
 
-At the end of this guide, you will be able to use SkyPilot to run jobs or services on your own preexisting cluster.
-
 ..
    Figure v1 (for deploy.sh): https://docs.google.com/drawings/d/1Jp1tTu1kxF-bIrS6LRMqoJ1dnxlFvn-iobVsXElXfAg/edit?usp=sharing
    Figure v2: https://docs.google.com/drawings/d/1hMvOe1HX0ESoUbCvUowla2zO5YBacsdruo0dFqML9vo/edit?usp=sharing
@@ -21,7 +19,7 @@ At the end of this guide, you will be able to use SkyPilot to run jobs or servic
    :alt: Deploying SkyPilot on existing clusters
    :class: no-scaled-link, only-light
 
-   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster..
+   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
 
 .. figure:: ../images/sky-existing-infra-workflow-dark.png
    :width: 85%
@@ -29,7 +27,7 @@ At the end of this guide, you will be able to use SkyPilot to run jobs or servic
    :alt: Deploying SkyPilot on existing clusters
    :class: no-scaled-link, only-dark
 
-   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster..
+   Given a list of IP addresses and SSH keys, ``sky local up`` will install necessary dependencies on the remote machines and configure SkyPilot to run jobs and services on the cluster.
 
 
 .. note::
@@ -49,7 +47,7 @@ Prerequisites
 **Remote machines (your cluster, optionally with GPUs):**
 
 * Debian-based OS (tested on Debian 11)
-* SSH access with key-based authentication and passwordless sudo
+* SSH access from local machine to all remote machines with key-based authentication and passwordless sudo
 * All machines must use the same SSH key and username
 * All machines must have network access to each other
 * Port 6443 must be accessible on at least one node from your local machine
@@ -70,7 +68,7 @@ Deploying SkyPilot
 
    In this example, the first node (``192.168.1.1``) has port 6443 open and will be used as the head node.
 
-2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH keys as arguments:
+2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH key as arguments:
 
    .. code-block:: bash
 
@@ -79,7 +77,7 @@ Deploying SkyPilot
       SSH_KEY=path/to/ssh/key
       sky local up --ip $IP_FILE --username $SSH_USERNAME --key-path $SSH_KEY
 
-   SkyPilot will deploy a Kubernetes cluster on the remote machines, setup GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
+   SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
    Example output of ``sky local up``:
 
@@ -113,6 +111,7 @@ Deploying SkyPilot
       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
       L4    1, 2, 4       12          12
       H100  1, 2, 4, 8    16          16
+
       Kubernetes per node GPU availability
       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
       my-cluster-0               L4        4           4
