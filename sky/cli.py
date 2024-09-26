@@ -5283,7 +5283,8 @@ def deploy_remote_cluster(ip_file, ssh_user, ssh_key_path, cleanup):
               help='Clean up the remote cluster instead of deploying it.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str, cleanup: bool):
+def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
+             cleanup: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
