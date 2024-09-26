@@ -160,7 +160,7 @@ def check_ssh_agent():
        launch the ssh-agent without setting the env varialbe like
         $SSH_AGENT_PID, its not reliable to check env variable"""
     try:
-        result = subprocess.run(['ssh-add', '-l'],
+        _ = subprocess.run(['ssh-add', '-l'],
                                 check=True,
                                 capture_output=True,
                                 text=True)
