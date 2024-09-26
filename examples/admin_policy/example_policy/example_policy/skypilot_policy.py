@@ -140,7 +140,6 @@ class DynamicKubernetesContextsUpdatePolicy(sky.AdminPolicy):
 
         # Update the kubernetes allowed contexts in skypilot config.
         config = user_request.skypilot_config
-        config.set_nested(('kubernetes', 'allowed_contexts'),
-                          allowed_contexts)
-        return sky.MutatedUserRequest(
-            task=user_request.task, skypilot_config=config)
+        config.set_nested(('kubernetes', 'allowed_contexts'), allowed_contexts)
+        return sky.MutatedUserRequest(task=user_request.task,
+                                      skypilot_config=config)
