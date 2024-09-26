@@ -115,7 +115,8 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)
-    def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str, ...]) -> None:
+    def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str,
+                                                                ...]) -> None:
         """Log skipped contexts for only once.
         
         We don't directly cache the result of _filter_existing_allowed_contexts
