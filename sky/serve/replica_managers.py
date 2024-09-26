@@ -23,6 +23,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
+from sky.resources import Resources
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -172,9 +173,10 @@ def _get_resources_ports(task_yaml: str) -> str:
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
     assert len(task.resources) >= 1, task
-    task_resources = list(task.resources)[0]
+    task_resources: Resources = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
+    assert task_resources.ports is not None
     return task_resources.ports[0]
 
 
