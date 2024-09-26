@@ -136,9 +136,8 @@ class Kubernetes(clouds.Cloud):
             else:
                 skipped_contexts.append(context)
         if skipped_contexts:
-            skipped_contexts = set(skipped_contexts)
             logger.warning(
-                f'Kubernetes contexts {skipped_contexts!r} specified in '
+                f'Kubernetes contexts {set(skipped_contexts)!r} specified in '
                 '"allowed_contexts" not found in kubeconfig. '
                 'Ignoring these contexts.')
         return existing_contexts
