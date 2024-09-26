@@ -5198,7 +5198,7 @@ def deploy_local_cluster(gpus: bool):
             f'{gpu_hint}')
 
 
-def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
+def deploy_remote_cluster(ip_file, ssh_user, ssh_key_path, cleanup):
     success = False
     path_to_package = os.path.dirname(os.path.dirname(__file__))
     up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
@@ -5206,7 +5206,7 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
 
-    deploy_command = f'{up_script_path} {ip_file} {ssh_username} {ssh_key_path}'
+    deploy_command = f'{up_script_path} {ip_file} {ssh_user} {ssh_key_path}'
     if cleanup:
         deploy_command += ' --cleanup'
 
@@ -5270,11 +5270,11 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
     type=str,
     required=False,
     help='Path to the file containing IP addresses of remote machines.')
-@click.option('--username',
+@click.option('--ssh-user',
               type=str,
               required=False,
               help='SSH username for accessing remote machines.')
-@click.option('--key-path',
+@click.option('--ssh-key-path',
               type=str,
               required=False,
               help='Path to the SSH private key.')
@@ -5283,32 +5283,32 @@ def deploy_remote_cluster(ip_file, ssh_username, ssh_key_path, cleanup):
               help='Clean up the remote cluster instead of deploying it.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: str, username: str, key_path: str, cleanup: bool):
+def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str, cleanup: bool):
     """Creates a local or remote cluster."""
 
-    def _validate_args(ips, username, key_path, cleanup):
-        # If any of --ips, --username, or --key-path is specified,
+    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
+        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
         # all must be specified
-        if bool(ips) or bool(username) or bool(key_path):
-            if not (ips and username and key_path):
+        if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
+            if not (ips and ssh_user and ssh_key_path):
                 raise click.BadParameter(
-                    'All --ips, --username, and --key-path '
+                    'All --ips, --ssh-user, and --ssh-key-path '
                     'must be specified together.')
 
-        # --cleanup can only be specified if --ips, --username and --key-path
+        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
         # are all provided
-        if cleanup and not (ips and username and key_path):
+        if cleanup and not (ips and ssh_user and ssh_key_path):
             raise click.BadParameter('--cleanup can only be used with '
-                                     '--ips, --username and --key-path.')
+                                     '--ips, --ssh-user and --ssh-key-path.')
 
-    _validate_args(ips, username, key_path, cleanup)
+    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
 
     # If remote deployment arguments are specified, run remote up script
-    if ips and username and key_path:
-        # Convert ips and key_path to absolute paths
+    if ips and ssh_user and ssh_key_path:
+        # Convert ips and ssh_key_path to absolute paths
         ips = os.path.abspath(ips)
-        key_path = os.path.abspath(key_path)
-        deploy_remote_cluster(ips, username, key_path, cleanup)
+        ssh_key_path = os.path.abspath(ssh_key_path)
+        deploy_remote_cluster(ips, ssh_user, ssh_key_path, cleanup)
     else:
         # Run local deployment (kind) if no remote args are specified
         deploy_local_cluster(gpus)
