@@ -201,7 +201,8 @@ Read the research:
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
    ../cloud-setup/quota
-
+   ../cloud-setup/policy
+   
 .. toctree::
    :hidden:
    :maxdepth: 1

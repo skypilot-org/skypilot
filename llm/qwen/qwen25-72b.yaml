@@ -1,5 +1,5 @@
 envs:
-  MODEL_NAME: Qwen/Qwen2-7B-Instruct
+  MODEL_NAME: Qwen/Qwen2.5-72B-Instruct
 
 service:
   # Specifying the path to the endpoint to check the readiness of the replicas.
@@ -17,24 +17,19 @@ service:
   
 
 resources:
-  accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB}
+  accelerators: {A100:8, A100-80GB:4, A100-80GB:8}
+  disk_size: 1024
   disk_tier: best
+  memory: 32+
   ports: 8000
 
 setup: |
-  conda activate qwen
-  if [ $? -ne 0 ]; then
-    conda create -n qwen python=3.10 -y
-    conda activate qwen
-  fi
-  pip install vllm==0.4.2
-  pip install flash-attn==2.5.9.post1
+  pip install vllm==0.6.1.post2
+  pip install vllm-flash-attn
 
 run: |
-  conda activate qwen
   export PATH=$PATH:/sbin
-  python -m vllm.entrypoints.openai.api_server \
+  vllm serve $MODEL_NAME \
     --host 0.0.0.0 \
-    --model $MODEL_NAME \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
     --max-model-len 1024 | tee ~/openai_api_server.log

@@ -26,10 +26,10 @@
 
 ----
 :fire: *News* :fire:
+- [Sep, 2024] Point, Lanuch and Serve **Llama 3.2** on on Kubernetes or Any Cloud: [**example**](./llm/llama-3_2/)
 - [Sep, 2024] Run and deploy [Pixtral](./llm/pixtral), the first open-source multimodal model from Mistral AI.
 - [Jul, 2024] [Finetune](./llm/llama-3_1-finetuning/) and [serve](./llm/llama-3_1/) **Llama 3.1** on your infra
 - [Jun, 2024] Reproduce **GPT** with [llm.c](https://github.com/karpathy/llm.c/discussions/481) on any cloud: [**guide**](./llm/gpt-2/)
-- [Apr, 2024] Serve and finetune [**Llama 3**](https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html) on any cloud or Kubernetes: [**example**](./llm/llama-3/)
 - [Apr, 2024] Serve [**Qwen-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) on your infra: [**example**](./llm/qwen/)
 - [Apr, 2024] Using [**Ollama**](https://github.com/ollama/ollama) to deploy quantized LLMs on CPUs and GPUs: [**example**](./llm/ollama/)
 - [Feb, 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) with SkyServe: [**example**](./llm/gemma/)
@@ -41,7 +41,8 @@
 
 <details>
   <summary>Archived</summary>
-
+  
+- [Apr, 2024] Serve and finetune [**Llama 3**](https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html) on any cloud or Kubernetes: [**example**](./llm/llama-3/)
 - [Mar, 2024] Serve and deploy [**Databricks DBRX**](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm) on your infra: [**example**](./llm/dbrx/)
 - [Feb, 2024] Speed up your LLM deployments with [**SGLang**](https://github.com/sgl-project/sglang) for 5x throughput on SkyServe: [**example**](./llm/sglang/)
 - [Dec, 2023] Using [**LoRAX**](https://github.com/predibase/lorax) to serve 1000s of finetuned LLMs on a single instance in the cloud: [**example**](./llm/lorax/)

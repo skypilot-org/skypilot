@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
@@ -17,6 +18,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -24,6 +26,9 @@ from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import backends
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
@@ -46,10 +51,10 @@ GPU_RESOURCE_KEY = 'nvidia.com/gpu'
 TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_GPU_HELP_MESSAGE = (
-    'If your cluster contains GPUs, make sure '
-    f'{GPU_RESOURCE_KEY} resource is available on the nodes and '
-    'the node labels for identifying GPUs '
-    '(e.g., skypilot.co/accelerator) are setup correctly. ')
+    'If your cluster contains GPUs or TPUs, make sure '
+    f'{GPU_RESOURCE_KEY} or {TPU_RESOURCE_KEY} resource is available'
+    ' on the nodes and the node labels for identifying '
+    'GPUs/TPUs (e.g., skypilot.co/accelerator) are setup correctly. ')
 
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
@@ -80,6 +85,16 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
     'tpu-v5-lite-podslice': 'v5e',
     'tpu-v5p-slice': 'v5p',
 }
+
+POD_STATUSES = {
+    'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
+}
+AUTODOWN_ANNOTATION_KEY = 'skypilot.co/autodown'
+IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY = (
+    'skypilot.co/idle_minutes_to_autostop')
+ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
+                                       '{namespace} while trying to {action} '
+                                       'an annotation {annotation}.')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1881,9 +1896,137 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
     return node_info_dict
 
 
+def to_label_selector(tags):
+    label_selector = ''
+    for k, v in tags.items():
+        if label_selector != '':
+            label_selector += ','
+        label_selector += '{}={}'.format(k, v)
+    return label_selector
+
+
 def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
     return provider_config.get('namespace',
                                get_current_kube_config_context_namespace())
+
+
+def filter_pods(namespace: str,
+                context: str,
+                tag_filters: Dict[str, str],
+                status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Filters pods by tags and status."""
+    non_included_pod_statuses = POD_STATUSES.copy()
+
+    field_selector = ''
+    if status_filters is not None:
+        non_included_pod_statuses -= set(status_filters)
+        field_selector = ','.join(
+            [f'status.phase!={status}' for status in non_included_pod_statuses])
+
+    label_selector = to_label_selector(tag_filters)
+    pod_list = kubernetes.core_api(context).list_namespaced_pod(
+        namespace, field_selector=field_selector, label_selector=label_selector)
+
+    # Don't return pods marked for deletion,
+    # i.e. pods with non-null metadata.DeletionTimestamp.
+    pods = [
+        pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
+    ]
+    return {pod.metadata.name: pod for pod in pods}
+
+
+def _remove_pod_annotation(pod: Any, annotation_key: str,
+                           namespace: str) -> None:
+    """Removes specified Annotations from a Kubernetes pod."""
+    try:
+        # Remove the specified annotation
+        if pod.metadata.annotations:
+            if annotation_key in pod.metadata.annotations:
+                # Patch the pod with the updated metadata.
+                body = {'metadata': {'annotations': {annotation_key: None}}}
+                kubernetes.core_api().patch_namespaced_pod(
+                    name=pod.metadata.name,
+                    namespace=namespace,
+                    body=body,
+                    _request_timeout=kubernetes.API_TIMEOUT)
+
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            logger.warning(
+                ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG.format(
+                    pod_name=pod.metadata.name,
+                    namespace=namespace,
+                    action='remove',
+                    annotation=annotation_key))
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise
+
+
+def _add_pod_annotation(pod: Any, annotation: Dict[str, str],
+                        namespace: str) -> None:
+    """Adds specified Annotations on a Kubernetes pod."""
+    try:
+        # Patch the pod with the updated metadata
+        body = {'metadata': {'annotations': annotation}}
+        kubernetes.core_api().patch_namespaced_pod(
+            name=pod.metadata.name,
+            namespace=namespace,
+            body=body,
+            _request_timeout=kubernetes.API_TIMEOUT)
+
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            logger.warning(
+                ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG.format(
+                    pod_name=pod.metadata.name,
+                    namespace=namespace,
+                    action='add',
+                    annotation=annotation))
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise
+
+
+def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
+                             idle_minutes_to_autostop: Optional[int],
+                             down: bool = False) -> None:
+    """Adds or removes Annotations of autodown on Kubernetes pods."""
+    tags = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: handle.cluster_name_on_cloud,
+    }
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
+    provider_config = ray_config['provider']
+    namespace = get_namespace_from_config(provider_config)
+    context = get_context_from_config(provider_config)
+    running_pods = filter_pods(namespace, context, tags)
+
+    for _, pod in running_pods.items():
+        if down:
+            idle_minutes_to_autostop_annotation = {
+                IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY:
+                    str(idle_minutes_to_autostop)
+            }
+            autodown_annotation = {AUTODOWN_ANNOTATION_KEY: 'true'}
+            _add_pod_annotation(pod=pod,
+                                annotation=idle_minutes_to_autostop_annotation,
+                                namespace=namespace)
+            _add_pod_annotation(pod=pod,
+                                annotation=autodown_annotation,
+                                namespace=namespace)
+
+        # If idle_minutes_to_autostop is negative, it indicates a request to
+        # cancel autostop using the --cancel flag with the `sky autostop`
+        # command.
+        elif (idle_minutes_to_autostop is not None and
+              idle_minutes_to_autostop < 0):
+            _remove_pod_annotation(
+                pod=pod,
+                annotation_key=IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY,
+                namespace=namespace)
+            _remove_pod_annotation(pod=pod,
+                                   annotation_key=AUTODOWN_ANNOTATION_KEY,
+                                   namespace=namespace)
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> str:

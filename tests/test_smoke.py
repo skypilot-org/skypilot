@@ -2140,6 +2140,64 @@ def test_task_labels_kubernetes():
         run_one_test(test)
 
 
+# ---------- Pod Annotations on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_add_pod_annotations_for_autodown_with_launch():
+    name = _get_cluster_name()
+    test = Test(
+        'add_pod_annotations_for_autodown_with_launch',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            # Autodown is set.
+            f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop'
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_add_and_remove_pod_annotations_with_autostop():
+    name = _get_cluster_name()
+    test = Test(
+        'add_and_remove_pod_annotations_with_autostop',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Set autodown on the cluster with 'autostop' command.
+            f'sky autostop -y {name} -i 20 --down',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Cancel the set autodown to remove the annotations from the pods.
+            f'sky autostop -y {name} --cancel',
+            # Describe the first pod and check if annotations are removed.
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check if annotations are removed.
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():

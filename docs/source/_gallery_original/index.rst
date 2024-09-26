@@ -41,6 +41,7 @@ Contents
    Llama-2 (Meta) <llms/llama-2>
    Llama-3 (Meta) <llms/llama-3>
    Llama-3.1 (Meta) <llms/llama-3_1>
+   Vision Llama-3.2 (Meta) <llms/llama-3_2>
    Qwen (Alibaba) <llms/qwen>
    CodeLlama (Meta) <llms/codellama>
    Gemma (Google) <llms/gemma>
