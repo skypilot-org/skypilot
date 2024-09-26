@@ -204,4 +204,4 @@ We are excited to hear your feedback!
 For general discussions, join us on the [SkyPilot Slack](http://slack.skypilot.co).
 
 ## Contributing
-We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
+We welcome all contributions to the project! See [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
