@@ -2,7 +2,7 @@
 <!-- $REMOVE -->
 # Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Vision Llama-3.2 (Meta) -->
+<!-- $UNCOMMENT# Vision Llama 3.2 (Meta) -->
 
 
 [Llama 3.2](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/) family was released by Meta on Sep 25, 2024. It not only includes the latest improved (and smaller) LLM models for chat, but also includes multimodal vision-language models. Let's _point and launch_ it with SkyPilot.
@@ -90,22 +90,22 @@ $ HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --env HF_TOKEN
 ```console
 ...
 ------------------------------------------------------------------------------------------------------------------
- CLOUD        INSTANCE                       vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+ CLOUD        INSTANCE                       vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
 ------------------------------------------------------------------------------------------------------------------
- Kubernetes   4CPU--16GB--1L4                4       16        L4:1           kubernetes      0.00          ✔     
- RunPod       1x_L4_SECURE                   4       24        L4:1           CA              0.44                
- GCP          g2-standard-4                  4       16        L4:1           us-east4-a      0.70                
- AWS          g6.xlarge                      4       16        L4:1           us-east-1       0.80                
- AWS          g5.xlarge                      4       16        A10G:1         us-east-1       1.01                
- RunPod       1x_L40_SECURE                  16      48        L40:1          CA              1.14                
- Fluidstack   L40_48GB::1                    32      60        L40:1          CANADA          1.15                
- AWS          g6e.xlarge                     4       32        L40S:1         us-east-1       1.86                
- Cudo         sapphire-rapids-h100_1x4v8gb   4       8         H100:1         ca-montreal-3   2.86                
- Fluidstack   H100_PCIE_80GB::1              28      180       H100:1         CANADA          2.89                
- Azure        Standard_NV36ads_A10_v5        36      440       A10:1          eastus          3.20                
- GCP          a2-highgpu-1g                  12      85        A100:1         us-central1-a   3.67                
- RunPod       1x_H100_SECURE                 16      80        H100:1         CA              4.49                
- Azure        Standard_NC40ads_H100_v5       40      320       H100:1         eastus          6.98                
+ Kubernetes   4CPU--16GB--1L4                4       16        L4:1           kubernetes      0.00          ✔
+ RunPod       1x_L4_SECURE                   4       24        L4:1           CA              0.44
+ GCP          g2-standard-4                  4       16        L4:1           us-east4-a      0.70
+ AWS          g6.xlarge                      4       16        L4:1           us-east-1       0.80
+ AWS          g5.xlarge                      4       16        A10G:1         us-east-1       1.01
+ RunPod       1x_L40_SECURE                  16      48        L40:1          CA              1.14
+ Fluidstack   L40_48GB::1                    32      60        L40:1          CANADA          1.15
+ AWS          g6e.xlarge                     4       32        L40S:1         us-east-1       1.86
+ Cudo         sapphire-rapids-h100_1x4v8gb   4       8         H100:1         ca-montreal-3   2.86
+ Fluidstack   H100_PCIE_80GB::1              28      180       H100:1         CANADA          2.89
+ Azure        Standard_NV36ads_A10_v5        36      440       A10:1          eastus          3.20
+ GCP          a2-highgpu-1g                  12      85        A100:1         us-central1-a   3.67
+ RunPod       1x_H100_SECURE                 16      80        H100:1         CA              4.49
+ Azure        Standard_NC40ads_H100_v5       40      320       H100:1         eastus          6.98
 ------------------------------------------------------------------------------------------------------------------
 ```
 
@@ -185,20 +185,20 @@ $ HF_TOKEN=xxx sky launch llama3_2-vision-11b.yaml -c llama3_2-vision --env HF_T
 
 ```console
 ------------------------------------------------------------------------------------------------------------------
- CLOUD        INSTANCE                       vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+ CLOUD        INSTANCE                       vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
 ------------------------------------------------------------------------------------------------------------------
- Kubernetes   2CPU--8GB--1H100               2       8         H100:1         kubernetes      0.00          ✔     
- RunPod       1x_L40_SECURE                  16      48        L40:1          CA              1.14                
- Fluidstack   L40_48GB::1                    32      60        L40:1          CANADA          1.15                
- AWS          g6e.xlarge                     4       32        L40S:1         us-east-1       1.86                
- RunPod       1x_A100-80GB_SECURE            8       80        A100-80GB:1    CA              1.99                
- Cudo         sapphire-rapids-h100_1x2v4gb   2       4         H100:1         ca-montreal-3   2.83                
- Fluidstack   H100_PCIE_80GB::1              28      180       H100:1         CANADA          2.89                
- GCP          a2-highgpu-1g                  12      85        A100:1         us-central1-a   3.67                
- Azure        Standard_NC24ads_A100_v4       24      220       A100-80GB:1    eastus          3.67                
- RunPod       1x_H100_SECURE                 16      80        H100:1         CA              4.49                
- GCP          a2-ultragpu-1g                 12      170       A100-80GB:1    us-central1-a   5.03                
- Azure        Standard_NC40ads_H100_v5       40      320       H100:1         eastus          6.98                
+ Kubernetes   2CPU--8GB--1H100               2       8         H100:1         kubernetes      0.00          ✔
+ RunPod       1x_L40_SECURE                  16      48        L40:1          CA              1.14
+ Fluidstack   L40_48GB::1                    32      60        L40:1          CANADA          1.15
+ AWS          g6e.xlarge                     4       32        L40S:1         us-east-1       1.86
+ RunPod       1x_A100-80GB_SECURE            8       80        A100-80GB:1    CA              1.99
+ Cudo         sapphire-rapids-h100_1x2v4gb   2       4         H100:1         ca-montreal-3   2.83
+ Fluidstack   H100_PCIE_80GB::1              28      180       H100:1         CANADA          2.89
+ GCP          a2-highgpu-1g                  12      85        A100:1         us-central1-a   3.67
+ Azure        Standard_NC24ads_A100_v4       24      220       A100-80GB:1    eastus          3.67
+ RunPod       1x_H100_SECURE                 16      80        H100:1         CA              4.49
+ GCP          a2-ultragpu-1g                 12      170       A100-80GB:1    us-central1-a   5.03
+ Azure        Standard_NC40ads_H100_v5       40      320       H100:1         eastus          6.98
 ------------------------------------------------------------------------------------------------------------------
 ```
 
