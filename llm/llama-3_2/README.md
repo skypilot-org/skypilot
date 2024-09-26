@@ -5,10 +5,6 @@
 <!-- $UNCOMMENT# Vision Llama-3.2 (Meta) -->
 
 
-<p align="center">
-<img src="https://i.imgur.com/1NEZs9f.png" alt="Llama-3 x SkyPilot" style="width: 50%;">
-</p>
-
 [Llama 3.2](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/) family was released by Meta on Sep 25, 2024. It not only includes the latest improved (and smaller) LLM models for chat, but also includes multimodal vision-language models. Let's _point and launch_ it with SkyPilot.
 
 * [Llama 3.2 release](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/)
