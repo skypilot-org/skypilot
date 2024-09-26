@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Pixtral (Mistral AI)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Reserved, Capacity Blocks, DWS' },
+        { selector: '.toctree-l1 > a', text: 'Admin Policy' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
