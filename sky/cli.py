@@ -3118,7 +3118,8 @@ def show_gpus(
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(context)
+                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
+                        context)
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes

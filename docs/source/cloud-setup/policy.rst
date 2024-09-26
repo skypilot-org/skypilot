@@ -13,6 +13,7 @@ Example usage:
 - :ref:`disable-public-ip-policy`
 - :ref:`use-spot-for-gpu-policy`
 - :ref:`enforce-autostop-policy`
+- :ref:`dynamic-kubernetes-contexts-update-policy`
  
 
 To implement and use an admin policy:
@@ -194,6 +195,8 @@ Enforce Autostop for all Tasks
     :language: yaml
     :caption: `Config YAML for using EnforceAutostopPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/enforce_autostop.yaml>`_
 
+
+.. _dynamic-kubernetes-contexts-update-policy:
 
 Dynamically Update Kubernetes Contexts to Use
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

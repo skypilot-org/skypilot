@@ -361,6 +361,7 @@ def detect_gpu_resource(context: str) -> Tuple[bool, Set[str]]:
 
     return has_gpu, cluster_resources
 
+
 @functools.lru_cache(maxsize=10)
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
@@ -381,16 +382,18 @@ def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     return nodes
 
 
-def get_all_pods_in_kubernetes_cluster(context: Optional[str] = None) -> List[Any]:
+def get_all_pods_in_kubernetes_cluster(
+        context: Optional[str] = None) -> List[Any]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
     """
     if context is None:
         context = get_current_kube_config_context_name()
-    
+
     try:
-        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(_request_timeout=kubernetes.API_TIMEOUT).items
+        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
+            _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get pod info from Kubernetes cluster. '
@@ -691,7 +694,7 @@ def check_credentials(context: str, timeout: int = kubernetes.API_TIMEOUT) -> \
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
 
-    _, exec_msg = is_kubeconfig_exec_auth()
+    _, exec_msg = is_kubeconfig_exec_auth(context)
 
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
@@ -716,7 +719,8 @@ def check_credentials(context: str, timeout: int = kubernetes.API_TIMEOUT) -> \
         return True, None
 
 
-def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
+def is_kubeconfig_exec_auth(
+        context: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     """Checks if the kubeconfig file uses exec-based authentication
 
     Exec-based auth is commonly used for authenticating with cloud hosted
@@ -750,8 +754,16 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         return False, None
 
     # Get active context and user from kubeconfig using k8s api
-    _, current_context = k8s.config.list_kube_config_contexts()
-    target_username = current_context['context']['user']
+    all_contexts, current_context = k8s.config.list_kube_config_contexts()
+    context_obj = current_context
+    if context is not None:
+        for c in all_contexts:
+            if c['name'] == context:
+                context_obj = c
+                break
+        else:
+            raise ValueError(f'Kubernetes context {context!r} not found.')
+    target_username = context_obj['context']['user']
 
     # K8s api does not provide a mechanism to get the user details from the
     # context. We need to load the kubeconfig file and parse it to get the
@@ -774,7 +786,7 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-        ctx_name = current_context['name']
+        ctx_name = context_obj['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'
                     ' This may cause issues with autodown or when running '
@@ -1688,7 +1700,8 @@ SPOT_LABEL_MAP = {
 }
 
 
-def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
+def get_spot_label(
+        context: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """Get the spot label key and value for using spot instances, if supported.
 
     Checks if the underlying cluster supports spot instances by checking nodes
@@ -1702,7 +1715,7 @@ def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
     """
     # Check if the cluster supports spot instances by checking nodes for known
     # spot label keys and values
-    for node in get_kubernetes_nodes():
+    for node in get_kubernetes_nodes(context):
         for _, (key, value) in SPOT_LABEL_MAP.items():
             if key in node.metadata.labels and node.metadata.labels[
                     key] == value:
@@ -1845,8 +1858,10 @@ def filter_pods(namespace: str,
     return {pod.metadata.name: pod for pod in pods}
 
 
-def _remove_pod_annotation(pod: Any, annotation_key: str,
-                           namespace: str) -> None:
+def _remove_pod_annotation(pod: Any,
+                           annotation_key: str,
+                           namespace: str,
+                           context: Optional[str] = None) -> None:
     """Removes specified Annotations from a Kubernetes pod."""
     try:
         # Remove the specified annotation
@@ -1854,7 +1869,7 @@ def _remove_pod_annotation(pod: Any, annotation_key: str,
             if annotation_key in pod.metadata.annotations:
                 # Patch the pod with the updated metadata.
                 body = {'metadata': {'annotations': {annotation_key: None}}}
-                kubernetes.core_api().patch_namespaced_pod(
+                kubernetes.core_api(context).patch_namespaced_pod(
                     name=pod.metadata.name,
                     namespace=namespace,
                     body=body,
@@ -1873,13 +1888,15 @@ def _remove_pod_annotation(pod: Any, annotation_key: str,
                 raise
 
 
-def _add_pod_annotation(pod: Any, annotation: Dict[str, str],
-                        namespace: str) -> None:
+def _add_pod_annotation(pod: Any,
+                        annotation: Dict[str, str],
+                        namespace: str,
+                        context: Optional[str] = None) -> None:
     """Adds specified Annotations on a Kubernetes pod."""
     try:
         # Patch the pod with the updated metadata
         body = {'metadata': {'annotations': annotation}}
-        kubernetes.core_api().patch_namespaced_pod(
+        kubernetes.core_api(context).patch_namespaced_pod(
             name=pod.metadata.name,
             namespace=namespace,
             body=body,
@@ -1920,10 +1937,12 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
             autodown_annotation = {AUTODOWN_ANNOTATION_KEY: 'true'}
             _add_pod_annotation(pod=pod,
                                 annotation=idle_minutes_to_autostop_annotation,
-                                namespace=namespace)
+                                namespace=namespace,
+                                context=context)
             _add_pod_annotation(pod=pod,
                                 annotation=autodown_annotation,
-                                namespace=namespace)
+                                namespace=namespace,
+                                context=context)
 
         # If idle_minutes_to_autostop is negative, it indicates a request to
         # cancel autostop using the --cancel flag with the `sky autostop`
@@ -1933,10 +1952,12 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
             _remove_pod_annotation(
                 pod=pod,
                 annotation_key=IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY,
-                namespace=namespace)
+                namespace=namespace,
+                context=context)
             _remove_pod_annotation(pod=pod,
                                    annotation_key=AUTODOWN_ANNOTATION_KEY,
-                                   namespace=namespace)
+                                   namespace=namespace,
+                                   context=context)
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> str:

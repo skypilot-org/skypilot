@@ -2520,7 +2520,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # For backward compatibility, we should update the region of a
             # SkyPilot cluster on Kubernetes to the actual context it is using.
             # pylint: disable=import-outside-toplevel
-            from sky.provision.kubernetes import utils as kubernetes_utils
             launched_resources = state['launched_resources']
             if isinstance(launched_resources.cloud, clouds.Kubernetes):
                 yaml_config = common_utils.read_yaml(state['_cluster_yaml'])

@@ -87,8 +87,12 @@ class Kubernetes(clouds.Cloud):
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        context = resources.region
+        if context is None:
+            context = kubernetes_utils.get_current_kube_config_context_name()
         # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
+        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
+            context)
         if is_exec_auth:
             assert isinstance(message, str), message
             # Controllers cannot spin up new pods with exec auth.
@@ -98,7 +102,7 @@ class Kubernetes(clouds.Cloud):
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
         # Allow spot instances if supported by the cluster
-        spot_label_key, _ = kubernetes_utils.get_spot_label()
+        spot_label_key, _ = kubernetes_utils.get_spot_label(context)
         if spot_label_key is not None:
             unsupported_features.pop(
                 clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
