@@ -3382,7 +3382,7 @@ def test_gcp_disk_tier():
                 GCP._get_disk_type(resources_utils.DiskTier.HIGH),
                 GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
             ]
-            instance_type_options.append('--instance-type n2-standard-64')
+            instance_type_options = ['', '--instance-type n2-standard-64']
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
             test = Test(
