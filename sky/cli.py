@@ -174,7 +174,6 @@ def check_ssh_agent():
                        'ssh-agent and resolve this issue.')
 
 
-
 _TASK_OPTIONS = [
     click.option(
         '--workdir',
