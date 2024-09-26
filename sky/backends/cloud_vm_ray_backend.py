@@ -2522,7 +2522,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # pylint: disable=import-outside-toplevel
             launched_resources = state['launched_resources']
             if isinstance(launched_resources.cloud, clouds.Kubernetes):
-                yaml_config = common_utils.read_yaml(state['_cluster_yaml'])
+                yaml_config = common_utils.read_yaml(
+                    os.path.expanduser(state['_cluster_yaml']))
                 context = kubernetes_utils.get_context_from_config(
                     yaml_config['provider'])
                 state['launched_resources'] = launched_resources.copy(
