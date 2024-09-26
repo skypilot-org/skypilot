@@ -148,8 +148,8 @@ plan_vcpus_memory = [{
 
 GPU_MAP = {
     'H100_PCIE_80GB': 'H100',
-    'H100_NVLINK_80GB': 'H100',
-    'A100_NVLINK_80GB': 'A100-80GB',
+    'H100_NVLINK_80GB': 'H100-NVLINK',
+    'A100_NVLINK_80GB': 'A100-80GB-NVLINK',
     'A100_SXM4_80GB': 'A100-80GB',
     'A100_PCIE_80GB': 'A100-80GB',
     'A100_SXM4_40GB': 'A100',
@@ -185,6 +185,8 @@ def create_catalog(output_dir: str) -> None:
     with open(DEFAULT_FLUIDSTACK_API_KEY_PATH, 'r', encoding='UTF-8') as f:
         api_key = f.read().strip()
     response = requests.get(ENDPOINT, headers={'api-key': api_key})
+    if not response.ok:
+        raise Exception(response.text)
     plans = response.json()
 
     with open(os.path.join(output_dir, 'vms.csv'), mode='w',
