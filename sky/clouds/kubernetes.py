@@ -118,7 +118,7 @@ class Kubernetes(clouds.Cloud):
     def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str,
                                                                 ...]) -> None:
         """Log skipped contexts for only once.
-        
+
         We don't directly cache the result of _filter_existing_allowed_contexts
         as the admin policy may update the allowed contexts.
         """
