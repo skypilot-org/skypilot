@@ -155,6 +155,23 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     return list(env_dict.items())
 
 
+def check_ssh_agent():
+    """Run the ssh-add -l command to check if ssh-agent started, some system
+       launch the ssh-agent without setting the env varialbe like
+        $SSH_AGENT_PID, its not reliable to check env variable"""
+    try:
+        result = subprocess.run(['ssh-add', '-l'], check=True, capture_output=True, text=True)
+    except Exception as e:
+        # Handle the error if ssh-add returns a non-zero exit code and is specific error
+        if "Error connecting to agent: No such file or directory" in e.stderr:
+            click.echo(f'ssh-agent is not running, so SSH key forwarding'
+                        'might not work properly. Try starting a new'
+                        'terminal session and manually run'
+                        '`eval "$(ssh-agent -s)"` to launch the'
+                        'ssh-agent and resolve this issue.')
+
+
+
 _TASK_OPTIONS = [
     click.option(
         '--workdir',
@@ -1076,6 +1093,7 @@ def launch(
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
+    check_ssh_agent()
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1257,6 +1275,7 @@ def exec(
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
     env = _merge_env_vars(env_file, env)
+    check_ssh_agent()
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
@@ -3542,6 +3561,7 @@ def jobs_launch(
                                    'Use one of the flags as they are alias.')
         name = cluster
     env = _merge_env_vars(env_file, env)
+    check_ssh_agent()
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -3906,6 +3926,7 @@ def _generate_task_with_service(
     if not is_yaml:
         raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
     env = _merge_env_vars(env_file, env)
+    check_ssh_agent()
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,
@@ -4574,6 +4595,7 @@ def benchmark_launch(
     which allows benchmarking on many more resource fields.
     """
     env = _merge_env_vars(env_file, env)
+    check_ssh_agent()
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
         raise click.BadParameter(f'Benchmark {benchmark} already exists. '
