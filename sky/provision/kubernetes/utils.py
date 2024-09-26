@@ -817,9 +817,11 @@ def get_current_kube_config_context_name() -> Optional[str]:
         return None
 
 
-@functools.lru_cache()
 def get_all_kube_config_context_names() -> Optional[List[str]]:
-    """Get all kubernetes context names from the kubeconfig file
+    """Get all kubernetes context names from the kubeconfig file.
+
+    We should not cache the result of this function as the admin policy may
+    update the contexts.
 
     Returns:
         List[str] | None: The list of kubernetes context names if it exists,

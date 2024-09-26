@@ -1,4 +1,5 @@
 """Kubernetes."""
+import functools
 import json
 import os
 import re
@@ -113,7 +114,22 @@ class Kubernetes(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
+    @functools.lru_cache(maxsize=1)
+    def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str, ...]) -> None:
+        """Log skipped contexts for only once.
+        
+        We don't directly cache the result of _filter_existing_allowed_contexts
+        as the admin policy may update the allowed contexts.
+        """
+        if skipped_contexts:
+            logger.warning(
+                f'Kubernetes contexts {set(skipped_contexts)!r} specified in '
+                '"allowed_contexts" not found in kubeconfig. '
+                'Ignoring these contexts.')
+
+    @classmethod
     def _existing_allowed_contexts(cls) -> List[str]:
+        """Get existing allowed contexts."""
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
         if all_contexts is None:
             return []
@@ -121,6 +137,7 @@ class Kubernetes(clouds.Cloud):
 
         allowed_contexts = skypilot_config.get_nested(
             ('kubernetes', 'allowed_contexts'), None)
+
         if allowed_contexts is None:
             current_context = (
                 kubernetes_utils.get_current_kube_config_context_name())
@@ -135,11 +152,7 @@ class Kubernetes(clouds.Cloud):
                 existing_contexts.append(context)
             else:
                 skipped_contexts.append(context)
-        if skipped_contexts:
-            logger.warning(
-                f'Kubernetes contexts {set(skipped_contexts)!r} specified in '
-                '"allowed_contexts" not found in kubeconfig. '
-                'Ignoring these contexts.')
+        cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
 
     @classmethod
