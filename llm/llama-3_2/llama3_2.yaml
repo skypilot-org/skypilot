@@ -82,8 +82,6 @@ resources:
   ports: 8081  # Expose to internet traffic.
 
 setup: |
-  # Install huggingface transformers for the support of Llama 3.2
-  pip install git+https://github.com/huggingface/transformers.git@f0eabf6c7da2afbe8425546c092fa3722f9f219e
   pip install vllm==0.6.2
 
 
