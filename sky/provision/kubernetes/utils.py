@@ -1,5 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
+import functools
 import json
 import math
 import os
@@ -307,7 +308,9 @@ AUTOSCALER_TO_LABEL_FORMATTER = {
 }
 
 
+@functools.lru_cache()
 def detect_gpu_label_formatter(
+    context: str
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
@@ -318,7 +321,7 @@ def detect_gpu_label_formatter(
     """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -338,7 +341,8 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
-def detect_gpu_resource() -> Tuple[bool, Set[str]]:
+@functools.lru_cache(maxsize=10)
+def detect_gpu_resource(context: str) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
 
     If nvidia.com/gpu resource is missing, that typically means that the
@@ -350,7 +354,7 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_gpu = 'nvidia.com/gpu' in cluster_resources
@@ -358,12 +362,17 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     return has_gpu, cluster_resources
 
 
-def get_kubernetes_nodes() -> List[Any]:
-    # TODO(romilb): Calling kube API can take between 10-100ms depending on
-    #  the control plane. Consider caching calls to this function (using
-    #  kubecontext hash as key).
+@functools.lru_cache(maxsize=10)
+def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
+    """Gets the kubernetes nodes in the context.
+
+    If context is None, gets the nodes in the current context.
+    """
+    if context is None:
+        context = get_current_kube_config_context_name()
+
     try:
-        nodes = kubernetes.core_api().list_node(
+        nodes = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
@@ -373,15 +382,18 @@ def get_kubernetes_nodes() -> List[Any]:
     return nodes
 
 
-def get_kubernetes_pods() -> List[Any]:
-    """Gets the kubernetes pods in the current namespace and current context.
+def get_all_pods_in_kubernetes_cluster(
+        context: Optional[str] = None) -> List[Any]:
+    """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
     """
+    if context is None:
+        context = get_current_kube_config_context_name()
+
     try:
-        ns = get_current_kube_config_context_namespace()
-        pods = kubernetes.core_api().list_namespaced_pod(
-            ns, _request_timeout=kubernetes.API_TIMEOUT).items
+        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
+            _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get pod info from Kubernetes cluster. '
@@ -390,7 +402,8 @@ def get_kubernetes_pods() -> List[Any]:
     return pods
 
 
-def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
+def check_instance_fits(context: str,
+                        instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
     If the instance has GPU requirements, checks if the GPU type is
@@ -404,6 +417,9 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         bool: True if the instance fits on the cluster, False otherwise.
         Optional[str]: Error message if the instance does not fit.
     """
+
+    # TODO(zhwu): this should check the node for specific context, instead
+    # of the default context to make failover fully functional.
 
     def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
                            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
@@ -431,7 +447,7 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -439,7 +455,8 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         # If GPUs are requested, check if GPU type is available, and if so,
         # check if CPU and memory requirements on the specific node are met.
         try:
-            gpu_label_key, gpu_label_val = get_gpu_label_key_value(acc_type)
+            gpu_label_key, gpu_label_val = get_gpu_label_key_value(
+                context, acc_type)
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -471,7 +488,9 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         return fits, reason
 
 
-def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
+def get_gpu_label_key_value(context: str,
+                            acc_type: str,
+                            check_mode=False) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
 
     Args:
@@ -512,11 +531,11 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                                        f' {autoscaler_type}')
         return formatter.get_label_key(), formatter.get_label_value(acc_type)
 
-    has_gpus, cluster_resources = detect_gpu_resource()
+    has_gpus, cluster_resources = detect_gpu_resource(context)
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
         label_formatter, node_labels = \
-            detect_gpu_label_formatter()
+            detect_gpu_label_formatter(context)
         if label_formatter is None:
             # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
             # detected, raise error
@@ -632,7 +651,7 @@ def get_external_ip(network_mode: Optional[
     return parsed_url.hostname
 
 
-def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
+def check_credentials(context: str, timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -644,10 +663,9 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        ns = get_current_kube_config_context_namespace()
-        context = get_current_kube_config_context_name()
+        namespace = get_kube_config_context_namespace(context)
         kubernetes.core_api(context).list_namespaced_pod(
-            ns, _request_timeout=timeout)
+            namespace, _request_timeout=timeout)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
@@ -676,7 +694,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
 
-    _, exec_msg = is_kubeconfig_exec_auth()
+    _, exec_msg = is_kubeconfig_exec_auth(context)
 
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
@@ -685,7 +703,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
     try:
-        _, _ = get_gpu_label_key_value(acc_type='', check_mode=True)
+        _, _ = get_gpu_label_key_value(context, acc_type='', check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
@@ -701,7 +719,8 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         return True, None
 
 
-def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
+def is_kubeconfig_exec_auth(
+        context: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     """Checks if the kubeconfig file uses exec-based authentication
 
     Exec-based auth is commonly used for authenticating with cloud hosted
@@ -735,8 +754,16 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         return False, None
 
     # Get active context and user from kubeconfig using k8s api
-    _, current_context = k8s.config.list_kube_config_contexts()
-    target_username = current_context['context']['user']
+    all_contexts, current_context = k8s.config.list_kube_config_contexts()
+    context_obj = current_context
+    if context is not None:
+        for c in all_contexts:
+            if c['name'] == context:
+                context_obj = c
+                break
+        else:
+            raise ValueError(f'Kubernetes context {context!r} not found.')
+    target_username = context_obj['context']['user']
 
     # K8s api does not provide a mechanism to get the user details from the
     # context. We need to load the kubeconfig file and parse it to get the
@@ -759,7 +786,7 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
         schemas.get_default_remote_identity('kubernetes'))
     if ('exec' in user_details.get('user', {}) and remote_identity
             == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
-        ctx_name = current_context['name']
+        ctx_name = context_obj['name']
         exec_msg = ('exec-based authentication is used for '
                     f'Kubernetes context {ctx_name!r}.'
                     ' This may cause issues with autodown or when running '
@@ -775,6 +802,7 @@ def is_kubeconfig_exec_auth() -> Tuple[bool, Optional[str]]:
     return False, None
 
 
+@functools.lru_cache()
 def get_current_kube_config_context_name() -> Optional[str]:
     """Get the current kubernetes context from the kubeconfig file
 
@@ -789,7 +817,27 @@ def get_current_kube_config_context_name() -> Optional[str]:
         return None
 
 
-def get_current_kube_config_context_namespace() -> str:
+def get_all_kube_config_context_names() -> Optional[List[str]]:
+    """Get all kubernetes context names from the kubeconfig file.
+
+    We should not cache the result of this function as the admin policy may
+    update the contexts.
+
+    Returns:
+        List[str] | None: The list of kubernetes context names if it exists,
+            None otherwise
+    """
+    k8s = kubernetes.kubernetes
+    try:
+        all_contexts, _ = k8s.config.list_kube_config_contexts()
+        return [context['name'] for context in all_contexts]
+    except k8s.config.config_exception.ConfigException:
+        return None
+
+
+@functools.lru_cache()
+def get_kube_config_context_namespace(
+        context_name: Optional[str] = None) -> str:
     """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
@@ -804,9 +852,17 @@ def get_current_kube_config_context_namespace() -> str:
             return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
-        if 'namespace' in current_context['context']:
-            return current_context['context']['namespace']
+        contexts, current_context = k8s.config.list_kube_config_contexts()
+        if context_name is None:
+            context = current_context
+        else:
+            context = next((c for c in contexts if c['name'] == context_name),
+                           None)
+            if context is None:
+                return DEFAULT_NAMESPACE
+
+        if 'namespace' in context['context']:
+            return context['context']['namespace']
         else:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
@@ -987,11 +1043,12 @@ def construct_ssh_jump_command(
 
 
 def get_ssh_proxy_command(
-        k8s_ssh_target: str,
-        network_mode: kubernetes_enums.KubernetesNetworkingMode,
-        private_key_path: Optional[str] = None,
-        namespace: Optional[str] = None,
-        context: Optional[str] = None) -> str:
+    k8s_ssh_target: str,
+    network_mode: kubernetes_enums.KubernetesNetworkingMode,
+    private_key_path: str,
+    context: str,
+    namespace: str,
+) -> str:
     """Generates the SSH proxy command to connect to the pod.
 
     Uses a jump pod if the network mode is NODEPORT, and direct port-forwarding
@@ -1048,8 +1105,6 @@ def get_ssh_proxy_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
-        current_context = get_current_kube_config_context_name()
-        current_namespace = get_current_kube_config_context_namespace()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
@@ -1059,8 +1114,8 @@ def get_ssh_proxy_command(
             # We embed both the current context and namespace to the SSH proxy
             # command to make sure SSH still works when the current
             # context/namespace is changed by the user.
-            current_kube_context=current_context,
-            current_kube_namespace=current_namespace)
+            current_kube_context=context,
+            current_kube_namespace=namespace)
     return ssh_jump_proxy_command
 
 
@@ -1647,7 +1702,8 @@ SPOT_LABEL_MAP = {
 }
 
 
-def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
+def get_spot_label(
+        context: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """Get the spot label key and value for using spot instances, if supported.
 
     Checks if the underlying cluster supports spot instances by checking nodes
@@ -1661,7 +1717,7 @@ def get_spot_label() -> Tuple[Optional[str], Optional[str]]:
     """
     # Check if the cluster supports spot instances by checking nodes for known
     # spot label keys and values
-    for node in get_kubernetes_nodes():
+    for node in get_kubernetes_nodes(context):
         for _, (key, value) in SPOT_LABEL_MAP.items():
             if key in node.metadata.labels and node.metadata.labels[
                     key] == value:
@@ -1706,7 +1762,8 @@ class KubernetesNodeInfo:
     free: Dict[str, int]
 
 
-def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
+def get_kubernetes_node_info(
+        context: Optional[str] = None) -> Dict[str, KubernetesNodeInfo]:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1717,11 +1774,11 @@ def get_kubernetes_node_info() -> Dict[str, KubernetesNodeInfo]:
         Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
             key and the KubernetesNodeInfo object as value
     """
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     # Get the pods to get the real-time resource usage
-    pods = get_kubernetes_pods()
+    pods = get_all_pods_in_kubernetes_cluster(context)
 
-    label_formatter, _ = detect_gpu_label_formatter()
+    label_formatter, _ = detect_gpu_label_formatter(context)
     if not label_formatter:
         label_key = None
     else:
@@ -1773,8 +1830,9 @@ def to_label_selector(tags):
 
 
 def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
+    context = get_context_from_config(provider_config)
     return provider_config.get('namespace',
-                               get_current_kube_config_context_namespace())
+                               get_kube_config_context_namespace(context))
 
 
 def filter_pods(namespace: str,
@@ -1802,8 +1860,10 @@ def filter_pods(namespace: str,
     return {pod.metadata.name: pod for pod in pods}
 
 
-def _remove_pod_annotation(pod: Any, annotation_key: str,
-                           namespace: str) -> None:
+def _remove_pod_annotation(pod: Any,
+                           annotation_key: str,
+                           namespace: str,
+                           context: Optional[str] = None) -> None:
     """Removes specified Annotations from a Kubernetes pod."""
     try:
         # Remove the specified annotation
@@ -1811,7 +1871,7 @@ def _remove_pod_annotation(pod: Any, annotation_key: str,
             if annotation_key in pod.metadata.annotations:
                 # Patch the pod with the updated metadata.
                 body = {'metadata': {'annotations': {annotation_key: None}}}
-                kubernetes.core_api().patch_namespaced_pod(
+                kubernetes.core_api(context).patch_namespaced_pod(
                     name=pod.metadata.name,
                     namespace=namespace,
                     body=body,
@@ -1830,13 +1890,15 @@ def _remove_pod_annotation(pod: Any, annotation_key: str,
                 raise
 
 
-def _add_pod_annotation(pod: Any, annotation: Dict[str, str],
-                        namespace: str) -> None:
+def _add_pod_annotation(pod: Any,
+                        annotation: Dict[str, str],
+                        namespace: str,
+                        context: Optional[str] = None) -> None:
     """Adds specified Annotations on a Kubernetes pod."""
     try:
         # Patch the pod with the updated metadata
         body = {'metadata': {'annotations': annotation}}
-        kubernetes.core_api().patch_namespaced_pod(
+        kubernetes.core_api(context).patch_namespaced_pod(
             name=pod.metadata.name,
             namespace=namespace,
             body=body,
@@ -1877,10 +1939,12 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
             autodown_annotation = {AUTODOWN_ANNOTATION_KEY: 'true'}
             _add_pod_annotation(pod=pod,
                                 annotation=idle_minutes_to_autostop_annotation,
-                                namespace=namespace)
+                                namespace=namespace,
+                                context=context)
             _add_pod_annotation(pod=pod,
                                 annotation=autodown_annotation,
-                                namespace=namespace)
+                                namespace=namespace,
+                                context=context)
 
         # If idle_minutes_to_autostop is negative, it indicates a request to
         # cancel autostop using the --cancel flag with the `sky autostop`
@@ -1890,10 +1954,12 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
             _remove_pod_annotation(
                 pod=pod,
                 annotation_key=IDLE_MINUTES_TO_AUTOSTOP_ANNOTATION_KEY,
-                namespace=namespace)
+                namespace=namespace,
+                context=context)
             _remove_pod_annotation(pod=pod,
                                    annotation_key=AUTODOWN_ANNOTATION_KEY,
-                                   namespace=namespace)
+                                   namespace=namespace,
+                                   context=context)
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> str:
