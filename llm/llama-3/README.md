@@ -1,7 +1,7 @@
 <!-- $REMOVE -->
-# Scale Serving Llama-3 on Any Cloud or Kubernetes with SkyPilot
+# Scale Serving Llama 3 on Any Cloud or Kubernetes with SkyPilot
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
+<!-- $UNCOMMENT# Llama 3: Open LLM from Meta -->
 
 
 <p align="center">
@@ -12,8 +12,6 @@
 
 * [Llama-3 release](https://github.com/meta-llama/llama3)
 * [Llama-3 blog](https://ai.meta.com/blog/meta-llama-3/)
-
-
 
 
 

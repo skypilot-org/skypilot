@@ -291,8 +291,8 @@ class Fluidstack(clouds.Cloud):
         return {filename: filename for filename in _CREDENTIAL_FILES}
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO(mjibril): Implement get_current_user_identity for Fluidstack
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        # TODO(mjibril): Implement get_active_user_identity for Fluidstack
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:

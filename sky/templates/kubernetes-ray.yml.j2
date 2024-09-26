@@ -21,6 +21,11 @@ provider:
     # The namespace to create the Ray cluster in.
     namespace: {{k8s_namespace}}
 
+    # The kubecontext used to connect to the Kubernetes cluster.
+    {% if k8s_context is not none %}
+    context: {{k8s_context}}
+    {% endif %}
+
     # This should be one of KubernetesPortMode
     port_mode: {{k8s_port_mode}}
 

@@ -1171,6 +1171,61 @@ def test_kubernetes_storage_mounts():
         run_one_test(test)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_context_switch():
+    name = _get_cluster_name()
+    new_context = f'sky-test-context-{int(time.time())}'
+    new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    test_commands = [
+        # Launch a cluster and run a simple task
+        f'sky launch -y -c {name} --cloud kubernetes "echo Hello from original context"',
+        f'sky logs {name} 1 --status',  # Ensure job succeeded
+
+        # Get current context details and save to a file for later use in cleanup
+        'CURRENT_CONTEXT=$(kubectl config current-context); '
+        'echo "$CURRENT_CONTEXT" > /tmp/sky_test_current_context; '
+        'CURRENT_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.cluster}"); '
+        'CURRENT_USER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.user}"); '
+
+        # Create a new context with a different name and namespace
+        f'kubectl config set-context {new_context} --cluster="$CURRENT_CLUSTER" --user="$CURRENT_USER" --namespace={new_namespace}',
+
+        # Create the new namespace if it doesn't exist
+        f'kubectl create namespace {new_namespace} --dry-run=client -o yaml | kubectl apply -f -',
+
+        # Set the new context as active
+        f'kubectl config use-context {new_context}',
+
+        # Verify the new context is active
+        f'[ "$(kubectl config current-context)" = "{new_context}" ] || exit 1',
+
+        # Try to run sky exec on the original cluster (should still work)
+        f'sky exec {name} "echo Success: sky exec works after context switch"',
+
+        # Test sky queue
+        f'sky queue {name}',
+
+        # Test SSH access
+        f'ssh {name} whoami',
+    ]
+
+    cleanup_commands = (
+        f'kubectl delete namespace {new_namespace}; '
+        f'kubectl config delete-context {new_context}; '
+        'kubectl config use-context $(cat /tmp/sky_test_current_context); '
+        'rm /tmp/sky_test_current_context; '
+        f'sky down -y {name}')
+
+    test = Test(
+        'kubernetes_context_switch',
+        test_commands,
+        cleanup_commands,
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -2066,6 +2121,64 @@ def test_task_labels_kubernetes():
         run_one_test(test)
 
 
+# ---------- Pod Annotations on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_add_pod_annotations_for_autodown_with_launch():
+    name = _get_cluster_name()
+    test = Test(
+        'add_pod_annotations_for_autodown_with_launch',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            # Autodown is set.
+            f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop'
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_add_and_remove_pod_annotations_with_autostop():
+    name = _get_cluster_name()
+    test = Test(
+        'add_and_remove_pod_annotations_with_autostop',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Set autodown on the cluster with 'autostop' command.
+            f'sky autostop -y {name} -i 20 --down',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Cancel the set autodown to remove the annotations from the pods.
+            f'sky autostop -y {name} --cancel',
+            # Describe the first pod and check if annotations are removed.
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check if annotations are removed.
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
@@ -2389,8 +2502,6 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -2398,8 +2509,6 @@ def test_cancel_aws():
 
 
 @pytest.mark.gcp
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -2407,8 +2516,6 @@ def test_cancel_gcp():
 
 
 @pytest.mark.azure
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
@@ -5069,14 +5176,10 @@ class TestStorageWithCredentials:
                 private_bucket).path.strip('/')
         else:
             private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
-        match_str = storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-            name=private_bucket_name)
-        if store_type == 'https':
-            # Azure blob uses a different error string since container may
-            # not exist even though the bucket name is ok.
-            match_str = 'Attempted to fetch a non-existent public container'
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match=match_str):
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @pytest.mark.no_fluidstack
