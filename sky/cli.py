@@ -160,15 +160,18 @@ def check_ssh_agent():
        launch the ssh-agent without setting the env varialbe like
         $SSH_AGENT_PID, its not reliable to check env variable"""
     try:
-        result = subprocess.run(['ssh-add', '-l'], check=True, capture_output=True, text=True)
+        result = subprocess.run(['ssh-add', '-l'],
+                                check=True,
+                                capture_output=True,
+                                text=True)
     except Exception as e:
         # Handle the error if ssh-add returns a non-zero exit code and is specific error
         if "Error connecting to agent: No such file or directory" in e.stderr:
             click.echo(f'ssh-agent is not running, so SSH key forwarding'
-                        'might not work properly. Try starting a new'
-                        'terminal session and manually run'
-                        '`eval "$(ssh-agent -s)"` to launch the'
-                        'ssh-agent and resolve this issue.')
+                       'might not work properly. Try starting a new'
+                       'terminal session and manually run'
+                       '`eval "$(ssh-agent -s)"` to launch the'
+                       'ssh-agent and resolve this issue.')
 
 
 
