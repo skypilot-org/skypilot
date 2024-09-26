@@ -170,3 +170,18 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                                     os.path.join(POLICY_PATH,
                                                  'enforce_autostop.yaml'),
                                     idle_minutes_to_autostop=None)
+
+
+@mock.patch('sky.provision.kubernetes.utils.get_all_kube_config_context_names', return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
+def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
+    _, config =_load_task_and_apply_policy(task,
+                                os.path.join(POLICY_PATH,
+                                             'dynamic_kubernetes_contexts_update.yaml'))
+
+    assert config.get_nested(('kubernetes', 'allowed_contexts'), None) == [
+        'kind-skypilot', 'kind-skypilot2'
+    ], 'Kubernetes allowed contexts should be updated'
+
+    assert skypilot_config.get_nested(('kubernetes', 'allowed_contexts'), None) == [
+        'kind-skypilot', 'kind-skypilot2'
+    ], 'Global skypilot config should be updated'
