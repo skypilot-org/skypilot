@@ -345,6 +345,7 @@ def _execute(
             # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{str(env_options.Options.DISABLE_LOGGING): '1'})
+            print()
             subprocess_utils.run(
                 'sky status --no-show-managed-jobs --no-show-services', env=env)
         print()

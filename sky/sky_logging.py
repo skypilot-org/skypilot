@@ -13,8 +13,7 @@ from sky.utils import rich_utils
 # UX: Should we show logging prefixes and some extra information in optimizer?
 _show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
                         not env_options.Options.MINIMIZE_LOGGING.get())
-_FORMAT = ('%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
-           if _show_logging_prefix else None)
+_FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 
 
@@ -46,6 +45,7 @@ _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
 
+NO_PREFIX_FORMATTER = NewLineFormatter(None, datefmt=_DATE_FORMAT)
 FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
 DIM_FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT, dim=True)
 
@@ -68,7 +68,10 @@ def _setup_logger():
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    _default_handler.setFormatter(FORMATTER)
+    if _show_logging_prefix:
+        _default_handler.setFormatter(FORMATTER)
+    else:
+        _default_handler.setFormatter(NO_PREFIX_FORMATTER)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
