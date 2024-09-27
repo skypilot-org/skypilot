@@ -290,4 +290,5 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'storage account {storage_account_name}.')
 
 # UX constants
-SECTION_TITLE_COLOR = colorama.Style.BRIGHT
+BOLD = '\033[1m'
+RESET_BOLD = '\033[0m'

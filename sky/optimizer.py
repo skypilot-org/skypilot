@@ -17,7 +17,6 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
-from sky.skylet import constants
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -717,7 +716,6 @@ class Optimizer:
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool,
     ):
-        logger.info(ux_utils.colored_title('Optimizer'))
         ordered_node_to_cost_map = collections.OrderedDict()
         ordered_best_plan = collections.OrderedDict()
         for node in topo_order:

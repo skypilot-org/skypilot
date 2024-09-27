@@ -70,9 +70,6 @@ IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
-BOLD = '\033[1m'
-RESET_BOLD = '\033[0m'
-
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 

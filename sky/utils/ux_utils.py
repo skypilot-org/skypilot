@@ -4,7 +4,6 @@ import functools
 import logging
 import sys
 import traceback
-import typing
 from typing import Callable
 
 import colorama
@@ -110,7 +109,7 @@ class RedirectOutputForProcess:
 
 
 def colored_title(title: str) -> str:
-    return (f'\n{constants.SECTION_TITLE_COLOR}{title}\n'
+    return (f'\n{constants.BOLD}{title}\n'
             f'{"-" * len(title)}{colorama.Style.RESET_ALL}')
 
 

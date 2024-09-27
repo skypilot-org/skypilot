@@ -3351,32 +3351,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                     '\nTo cancel the job:\t\t'
-                    f'{backend_utils.BOLD}sky jobs cancel {job_id}'
-                    f'{backend_utils.RESET_BOLD}'
+                    f'{constants.BOLD}sky jobs cancel {job_id}'
+                    f'{constants.RESET_BOLD}'
                     '\nTo stream job logs:\t\t'
-                    f'{backend_utils.BOLD}sky jobs logs {job_id}'
-                    f'{backend_utils.RESET_BOLD}'
+                    f'{constants.BOLD}sky jobs logs {job_id}'
+                    f'{constants.RESET_BOLD}'
                     f'\nTo stream controller logs:\t'
-                    f'{backend_utils.BOLD}sky jobs logs --controller {job_id}'
-                    f'{backend_utils.RESET_BOLD}'
+                    f'{constants.BOLD}sky jobs logs --controller {job_id}'
+                    f'{constants.RESET_BOLD}'
                     '\nTo view all managed jobs:\t'
-                    f'{backend_utils.BOLD}sky jobs queue'
-                    f'{backend_utils.RESET_BOLD}'
+                    f'{constants.BOLD}sky jobs queue'
+                    f'{constants.RESET_BOLD}'
                     '\nTo view managed job dashboard:\t'
-                    f'{backend_utils.BOLD}sky jobs dashboard'
-                    f'{backend_utils.RESET_BOLD}')
+                    f'{constants.BOLD}sky jobs dashboard'
+                    f'{constants.RESET_BOLD}')
             elif controller is None:
                 logger.info(f'{ux_utils.colored_title("Useful Commands")}'
                             f'\nJob ID: {job_id}'
                             '\nTo cancel the job:\t'
-                            f'{backend_utils.BOLD}sky cancel {name} {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
+                            f'{constants.BOLD}sky cancel {name} {job_id}'
+                            f'{constants.RESET_BOLD}'
                             '\nTo stream job logs:\t'
-                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
+                            f'{constants.BOLD}sky logs {name} {job_id}'
+                            f'{constants.RESET_BOLD}'
                             '\nTo view the job queue:\t'
-                            f'{backend_utils.BOLD}sky queue {name}'
-                            f'{backend_utils.RESET_BOLD}')
+                            f'{constants.BOLD}sky queue {name}'
+                            f'{constants.RESET_BOLD}')
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str) -> int:
@@ -3453,26 +3453,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
-        fore = colorama.Fore
-        style = colorama.Style
         name = handle.cluster_name
         controller = controller_utils.Controllers.from_name(name)
         if controller is not None or down:
             return
         stop_str = ('\nTo stop the cluster:'
-                    f'\t{backend_utils.BOLD}sky stop {name}'
-                    f'{backend_utils.RESET_BOLD}')
+                    f'\t{constants.BOLD}sky stop {name}'
+                    f'{constants.RESET_BOLD}')
         logger.info(f'\nCluster name: {name}'
                     '\nTo log into the head VM:\t'
-                    f'{backend_utils.BOLD}ssh {name}'
-                    f'{backend_utils.RESET_BOLD}'
+                    f'{constants.BOLD}ssh {name}'
+                    f'{constants.RESET_BOLD}'
                     '\nTo submit a job:'
-                    f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
-                    f'{backend_utils.RESET_BOLD}'
+                    f'\t\t{constants.BOLD}sky exec {name} yaml_file'
+                    f'{constants.RESET_BOLD}'
                     f'{stop_str}'
                     '\nTo teardown the cluster:'
-                    f'\t{backend_utils.BOLD}sky down {name}'
-                    f'{backend_utils.RESET_BOLD}')
+                    f'\t{constants.BOLD}sky down {name}'
+                    f'{constants.RESET_BOLD}')
         if (gcp_utils.is_tpu(handle.launched_resources) and
                 not gcp_utils.is_tpu_vm(handle.launched_resources)):
             logger.info('Tip: `sky down` will delete launched TPU(s) too.')

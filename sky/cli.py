@@ -2467,8 +2467,8 @@ def start(
                                'is currently not supported.\n'
                                'Please start the former independently.')
     if controllers:
-        bold = backend_utils.BOLD
-        reset_bold = backend_utils.RESET_BOLD
+        bold = constants.BOLD
+        reset_bold = constants.RESET_BOLD
         if len(controllers) != 1:
             raise click.UsageError(
                 'Starting multiple controllers is currently not supported.\n'
@@ -4725,11 +4725,11 @@ def benchmark_launch(
             f'\n{colorama.Fore.CYAN}Benchmark name: '
             f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
             '\nTo see the benchmark results: '
-            f'{backend_utils.BOLD}sky bench show '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
+            f'{constants.BOLD}sky bench show '
+            f'{benchmark}{constants.RESET_BOLD}'
             '\nTo teardown the clusters: '
-            f'{backend_utils.BOLD}sky bench down '
-            f'{benchmark}{backend_utils.RESET_BOLD}')
+            f'{constants.BOLD}sky bench down '
+            f'{benchmark}{constants.RESET_BOLD}')
         subprocess_utils.run('sky bench ls')
     else:
         logger.error('No benchmarking clusters are created.')
@@ -5037,8 +5037,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
                        f'has {num_clusters} un-terminated cluster{plural}. '
                        f'Terminate the cluster{plural} with '
-                       f'{backend_utils.BOLD} sky bench down {benchmark} '
-                       f'{backend_utils.RESET_BOLD} '
+                       f'{constants.BOLD} sky bench down {benchmark} '
+                       f'{constants.RESET_BOLD} '
                        'before deleting the benchmark report.')
             success = False
         else:
