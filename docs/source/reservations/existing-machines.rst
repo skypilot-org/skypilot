@@ -11,7 +11,7 @@ SkyPilot will install necessary dependencies on the remote machines and configur
 ..
    Figure v1 (for deploy.sh): https://docs.google.com/drawings/d/1Jp1tTu1kxF-bIrS6LRMqoJ1dnxlFvn-iobVsXElXfAg/edit?usp=sharing
    Figure v2: https://docs.google.com/drawings/d/1hMvOe1HX0ESoUbCvUowla2zO5YBacsdruo0dFqML9vo/edit?usp=sharing
-   Figure v2 Dark: https://docs.google.com/drawings/d/1Bo--2227CH0r4UBkj4TGY3I3ZfpOdh4SfeheE95ZBvU/edit?usp=sharing
+   Figure v2 Dark: https://docs.google.com/drawings/d/1AEdf9i3SO6MVnD7d-hwRumIfVndzNDqQmrFvRwwVEiU/edit
 
 .. figure:: ../images/sky-existing-infra-workflow-light.png
    :width: 85%
