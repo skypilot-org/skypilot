@@ -57,9 +57,16 @@ class SkyServeController:
             try:
                 replica_infos = serve_state.get_replica_infos(
                     self._service_name)
+                # Use the active versions set by replica manager to make
+                # sure we only scale down the outdated replicas that are
+                # not used by the load balancer.
+                record = serve_state.get_service_from_name(self._service_name)
+                assert record is not None, ('No service record found for '
+                                            f'{self._service_name}')
+                active_versions = record['active_versions']
                 logger.info(f'All replica info: {replica_infos}')
                 scaling_options = self._autoscaler.evaluate_scaling(
-                    replica_infos)
+                    replica_infos, active_versions)
                 for scaling_option in scaling_options:
                     logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==
@@ -67,15 +74,10 @@ class SkyServeController:
                         assert (scaling_option.target is None or isinstance(
                             scaling_option.target, dict)), scaling_option
                         self._replica_manager.scale_up(scaling_option.target)
-                    elif (scaling_option.operator ==
-                          autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
+                    else:
                         assert isinstance(scaling_option.target,
                                           int), scaling_option
                         self._replica_manager.scale_down(scaling_option.target)
-                    else:
-                        with ux_utils.enable_traceback():
-                            logger.error('Error in scaling_option.operator: '
-                                         f'{scaling_option.operator}')
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
