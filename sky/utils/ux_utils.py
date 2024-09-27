@@ -1,12 +1,17 @@
 """Utility functions for UX."""
 import contextlib
+import functools
+import logging
 import sys
 import traceback
+import typing
 from typing import Callable
 
+import colorama
 import rich.console as rich_console
 
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -102,3 +107,15 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+def colored_title(title: str) -> str:
+    return (f'\n{constants.SECTION_TITLE_COLOR}{title}\n'
+            f'{"-" * len(title)}{colorama.Style.RESET_ALL}')
+
+
+@functools.lru_cache()
+def log_once(msg: str,
+             logger: logging.Logger,
+             log_level: int = logging.INFO) -> None:
+    logger.log(level=log_level, msg=msg)

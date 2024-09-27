@@ -17,6 +17,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.skylet import constants
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -716,7 +717,7 @@ class Optimizer:
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool,
     ):
-        logger.info('== Optimizer ==')
+        logger.info(ux_utils.colored_title('Optimizer'))
         ordered_node_to_cost_map = collections.OrderedDict()
         ordered_best_plan = collections.OrderedDict()
         for node in topo_order:
@@ -738,15 +739,18 @@ class Optimizer:
                     node.get_inputs() is None and node.get_outputs() is None):
                 print_hourly_cost = True
 
-        if print_hourly_cost:
-            logger.info(f'{colorama.Style.BRIGHT}Estimated cost: '
-                        f'{colorama.Style.RESET_ALL}${total_cost:.1f} / hour\n')
-        else:
-            logger.info(f'{colorama.Style.BRIGHT}Estimated total runtime: '
-                        f'{colorama.Style.RESET_ALL}{total_time / 3600:.1f} '
-                        'hours\n'
-                        f'{colorama.Style.BRIGHT}Estimated total cost: '
-                        f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
+        if not env_options.Options.MINIMIZE_LOGGING.get():
+            if print_hourly_cost:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Estimated cost: '
+                    f'{colorama.Style.RESET_ALL}${total_cost:.1f} / hour\n')
+            else:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Estimated total runtime: '
+                    f'{colorama.Style.RESET_ALL}{total_time / 3600:.1f} '
+                    'hours\n'
+                    f'{colorama.Style.BRIGHT}Estimated total cost: '
+                    f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
 
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:

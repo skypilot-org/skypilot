@@ -1312,6 +1312,7 @@ class RetryingVmProvisioner(object):
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
+        ux_utils.log_once(ux_utils.colored_title('Cluster'), logger)
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
@@ -3329,9 +3330,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
-
-        logger.info('Job submitted with Job ID: '
-                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}\n')
+        logger.info(
+            ux_utils.colored_title('Job') + '\nSubmitted with ID: '
+            f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
         try:
             if not detach_run:
@@ -3365,8 +3366,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{backend_utils.BOLD}sky jobs dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n{fore.CYAN}Job ID: '
-                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                logger.info(f'{ux_utils.colored_title("Useful Commands")}'
+                            f'\nJob ID: {job_id}'
                             '\nTo cancel the job:\t'
                             f'{backend_utils.BOLD}sky cancel {name} {job_id}'
                             f'{backend_utils.RESET_BOLD}'
@@ -3461,8 +3462,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
                     f'{backend_utils.RESET_BOLD}')
-        logger.info(f'\n{fore.CYAN}Cluster name: '
-                    f'{style.BRIGHT}{name}{style.RESET_ALL}'
+        logger.info(f'\nCluster name: {name}'
                     '\nTo log into the head VM:\t'
                     f'{backend_utils.BOLD}ssh {name}'
                     f'{backend_utils.RESET_BOLD}'
@@ -4425,6 +4425,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             to_provision = handle_before_refresh.launched_resources
             self.check_resources_fit_cluster(handle_before_refresh, task)
 
+        ux_utils.log_once(ux_utils.colored_title('Cluster'), logger)
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
             f'[{task.num_nodes}x {to_provision}].'
@@ -4480,6 +4481,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
+
+        ux_utils.log_once(ux_utils.colored_title('Cluster'), logger)
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 

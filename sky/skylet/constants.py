@@ -1,6 +1,7 @@
 """Constants for SkyPilot."""
 from typing import List, Tuple
 
+import colorama
 from packaging import version
 
 import sky
@@ -287,3 +288,6 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
+
+# UX constants
+SECTION_TITLE_COLOR = colorama.Style.BRIGHT
