@@ -3,7 +3,7 @@
 Deploy SkyPilot on existing machines
 ====================================
 
-This guide will help you deploy SkyPilot on your existing machines - whether they are on-premises or reserved instances on a cloud provider.
+This guide will help you deploy SkyPilot on your existing machines — whether they are on-premises or reserved instances on a cloud provider.
 
 **Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
@@ -56,7 +56,7 @@ Deploying SkyPilot
 ------------------
 
 1. Create a file ``ips.txt`` with the IP addresses of your machines with one IP per line.
-   The first node will be used as the head node - this node must have port 6443 accessible from your local machine.
+   The first node will be used as the head node — this node must have port 6443 accessible from your local machine.
 
    Here is an example ``ips.txt`` file:
 

@@ -1,6 +1,6 @@
 """Logging utils."""
 import enum
-from types import TracebackType
+import types
 from typing import List, Optional, Type
 
 import colorama
@@ -24,7 +24,7 @@ class LineProcessor(object):
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
-                 traceback: Optional[TracebackType]) -> None:
+                 traceback: Optional[types.TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         pass
 
@@ -65,7 +65,7 @@ class RayUpLineProcessor(LineProcessor):
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
-                 traceback: Optional[TracebackType]) -> None:
+                 traceback: Optional[types.TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
@@ -131,7 +131,7 @@ class SkyLocalUpLineProcessor(LineProcessor):
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
-                 traceback: Optional[TracebackType]) -> None:
+                 traceback: Optional[types.TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
@@ -202,7 +202,7 @@ class SkyRemoteUpLineProcessor(LineProcessor):
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
-                 traceback: Optional[TracebackType]) -> None:
+                 traceback: Optional[types.TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
