@@ -821,12 +821,15 @@ class Optimizer:
             return row
 
         def _get_resource_group_hash(resources: 'resources_lib.Resources'):
-            return json.dumps(
-                {
+            resource_key_dict = {
                     'cloud': f'{resources.cloud}',
                     'accelerators': f'{resources.accelerators}',
                     'use_spot': resources.use_spot
-                },
+                }
+            if isinstance(resources.cloud, clouds.Kubernetes):
+                resource_key_dict['region'] = resources.region
+            return json.dumps(
+                resource_key_dict,
                 sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
