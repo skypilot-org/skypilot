@@ -3026,14 +3026,11 @@ def show_gpus(
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
 
-    if cloud_is_kubernetes and region is not None:
-        raise click.UsageError(
-            'The --region flag cannot be set with --cloud kubernetes.')
-
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
     def _get_kubernetes_realtime_gpu_table(
+            context: Optional[str] = None,
             name_filter: Optional[str] = None,
             quantity_filter: Optional[int] = None):
         if quantity_filter:
@@ -3048,7 +3045,7 @@ def show_gpus(
             gpus_only=True,
             clouds='kubernetes',
             name_filter=name_filter,
-            region_filter=region,
+            region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
         assert (set(counts.keys()) == set(capacity.keys()) == set(
@@ -3078,11 +3075,11 @@ def show_gpus(
             ])
         return realtime_gpu_table
 
-    def _get_kubernetes_node_info_table():
+    def _get_kubernetes_node_info_table(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        node_info_dict = kubernetes_utils.get_kubernetes_node_info()
+        node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
             node_table.add_row([
                 node_name, node_info.gpu_type,
@@ -3116,11 +3113,13 @@ def show_gpus(
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+                context = region
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table()
+                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
+                        context)
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3129,9 +3128,10 @@ def show_gpus(
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
+                           f'Kubernetes GPUs (Context: {context})'
+                           f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
-                    k8s_node_table = _get_kubernetes_node_info_table()
+                    k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                            f'Kubernetes per node GPU availability'

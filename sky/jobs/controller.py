@@ -64,6 +64,7 @@ class JobsController:
             if len(self._dag.tasks) <= 1:
                 task_name = self._dag_name
             else:
+                assert task.name is not None, task
                 task_name = task.name
                 # This is guaranteed by the spot_launch API, where we fill in
                 # the task.name with
@@ -447,6 +448,7 @@ def _cleanup(job_id: int, dag_yaml: str):
     # controller, we should keep it in sync with JobsController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
+        assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
         recovery_strategy.terminate_cluster(cluster_name)
