@@ -1,18 +1,18 @@
 .. _multi-kubernetes:
 
-Across Multiple Kubernetes Clusters
-===================================
+Multiple Kubernetes Clusters
+=============================
 
 
 SkyPilot allows you to manage dev pods, jobs and services across multiple Kubernetes clusters in a single pane of glass.
 
-You may have multiple Kubernetes clusters for a variety of reasons:
+You may have multiple Kubernetes clusters for different:
 
-* Clusters for different purposes: e.g.,a production cluster and a development/testing cluster.
-* Clusters in different regions or clouds: e.g., US and EU regions; or AWS and Lambda clouds.
-* Clusters for different accelerators: e.g., NVIDIA H100 cluster and a Google TPU cluster.
-* Clusters with different configurations: e.g., a small cluster for a single node and a large cluster for multiple nodes.
-* Clusters for different Kubernetes versions: e.g., to upgrade a cluster from Kubernetes 1.20 to 1.21, you may create a new Kubernetes cluster to avoid downtime or unexpected errors.
+* **Use cases:** e.g., a production cluster and a development/testing cluster.
+* **Regions or clouds:** e.g., US and EU regions; or AWS and Lambda clouds.
+* **Accelerators:** e.g., NVIDIA H100 cluster and a Google TPU cluster.
+* **Configurations:** e.g., a small cluster for a single node and a large cluster for multiple nodes.
+* **Kubernetes versions:** e.g., to upgrade a cluster from Kubernetes 1.20 to 1.21, you may create a new Kubernetes cluster to avoid downtime or unexpected errors.
 
 
 .. image:: /images/kubernetes/multi-kubernetes.png
@@ -21,8 +21,9 @@ You may have multiple Kubernetes clusters for a variety of reasons:
 Set Up Credentials for Multiple Kubernetes Clusters
 ---------------------------------------------------
 
-To work with multiple Kubernetes clusters, you need to ensure you have the necessary credentials for each cluster. To get
-it work with SkyPilot, you don't have to do any additional setup than having those credentials in your local ``~/.kube/config`` file.
+To work with multiple Kubernetes clusters, you need to ensure you have the necessary credentials for each cluster.
+Check that your local ``~/.kube/config`` file has the credentials for each cluster. For setting up clusters and their credentials,
+see :ref:`kubernetes-setup-deploy`.
 
 For example, a ``~/.kube/config`` file may look like this:
 
@@ -73,8 +74,8 @@ by specifying the ``--region`` with the context name for that cluster.
 
     Kubernetes per node GPU availability
     NODE_NAME                                 GPU_NAME  TOTAL_GPUS  FREE_GPUS  
-    gke-test-zhwu-default-pool-20159504-hbzn  H100      8           8
-    gke-test-zhwu-default-pool-20159504-w5x7  None      0           0
+    my-h100-cluster-hbzn  H100      8           8
+    my-h100-cluster-w5x7  None      0           0
 
 When launching a SkyPilot cluster or task, you can also specify the context name with ``--region`` to launch the cluster or task in.
 
@@ -91,12 +92,12 @@ When launching a SkyPilot cluster or task, you can also specify the context name
 Failover across Multiple Kubernetes Clusters
 --------------------------------------------
 
-SkyPilot enables you to failover across multiple Kubernetes clusters. It is useful when you have multiple Kubernetes clusters
-across different clouds and regions, and you want to launch a task in any of the clusters with available GPUs.
+SkyPilot enables you to failover across multiple Kubernetes clusters. It is useful when you want to launch a task in any of the clusters with available GPUs.
 
 Different from cloud providers, SkyPilot does not failover through different regions (contexts) by default, because multiple
-Kubernetes clusters can be for different purposes. To enable the failover, you can specify the ``kubernetes.allowed_contexts``
-in SkyPilot config, ``~/.sky/config.yaml`` (See config YAML spec: :ref:`config-yaml`).
+Kubernetes clusters can be for different purposes.
+
+To enable the failover, you can specify the ``kubernetes.allowed_contexts`` in SkyPilot config, ``~/.sky/config.yaml`` (See config YAML spec: :ref:`config-yaml`).
 
 .. code-block:: yaml
 
