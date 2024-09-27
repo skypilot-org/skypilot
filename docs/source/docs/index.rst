@@ -151,6 +151,7 @@ Read the research:
    ../reservations/reservations
    Using Existing Machines <../reservations/existing-machines>
    ../reference/kubernetes/index
+   ../reference/kubernetes/multi-kubernetes
 
 .. toctree::
    :hidden:
