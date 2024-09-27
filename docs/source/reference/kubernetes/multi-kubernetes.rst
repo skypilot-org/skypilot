@@ -12,6 +12,7 @@ You may have multiple Kubernetes clusters for a variety of reasons:
 * Clusters in different regions or clouds: e.g., US and EU regions; or AWS and Lambda clouds.
 * Clusters for different accelerators: e.g., NVIDIA H100 cluster and a Google TPU cluster.
 * Clusters with different configurations: e.g., a small cluster for a single node and a large cluster for multiple nodes.
+* Clusters for different Kubernetes versions: e.g., to upgrade a cluster from Kubernetes 1.20 to 1.21, you may create a new Kubernetes cluster to avoid downtime or unexpected errors.
 
 
 .. image:: /images/kubernetes/multi-kubernetes.png
@@ -111,4 +112,19 @@ order as they are specified.
 .. code-block:: console
 
     $ sky launch --cloud kubernetes echo 'Hello World'
+
+    Considered resources (1 node):
+    ------------------------------------------------------------------------------------------------------------
+    CLOUD        INSTANCE           vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE           COST ($)   CHOSEN   
+    ------------------------------------------------------------------------------------------------------------
+    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-gke   0.00          ✔     
+    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-eks   0.00                
+    ------------------------------------------------------------------------------------------------------------
+
+
+
+Dynamically Update Kubernetes Clusters to Use
+----------------------------------------------
+
+To see how to dynamically update Kubernetes clusters to use, refer to :ref:`dynamic-kubernetes-contexts-update-policy`.
 
