@@ -1,7 +1,6 @@
 """Constants for SkyPilot."""
 from typing import List, Tuple
 
-import colorama
 from packaging import version
 
 import sky
