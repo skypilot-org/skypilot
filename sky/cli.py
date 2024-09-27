@@ -5072,7 +5072,7 @@ def local():
     pass
 
 
-def deploy_local_cluster(gpus: bool):
+def _deploy_local_cluster(gpus: bool):
     cluster_created = False
 
     # Check if GPUs are available on the host
@@ -5198,7 +5198,8 @@ def deploy_local_cluster(gpus: bool):
             f'{gpu_hint}')
 
 
-def deploy_remote_cluster(ip_file, ssh_user, ssh_key_path, cleanup):
+def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
+                           cleanup: bool):
     success = False
     path_to_package = os.path.dirname(os.path.dirname(__file__))
     up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
@@ -5309,10 +5310,10 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
         # Convert ips and ssh_key_path to absolute paths
         ips = os.path.abspath(ips)
         ssh_key_path = os.path.abspath(ssh_key_path)
-        deploy_remote_cluster(ips, ssh_user, ssh_key_path, cleanup)
+        _deploy_remote_cluster(ips, ssh_user, ssh_key_path, cleanup)
     else:
         # Run local deployment (kind) if no remote args are specified
-        deploy_local_cluster(gpus)
+        _deploy_local_cluster(gpus)
 
 
 @local.command('down', cls=_DocumentedCodeCommand)

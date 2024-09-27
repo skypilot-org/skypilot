@@ -3,7 +3,7 @@
 Deploy SkyPilot on existing machines
 ====================================
 
-This guide will help you deploy SkyPilot on your existing machines - whether they are on-premisesc or reserved instances on a cloud provider.
+This guide will help you deploy SkyPilot on your existing machines - whether they are on-premises or reserved instances on a cloud provider.
 
 **Given a list of IP addresses and SSH credentials,**
 SkyPilot will install necessary dependencies on the remote machines and configure itself to run jobs and services on the cluster.
@@ -75,7 +75,7 @@ Deploying SkyPilot
       IP_FILE=ips.txt
       SSH_USER=username
       SSH_KEY=path/to/ssh/key
-      sky local up --ip $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY
+      sky local up --ips $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY
 
    SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 

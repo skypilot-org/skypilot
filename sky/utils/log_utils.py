@@ -1,6 +1,7 @@
 """Logging utils."""
 import enum
-from typing import List, Optional
+from types import TracebackType
+from typing import List, Optional, Type
 
 import colorama
 import pendulum
@@ -15,13 +16,15 @@ logger = sky_logging.init_logger(__name__)
 class LineProcessor(object):
     """A processor for log lines."""
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
-    def process_line(self, log_line):
+    def process_line(self, log_line: str) -> None:
         pass
 
-    def __exit__(self, except_type, except_value, traceback):
+    def __exit__(self, except_type: Optional[Type[BaseException]],
+                 except_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         pass
 
@@ -34,12 +37,12 @@ class RayUpLineProcessor(LineProcessor):
         RUNTIME_SETUP = 1
         PULLING_DOCKER_IMAGES = 2
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.state = self.ProvisionStatus.LAUNCH
         self.status_display = rich_utils.safe_status('[bold cyan]Launching')
         self.status_display.start()
 
-    def process_line(self, log_line):
+    def process_line(self, log_line: str) -> None:
         if ('Success.' in log_line and
                 self.state == self.ProvisionStatus.LAUNCH):
             logger.info(f'{colorama.Fore.GREEN}Head node is up.'
@@ -60,7 +63,9 @@ class RayUpLineProcessor(LineProcessor):
                 '[bold cyan]Launching - Preparing SkyPilot runtime')
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
-    def __exit__(self, except_type, except_value, traceback):
+    def __exit__(self, except_type: Optional[Type[BaseException]],
+                 except_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
@@ -68,13 +73,13 @@ class RayUpLineProcessor(LineProcessor):
 class SkyLocalUpLineProcessor(LineProcessor):
     """A processor for `sky local up` log lines."""
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         status = rich_utils.safe_status('[bold cyan]Creating local cluster - '
                                         'initializing Kubernetes')
         self.status_display = status
         self.status_display.start()
 
-    def process_line(self, log_line):
+    def process_line(self, log_line: str) -> None:
         if 'Kind cluster created.' in log_line:
             logger.info(f'{colorama.Fore.GREEN}Kubernetes is running.'
                         f'{colorama.Style.RESET_ALL}')
@@ -124,7 +129,9 @@ class SkyLocalUpLineProcessor(LineProcessor):
                 f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'
                 f'{colorama.Style.RESET_ALL}')
 
-    def __exit__(self, except_type, except_value, traceback):
+    def __exit__(self, except_type: Optional[Type[BaseException]],
+                 except_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
@@ -132,12 +139,12 @@ class SkyLocalUpLineProcessor(LineProcessor):
 class SkyRemoteUpLineProcessor(LineProcessor):
     """A processor for deploy_remote_cluster.sh log lines."""
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         status = rich_utils.safe_status('[bold cyan]Creating remote cluster')
         self.status_display = status
         self.status_display.start()
 
-    def process_line(self, log_line):
+    def process_line(self, log_line: str) -> None:
         # Pre-flight checks
         if 'SSH connection successful' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SSH connection established.'
@@ -193,7 +200,9 @@ class SkyRemoteUpLineProcessor(LineProcessor):
             logger.info(f'{colorama.Fore.GREEN}✔ Remote k3s is running.'
                         f'{colorama.Style.RESET_ALL}')
 
-    def __exit__(self, except_type, except_value, traceback):
+    def __exit__(self, except_type: Optional[Type[BaseException]],
+                 except_value: Optional[BaseException],
+                 traceback: Optional[TracebackType]) -> None:
         del except_type, except_value, traceback  # unused
         self.status_display.stop()
 
