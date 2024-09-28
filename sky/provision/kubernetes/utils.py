@@ -311,7 +311,7 @@ AUTOSCALER_TO_LABEL_FORMATTER = {
 
 @functools.lru_cache()
 def detect_gpu_label_formatter(
-    context: str
+    context: Optional[str]
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
@@ -343,7 +343,7 @@ def detect_gpu_label_formatter(
 
 
 @functools.lru_cache(maxsize=10)
-def detect_gpu_resource(context: str) -> Tuple[bool, Set[str]]:
+def detect_gpu_resource(context: Optional[str]) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
 
     If nvidia.com/gpu resource is missing, that typically means that the
@@ -403,7 +403,7 @@ def get_all_pods_in_kubernetes_cluster(
     return pods
 
 
-def check_instance_fits(context: str,
+def check_instance_fits(context: Optional[str],
                         instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
@@ -489,7 +489,7 @@ def check_instance_fits(context: str,
         return fits, reason
 
 
-def get_gpu_label_key_value(context: str,
+def get_gpu_label_key_value(context: Optional[str],
                             acc_type: str,
                             check_mode=False) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
@@ -652,7 +652,8 @@ def get_external_ip(network_mode: Optional[
     return parsed_url.hostname
 
 
-def check_credentials(context: Optional[str], timeout: int = kubernetes.API_TIMEOUT) -> \
+def check_credentials(context: Optional[str],
+                      timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -1049,7 +1050,7 @@ def get_ssh_proxy_command(
     k8s_ssh_target: str,
     network_mode: kubernetes_enums.KubernetesNetworkingMode,
     private_key_path: str,
-    context: str,
+    context: Optional[str],
     namespace: str,
 ) -> str:
     """Generates the SSH proxy command to connect to the pod.
@@ -1147,7 +1148,8 @@ def create_proxy_command_script() -> str:
     return port_fwd_proxy_cmd_path
 
 
-def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str, context: str,
+def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
+                       context: Optional[str],
                        service_type: kubernetes_enums.KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
@@ -1219,7 +1221,8 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str, context: str,
 
 
 def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
-                       ssh_key_secret: str, namespace: str, context: str):
+                       ssh_key_secret: str, namespace: str,
+                       context: Optional[str]):
     """Sets up Kubernetes RBAC and pod for SSH jump host.
 
     Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
@@ -1299,7 +1302,8 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
         logger.info(f'Created SSH Jump Host {ssh_jump_name}.')
 
 
-def clean_zombie_ssh_jump_pod(namespace: str, context: str, node_id: str):
+def clean_zombie_ssh_jump_pod(namespace: str, context: Optional[str],
+                              node_id: str):
     """Analyzes SSH jump pod and removes if it is in a bad state
 
     Prevents the existence of a dangling SSH jump pod. This could happen
@@ -1621,7 +1625,8 @@ def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:
     return nvidia_exists
 
 
-def check_secret_exists(secret_name: str, namespace: str, context: str) -> bool:
+def check_secret_exists(secret_name: str, namespace: str,
+                        context: Optional[str]) -> bool:
     """Checks if a secret exists in a namespace
 
     Args:
@@ -1839,7 +1844,7 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
 
 
 def filter_pods(namespace: str,
-                context: str,
+                context: Optional[str],
                 tag_filters: Dict[str, str],
                 status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
     """Filters pods by tags and status."""
@@ -1966,7 +1971,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
-    context = provider_config.get('context', get_current_kube_config_context_name())
+    context = provider_config.get('context',
+                                  get_current_kube_config_context_name())
     if context == SINGLETON_REGION:
         # If singleton region name is set as context, the cluster was launched
         # from a pod using in-cluster config. In this case, we need to use the
