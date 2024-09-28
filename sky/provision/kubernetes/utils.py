@@ -1973,9 +1973,8 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
-    if context == SINGLETON_REGION:
-        # If singleton region name is set as context, the cluster was launched
-        # from a pod using in-cluster config. In this case, we need to use the
-        # default context.
+    if context == IN_CLUSTER_REGION:
+        # If the context (also used as the region) is set to IN_CLUSTER_REGION
+        # we need to use in-cluster auth.
         context = None
     return context
