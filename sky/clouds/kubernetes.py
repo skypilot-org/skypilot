@@ -53,6 +53,7 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
+    _LEGACY_SINGLETON_REGION = 'kubernetes'
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -173,7 +174,7 @@ class Kubernetes(clouds.Cloud):
             if context is None:
                 # If running in-cluster, we allow the region to be set to the
                 # singleton region since there is no context name available.
-                regions.append(clouds.Region(kubernetes_utils.SINGLETON_REGION))
+                regions.append(clouds.Region(kubernetes_utils.IN_CLUSTER_REGION))
             else:
                 regions.append(clouds.Region(context))
 
@@ -550,15 +551,22 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region == kubernetes_utils.SINGLETON_REGION:
-            # If running incluster, we allow the region to be set to the
-            # singleton region since there is no context name available.
+        if region == self._LEGACY_SINGLETON_REGION:
+            # For backward compatibility, we allow the region to be set to the
+            # legacy singleton region.
+            # TODO: Remove this after 0.9.0.
+            return region, zone
+
+        if region == kubernetes_utils.IN_CLUSTER_REGION:
+            # If running incluster, we set region to IN_CLUSTER_REGION
+            # since there is no context name available.
             return region, zone
 
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
         if all_contexts is None:
-            # If no context is returned,
-            all_contexts = [kubernetes_utils.SINGLETON_REGION]
+            # If no context is returned, use the singleton region since we may
+            # be running in a pod with in-cluster auth.
+            all_contexts = [kubernetes_utils.IN_CLUSTER_REGION]
         if region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '

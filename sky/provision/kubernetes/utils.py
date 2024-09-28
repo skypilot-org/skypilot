@@ -33,7 +33,7 @@ if typing.TYPE_CHECKING:
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
-SINGLETON_REGION = 'kubernetes'
+IN_CLUSTER_REGION = 'in-cluster'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
