@@ -33,6 +33,7 @@ if typing.TYPE_CHECKING:
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
+SINGLETON_REGION = 'kubernetes'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
@@ -651,11 +652,13 @@ def get_external_ip(network_mode: Optional[
     return parsed_url.hostname
 
 
-def check_credentials(context: str, timeout: int = kubernetes.API_TIMEOUT) -> \
+def check_credentials(context: Optional[str], timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
     Args:
+        context (Optional[str]): The Kubernetes context to use. If none, uses
+            in-cluster auth to check credentials, if available.
         timeout (int): Timeout in seconds for the test API call
 
     Returns:
@@ -1962,6 +1965,11 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
                                    context=context)
 
 
-def get_context_from_config(provider_config: Dict[str, Any]) -> str:
-    return provider_config.get('context',
-                               get_current_kube_config_context_name())
+def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
+    context = provider_config.get('context', get_current_kube_config_context_name())
+    if context == SINGLETON_REGION:
+        # If singleton region name is set as context, the cluster was launched
+        # from a pod using in-cluster config. In this case, we need to use the
+        # default context.
+        context = None
+    return context
