@@ -17,6 +17,8 @@ from sky.utils import ux_utils
 
 console = rich_console.Console()
 
+_TITLE_LENGTH = 25
+
 
 def console_newline():
     """Print a newline to the console using rich.
@@ -108,9 +110,13 @@ class RedirectOutputForProcess:
                 raise
 
 
-def colored_title(title: str) -> str:
-    return (f'\n{constants.BOLD}{title}\n'
-            f'{"-" * len(title)}{colorama.Style.RESET_ALL}')
+def format_title(title: str) -> str:
+    remaining_length = _TITLE_LENGTH - len(title) - 2
+    equation_length = remaining_length // 2
+    equations = '=' * equation_length
+    padding_space = ' ' * (remaining_length % 2)
+    title = f'{equations} {title} {padding_space}{equations}'
+    return (f'\n{constants.BOLD}{title}{colorama.Style.RESET_ALL}')
 
 
 @functools.lru_cache()
