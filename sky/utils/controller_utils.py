@@ -363,6 +363,11 @@ def shared_controller_vars_to_fill(
         # again on the controller. This is required since admin_policy is not
         # installed on the controller.
         local_user_config.pop('admin_policy', None)
+        # Remove allowed_contexts from local_user_config since the controller
+        # may be running in a Kubernetes cluster with in-cluster auth and may
+        # not have kubeconfig available to it. This is the typical case since
+        # remote_identity default for Kubernetes is SERVICE_ACCOUNT.
+        local_user_config.pop('allowed_contexts', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
