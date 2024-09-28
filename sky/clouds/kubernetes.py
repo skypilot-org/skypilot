@@ -174,7 +174,8 @@ class Kubernetes(clouds.Cloud):
             if context is None:
                 # If running in-cluster, we allow the region to be set to the
                 # singleton region since there is no context name available.
-                regions.append(clouds.Region(kubernetes_utils.IN_CLUSTER_REGION))
+                regions.append(clouds.Region(
+                    kubernetes_utils.IN_CLUSTER_REGION))
             else:
                 regions.append(clouds.Region(context))
 
