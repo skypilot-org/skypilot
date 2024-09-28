@@ -198,7 +198,7 @@ class Controllers(enum.Enum):
 # can be cleaned up by another process.
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
-        controller: Controllers, 
+        controller: Controllers,  # yapf: disable
         task_config: Optional[Dict[str, Any]]) -> List[str]:
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
