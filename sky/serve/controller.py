@@ -185,14 +185,32 @@ class SkyServeController:
                 purge = request_data.get('purge')
                 if purge is None:
                     return {'message': 'Error: purge is not specified.'}
-                if purge:
-                    return self._purge_replica(replica_id)
+                replica_info = serve_state.get_replica_info_from_id(
+                    self._service_name, replica_id)
+                if replica_info is None:
+                    return {'message': f'Error: replica {replica_id} does not exist.'}
+                
+                if replica_info.status in serve_state.ReplicaStatus.failed_statuses():
+                    if purge:
+                        return self._purge_replica(replica_id)
+                    else:
+                        return {
+                            'message': f'Error: replica {replica_id} has failed. '
+                            f'Please use purge to remove the failed replica.'
+                        }
                 else:
-                    logger.info(f'Terminating replica {replica_id}...')
-                    self._replica_manager.scale_down(replica_id)
-                    return {
-                        'message': f'Success terminating replica {replica_id}.'
-                    }
+                    if purge:
+                        logger.info(f'Purging replica {replica_id}...')
+                        self._replica_manager.scale_down(replica_id)
+                        serve_state.remove_replica(self._service_name, replica_id)
+                        return {'message': f'Successfully purged replica {replica_id}.'}
+                    else:
+                        logger.info(f'Terminating replica {replica_id}...')
+                        self._replica_manager.scale_down(replica_id)
+                        return {
+                            'message': f'Success terminating replica {replica_id}.'
+                        }
+
             except Exception as e:  # pylint: disable=broad-except
                 error_message = (f'Error in terminate_replica: '
                                  f'{common_utils.format_exception(e)}')
