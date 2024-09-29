@@ -171,10 +171,7 @@ def stop_instances(
         if worker_only and instance_name.endswith('-head'):
             num_instances -= 1
             continue
-        utils.client().droplet_actions.post(
-            droplet_id=instance_meta['id'],
-            body={'type': 'shutdown'},
-        )
+        utils.stop_instance(instance_meta)
 
     # Wait for instances to stop
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
