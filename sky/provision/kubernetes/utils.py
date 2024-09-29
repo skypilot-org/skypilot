@@ -820,6 +820,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
     except k8s.config.config_exception.ConfigException:
         return None
 
+
 def is_incluster_config_available() -> bool:
     """Check if in-cluster auth is available.
 
