@@ -820,23 +820,42 @@ def get_current_kube_config_context_name() -> Optional[str]:
     except k8s.config.config_exception.ConfigException:
         return None
 
+def is_incluster_config_available() -> bool:
+    """Check if in-cluster auth is available.
 
-def get_all_kube_config_context_names() -> Optional[List[str]]:
+    Note: We cannot use load_incluster_config() to check if in-cluster config
+    is available because it will load the in-cluster config (if available)
+    and modify the current global kubernetes config. We simply check if the
+    service account token file exists to determine if in-cluster config may
+    be available.
+    """
+    return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
+
+
+def get_all_kube_config_context_names() -> List[Optional[str]]:
     """Get all kubernetes context names from the kubeconfig file.
+
+    If running in-cluster, returns [None] to indicate in-cluster config.
 
     We should not cache the result of this function as the admin policy may
     update the contexts.
 
     Returns:
-        List[str] | None: The list of kubernetes context names if it exists,
-            None otherwise
+        List[Optional[str]]: The list of kubernetes context names if
+            available, an empty list otherwise. If running in-cluster,
+            returns [None] to indicate in-cluster config.
     """
     k8s = kubernetes.kubernetes
     try:
         all_contexts, _ = k8s.config.list_kube_config_contexts()
+        # all_contexts will always have at least one context. If kubeconfig
+        # does not have any contexts defined, it will raise ConfigException.
         return [context['name'] for context in all_contexts]
     except k8s.config.config_exception.ConfigException:
-        return None
+        # If running in cluster, return [None] to indicate in-cluster config
+        if is_incluster_config_available():
+            return [None]
+        return []
 
 
 @functools.lru_cache()

@@ -132,13 +132,20 @@ class Kubernetes(clouds.Cloud):
     def _existing_allowed_contexts(cls) -> List[Optional[str]]:
         """Get existing allowed contexts.
 
-        If None is returned in the list, it means that the kubeconfig is not
-        found and we may be running in a pod with in-cluster auth. In this
-        case, we use None context that will use the available service account
-        mounted in the pod.
+        If None is returned in the list, it means that we are running in a pod
+        with in-cluster auth. In this case, we specify None context, which will
+        use the service account mounted in the pod.
         """
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
-        if all_contexts is None:
+        if len(all_contexts) == 0:
+            return []
+        if all_contexts == [None]:
+            # If only one context is found and it is None, we are running in a
+            # pod with in-cluster auth. In this case, we allow it to be used
+            # without checking against allowed_contexts.
+            # TODO(romilb): We may want check in-cluster auth against
+            #  allowed_contexts in the future by adding a special context name
+            #  for in-cluster auth.
             return [None]
         all_contexts = set(all_contexts)
 
@@ -565,9 +572,9 @@ class Kubernetes(clouds.Cloud):
             return region, zone
 
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
-        if all_contexts is None:
-            # If no context is returned, use the singleton region since we may
-            # be running in a pod with in-cluster auth.
+        if all_contexts == [None]:
+            # If [None] context is returned, use the singleton region since we
+            # are running in a pod with in-cluster auth.
             all_contexts = [kubernetes_utils.IN_CLUSTER_REGION]
         if region not in all_contexts:
             raise ValueError(
