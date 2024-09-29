@@ -192,8 +192,8 @@ class DO(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'
-            ) -> resources_utils.FeasibleResources:
+        self, resources: 'resources_lib.Resources'
+    ) -> resources_utils.FeasibleResources:
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             # TODO: Add hints to all return values in this method to help
@@ -253,13 +253,15 @@ class DO(clouds.Cloud):
             # attempt to make a CURL request for listing instances
             do_utils.client().droplets.list()
         except do.exceptions().HttpResponseError as err:
-            return False, str(e)
+            return False, str(err)
 
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         do_utils.client()
-        return {f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH}
+        return {
+            f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
+        }
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

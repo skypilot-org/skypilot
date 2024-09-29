@@ -19,7 +19,8 @@ MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_head_instance(instances: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _get_head_instance(
+        instances: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     for instance_name, instance_meta in instances.items():
         if instance_name.endswith('-head'):
             return instance_meta
@@ -290,6 +291,9 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    logger.debug(
+        f'Skip opening ports {ports} for DigitalOcean instances, as all '
+        'ports are open by default.')
     del cluster_name_on_cloud, provider_config, ports
 
 
