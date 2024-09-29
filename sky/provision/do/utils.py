@@ -40,35 +40,35 @@ class DigitalOceanError(Exception):
 
 def _init_client():
     global _client, CREDENTIALS_PATH
-    if _client is None:
-        CREDENTIALS_PATH = None
-        credentials_found = 0
-        for path in POSSIBLE_CREDENTIALS_PATHS:
-            if os.path.exists(path):
-                CREDENTIALS_PATH = path
-                credentials_found += 1
-                logger.debug(f'Digital Ocean credential path found at {path}')
-        assert credentials_found == 1, 'more than 1 credential file found'
-        if CREDENTIALS_PATH is None:
-            raise DigitalOceanError(
-                'no credentials file found from '
-                f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
+    assert _client is None
+    CREDENTIALS_PATH = None
+    credentials_found = 0
+    for path in POSSIBLE_CREDENTIALS_PATHS:
+        if os.path.exists(path):
+            CREDENTIALS_PATH = path
+            credentials_found += 1
+            logger.debug(f'Digital Ocean credential path found at {path}')
+    assert credentials_found == 1, 'more than 1 credential file found'
+    if CREDENTIALS_PATH is None:
+        raise DigitalOceanError(
+            'no credentials file found from '
+            f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
 
-        auth_contexts = common_utils.read_yaml(
-            CREDENTIALS_PATH)['auth-contexts']
-        for context, api_token in auth_contexts.items():
-            try:
-                test_client = do.pydo.Client(token=api_token)
-                test_client.droplets.list()
-                logger.debug(f'using {context} context')
-                _client = test_client
-                break
-            except do.exceptions().HttpResponseError:
-                continue
-        else:
-            raise DigitalOceanError(
-                'no valid api tokens found try '
-                'setting a new API token with `doctl auth init`')
+    auth_contexts = common_utils.read_yaml(
+        CREDENTIALS_PATH)['auth-contexts']
+    for context, api_token in auth_contexts.items():
+        try:
+            test_client = do.pydo.Client(token=api_token)
+            test_client.droplets.list()
+            logger.debug(f'using {context} context')
+            _client = test_client
+            break
+        except do.exceptions().HttpResponseError:
+            continue
+    else:
+        raise DigitalOceanError(
+            'no valid api tokens found try '
+            'setting a new API token with `doctl auth init`')
     return _client
 
 
