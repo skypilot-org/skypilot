@@ -129,11 +129,24 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def _existing_allowed_contexts(cls) -> List[str]:
-        """Get existing allowed contexts."""
+    def _existing_allowed_contexts(cls) -> List[Optional[str]]:
+        """Get existing allowed contexts.
+
+        If None is returned in the list, it means that we are running in a pod
+        with in-cluster auth. In this case, we specify None context, which will
+        use the service account mounted in the pod.
+        """
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
-        if all_contexts is None:
+        if len(all_contexts) == 0:
             return []
+        if all_contexts == [None]:
+            # If only one context is found and it is None, we are running in a
+            # pod with in-cluster auth. In this case, we allow it to be used
+            # without checking against allowed_contexts.
+            # TODO(romilb): We may want check in-cluster auth against
+            #  allowed_contexts in the future by adding a special context name
+            #  for in-cluster auth.
+            return [None]
         all_contexts = set(all_contexts)
 
         allowed_contexts = skypilot_config.get_nested(
@@ -164,7 +177,15 @@ class Kubernetes(clouds.Cloud):
         del accelerators, zone, use_spot  # unused
         existing_contexts = cls._existing_allowed_contexts()
 
-        regions = [clouds.Region(context) for context in existing_contexts]
+        regions = []
+        for context in existing_contexts:
+            if context is None:
+                # If running in-cluster, we allow the region to be set to the
+                # singleton region since there is no context name available.
+                regions.append(clouds.Region(
+                    kubernetes_utils.IN_CLUSTER_REGION))
+            else:
+                regions.append(clouds.Region(context))
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -541,13 +562,20 @@ class Kubernetes(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         if region == self._LEGACY_SINGLETON_REGION:
             # For backward compatibility, we allow the region to be set to the
-            # legacy singletonton region.
+            # legacy singleton region.
             # TODO: Remove this after 0.9.0.
             return region, zone
 
+        if region == kubernetes_utils.IN_CLUSTER_REGION:
+            # If running incluster, we set region to IN_CLUSTER_REGION
+            # since there is no context name available.
+            return region, zone
+
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
-        if all_contexts is None:
-            all_contexts = []
+        if all_contexts == [None]:
+            # If [None] context is returned, use the singleton region since we
+            # are running in a pod with in-cluster auth.
+            all_contexts = [kubernetes_utils.IN_CLUSTER_REGION]
         if region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
