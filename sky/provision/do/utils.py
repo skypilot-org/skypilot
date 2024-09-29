@@ -201,8 +201,8 @@ def filter_instances(
                         'status'] in status_filters:
                     filtered_instances[instance['name']] = instance
         except do.exceptions().HttpResponseError as err:
-            DigitalOceanError('Error: {0} {1}: {2}'.format(
-                err.status_code, err.reason, err.error.message))
+            DigitalOceanError(
+                f'Error: {err.status_code} {err.reason}: {err.error.message}')
 
         pages = resp['links']
         if 'pages' in pages and 'next' in pages['pages']:
