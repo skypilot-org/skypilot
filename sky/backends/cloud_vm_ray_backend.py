@@ -1312,7 +1312,10 @@ class RetryingVmProvisioner(object):
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
-        ux_utils.log_once(ux_utils.format_title('Cluster Launching'), logger)
+        cluster_launching_title = controller_utils.cluster_launching_title(
+            cluster_name)
+        ux_utils.log_once(ux_utils.format_title(cluster_launching_title),
+                          logger)
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
@@ -4423,7 +4426,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             to_provision = handle_before_refresh.launched_resources
             self.check_resources_fit_cluster(handle_before_refresh, task)
 
-        ux_utils.log_once(ux_utils.format_title('Cluster Launching'), logger)
+        cluster_launching_title = controller_utils.cluster_launching_title(
+            cluster_name)
+        ux_utils.log_once(ux_utils.format_title(cluster_launching_title),
+                          logger)
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
             f'[{task.num_nodes}x {to_provision}].'
@@ -4480,7 +4486,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.system(f'touch {log_path}')
         tail_cmd = f'tail -n100 -f {log_path}'
 
-        ux_utils.log_once(ux_utils.format_title('Cluster Launching'), logger)
+        cluster_launching_title = controller_utils.cluster_launching_title(
+            handle.cluster_name)
+        ux_utils.log_once(ux_utils.format_title(cluster_launching_title),
+                          logger)
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 

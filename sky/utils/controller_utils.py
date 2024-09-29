@@ -248,8 +248,8 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y '
-                '&> /dev/null; '
+                'then apt update &> /dev/null && '
+                'apt install curl socat netcat -y &> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '
@@ -794,3 +794,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
+
+
+def cluster_launching_title(cluster_name: str) -> str:
+    if cluster_name and Controllers.from_name(cluster_name) is not None:
+        return 'Controller Launching'
+    return 'Cluster Launching'
