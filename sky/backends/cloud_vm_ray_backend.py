@@ -1314,8 +1314,7 @@ class RetryingVmProvisioner(object):
         tail_cmd = f'tail -n100 -f {log_path}'
         cluster_launching_title = controller_utils.cluster_launching_title(
             cluster_name)
-        ux_utils.log_once(ux_utils.format_title(cluster_launching_title),
-                          logger)
+        ux_utils.log_once(cluster_launching_title, logger)
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
@@ -3333,10 +3332,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
-        job_title = controller_utils.job_starting_title(handle.cluster_name)
-        logger.info(
-            ux_utils.format_title(job_title) + '\nSubmitted with ID: '
-            f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
+        job_title = controller_utils.job_starting_title(handle.cluster_name,
+                                                        job_id)
+        logger.info(job_title)
 
         try:
             if not detach_run:
@@ -4429,8 +4427,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         cluster_launching_title = controller_utils.cluster_launching_title(
             cluster_name)
-        ux_utils.log_once(ux_utils.format_title(cluster_launching_title),
-                          logger)
+        ux_utils.log_once(cluster_launching_title, logger)
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
             f'[{task.num_nodes}x {to_provision}].'
@@ -4489,8 +4486,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         cluster_launching_title = controller_utils.cluster_launching_title(
             handle.cluster_name)
-        ux_utils.log_once(ux_utils.format_title(cluster_launching_title),
-                          logger)
+        ux_utils.log_once(cluster_launching_title, logger)
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
