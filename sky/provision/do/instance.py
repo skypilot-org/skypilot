@@ -60,8 +60,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     for instance in stopped_instances.values():
         utils.start_instance(instance)
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
-        instances = utils.filter_instances(cluster_name_on_cloud,
-                                           pending_status + ['off'])
+        instances = utils.filter_instances(cluster_name_on_cloud, ['off'])
         if len(instances) == 0:
             break
         num_stopped_instances = len(stopped_instances)
