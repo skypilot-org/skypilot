@@ -176,6 +176,11 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     return instance
 
 
+def start_instance(instance: Dict[str, Any]) -> None:
+    client().droplet_actions.post(droplet_id=instance['id'],
+                                  body={'type': 'power_on'})
+
+
 def filter_instances(
         cluster_name_on_cloud: str,
         status_filters: Optional[List[str]] = None) -> Dict[str, Any]:

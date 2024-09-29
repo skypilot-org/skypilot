@@ -57,9 +57,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     stopped_instances = utils.filter_instances(cluster_name_on_cloud,
                                                status_filters=['off'])
-    for instance_meta in stopped_instances.values():
-        utils.client().droplet_actions.post(droplet_id=instance_meta['id'],
-                                            body={'type': 'power_on'})
+    for instance in stopped_instances.values():
+        utils.start_instance(instance)
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,
                                            pending_status + ['off'])
