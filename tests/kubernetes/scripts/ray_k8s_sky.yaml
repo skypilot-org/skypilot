@@ -144,7 +144,7 @@ available_node_types:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys && sudo service ssh restart"]
           ports:
           - containerPort: 22  # Used for SSH
           # This volume allocates shared memory for Ray to use for its plasma
@@ -224,7 +224,7 @@ available_node_types:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys && sudo service ssh restart"]
           resources:
             requests:
               cpu: 1000m

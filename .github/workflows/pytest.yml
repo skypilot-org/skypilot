@@ -10,6 +10,8 @@ on:
     branches:
       - master
       - 'releases/**'
+  merge_group:
+
 jobs:
   python-test:
     strategy:
@@ -27,7 +29,7 @@ jobs:
           - tests/test_optimizer_random_dag.py
           - tests/test_storage.py
           - tests/test_wheels.py
-          - tests/test_spot.py
+          - tests/test_jobs_and_serve.py
           - tests/test_yaml_parser.py
     runs-on: ubuntu-latest
     steps:
@@ -51,7 +53,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ".[all]"
+          pip install -e ".[all]"
           pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
 
       - name: Run tests with pytest

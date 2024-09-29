@@ -1,0 +1,39 @@
+# Example: Cog + SkyPilot.
+#
+# This is the "Blur" example from https://github.com/replicate/cog-examples/blob/main/blur/README.md
+#
+# Usage (1 serving instance):
+#
+#   sky launch -c cog ./sky.yaml
+#
+#   IP=$(sky status --ip cog)
+#   curl http://$IP:5000/predictions -X POST \
+#     -H 'Content-Type: application/json' \
+#     -d '{"input": {"image": "https://blog.skypilot.co/introducing-sky-serve/images/sky-serve-thumbnail.png"}}' \
+#   | jq -r '.output | split(",")[1]' | base64 --decode > output.png
+#
+# Usage (SkyServe): See README.md
+
+service:
+  readiness_probe:
+    path: /predictions
+    post_data:
+      input: {"image": "https://blog.skypilot.co/introducing-sky-serve/images/sky-serve-thumbnail.png"}
+  replicas: 2
+
+resources:
+  accelerators: {L4, T4, A10G}
+  ports:
+    - 5000
+
+workdir: .
+
+setup: |
+  set -e
+  sudo curl -o /usr/local/bin/cog -L "https://github.com/replicate/cog/releases/latest/download/cog_$(uname -s)_$(uname -m)"
+  sudo chmod +x /usr/local/bin/cog
+
+  cog build -t my-model
+
+run: |
+  docker run -d -p 5000:5000 --gpus all my-model

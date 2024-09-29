@@ -6,6 +6,7 @@ import copy
 import io
 import multiprocessing.pool
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -184,8 +185,22 @@ def run_with_log(
             daemon_script = os.path.join(
                 os.path.dirname(os.path.abspath(job_lib.__file__)),
                 'subprocess_daemon.py')
+            if not hasattr(constants, 'SKY_GET_PYTHON_PATH_CMD'):
+                # Backward compatibility: for cluster started before #3326, this
+                # constant does not exist. Since we generate the job script
+                # in backends.cloud_vm_ray_backend with inspect, so the
+                # the lates `run_with_log` will be used, but the `constants` is
+                # not updated. We fallback to `python3` in this case.
+                # TODO(zhwu): remove this after 0.7.0.
+                python_path = 'python3'
+            else:
+                python_path = subprocess.check_output(
+                    constants.SKY_GET_PYTHON_PATH_CMD,
+                    shell=True,
+                    stderr=subprocess.DEVNULL,
+                    encoding='utf-8').strip()
             daemon_cmd = [
-                'python3',
+                python_path,
                 daemon_script,
                 '--parent-pid',
                 str(parent_pid),
@@ -193,9 +208,12 @@ def run_with_log(
                 str(proc.pid),
             ]
 
+            # We do not need to set `start_new_session=True` here, as the
+            # daemon script will detach itself from the parent process with
+            # fork to avoid being killed by ray job. See the reason we
+            # daemonize the process in `sky/skylet/subprocess_daemon.py`.
             subprocess.Popen(
                 daemon_cmd,
-                start_new_session=True,
                 # Suppress output
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -248,6 +266,9 @@ def make_task_bash_script(codegen: str,
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
+    # DEACTIVATE_SKY_REMOTE_PYTHON_ENV: Deactivate the SkyPilot runtime env, as
+    # the ray cluster is started within the runtime env, which may cause the
+    # user program to run in that env as well.
     # PYTHONUNBUFFERED is used to disable python output buffering.
     script = [
         textwrap.dedent(f"""\
@@ -256,12 +277,13 @@ def make_task_bash_script(codegen: str,
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
+            {constants.DEACTIVATE_SKY_REMOTE_PYTHON_ENV}
             export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
     if env_vars is not None:
         for k, v in env_vars.items():
-            script.append(f'export {k}="{v}"')
+            script.append(f'export {k}={shlex.quote(str(v))}')
     script += [
         codegen,
         '',  # New line at EOF.
@@ -364,14 +386,15 @@ def _follow_job_logs(file,
 
 def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
-              spot_job_id: Optional[int] = None,
+              managed_job_id: Optional[int] = None,
               follow: bool = True) -> None:
     """Tail the logs of a job.
 
     Args:
         job_id: The job id.
         log_dir: The log directory of the job.
-        spot_job_id: The spot job id (for logging info only to avoid confusion).
+        managed_job_id: The managed job id (for logging info only to avoid
+            confusion).
         follow: Whether to follow the logs or print the logs so far and exit.
     """
     if job_id is None:
@@ -381,14 +404,14 @@ def tail_logs(job_id: Optional[int],
         logger.info('Skip streaming logs as no job has been submitted.')
         return
     job_str = f'job {job_id}'
-    if spot_job_id is not None:
-        job_str = f'spot job {spot_job_id}'
+    if managed_job_id is not None:
+        job_str = f'managed job {managed_job_id}'
     if log_dir is None:
         print(f'{job_str.capitalize()} not found (see `sky queue`).',
               file=sys.stderr)
         return
-    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
-                 f'{spot_job_id}.')
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
+                 f'{managed_job_id}.')
     logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
                 f'{colorama.Style.RESET_ALL}')
     log_path = os.path.join(log_dir, 'run.log')

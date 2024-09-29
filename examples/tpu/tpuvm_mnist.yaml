@@ -5,7 +5,7 @@ resources:
 
 # The setup command.  Will be run under the working directory.
 setup: |
-  git clone https://github.com/google/flax.git --branch v0.6.11
+  git clone https://github.com/google/flax.git --branch v0.8.2
 
   conda activate flax
   if [ $? -eq 0 ]; then
@@ -14,18 +14,20 @@ setup: |
     conda create -n flax python=3.10 -y
     conda activate flax
     # Make sure to install TPU related packages in a conda env to avoid package conflicts.
-    pip install "jax[tpu]==0.4.23" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-    pip install --upgrade clu
+    pip install \
+      -f https://storage.googleapis.com/jax-releases/libtpu_releases.html "jax[tpu]==0.4.25" \
+      clu \
+      tensorflow tensorflow-datasets
     pip install -e flax
-    pip install tensorflow tensorflow-datasets
   fi
 
 
 # The command to run.  Will be run under the working directory.
 run: |
   conda activate flax
+  pip install clu
   cd flax/examples/mnist
   python3 main.py --workdir=/tmp/mnist \
-  --config=configs/default.py \
-  --config.learning_rate=0.05 \
-  --config.num_epochs=10
+    --config=configs/default.py \
+    --config.learning_rate=0.05 \
+    --config.num_epochs=10

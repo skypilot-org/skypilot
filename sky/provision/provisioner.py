@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import colorama
 
+import sky
 from sky import clouds
 from sky import provision
 from sky import sky_logging
@@ -23,8 +24,8 @@ from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
-from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -38,23 +39,11 @@ _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
 
-@dataclasses.dataclass
-class ClusterName:
-    display_name: str
-    name_on_cloud: str
-
-    def __repr__(self) -> str:
-        return repr(self.display_name)
-
-    def __str__(self) -> str:
-        return self.display_name
-
-
 def _bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
-    cluster_name: ClusterName,
+    cluster_name: resources_utils.ClusterName,
     bootstrap_config: provision_common.ProvisionConfig,
 ) -> provision_common.ProvisionRecord:
     provider_name = repr(cloud)
@@ -135,11 +124,12 @@ def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
-    cluster_name: ClusterName,
+    cluster_name: resources_utils.ClusterName,
     num_nodes: int,
     cluster_yaml: str,
     prev_cluster_ever_up: bool,
     log_dir: str,
+    ports_to_open_on_launch: Optional[List[int]] = None,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
 
@@ -161,10 +151,13 @@ def bulk_provision(
         ['node_config'],
         count=num_nodes,
         tags={},
-        resume_stopped_nodes=True)
+        resume_stopped_nodes=True,
+        ports_to_open_on_launch=ports_to_open_on_launch)
 
     with provision_logging.setup_provision_logging(log_dir):
         try:
+            logger.debug(f'SkyPilot version: {sky.__version__}; '
+                         f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
             logger.debug(
                 'Provision config:\n'
@@ -223,7 +216,7 @@ def bulk_provision(
             raise
 
 
-def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
+def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
                      terminate: bool, provider_config: Dict) -> None:
     """Deleting or stopping a cluster.
 
@@ -257,6 +250,8 @@ def _ssh_probe_command(ip: str,
         str(ssh_port),
         '-o',
         'StrictHostKeyChecking=no',
+        '-o',
+        'PasswordAuthentication=no',
         '-o',
         'ConnectTimeout=10s',
         '-o',
@@ -346,18 +341,23 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
-    logger.debug(f'Waiting for SSH using command: {_shlex_join(command)}')
-    proc = subprocess.run(command,
-                          shell=False,
-                          check=False,
-                          stdout=subprocess.DEVNULL,
-                          stderr=subprocess.PIPE)
-    if proc.returncode != 0:
-        stderr = proc.stderr.decode('utf-8')
-        stderr = f'Error: {stderr}'
-        logger.debug(
-            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
-            f'{stderr}')
+    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    logger.debug(message)
+    try:
+        proc = subprocess.run(command,
+                              shell=False,
+                              check=False,
+                              timeout=10,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode('utf-8')
+            stderr = f'Error: {stderr}'
+            logger.debug(f'{message}{stderr}')
+            return False, stderr
+    except subprocess.TimeoutExpired as e:
+        stderr = f'Error: {str(e)}'
+        logger.debug(f'{message}Error: {e}')
         return False, stderr
     return True, ''
 
@@ -402,8 +402,8 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 
 def _post_provision_setup(
-        cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
-        provision_record: provision_common.ProvisionRecord,
+        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
@@ -428,14 +428,13 @@ def _post_provision_setup(
 
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
-        raise RuntimeError(
-            f'Provision failed for cluster {cluster_name!r}. '
-            'Could not find any head instance. To fix: refresh '
-            'status with: sky status -r; and retry provisioning.')
+        e = RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
+                         'Could not find any head instance. To fix: refresh '
+                         f'status with: sky status -r; and retry provisioning.')
+        setattr(e, 'detailed_reason', str(cluster_info))
+        raise e
 
     # TODO(suquark): Move wheel build here in future PRs.
-    ip_list = cluster_info.get_feasible_ips()
-    port_list = cluster_info.get_ssh_ports()
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
@@ -455,7 +454,7 @@ def _post_provision_setup(
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                '[bold cyan]Lauching - Initializing docker container[/]')
+                '[bold cyan]Launching - Initializing docker container[/]')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -472,7 +471,7 @@ def _post_provision_setup(
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
-        # (1) spot controllers need permission to launch/down nodes of
+        # (1) jobs controllers need permission to launch/down nodes of
         #     multiple clouds
         # (2) head instances need permission for auto stop or auto down
         #     nodes for the current cloud
@@ -495,9 +494,9 @@ def _post_provision_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
-        head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=port_list[0],
-                                                      **ssh_credentials)
+        runners = provision.get_command_runners(cloud_name, cluster_info,
+                                                **ssh_credentials)
+        head_runner = runners[0]
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
@@ -534,7 +533,7 @@ def _post_provision_setup(
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
-        if len(ip_list) > 1:
+        if cluster_info.num_instances > 1:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
@@ -556,8 +555,8 @@ def _post_provision_setup(
 
 
 def post_provision_runtime_setup(
-        cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
-        provision_record: provision_common.ProvisionRecord,
+        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
         log_dir: str) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.

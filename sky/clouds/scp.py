@@ -144,10 +144,6 @@ class SCP(clouds.Cloud):
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, SCP)
-
     @classmethod
     def get_default_instance_type(
             cls,
@@ -183,11 +179,11 @@ class SCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, dryrun  # Unused.
+        del cluster_name, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
         r = resources
@@ -255,16 +251,18 @@ class SCP(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         # Check if the host VM satisfies the min/max disk size limits.
         is_allowed = self._is_disk_size_allowed(resources)
         if not is_allowed:
-            return ([], [])
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in SCP Cloud
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -291,9 +289,10 @@ class SCP(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -308,8 +307,10 @@ class SCP(clouds.Cloud):
             zone=resources.zone,
             clouds='scp')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -336,8 +337,8 @@ class SCP(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO(jgoo1): Implement get_current_user_identity for SCP
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        # TODO(jgoo1): Implement get_user_identities for SCP
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:

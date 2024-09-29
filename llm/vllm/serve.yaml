@@ -13,8 +13,8 @@ setup: |
 
   # Install fschat and accelerate for chat completion
   git clone https://github.com/vllm-project/vllm.git || true
-  pip list | grep vllm || pip install vllm==0.3.0
-  pip list | grep transformers || pip install transformers==4.37.2
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
 
   pip install gradio
 

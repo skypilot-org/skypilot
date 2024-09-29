@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+import enum
 import functools
 import json
 import os
@@ -6,13 +7,14 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import colorama
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
@@ -44,11 +46,6 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH: str = (
 # NOTE: do not expanduser() on this path. It's used as a destination path on the
 # remote cluster.
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
-# Do not place the backup under the gcloud config directory, as ray
-# autoscaler can overwrite that directory on the remote nodes.
-# NOTE: do not expanduser() on this path. It's used as a destination path on the
-# remote cluster.
-GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
@@ -76,7 +73,6 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }}; }} && \
-    {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
@@ -116,6 +112,19 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.returncode != 0
+
+
+class GCPIdentityType(enum.Enum):
+    """GCP identity type.
+
+    The account type is determined by the current user identity, based on
+    the identity email.
+    """
+    # Example of a service account email:
+    #   skypilot-v1@xxxx.iam.gserviceaccount.com
+    SERVICE_ACCOUNT = 'iam.gserviceaccount.com'
+
+    SHARED_CREDENTIALS_FILE = ''
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -171,20 +180,33 @@ class GCP(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
-            return {
+            unsupported = {
                 clouds.CloudImplementationFeatures.STOP: (
-                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                    'TPU VM pods cannot be stopped. Please refer to: '
+                    'https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             # TPU node does not support multi-node.
-            return {
-                clouds.CloudImplementationFeatures.MULTI_NODE:
-                    ('TPU node does not support multi-node. Please set '
-                     'num_nodes to 1.')
-            }
-        return {}
+            unsupported[clouds.CloudImplementationFeatures.MULTI_NODE] = (
+                'TPU node does not support multi-node. Please set '
+                'num_nodes to 1.')
+        # TODO(zhwu): We probably need to store the MIG requirement in resources
+        # because `skypilot_config` may change for an existing cluster.
+        # Clusters created with MIG (only GPU clusters) cannot be stopped.
+        if (skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'),
+                None,
+                override_configs=resources.cluster_config_overrides) is not None
+                and resources.accelerators):
+            unsupported[clouds.CloudImplementationFeatures.STOP] = (
+                'Managed Instance Group (MIG) does not support stopping yet.')
+            unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
+                'Managed Instance Group with DWS does not support '
+                'spot instances.')
+        return unsupported
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -237,6 +259,10 @@ class GCP(clouds.Cloud):
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
         return regions
+
+    @classmethod
+    def optimize_by_zone(cls) -> bool:
+        return True
 
     @classmethod
     def zones_provision_loop(
@@ -306,9 +332,6 @@ class GCP(clouds.Cloud):
             return 0.11 * num_gigabytes
         else:
             return 0.08 * num_gigabytes
-
-    def is_same_cloud(self, other):
-        return isinstance(other, GCP)
 
     @classmethod
     def _is_machine_image(cls, image_id: str) -> bool:
@@ -385,7 +408,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
@@ -401,6 +424,21 @@ class GCP(clouds.Cloud):
         # issue when first booted.
         image_id = 'skypilot:cpu-debian-11'
 
+        def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
+            if (r.disk_tier is not None and
+                    r.disk_tier != resources_utils.DiskTier.BEST):
+                return r.disk_tier
+            # Failover disk tier from ultra to low.
+            all_tiers = list(reversed(resources_utils.DiskTier))
+            start_index = all_tiers.index(GCP._translate_disk_tier(r.disk_tier))
+            while start_index < len(all_tiers):
+                disk_tier = all_tiers[start_index]
+                ok, _ = GCP.check_disk_tier(r.instance_type, disk_tier)
+                if ok:
+                    return disk_tier
+                start_index += 1
+            assert False, 'Low disk tier should always be supported on GCP.'
+
         r = resources
         # Find GPU spec, if any.
         resources_vars = {
@@ -414,6 +452,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
             'gcp_project_id': self.get_project_id(dryrun),
+            **GCP._get_disk_specs(_failover_disk_tier()),
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -437,7 +476,9 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
-                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}'
+                elif acc == 'H100':
+                    resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
                         acc.lower())
@@ -451,8 +492,8 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 535.86.10, CUDA Library 12.2
                     image_id = 'skypilot:gpu-debian-11'
 
-        if resources.image_id is not None and resources.extract_docker_image(
-        ) is None:
+        if (resources.image_id is not None and
+                resources.extract_docker_image() is None):
             if None in resources.image_id:
                 image_id = resources.image_id[None]
             else:
@@ -470,30 +511,47 @@ class GCP(clouds.Cloud):
             resources_vars['machine_image'] = image_id
             resources_vars['image_id'] = None
 
-        resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
-
         firewall_rule = None
         if resources.ports is not None:
-            firewall_rule = (
-                USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
+            firewall_rule = (USER_PORTS_FIREWALL_RULE_NAME.format(
+                cluster_name.name_on_cloud))
         resources_vars['firewall_rule'] = firewall_rule
 
         # For TPU nodes. TPU VMs do not need TPU_NAME.
         tpu_node_name = resources_vars.get('tpu_node_name')
         if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
             if tpu_node_name is None:
-                tpu_node_name = cluster_name_on_cloud
+                tpu_node_name = cluster_name.name_on_cloud
 
         resources_vars['tpu_node_name'] = tpu_node_name
 
+        managed_instance_group_config = skypilot_config.get_nested(
+            ('gcp', 'managed_instance_group'),
+            None,
+            override_configs=resources.cluster_config_overrides)
+        use_mig = managed_instance_group_config is not None
+        resources_vars['gcp_use_managed_instance_group'] = use_mig
+        # Convert boolean to 0 or 1 in string, as GCP does not support boolean
+        # value in labels for TPU VM APIs.
+        resources_vars['gcp_use_managed_instance_group_value'] = str(
+            int(use_mig))
+        if use_mig:
+            resources_vars.update(managed_instance_group_config)
+        resources_vars[
+            'force_enable_external_ips'] = skypilot_config.get_nested(
+                ('gcp', 'force_enable_external_ips'), False)
         return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
-    ) -> Tuple[List['resources.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return ([resources], [])
+            ok, _ = GCP.check_disk_tier(resources.instance_type,
+                                        resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
+            return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
@@ -502,16 +560,20 @@ class GCP(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if host_vm_type is None:
-                return ([], [])
-            else:
-                r = resources.copy(
-                    cloud=GCP(),
-                    instance_type=host_vm_type,
-                    accelerators=None,
-                    cpus=None,
-                    memory=None,
-                )
-                return ([r], [])
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
+            ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+            if not ok:
+                return resources_utils.FeasibleResources([], [], None)
+            r = resources.copy(
+                cloud=GCP(),
+                instance_type=host_vm_type,
+                accelerators=None,
+                cpus=None,
+                memory=None,
+            )
+            return resources_utils.FeasibleResources([r], [], None)
 
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
@@ -533,7 +595,8 @@ class GCP(clouds.Cloud):
             clouds='gcp')
 
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
         assert len(
             instance_list
         ) == 1, f'More than one instance type matched, {instance_list}'
@@ -548,11 +611,13 @@ class GCP(clouds.Cloud):
                 if resources.cpus.endswith('+'):
                     cpus = float(resources.cpus[:-1])
                     if cpus > num_cpus_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
                 else:
                     cpus = float(resources.cpus)
                     if cpus != num_cpus_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
             # FIXME(woosuk, wei-lin): This leverages the fact that TPU VMs
             # have 334 GB RAM, and 400 GB RAM for tpu-v4. We need to move
             # this to service catalog, instead.
@@ -561,14 +626,20 @@ class GCP(clouds.Cloud):
                 if resources.memory.endswith('+'):
                     memory = float(resources.memory[:-1])
                     if memory > memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
                 else:
                     memory = float(resources.memory)
                     if memory != memory_in_tpu_vm:
-                        return ([], fuzzy_candidate_list)
+                        return resources_utils.FeasibleResources(
+                            [], fuzzy_candidate_list, None)
         else:
             host_vm_type = instance_list[0]
 
+        ok, _ = GCP.check_disk_tier(host_vm_type, resources.disk_tier)
+        if not ok:
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
         acc_dict = {acc: acc_count}
         r = resources.copy(
             cloud=GCP(),
@@ -577,7 +648,8 @@ class GCP(clouds.Cloud):
             cpus=None,
             memory=None,
         )
-        return ([r], fuzzy_candidate_list)
+        return resources_utils.FeasibleResources([r], fuzzy_candidate_list,
+                                                 None)
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -633,38 +705,42 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        try:
-            # These files are required because they will be synced to remote
-            # VMs for `gsutil` to access private storage buckets.
-            # `auth.default()` does not guarantee these files exist.
-            for file in [
-                    '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db',
-            ]:
-                if not os.path.isfile(os.path.expanduser(file)):
-                    raise FileNotFoundError(file)
-        except FileNotFoundError as e:
-            return False, (
-                f'Credentails are not set. '
-                f'{cls._CREDENTIAL_HINT}\n'
-                f'{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+        identity_type = cls._get_identity_type()
+        if identity_type == GCPIdentityType.SHARED_CREDENTIALS_FILE:
+            # This files are only required when using the shared credentials
+            # to access GCP. They are not required when using service account.
+            try:
+                # These files are required because they will be synced to remote
+                # VMs for `gsutil` to access private storage buckets.
+                # `auth.default()` does not guarantee these files exist.
+                for file in [
+                        '~/.config/gcloud/access_tokens.db',
+                        '~/.config/gcloud/credentials.db',
+                ]:
+                    if not os.path.isfile(os.path.expanduser(file)):
+                        raise FileNotFoundError(file)
+            except FileNotFoundError as e:
+                return False, (
+                    f'Credentails are not set. '
+                    f'{cls._CREDENTIAL_HINT}\n'
+                    f'{cls._INDENT_PREFIX}Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        try:
-            cls._find_application_key_path()
-        except FileNotFoundError as e:
-            return False, (
-                f'Application credentials are not set. '
-                f'{cls._APPLICATION_CREDENTIAL_HINT}\n'
-                f'{cls._INDENT_PREFIX}Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            try:
+                cls._find_application_key_path()
+            except FileNotFoundError as e:
+                return False, (
+                    f'Application credentials are not set. '
+                    f'{cls._APPLICATION_CREDENTIAL_HINT}\n'
+                    f'{cls._INDENT_PREFIX}Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
 
         try:
             # Check if application default credentials are set.
             project_id = cls.get_project_id()
 
             # Check if the user is activated.
-            identity = cls.get_current_user_identity()
+            identity = cls.get_active_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 exceptions.CloudUserIdentityError) as e:
             # See also: https://stackoverflow.com/a/53307505/1165051
@@ -725,17 +801,17 @@ class GCP(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel,unused-import
         import google.auth
-        import googleapiclient.discovery
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
-        service = googleapiclient.discovery.build('cloudresourcemanager',
-                                                  'v1',
-                                                  credentials=credentials)
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
         gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
         permissions = {'permissions': gcp_minimal_permissions}
-        request = service.projects().testIamPermissions(resource=project,
-                                                        body=permissions)
+        request = crm.projects().testIamPermissions(resource=project,
+                                                    body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
@@ -749,43 +825,45 @@ class GCP(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # Create a backup of the config_default file, as the original file can
-        # be modified on the remote cluster by ray causing authentication
-        # problems. The backup file will be updated to the remote cluster
-        # whenever the original file is not empty and will be applied
-        # appropriately on the remote cluster when necessary.
-        if (os.path.exists(os.path.expanduser(GCP_CONFIG_PATH)) and
-                os.path.getsize(os.path.expanduser(GCP_CONFIG_PATH)) > 0):
-            subprocess.run(f'cp {GCP_CONFIG_PATH} {GCP_CONFIG_SKY_BACKUP_PATH}',
-                           shell=True,
-                           check=True)
-        elif not os.path.exists(os.path.expanduser(GCP_CONFIG_SKY_BACKUP_PATH)):
-            raise RuntimeError(
-                'GCP credential file is empty. Please make sure you '
-                'have run: gcloud init')
-
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
         # We only add the existing credential files. It should be safe to ignore
-        # the missing files, as we successfully created the VM at this point,
-        # meaning the authentication is successful.
+        # the missing files, as we have checked the cloud credentials in
+        # `check_credentials()` when the user calls `sky check`.
         credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(
                 f'~/.config/gcloud/{filename}'))
         }
-        # Upload the application key path to the default path, so that
-        # autostop and GCS can be accessed on the remote cluster.
-        credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
-            self._find_application_key_path())
-        credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
+        try:
+            application_key_path = self._find_application_key_path()
+            # Upload the application key path to the default path, so that
+            # autostop and GCS can be accessed on the remote cluster.
+            credentials[DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH] = (
+                application_key_path)
+        except FileNotFoundError:
+            # Skip if the application key path is not found.
+            pass
         return credentials
 
     @classmethod
+    def _get_identity_type(cls) -> Optional[GCPIdentityType]:
+        try:
+            account = cls.get_active_user_identity()
+        except exceptions.CloudUserIdentityError:
+            return None
+        if account is None:
+            return None
+        assert account is not None
+        if GCPIdentityType.SERVICE_ACCOUNT.value in account[0]:
+            return GCPIdentityType.SERVICE_ACCOUNT
+        return GCPIdentityType.SHARED_CREDENTIALS_FILE
+
+    @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
@@ -816,11 +894,13 @@ class GCP(clouds.Cloud):
                     '  Reason: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
-        return [f'{account} [project_id={project_id}]']
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for GCP. Currently we only support one identity.
+        return [[f'{account} [project_id={project_id}]']]
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return user_identity[0].replace('\n', '')
@@ -828,13 +908,14 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def need_cleanup_after_preemption(self,
-                                      resources: 'resources.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption."""
+    def need_cleanup_after_preemption_or_failure(
+            self, resources: 'resources.Resources') -> bool:
+        """Whether a resource needs cleanup after preeemption or failure."""
         # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
+        # On-demand TPU VMs are likely to require manual cleanup as well.
 
         return gcp_utils.is_tpu_vm(resources)
 
@@ -861,15 +942,57 @@ class GCP(clouds.Cloud):
             'gcp')
 
     @classmethod
+    def check_disk_tier(
+            cls, instance_type: Optional[str],
+            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
+        if disk_tier != resources_utils.DiskTier.ULTRA or instance_type is None:
+            return True, ''
+        # Ultra disk tier (pd-extreme) only support m2, m3 and part of n2
+        # instance types, so we failover to lower tiers for other instance
+        # types. Reference:
+        # https://cloud.google.com/compute/docs/disks/extreme-persistent-disk#machine_shape_support  # pylint: disable=line-too-long
+        series = instance_type.split('-')[0]
+        if series in ['m2', 'm3', 'n2']:
+            if series == 'n2':
+                num_cpus = int(instance_type.split('-')[2])
+                if num_cpus < 64:
+                    return False, ('n2 series with less than 64 vCPUs are '
+                                   'not supported with pd-extreme.')
+            return True, ''
+        return False, (f'{series} series is not supported with pd-extreme. '
+                       'Only m2, m3 series and n2 series with 64 or more vCPUs '
+                       'are supported.')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_tier: resources_utils.DiskTier) -> None:
+        ok, msg = cls.check_disk_tier(instance_type, disk_tier)
+        if not ok:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
+
+    @classmethod
     def _get_disk_type(cls,
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls._translate_disk_tier(disk_tier)
         tier2name = {
+            resources_utils.DiskTier.ULTRA: 'pd-extreme',
             resources_utils.DiskTier.HIGH: 'pd-ssd',
             resources_utils.DiskTier.MEDIUM: 'pd-balanced',
             resources_utils.DiskTier.LOW: 'pd-standard',
         }
         return tier2name[tier]
+
+    @classmethod
+    def _get_disk_specs(
+            cls,
+            disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
+        specs: Dict[str, Any] = {'disk_tier': cls._get_disk_type(disk_tier)}
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            # Only pd-extreme supports custom iops.
+            # see https://cloud.google.com/compute/docs/disks#disk-types
+            specs['disk_iops'] = 20000
+        return specs
 
     @classmethod
     def _label_filter_str(cls, tag_filters: Dict[str, str]) -> str:
@@ -965,8 +1088,8 @@ class GCP(clouds.Cloud):
         assert False, 'This code path should not be used.'
 
     @classmethod
-    def create_image_from_cluster(cls, cluster_name: str,
-                                  cluster_name_on_cloud: str,
+    def create_image_from_cluster(cls,
+                                  cluster_name: resources_utils.ClusterName,
                                   region: Optional[str],
                                   zone: Optional[str]) -> str:
         del region  # unused
@@ -975,7 +1098,7 @@ class GCP(clouds.Cloud):
         # `ray-cluster-name` tag, which is guaranteed by the current `ray`
         # backend. Once the `provision.query_instances` is implemented for GCP,
         # we should be able to get rid of this assumption.
-        tag_filters = {'ray-cluster-name': cluster_name_on_cloud}
+        tag_filters = {'ray-cluster-name': cluster_name.name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '
@@ -987,7 +1110,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             instance_name_cmd,
-            error_msg=f'Failed to get instance name for {cluster_name!r}',
+            error_msg=
+            f'Failed to get instance name for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
         instance_names = json.loads(stdout)
@@ -998,7 +1122,7 @@ class GCP(clouds.Cloud):
                     f'instance, but got: {instance_names}')
         instance_name = instance_names[0]['name']
 
-        image_name = f'skypilot-{cluster_name}-{int(time.time())}'
+        image_name = f'skypilot-{cluster_name.display_name}-{int(time.time())}'
         create_image_cmd = (f'gcloud compute images create {image_name} '
                             f'--source-disk  {instance_name} '
                             f'--source-disk-zone {zone}')
@@ -1010,7 +1134,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             create_image_cmd,
-            error_msg=f'Failed to create image for {cluster_name!r}',
+            error_msg=
+            f'Failed to create image for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
 
@@ -1024,7 +1149,8 @@ class GCP(clouds.Cloud):
         subprocess_utils.handle_returncode(
             returncode,
             image_uri_cmd,
-            error_msg=f'Failed to get image uri for {cluster_name!r}',
+            error_msg=
+            f'Failed to get image uri for {cluster_name.display_name!r}',
             stderr=stderr,
             stream_logs=True)
 
@@ -1056,3 +1182,25 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        key_regex = re.compile(r'^[a-z]([a-z0-9_-]{0,62})?$')
+        value_regex = re.compile(r'^[a-z0-9_-]{0,63}$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        condition_msg = ('can include lowercase alphanumeric characters, '
+                         'dashes, and underscores, with a total length of 63 '
+                         'characters or less.')
+        if not key_valid:
+            error_msg = (f'Invalid label key {label_key} for GCP. '
+                         f'Key must start with a lowercase letter '
+                         f'and {condition_msg}')
+        if not value_valid:
+            error_msg = (f'Invalid label value {label_value} for GCP. Value '
+                         f'{condition_msg}')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None

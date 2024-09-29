@@ -30,21 +30,19 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            ('Opening ports is not '
-             'supported yet on RunPod.'),
-        clouds.CloudImplementationFeatures.IMAGE_ID:
-            ('Specifying image ID is not supported on RunPod.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Customizing disk tier is not supported yet on RunPod.')
+            ('Customizing disk tier is not supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            ('Mounting object stores is not supported on RunPod. To read data '
+             'from object stores on RunPod, use `mode: COPY` to copy the data '
+             'to local disk.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+    OPEN_PORTS_VERSION = clouds.OpenPortsVersion.LAUNCH_ONLY
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -134,10 +132,6 @@ class RunPod(clouds.Cloud):
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        # Returns true if the two clouds are the same cloud type.
-        return isinstance(other, RunPod)
-
     @classmethod
     def get_default_instance_type(
             cls,
@@ -164,11 +158,11 @@ class RunPod(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun  # unused
+        del zones, dryrun, cluster_name  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -177,20 +171,28 @@ class RunPod(clouds.Cloud):
         else:
             custom_resources = None
 
+        if r.image_id is None:
+            image_id = 'runpod/base:0.0.2'
+        elif r.extract_docker_image() is not None:
+            image_id = r.extract_docker_image()
+        else:
+            image_id = r.image_id[r.region]
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'image_id': image_id,
         }
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -213,9 +215,12 @@ class RunPod(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -229,8 +234,10 @@ class RunPod(clouds.Cloud):
             zone=resources.zone,
             clouds='runpod')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -261,7 +268,7 @@ class RunPod(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
@@ -273,3 +280,9 @@ class RunPod(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='runpod')
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        # TODO: use 0.0 for now to allow all images. We should change this to
+        # return the docker image size.
+        return 0.0

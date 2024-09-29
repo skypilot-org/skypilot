@@ -18,11 +18,11 @@ import pytest
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, --azure, or --lambda.
 #
-# To only run tests for managed spot (without generic tests), use
-# --managed-spot.
+# To only run tests for managed jobs (without generic tests), use
+# --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -40,7 +40,9 @@ cloud_to_pytest_keyword = {
     'oci': 'oci',
     'kubernetes': 'kubernetes',
     'vsphere': 'vsphere',
-    'cudo': 'cudo'
+    'fluidstack': 'fluidstack',
+    'cudo': 'cudo',
+    'paperspace': 'paperspace',
 }
 
 
@@ -55,11 +57,11 @@ def pytest_addoption(parser):
                          action='store_true',
                          default=False,
                          help=f'Only run {cloud.upper()} tests.')
-    parser.addoption('--managed-spot',
+    parser.addoption('--managed-jobs',
                      action='store_true',
                      default=False,
-                     help='Only run tests for managed spot.')
-    parser.addoption('--sky-serve',
+                     help='Only run tests for managed jobs.')
+    parser.addoption('--serve',
                      action='store_true',
                      default=False,
                      help='Only run tests for sky serve.')
@@ -113,10 +115,10 @@ def _get_cloud_to_run(config) -> List[str]:
 def pytest_collection_modifyitems(config, items):
     skip_marks = {}
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
-    skip_marks['managed_spot'] = pytest.mark.skip(
-        reason='skipped, because --managed-spot option is set')
-    skip_marks['sky_serve'] = pytest.mark.skip(
-        reason='skipped, because --sky-serve option is set')
+    skip_marks['managed_jobs'] = pytest.mark.skip(
+        reason='skipped, because --managed-jobs option is set')
+    skip_marks['serve'] = pytest.mark.skip(
+        reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
     for cloud in all_clouds_in_smoke_tests:
@@ -142,14 +144,13 @@ def pytest_collection_modifyitems(config, items):
                     continue
                 item.add_marker(skip_marks[cloud])
 
-        if (not 'managed_spot'
-                in item.keywords) and config.getoption('--managed-spot'):
-            item.add_marker(skip_marks['managed_spot'])
+        if (not 'managed_jobs'
+                in item.keywords) and config.getoption('--managed-jobs'):
+            item.add_marker(skip_marks['managed_jobs'])
         if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
             item.add_marker(skip_marks['tpu'])
-        if (not 'sky_serve'
-                in item.keywords) and config.getoption('--sky-serve'):
-            item.add_marker(skip_marks['sky_serve'])
+        if (not 'serve' in item.keywords) and config.getoption('--serve'):
+            item.add_marker(skip_marks['serve'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -159,7 +160,7 @@ def pytest_collection_modifyitems(config, items):
     serial_mark = pytest.mark.xdist_group(
         name=f'serial_{generic_cloud_keyword}')
     # Handle generic tests
-    if generic_cloud in ['lambda', 'kubernetes']:
+    if generic_cloud in ['lambda']:
         for item in items:
             if (_is_generic_test(item) and
                     f'no_{generic_cloud_keyword}' not in item.keywords):
@@ -198,7 +199,7 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch: pytest.MonkeyPatch):
+def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
     common.enable_all_clouds_in_monkeypatch(monkeypatch)
 
 

@@ -1,5 +1,4 @@
 """Azure."""
-import base64
 import functools
 import json
 import os
@@ -7,17 +6,15 @@ import re
 import subprocess
 import textwrap
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import colorama
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import azure
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -36,6 +33,9 @@ _CREDENTIAL_FILES = [
 ]
 
 _MAX_IDENTITY_FETCH_RETRY = 10
+
+_DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
+_DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
 
 
 def _run_output(cmd):
@@ -58,15 +58,16 @@ class Azure(clouds.Cloud):
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
-    _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
-    # Azure does not support high disk tier.
+    # Azure does not support high disk and ultra disk tier.
     _SUPPORTED_DISK_TIERS = (set(resources_utils.DiskTier) -
-                             {resources_utils.DiskTier.HIGH})
+                             {resources_utils.DiskTier.ULTRA})
 
     _INDENT_PREFIX = ' ' * 4
 
-    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_AUTOSCALER
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -75,9 +76,6 @@ class Azure(clouds.Cloud):
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is currently not supported on {cls._REPR}.'),
-            clouds.CloudImplementationFeatures.IMAGE_ID:
-                ('Specifying image ID is currently not supported on '
-                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -134,8 +132,49 @@ class Azure(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def is_same_cloud(self, other):
-        return isinstance(other, Azure)
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        if region is None:
+            # The region used here is only for where to send the query,
+            # not the image location. Azure's image is globally available.
+            region = 'eastus'
+        is_skypilot_image_tag = False
+        if image_id.startswith('skypilot:'):
+            is_skypilot_image_tag = True
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             clouds='azure')
+        image_id_splitted = image_id.split(':')
+        if len(image_id_splitted) != 4:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid image id: {image_id}. Expected '
+                                 'format: <publisher>:<offer>:<sku>:<version>')
+        publisher, offer, sku, version = image_id_splitted
+        if is_skypilot_image_tag:
+            if offer == 'ubuntu-hpc':
+                return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
+            else:
+                return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
+        compute_client = azure.get_client('compute', cls.get_project_id())
+        try:
+            image = compute_client.virtual_machine_images.get(
+                region, publisher, offer, sku, version)
+        except azure.exceptions().ResourceNotFoundError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Image not found: {image_id}') from e
+        if image.os_disk_image is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Retrieve image size for {image_id} failed.')
+        ap = image.os_disk_image.additional_properties
+        size_in_gb = ap.get('sizeInGb')
+        if size_in_gb is not None:
+            return float(size_in_gb)
+        size_in_bytes = ap.get('sizeInBytes')
+        if size_in_bytes is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Retrieve image size for {image_id} failed. '
+                                 f'Got additional_properties: {ap}')
+        size_in_gb = size_in_bytes / (1024**3)
+        return size_in_gb
 
     @classmethod
     def get_default_instance_type(
@@ -149,33 +188,13 @@ class Azure(clouds.Cloud):
                                                          disk_tier=disk_tier,
                                                          clouds='azure')
 
-    def _get_image_config(self, gen_version, instance_type):
-        # TODO(tian): images for Azure is not well organized. We should refactor
-        # it to images.csv like AWS.
-        # az vm image list \
-        #  --publisher microsoft-dsvm --all --output table
-        # nvidia-driver: 535.54.03, cuda: 12.2
-        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
-        # All A100 instances is of gen2, so it will always use
-        # the latest ubuntu-hpc:2204 image.
-        image_config = {
-            'image_publisher': 'microsoft-dsvm',
-            'image_offer': 'ubuntu-hpc',
-            'image_sku': '2204',
-            'image_version': '22.04.2023080201'
-        }
-
+    def _get_default_image_tag(self, gen_version, instance_type) -> str:
         # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
         acc = self.get_accelerators_from_instance_type(instance_type)
         if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                image_config = {
-                    'image_publisher': 'microsoft-dsvm',
-                    'image_offer': 'ubuntu-2004',
-                    'image_sku': '2004-gen2',
-                    'image_version': '21.08.30'
-                }
+                return 'skypilot:k80-ubuntu-2004'
 
         # ubuntu-2004 v21.11.04, the previous image we used in the past for
         # V1 HyperV instance before we change default image to ubuntu-hpc.
@@ -184,14 +203,13 @@ class Azure(clouds.Cloud):
         # (Basic_A, Standard_D, ...) are V1 instance. For these instances,
         # we use the previous image.
         if gen_version == 'V1':
-            image_config = {
-                'image_publisher': 'microsoft-dsvm',
-                'image_offer': 'ubuntu-2004',
-                'image_sku': '2004',
-                'image_version': '21.11.04'
-            }
+            return 'skypilot:v1-ubuntu-2004'
 
-        return image_config
+        # nvidia-driver: 535.54.03, cuda: 12.2
+        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
+        # All A100 instances is of gen2, so it will always use
+        # the latest ubuntu-hpc:2204 image.
+        return 'skypilot:gpu-ubuntu-2204'
 
     @classmethod
     def regions_with_offering(cls, instance_type: str,
@@ -253,10 +271,10 @@ class Azure(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
-            dryrun: bool = False) -> Dict[str, Optional[str]]:
+            dryrun: bool = False) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name
@@ -264,23 +282,49 @@ class Azure(clouds.Cloud):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        acc_count = None
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+            acc_count = str(sum(acc_dict.values()))
         else:
             custom_resources = None
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import azure_catalog
-        gen_version = azure_catalog.get_gen_version_from_instance_type(
-            r.instance_type)
-        image_config = self._get_image_config(gen_version, r.instance_type)
+
+        if (resources.image_id is None or
+                resources.extract_docker_image() is not None):
+            # pylint: disable=import-outside-toplevel
+            from sky.clouds.service_catalog import azure_catalog
+            gen_version = azure_catalog.get_gen_version_from_instance_type(
+                r.instance_type)
+            image_id = self._get_default_image_tag(gen_version, r.instance_type)
+        else:
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert region_name in resources.image_id, resources.image_id
+                image_id = resources.image_id[region_name]
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             clouds='azure')
+        # Already checked in resources.py
+        publisher, offer, sku, version = image_id.split(':')
+        image_config = {
+            'image_publisher': publisher,
+            'image_offer': offer,
+            'image_sku': sku,
+            'image_version': version,
+        }
+
+        # Setup the A10 nvidia driver.
+        need_nvidia_driver_extension = (acc_dict is not None and
+                                        'A10' in acc_dict)
+
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
         # Also, add default user to docker group.
         # pylint: disable=line-too-long
-        cloud_init_setup_commands = base64.b64encode(
-            textwrap.dedent("""\
+        cloud_init_setup_commands = textwrap.dedent("""\
             #cloud-config
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
@@ -296,7 +340,7 @@ class Azure(clouds.Cloud):
               - path: /etc/apt/apt.conf.d/10cloudinit-disable
                 content: |
                   APT::Periodic::Enable "0";
-            """).encode('utf-8')).decode('utf-8')
+            """).split('\n')
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
             if (r.disk_tier is not None and
@@ -316,33 +360,45 @@ class Azure(clouds.Cloud):
                 start_index += 1
             assert False, 'Low disk tier should always be supported on Azure.'
 
-        return {
+        disk_tier = _failover_disk_tier()
+
+        resources_vars = {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'num_gpus': acc_count,
             'use_spot': r.use_spot,
             'region': region_name,
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure._get_disk_type(_failover_disk_tier()),
+            'need_nvidia_driver_extension': need_nvidia_driver_extension,
+            'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
-            'resource_group': f'{cluster_name_on_cloud}-{region_name}',
+            'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
         }
+
+        # Setting disk performance tier for high disk tier.
+        if disk_tier == resources_utils.DiskTier.HIGH:
+            resources_vars['disk_performance_tier'] = 'P50'
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources.Resources'
-    ) -> Tuple[List['resources.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             ok, _ = Azure.check_disk_tier(resources.instance_type,
                                           resources.disk_tier)
             if not ok:
-                return ([], [])
+                # TODO: Add hints to all return values in this method to help
+                #  users understand why the resources are not launchable.
+                return resources_utils.FeasibleResources([], [], None)
             # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
             # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -372,9 +428,10 @@ class Azure(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -389,8 +446,10 @@ class Azure(clouds.Cloud):
             zone=resources.zone,
             clouds='azure')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -424,11 +483,24 @@ class Azure(clouds.Cloud):
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
         try:
-            cls.get_current_user_identity()
+            cls.get_active_user_identity()
         except exceptions.CloudUserIdentityError as e:
             return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
                            f'{cls._INDENT_PREFIX}Details: '
                            f'{common_utils.format_exception(e)}')
+
+        # Check if the azure blob storage dependencies are installed.
+        try:
+            # pylint: disable=redefined-outer-name, import-outside-toplevel, unused-import
+            from azure.storage import blob
+            import msgraph
+        except ImportError as e:
+            return False, (
+                f'Azure blob storage depdencies are not installed. '
+                'Run the following commands:'
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -444,7 +516,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
         retry_cnt = 0
@@ -486,11 +558,13 @@ class Azure(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure project ID.') from e
-        return [f'{account_email} [subscription_id={project_id}]']
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for Az. Currently we only support one identity.
+        return [[f'{account_email} [subscription_id={project_id}]']]
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return user_identity[0]
@@ -535,9 +609,10 @@ class Azure(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
-        if disk_tier == resources_utils.DiskTier.HIGH:
-            return False, ('Azure disk_tier=high is not supported now. '
-                           'Please use disk_tier={low, medium} instead.')
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            return False, (
+                'Azure disk_tier=ultra is not supported now. '
+                'Please use disk_tier={low, medium, high, best} instead.')
         # Only S-series supported premium ssd
         # see https://stackoverflow.com/questions/48590520/azure-requested-operation-cannot-be-performed-because-storage-account-type-pre  # pylint: disable=line-too-long
         if cls._get_disk_type(
@@ -545,7 +620,7 @@ class Azure(clouds.Cloud):
         ) == 'Premium_LRS' and not Azure._is_s_series(instance_type):
             return False, (
                 'Azure premium SSDs are only supported for S-series '
-                'instances. To use disk_tier=medium, please make sure '
+                'instances. To use disk_tier>=medium, please make sure '
                 'instance_type is specified to an S-series instance.')
         return True, ''
 
@@ -564,95 +639,9 @@ class Azure(clouds.Cloud):
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
-            resources_utils.DiskTier.HIGH: 'Disabled',
+            resources_utils.DiskTier.ULTRA: 'Disabled',
+            resources_utils.DiskTier.HIGH: 'Premium_LRS',
             resources_utils.DiskTier.MEDIUM: 'Premium_LRS',
             resources_utils.DiskTier.LOW: 'Standard_LRS',
         }
         return tier2name[tier]
-
-    @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List[status_lib.ClusterStatus]:
-        del zone  # unused
-        status_map = {
-            'VM starting': status_lib.ClusterStatus.INIT,
-            'VM running': status_lib.ClusterStatus.UP,
-            # 'VM stopped' in Azure means Stopped (Allocated), which still bills
-            # for the VM.
-            'VM stopping': status_lib.ClusterStatus.INIT,
-            'VM stopped': status_lib.ClusterStatus.INIT,
-            # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
-            # bill for the VM.
-            'VM deallocating': status_lib.ClusterStatus.STOPPED,
-            'VM deallocated': status_lib.ClusterStatus.STOPPED,
-        }
-        tag_filter_str = ' '.join(
-            f'tags.\\"{k}\\"==\'{v}\'' for k, v in tag_filters.items())
-
-        query_node_id = (f'az vm list --query "[?{tag_filter_str}].id" -o json')
-        returncode, stdout, stderr = log_lib.run_with_log(query_node_id,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
-        logger.debug(f'{query_node_id} returned {returncode}.\n'
-                     '**** STDOUT ****\n'
-                     f'{stdout}\n'
-                     '**** STDERR ****\n'
-                     f'{stderr}')
-        if returncode == 0:
-            if not stdout.strip():
-                return []
-            node_ids = json.loads(stdout.strip())
-            if not node_ids:
-                return []
-            state_str = '[].powerState'
-            if len(node_ids) == 1:
-                state_str = 'powerState'
-            node_ids_str = '\t'.join(node_ids)
-            query_cmd = (
-                f'az vm show -d --ids {node_ids_str} --query "{state_str}" -o json'
-            )
-            returncode, stdout, stderr = log_lib.run_with_log(
-                query_cmd, '/dev/null', require_outputs=True, shell=True)
-            logger.debug(f'{query_cmd} returned {returncode}.\n'
-                         '**** STDOUT ****\n'
-                         f'{stdout}\n'
-                         '**** STDERR ****\n'
-                         f'{stderr}')
-
-        # NOTE: Azure cli should be handled carefully. The query command above
-        # takes about 1 second to run.
-        # An alternative is the following command, but it will take more than
-        # 20 seconds to run.
-        # query_cmd = (
-        #     f'az vm list --show-details --query "['
-        #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
-        #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
-        # )
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query Azure cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        assert stdout.strip(), f'No status returned for {name!r}'
-
-        original_statuses_list = json.loads(stdout.strip())
-        if not original_statuses_list:
-            # No nodes found. The original_statuses_list will be empty string.
-            # Return empty list.
-            return []
-        if not isinstance(original_statuses_list, list):
-            original_statuses_list = [original_statuses_list]
-        statuses = []
-        for s in original_statuses_list:
-            if s not in status_map:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ClusterStatusFetchingError(
-                        f'Failed to parse status from Azure response: {stdout}')
-            node_status = status_map[s]
-            if node_status is not None:
-                statuses.append(node_status)
-        return statuses

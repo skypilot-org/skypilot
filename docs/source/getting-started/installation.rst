@@ -11,37 +11,13 @@ Install SkyPilot using pip:
 
 .. tab-set::
 
-    .. tab-item:: Nightly (recommended)
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          # Choose your cloud:
-
-          pip install "skypilot-nightly[aws]"
-          pip install "skypilot-nightly[gcp]"
-          pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[oci]"
-          pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
-          pip install "skypilot-nightly[ibm]"
-          pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[all]"
-
     .. tab-item:: Latest Release
         :sync: latest-release-tab
 
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -53,11 +29,43 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
+          pip install "skypilot[fluidstack]"
+          pip install "skypilot[paperspace]"
+          pip install "skypilot[cudo]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
           pip install "skypilot[all]"
+
+
+    .. tab-item:: Nightly
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.11.
+          conda create -y -n sky python=3.10
+          conda activate sky
+
+          # Choose your cloud:
+
+          pip install "skypilot-nightly[aws]"
+          pip install "skypilot-nightly[gcp]"
+          pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[runpod]"
+          pip install "skypilot-nightly[fluidstack]"
+          pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[cudo]"
+          pip install "skypilot-nightly[ibm]"
+          pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[vsphere]"
+          pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[all]"
+
 
     .. tab-item:: From Source
         :sync: from-source-tab
@@ -65,7 +73,7 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.10.
+          # SkyPilot requires 3.7 <= python <= 3.11.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -80,6 +88,9 @@ Install SkyPilot using pip:
           pip install -e ".[oci]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
+          pip install -e ".[fluidstack]"
+          pip install -e ".[paperspace]"
+          pip install -e ".[cudo]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
@@ -90,19 +101,19 @@ To use more than one cloud, combine the pip extras:
 
 .. tab-set::
 
-    .. tab-item:: Nightly (recommended)
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          pip install -U "skypilot-nightly[aws,gcp]"
-
     .. tab-item:: Latest Release
         :sync: latest-release-tab
 
         .. code-block:: shell
 
           pip install -U "skypilot[aws,gcp]"
+
+    .. tab-item:: Nightly
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          pip install -U "skypilot-nightly[aws,gcp]"
 
     .. tab-item:: From Source
         :sync: from-source-tab
@@ -135,6 +146,9 @@ This will produce a summary like:
     OCI: enabled
     Lambda: enabled
     RunPod: enabled
+    Paperspace: enabled
+    Fluidstack: enabled
+    Cudo: enabled
     IBM: enabled
     SCP: enabled
     vSphere: enabled
@@ -152,12 +166,16 @@ section :ref:`below <cloud-account-setup>`.
   If your clouds show ``enabled`` --- |:tada:| |:tada:| **Congratulations!** |:tada:| |:tada:| You can now head over to
   :ref:`Quickstart <quickstart>` to get started with SkyPilot.
 
+.. tip::
+
+  To check credentials only for specific clouds, pass the clouds as arguments: :code:`sky check aws gcp`
+
 .. _cloud-account-setup:
 
 Cloud account setup
 -------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod,
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo,
 IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
@@ -259,6 +277,15 @@ Lambda Cloud
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
+Paperspace
+~~~~~~~~~~~~~~~~~~
+
+`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
+
+.. code-block:: shell
+
+  mkdir -p ~/.paperspace
+  echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
 RunPod
 ~~~~~~~~~~
@@ -269,6 +296,44 @@ RunPod
   
   pip install "runpod>=1.5.1"
   runpod config
+
+
+Fluidstack
+~~~~~~~~~~~~~~~~~~
+
+`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://dashboard.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` :
+.. code-block:: shell
+
+  mkdir -p ~/.fluidstack
+  echo "your_api_key_here" > ~/.fluidstack/api_key
+
+
+
+Cudo Compute
+~~~~~~~~~~~~~~~~~~
+
+`Cudo Compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
+
+1. Create a `billing account <https://www.cudocompute.com/docs/guide/billing/>`__.
+2. Create a `project <https://www.cudocompute.com/docs/guide/projects/>`__.
+3. Create an `API Key <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+4. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+5. Run :code:`cudoctl init`:
+
+   .. code-block:: shell
+
+     cudoctl init
+       ✔ api key: my-api-key
+       ✔ project: my-project
+       ✔ billing account: my-billing-account
+       ✔ context: default
+       config file saved ~/.config/cudo/cudo.yml
+
+     pip install "cudo-compute>=0.1.10"
+
+If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
+
+
 
 
 IBM
@@ -440,7 +505,7 @@ You can simply run:
     -v "$HOME/.sky:/root/.sky:rw" \
     -v "$HOME/.aws:/root/.aws:rw" \
     -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" \
-    berkeleyskypilot/skypilot-nightly
+    berkeleyskypilot/skypilot
 
   docker exec -it sky /bin/bash
 

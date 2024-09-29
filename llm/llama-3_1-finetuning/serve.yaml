@@ -1,0 +1,33 @@
+# Serve a LoRA finetuned Meta Llama-3.1.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch serve.yaml -c llama31-serve --env HF_TOKEN
+
+envs:
+  MODEL_SIZE: 8B
+  HF_TOKEN:
+  # Change this to your checkpoint bucket created in lora.yaml
+  CHECKPOINT_BUCKET_NAME: your-checkpoint-bucket
+  LORA_NAME: my-finance-lora
+
+resources:
+  accelerators: L4
+  ports: 8081
+  cpus: 32+
+
+file_mounts:
+  /checkpoints:
+    name: $CHECKPOINT_BUCKET_NAME
+    mode: MOUNT
+
+setup: |
+  pip install vllm==0.5.3post1
+  pip install vllm-flash-attn==2.5.9.post1
+  pip install openai
+
+run: |
+  vllm serve meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE --enable-lora \
+    --lora-modules $LORA_NAME=/checkpoints/${MODEL_SIZE}-lora/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/ \
+    --max-model-len=2048 --port 8081

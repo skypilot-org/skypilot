@@ -26,7 +26,7 @@ pod_spec:
             lifecycle:
                 postStart:
                     exec:
-                        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+                        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys && sudo service ssh restart"]
             env:
               - name: MY_POD_NAME
                 valueFrom:
@@ -65,22 +65,26 @@ service_account:
     kind: ServiceAccount
     metadata:
         name: sky-ssh-jump-sa
-        parent: skypilot
+        labels:
+          parent: skypilot
 role:
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
         name: sky-ssh-jump-role
+        labels:
+          parent: skypilot
     rules:
       - apiGroups: [""]
         resources: ["pods", "pods/status", "pods/exec", "services"]
-        verbs: ["get", "list", "create", "delete"]    
+        verbs: ["get", "list", "create", "delete"]
 role_binding:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
         name: sky-ssh-jump-rb
-        parent: skypilot
+        labels:
+          parent: skypilot
     subjects:
     - kind: ServiceAccount
       name: sky-ssh-jump-sa

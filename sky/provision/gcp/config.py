@@ -242,24 +242,49 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
         # roles, so only call setIamPolicy if needed.
         return True, policy
 
-    for binding in original_policy['bindings']:
-        if member_id in binding['members']:
-            role = binding['role']
-            try:
-                role_definition = iam.projects().roles().get(
-                    name=role).execute()
-            except TypeError as e:
-                if 'does not match the pattern' in str(e):
-                    logger.info('_configure_iam_role: fail to check permission '
-                                f'for built-in role {role}. skipped.')
-                    permissions = []
+    # TODO(zhwu): It is possible that the permission is only granted at the
+    # service-account level, not at the project level. We should check the
+    # permission at both levels.
+    # For example, `roles/iam.serviceAccountUser` can be granted at the
+    # skypilot-v1 service account level, which can be checked with
+    # service_account_policy = iam.projects().serviceAccounts().getIamPolicy(
+    #    resource=f'projects/{project_id}/serviceAcccounts/{email}').execute()
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service account level.
+    def check_permissions(policy, required_permissions):
+        for binding in policy['bindings']:
+            if member_id in binding['members']:
+                role = binding['role']
+                logger.info(f'_configure_iam_role: role {role} is attached to '
+                            f'{member_id}...')
+                try:
+                    role_definition = iam.projects().roles().get(
+                        name=role).execute()
+                except TypeError as e:
+                    if 'does not match the pattern' in str(e):
+                        logger.info(
+                            '_configure_iam_role: fail to check permission '
+                            f'for built-in role {role}. Fallback to predefined '
+                            'permission list.')
+                        # Built-in roles cannot be checked for permissions with
+                        # the current API, so we fallback to predefined list
+                        # to find the implied permissions.
+                        permissions = constants.BUILTIN_ROLE_TO_PERMISSIONS.get(
+                            role, [])
+                    else:
+                        raise
                 else:
-                    raise
-            else:
-                permissions = role_definition['includedPermissions']
-            required_permissions -= set(permissions)
-        if not required_permissions:
-            break
+                    permissions = role_definition['includedPermissions']
+                    logger.info(f'_configure_iam_role: role {role} has '
+                                f'permissions {permissions}.')
+                required_permissions -= set(permissions)
+            if not required_permissions:
+                break
+        return required_permissions
+
+    # Check the permissions
+    required_permissions = check_permissions(original_policy,
+                                             required_permissions)
     if not required_permissions:
         # All required permissions are already granted.
         return True, policy
@@ -647,7 +672,8 @@ def _configure_subnet(region: str, cluster_name: str,
             'type': 'ONE_TO_ONE_NAT',
         }],
     }]
-    if config.provider_config.get('use_internal_ips', False):
+    enable_external_ips = _enable_external_ips(config)
+    if not enable_external_ips:
         # Removing this key means the VM will not be assigned an external IP.
         default_interfaces[0].pop('accessConfigs')
 
@@ -661,12 +687,17 @@ def _configure_subnet(region: str, cluster_name: str,
         node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
         # TPU doesn't have accessConfigs
         node_config['networkConfig'].pop('accessConfigs', None)
-        if config.provider_config.get('use_internal_ips', False):
-            node_config['networkConfig']['enableExternalIps'] = False
-        else:
-            node_config['networkConfig']['enableExternalIps'] = True
+        node_config['networkConfig']['enableExternalIps'] = enable_external_ips
 
     return config
+
+
+def _enable_external_ips(config: common.ProvisionConfig) -> bool:
+    force_enable_external_ips = config.provider_config.get(
+        'force_enable_external_ips', False)
+    use_internal_ips = config.provider_config.get('use_internal_ips', False)
+
+    return force_enable_external_ips or not use_internal_ips
 
 
 def _delete_firewall_rule(project_id: str, compute, name):

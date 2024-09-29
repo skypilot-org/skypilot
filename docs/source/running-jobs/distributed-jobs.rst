@@ -1,15 +1,15 @@
 .. _dist-jobs:
 
-Distributed Jobs on Many VMs
+Distributed Multi-Node Jobs
 ================================================
 
 SkyPilot supports multi-node cluster
-provisioning and distributed execution on many VMs.
+provisioning and distributed execution on many nodes.
 
 For example, here is a simple PyTorch Distributed training example:
 
 .. code-block:: yaml
-   :emphasize-lines: 6-6,21-22,24-25
+   :emphasize-lines: 6-6,21-21,23-26
 
    name: resnet-distributed-app
 
@@ -31,14 +31,13 @@ For example, here is a simple PyTorch Distributed training example:
    run: |
      cd pytorch-distributed-resnet
 
-     num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
-     master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-     python3 -m torch.distributed.launch \
-       --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
-       --node_rank=${SKYPILOT_NODE_RANK} \
-       --nnodes=$num_nodes \
-       --master_addr=$master_addr \
-       --master_port=8008 \
+     MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+     torchrun \
+      --nnodes=$SKPILOT_NUM_NODES \
+      --master_addr=$MASTER_ADDR \
+      --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+      --node_rank=$SKYPILOT_NODE_RANK \
+      --master_port=12375 \
        resnet_ddp.py --num_epochs 20
 
 In the above,
@@ -66,16 +65,11 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
   the node executing the task.
 - :code:`SKYPILOT_NODE_IPS`: a string of IP addresses of the nodes reserved to execute
   the task, where each line contains one IP address.
-
-  - You can retrieve the number of nodes by :code:`echo "$SKYPILOT_NODE_IPS" | wc -l`
-    and the IP address of the third node by :code:`echo "$SKYPILOT_NODE_IPS" | sed -n
-    3p`.
-
-  - To manipulate these IP addresses, you can also store them to a file in the
-    :code:`run` command with :code:`echo $SKYPILOT_NODE_IPS >> ~/sky_node_ips`.
+- :code:`SKYPILOT_NUM_NODES`: number of nodes reserved for the task, which can be specified by ``num_nodes: <n>``. Same value as :code:`echo "$SKYPILOT_NODE_IPS" | wc -l`.
 - :code:`SKYPILOT_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
 
+See :ref:`sky-env-vars` for more details.
 
 Launching a multi-node task (new cluster)
 -------------------------------------------------
@@ -106,7 +100,7 @@ The following happens in sequence:
   and step 4).
 
 Executing a task on the head node only
------------------------------------------
+--------------------------------------
 To execute a task on the head node only (a common scenario for tools like
 ``mpirun``), use the ``SKYPILOT_NODE_RANK`` environment variable as follows:
 
@@ -137,3 +131,51 @@ This allows you directly to SSH into the worker nodes, if required.
   # Worker nodes.
   $ ssh mycluster-worker1
   $ ssh mycluster-worker2
+
+
+Executing a Distributed Ray Program
+------------------------------------
+To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `task yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
+
+.. code-block:: console
+
+  $ wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/examples/distributed_ray_train/train.py
+  $ sky launch ray_train.yaml
+
+.. code-block:: yaml
+  
+    resources:
+      accelerators: L4:2
+      memory: 64+
+  
+    num_nodes: 2
+
+    workdir: .
+
+    setup: |
+      conda activate ray
+      if [ $? -ne 0 ]; then
+        conda create -n ray python=3.10 -y
+        conda activate ray
+      fi
+      
+      pip install "ray[train]"
+      pip install tqdm
+      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+  
+    run: |
+      sudo chmod 777 -R /var/tmp
+      HEAD_IP=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+      if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
+        ps aux | grep ray | grep 6379 &> /dev/null || ray start --head  --disable-usage-stats --port 6379
+        sleep 5
+        python train.py --num-workers $SKYPILOT_NUM_NODES
+      else
+        sleep 5
+        ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
+      fi
+
+.. warning:: 
+
+  When using Ray, avoid calling ``ray stop`` as that will also cause the SkyPilot runtime to be stopped.
+

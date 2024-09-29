@@ -96,6 +96,17 @@ def init_logger(name: str):
 
 
 @contextlib.contextmanager
+def set_logging_level(logger: str, level: int):
+    logger = logging.getLogger(logger)
+    original_level = logger.level
+    logger.setLevel(level)
+    try:
+        yield
+    finally:
+        logger.setLevel(original_level)
+
+
+@contextlib.contextmanager
 def silent():
     """Make all sky_logging.print() and logger.{info, warning...} silent.
 
@@ -111,12 +122,13 @@ def silent():
     _root_logger.setLevel(logging.ERROR)
     _logging_config.is_silent = True
     print = lambda *args, **kwargs: None
-    yield
-
-    # Restore logger
-    print = previous_print
-    _root_logger.setLevel(previous_level)
-    _logging_config.is_silent = previous_is_silent
+    try:
+        yield
+    finally:
+        # Restore logger
+        print = previous_print
+        _root_logger.setLevel(previous_level)
+        _logging_config.is_silent = previous_is_silent
 
 
 def is_silent():

@@ -1,3 +1,10 @@
+envs:
+  MODEL_SIZE: 7
+  SEQ_LEN: 2048
+  GC_SCALE: 4
+  USE_FLASH_ATTN: 0
+  WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
+
 resources:
   accelerators: A100-80GB:8
   disk_size: 1000
@@ -100,7 +107,7 @@ run: |
     --fsdp_transformer_layer_cls_to_wrap 'LlamaDecoderLayer' \
     --tf32 True \
     --model_max_length ${SEQ_LEN} \
-    --run_name $SKYPILOT_JOB_ID \
+    --run_name $SKYPILOT_TASK_ID \
     --gradient_checkpointing True \
     --lazy_preprocess True
 
@@ -109,10 +116,3 @@ run: |
   gsutil -m rsync -r -x 'checkpoint-*' $LOCAL_CKPT_PATH/ $CKPT_PATH/
   exit $returncode
 
-
-envs:
-  MODEL_SIZE: 7
-  SEQ_LEN: 2048
-  GC_SCALE: 4
-  USE_FLASH_ATTN: 0
-  WANDB_API_KEY: ""

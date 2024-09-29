@@ -3,9 +3,38 @@
 Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
+import enum
+from typing import Any, Dict, List, Tuple
+
+from sky.skylet import constants
 
 
-def get_single_resources_schema():
+def _check_not_both_fields_present(field1: str, field2: str):
+    return {
+        'oneOf': [{
+            'required': [field1],
+            'not': {
+                'required': [field2]
+            }
+        }, {
+            'required': [field2],
+            'not': {
+                'required': [field1]
+            }
+        }, {
+            'not': {
+                'anyOf': [{
+                    'required': [field1]
+                }, {
+                    'required': [field2]
+                }]
+            }
+        }]
+    }
+
+
+def _get_single_resources_schema():
+    """Schema for a single resource in a resources list."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
@@ -57,7 +86,12 @@ def get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            # Deprecated: use 'job_recovery' instead. This is for backward
+            # compatibility, and can be removed in 0.8.0.
             'spot_recovery': {
+                'type': 'string',
+            },
+            'job_recovery': {
                 'type': 'string',
             },
             'disk_size': {
@@ -80,7 +114,15 @@ def get_single_resources_schema():
                             'type': 'integer',
                         }]
                     }
+                }, {
+                    'type': 'null',
                 }],
+            },
+            'labels': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                }
             },
             'accelerator_args': {
                 'type': 'object',
@@ -104,46 +146,65 @@ def get_single_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
+                }, {
+                    'type': 'null',
                 }]
-            }
+            },
+            # The following fields are for internal use only. Should not be
+            # specified in the task config.
+            '_docker_login_config': {
+                'type': 'object',
+                'required': ['username', 'password', 'server'],
+                'additionalProperties': False,
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                    },
+                    'password': {
+                        'type': 'string',
+                    },
+                    'server': {
+                        'type': 'string',
+                    }
+                }
+            },
+            '_is_image_managed': {
+                'type': 'boolean',
+            },
+            '_requires_fuse': {
+                'type': 'boolean',
+            },
+            '_cluster_config_overrides': {
+                'type': 'object',
+            },
         }
     }
 
 
+def _get_multi_resources_schema():
+    multi_resources_schema = {
+        k: v
+        for k, v in _get_single_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    return multi_resources_schema
+
+
 def get_resources_schema():
-    # To avoid circular imports, only import when needed.
-    # pylint: disable=import-outside-toplevel
-    from sky.clouds import service_catalog
+    """Resource schema in task config."""
+    single_resources_schema = _get_single_resources_schema()['properties']
+    single_resources_schema.pop('accelerators')
+    multi_resources_schema = _get_multi_resources_schema()
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'cloud': {
-                'type': 'string',
-                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
-            },
-            'region': {
-                'type': 'string',
-            },
-            'zone': {
-                'type': 'string',
-            },
-            'cpus': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
-            'memory': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'number',
-                }],
-            },
+            **single_resources_schema,
+            # We redefine the 'accelerators' field to allow one line list or
+            # a set of accelerators.
             'accelerators': {
                 # {'V100:1', 'A100:1'} will be
                 # read as a string and converted to dict.
@@ -166,80 +227,17 @@ def get_resources_schema():
                     }
                 }]
             },
-            'instance_type': {
-                'type': 'string',
-            },
-            'use_spot': {
-                'type': 'boolean',
-            },
-            'spot_recovery': {
-                'type': 'string',
-            },
-            'disk_size': {
-                'type': 'integer',
-            },
-            'disk_tier': {
-                'type': 'string',
-            },
-            'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }],
-            },
-            'accelerator_args': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    }
-                }
-            },
-            'image_id': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                }]
-            },
             'any_of': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             },
             'ordered': {
                 'type': 'array',
-                'items': {
-                    k: v
-                    for k, v in get_single_resources_schema().items()
-                    # Validation may fail if $schema is included.
-                    if k != '$schema'
-                },
+                'items': multi_resources_schema,
             }
-        }
+        },
+        # Avoid job_recovery and spot_recovery being present at the same time.
+        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -310,13 +308,22 @@ def get_service_schema():
                         'initial_delay_seconds': {
                             'type': 'number',
                         },
+                        'timeout_seconds': {
+                            'type': 'number',
+                        },
                         'post_data': {
                             'anyOf': [{
                                 'type': 'string',
                             }, {
                                 'type': 'object',
                             }]
-                        }
+                        },
+                        'headers': {
+                            'type': 'object',
+                            'additionalProperties': {
+                                'type': 'string'
+                            }
+                        },
                     }
                 }]
             },
@@ -327,12 +334,22 @@ def get_service_schema():
                 'properties': {
                     'min_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'max_replicas': {
                         'type': 'integer',
+                        'minimum': 0,
                     },
                     'target_qps_per_replica': {
                         'type': 'number',
+                        'minimum': 0,
+                    },
+                    'dynamic_ondemand_fallback': {
+                        'type': 'boolean',
+                    },
+                    'base_ondemand_fallback_replicas': {
+                        'type': 'integer',
+                        'minimum': 0,
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
@@ -358,6 +375,74 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+        }
+    }
+
+
+def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
+    """Recursively filter a schema to include only certain keys.
+
+    Args:
+        schema: The original schema dictionary.
+        keys_to_keep: List of tuples with the path of keys to retain.
+
+    Returns:
+        The filtered schema.
+    """
+    # Convert list of tuples to a dictionary for easier access
+    paths_dict: Dict[str, Any] = {}
+    for path in keys_to_keep:
+        current = paths_dict
+        for step in path:
+            if step not in current:
+                current[step] = {}
+            current = current[step]
+
+    def keep_keys(current_schema: dict, current_path_dict: dict,
+                  new_schema: dict) -> dict:
+        # Base case: if we reach a leaf in the path_dict, we stop.
+        if (not current_path_dict or not isinstance(current_schema, dict) or
+                not current_schema.get('properties')):
+            return current_schema
+
+        if 'properties' not in new_schema:
+            new_schema = {
+                key: current_schema[key]
+                for key in current_schema
+                # We do not support the handling of `oneOf`, `anyOf`, `allOf`,
+                # `required` for now.
+                if key not in
+                {'properties', 'oneOf', 'anyOf', 'allOf', 'required'}
+            }
+            new_schema['properties'] = {}
+        for key, sub_schema in current_schema['properties'].items():
+            if key in current_path_dict:
+                # Recursively keep keys if further path dict exists
+                new_schema['properties'][key] = {}
+                current_path_value = current_path_dict.pop(key)
+                new_schema['properties'][key] = keep_keys(
+                    sub_schema, current_path_value,
+                    new_schema['properties'][key])
+
+        return new_schema
+
+    # Start the recursive filtering
+    new_schema = keep_keys(schema, paths_dict, {})
+    assert not paths_dict, f'Unprocessed keys: {paths_dict}'
+    return new_schema
+
+
+def _experimental_task_schema() -> dict:
+    config_override_schema = _filter_schema(get_config_schema(),
+                                            constants.OVERRIDEABLE_CONFIG_KEYS)
+    return {
+        'experimental': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'config_overrides': config_override_schema,
+            }
         }
     }
 
@@ -405,7 +490,7 @@ def get_task_schema():
                 'patternProperties': {
                     # Checks env keys are valid env var names.
                     '^[a-zA-Z_][a-zA-Z0-9_]*$': {
-                        'type': 'string'
+                        'type': ['string', 'null']
                     }
                 },
                 'additionalProperties': False,
@@ -427,6 +512,7 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
+            **_experimental_task_schema(),
         }
     }
 
@@ -507,7 +593,9 @@ _NETWORK_CONFIG_SCHEMA = {
     },
 }
 
-_INSTANCE_TAGS_SCHEMA = {
+_LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -515,18 +603,79 @@ _INSTANCE_TAGS_SCHEMA = {
             'type': 'string',
         },
     },
+    'labels': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    }
 }
+
+_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY = {
+    'oneOf': [
+        {
+            'type': 'string'
+        },
+        {
+            # A list of single-element dict to pretain the
+            # order.
+            # Example:
+            #  property_name:
+            #    - my-cluster1-*: my-property-1
+            #    - my-cluster2-*: my-property-2
+            #    - "*"": my-property-3
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'additionalProperties': {
+                    'type': 'string'
+                },
+                'maxProperties': 1,
+                'minProperties': 1,
+            },
+        }
+    ]
+}
+
+
+class RemoteIdentityOptions(enum.Enum):
+    """Enum for remote identity types.
+
+    Some clouds (e.g., AWS, Kubernetes) also allow string values for remote
+    identity, which map to the service account/role to use. Those are not
+    included in this enum.
+    """
+    LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
+    SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+
+
+def get_default_remote_identity(cloud: str) -> str:
+    """Get the default remote identity for the specified cloud."""
+    if cloud == 'kubernetes':
+        return RemoteIdentityOptions.SERVICE_ACCOUNT.value
+    return RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
         'type': 'string',
-        'case_insensitive_enum': ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT'],
+        'case_insensitive_enum': [
+            option.value for option in RemoteIdentityOptions
+        ]
     }
+}
+
+_REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
+    'remote_identity': {
+        'type': 'string'
+    },
 }
 
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
+    from sky.clouds import service_catalog
     from sky.utils import kubernetes_enums
 
     resources_schema = {
@@ -557,26 +706,68 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
-                'security_group_name': {
-                    'type': 'string',
+                'prioritize_reservations': {
+                    'type': 'boolean',
                 },
-                **_INSTANCE_TAGS_SCHEMA,
-                **_NETWORK_CONFIG_SCHEMA,
-            }
-        },
-        'gcp': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
                 'specific_reservations': {
                     'type': 'array',
                     'items': {
                         'type': 'string',
                     },
                 },
-                **_INSTANCE_TAGS_SCHEMA,
+                'disk_encrypted': {
+                    'type': 'boolean',
+                },
+                'security_group_name':
+                    (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
+        },
+        'gcp': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
+                'specific_reservations': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
+                'managed_instance_group': {
+                    'type': 'object',
+                    'required': ['run_duration'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'run_duration': {
+                            'type': 'integer',
+                        },
+                        'provision_timeout': {
+                            'type': 'integer',
+                        }
+                    }
+                },
+                'force_enable_external_ips': {
+                    'type': 'boolean'
+                },
+                **_LABELS_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
+        },
+        'azure': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'storage_account': {
+                    'type': 'string',
+                },
             }
         },
         'kubernetes': {
@@ -603,7 +794,31 @@ def get_config_schema():
                     'required': [],
                     # Allow arbitrary keys since validating pod spec is hard
                     'additionalProperties': True,
-                }
+                },
+                'custom_metadata': {
+                    'type': 'object',
+                    'required': [],
+                    # Allow arbitrary keys since validating metadata is hard
+                    'additionalProperties': True,
+                    # Disallow 'name' and 'namespace' keys in this dict
+                    'not': {
+                        'anyOf': [{
+                            'required': ['name']
+                        }, {
+                            'required': ['namespace']
+                        }]
+                    }
+                },
+                'provision_timeout': {
+                    'type': 'integer',
+                },
+                'autoscaler': {
+                    'type': 'string',
+                    'case_insensitive_enum': [
+                        type.value
+                        for type in kubernetes_enums.KubernetesAutoscalerType
+                    ]
+                },
             }
         },
         'oci': {
@@ -633,16 +848,75 @@ def get_config_schema():
         },
     }
 
-    for config in cloud_configs.values():
-        config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
+    admin_policy_schema = {
+        'type': 'string',
+        # Check regex to be a valid python module path
+        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+    }
+
+    allowed_clouds = {
+        # A list of cloud names that are allowed to be used
+        'type': 'array',
+        'items': {
+            'type': 'string',
+            'case_insensitive_enum':
+                (list(service_catalog.ALL_CLOUDS) + ['cloudflare'])
+        }
+    }
+
+    docker_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'run_options': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    }
+                }]
+            }
+        }
+    }
+    gpu_configs = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'disable_ecc': {
+                'type': 'boolean',
+            },
+        }
+    }
+
+    for cloud, config in cloud_configs.items():
+        if cloud == 'aws':
+            config['properties'].update({
+                'remote_identity': _PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY
+            })
+        elif cloud == 'kubernetes':
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA_KUBERNETES)
+        else:
+            config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
+            'allowed_clouds': allowed_clouds,
+            'admin_policy': admin_policy_schema,
+            'docker': docker_configs,
+            'nvidia_gpus': gpu_configs,
             **cloud_configs,
-        }
+        },
+        # Avoid spot and jobs being present at the same time.
+        **_check_not_both_fields_present('spot', 'jobs')
     }

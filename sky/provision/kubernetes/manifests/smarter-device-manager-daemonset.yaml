@@ -1,0 +1,68 @@
+# A daemonset for the smarter-device-manager agent. Used to expose FUSE devices
+# to SkyPilot pods, bypassing the need to run SkyPilot pods as privileged.
+# From smarter-device-manager daemonset: https://gitlab.com/arm-research/smarter/smarter-device-manager/-/blob/master/smarter-device-manager-ds.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: smarter-device-manager
+  labels:
+    name: smarter-device-manager
+    role: agent
+    parent: skypilot
+spec:
+  selector:
+    matchLabels:
+      name: smarter-device-manager
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: smarter-device-manager
+        parent: skypilot
+      annotations:
+        node.kubernetes.io/bootstrap-checkpoint: "true"
+    spec:
+      hostname: smarter-device-management
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: smarter-device-manager
+        image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/smarter-device-manager:v1.1.2
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          limits:
+            cpu: 100m
+            memory: 15Mi
+          requests:
+            cpu: 10m
+            memory: 15Mi
+        volumeMounts:
+          - name: device-plugin
+            mountPath: /var/lib/kubelet/device-plugins
+          - name: dev-dir
+            mountPath: /dev
+          - name: sys-dir
+            mountPath: /sys
+          - name: config
+            mountPath: /root/config
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dev-dir
+          hostPath:
+            path: /dev
+        - name: sys-dir
+          hostPath:
+            path: /sys
+        - name: config
+          configMap:
+            name: smarter-device-manager

@@ -191,6 +191,29 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             for policy_arn in attach_policy_arns:
                 role.attach_policy(PolicyArn=policy_arn)
 
+            # SkyPilot: 'PassRole' is required by the controllers (jobs and
+            # services) created with `aws.remote_identity: SERVICE_ACCOUNT` to
+            # create instances with the IAM role.
+            skypilot_pass_role_policy_doc = {
+                'Statement': [
+                    {
+                        'Effect': 'Allow',
+                        'Action': [
+                            'iam:GetRole',
+                            'iam:PassRole',
+                        ],
+                        'Resource': role.arn,
+                    },
+                    {
+                        'Effect': 'Allow',
+                        'Action': 'iam:GetInstanceProfile',
+                        'Resource': profile.arn,
+                    },
+                ]
+            }
+            role.Policy('SkyPilotPassRolePolicy').put(
+                PolicyDocument=json.dumps(skypilot_pass_role_policy_doc))
+
         profile.add_role(RoleName=role.name)
         time.sleep(15)  # wait for propagation
     return {'Arn': profile.arn}

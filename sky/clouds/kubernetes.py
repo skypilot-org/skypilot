@@ -1,17 +1,20 @@
 """Kubernetes."""
 import json
 import os
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -23,25 +26,27 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
 CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
+# Namespace for SkyPilot resources shared across multiple tenants on the
+# same cluster (even if they might be running in different namespaces).
+# E.g., FUSE device manager daemonset is run in this namespace.
+_SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
+
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
-    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
-        'kubernetes-port-forward-proxy-command.sh.j2'
-    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
-    # Timeout for resource provisioning. This timeout determines how long to
-    # wait for pod to be in pending status before giving up.
-    # Larger timeout may be required for autoscaling clusters, since autoscaler
-    # may take some time to provision new nodes.
-    # Note that this timeout includes time taken by the Kubernetes scheduler
-    # itself, which can be upto 2-3 seconds.
-    # For non-autoscaling clusters, we conservatively set this to 10s.
-    # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 10
+    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
+    SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
+
+    # Limit the length of the cluster name to avoid exceeding the limit of 63
+    # characters for Kubernetes resources. We limit to 42 characters (63-21) to
+    # allow additional characters for creating ingress services to expose ports.
+    # These services are named as {cluster_name_on_cloud}--skypilot-svc--{port},
+    # where the suffix is 21 characters long.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
@@ -70,22 +75,39 @@ class Kubernetes(clouds.Cloud):
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
+    @property
+    def ssh_key_secret_field_name(self):
+        # Use a fresh user hash to avoid conflicts in the secret object naming.
+        # This can happen when the controller is reusing the same user hash
+        # through USER_ID_ENV_VAR but has a different SSH key.
+        fresh_user_hash = common_utils.get_user_hash(force_fresh_hash=True)
+        return f'ssh-publickey-{fresh_user_hash}'
+
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
-            # If we are using KIND, the loadbalancer service will never be
-            # assigned an external IP. Users may use ingress, but that requires
-            # blocking HTTP port 80.
-            # For now, we disable port opening feature on kind clusters.
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        # Features to be disabled for exec auth
+        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
+        if is_exec_auth:
+            assert isinstance(message, str), message
+            # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
-                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
-                    'Opening ports is not supported in Kubernetes when '
-                    'using local kind cluster.')
+                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
+            # Pod does not have permissions to terminate itself with exec auth.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+        # Allow spot instances if supported by the cluster
+        spot_label_key, _ = kubernetes_utils.get_spot_label()
+        if spot_label_key is not None:
+            unsupported_features.pop(
+                clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
         return unsupported_features
+
+    @classmethod
+    def max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -123,14 +145,6 @@ class Kubernetes(clouds.Cloud):
     def __repr__(self):
         return self._REPR
 
-    def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        return isinstance(other, Kubernetes)
-
-    @classmethod
-    def get_port(cls, svc_name) -> int:
-        ns = kubernetes_utils.get_current_kube_config_context_namespace()
-        return kubernetes_utils.get_port(svc_name, ns)
-
     @classmethod
     def get_default_instance_type(
             cls,
@@ -144,8 +158,15 @@ class Kubernetes(clouds.Cloud):
         # exactly the requested resources.
         instance_cpus = float(
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
-        instance_mem = float(memory.strip('+')) if memory is not None else \
-            instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
+        if memory is not None:
+            if memory.endswith('+'):
+                instance_mem = float(memory[:-1])
+            elif memory.endswith('x'):
+                instance_mem = float(memory[:-1]) * instance_cpus
+            else:
+                instance_mem = float(memory)
+        else:
+            instance_mem = instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
         virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
             instance_cpus, instance_mem).name
         return virtual_instance_type
@@ -198,11 +219,11 @@ class Kubernetes(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
+            cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del cluster_name_on_cloud, zones, dryrun  # Unused.
+        del cluster_name, zones, dryrun  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -225,8 +246,9 @@ class Kubernetes(clouds.Cloud):
 
         if resources.image_id is not None:
             # Use custom image specified in resources
-            image_id_with_region = resources.image_id['kubernetes']
-            image_id = image_id_with_region.lstrip('docker:')
+            image_id = resources.image_id['kubernetes']
+            if image_id.startswith('docker:'):
+                image_id = image_id[len('docker:'):]
         else:
             # Select image based on whether we are using GPUs or not.
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
@@ -247,6 +269,43 @@ class Kubernetes(clouds.Cloud):
 
         port_mode = network_utils.get_port_mode(None)
 
+        remote_identity = skypilot_config.get_nested(
+            ('kubernetes', 'remote_identity'),
+            schemas.get_default_remote_identity('kubernetes'))
+        if (remote_identity ==
+                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+            # SA name doesn't matter since automounting credentials is disabled
+            k8s_service_account_name = 'default'
+            k8s_automount_sa_token = 'false'
+        elif (remote_identity ==
+              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
+            # Use the default service account
+            k8s_service_account_name = (
+                kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
+            k8s_automount_sa_token = 'true'
+        else:
+            # User specified a custom service account
+            k8s_service_account_name = remote_identity
+            k8s_automount_sa_token = 'true'
+
+        fuse_device_required = bool(resources.requires_fuse)
+
+        # Configure spot labels, if requested and supported
+        spot_label_key, spot_label_value = None, None
+        if resources.use_spot:
+            spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
+
+        # Timeout for resource provisioning. This timeout determines how long to
+        # wait for pod to be in pending status before giving up.
+        # Larger timeout may be required for autoscaling clusters, since
+        # autoscaler may take some time to provision new nodes.
+        # Note that this timeout includes time taken by the Kubernetes scheduler
+        # itself, which can be upto 2-3 seconds.
+        # For non-autoscaling clusters, we conservatively set this to 10s.
+        timeout = skypilot_config.get_nested(
+            ('kubernetes', 'provision_timeout'),
+            10,
+            override_configs=resources.cluster_config_overrides)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -254,29 +313,43 @@ class Kubernetes(clouds.Cloud):
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
-            'timeout': str(self.TIMEOUT),
+            'timeout': str(timeout),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
+            'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
-            # TODO(romilb): Allow user to specify custom images
+            'k8s_service_account_name': k8s_service_account_name,
+            'k8s_automount_sa_token': k8s_automount_sa_token,
+            'k8s_fuse_device_required': fuse_device_required,
+            # Namespace to run the FUSE device manager in
+            'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_spot_label_key': spot_label_key,
+            'k8s_spot_label_value': spot_label_value,
             'image_id': image_id,
         }
+
+        # Add kubecontext if it is set. It may be None if SkyPilot is running
+        # inside a pod with in-cluster auth.
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context is not None:
+            deploy_vars['k8s_context'] = curr_context
 
         return deploy_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([resources],
+                                                     fuzzy_candidate_list, None)
 
         def _make(instance_list):
             resource_list = []
@@ -319,35 +392,41 @@ class Kubernetes(clouds.Cloud):
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
         # Check if requested instance type will fit in the cluster.
-        # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = kubernetes_utils.check_instance_fits(
-            chosen_instance_type)
-        if not fits:
-            logger.debug(f'Instance type {chosen_instance_type} does '
-                         'not fit in the Kubernetes cluster. '
-                         f'Reason: {reason}')
-            return [], []
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if autoscaler_type is None:
+            # If autoscaler is not set, check if the instance type fits in the
+            # cluster. Else, rely on the autoscaler to provision the right
+            # instance type without running checks. Worst case, if autoscaling
+            # fails, the pod will be stuck in pending state until
+            # provision_timeout, after which failover will be triggered.
+            fits, reason = kubernetes_utils.check_instance_fits(
+                chosen_instance_type)
+            if not fits:
+                logger.debug(f'Instance type {chosen_instance_type} does '
+                             'not fit in the Kubernetes cluster. '
+                             f'Reason: {reason}')
+                return resources_utils.FeasibleResources([], [], reason)
 
         # No fuzzy lists for Kubernetes
-        return _make([chosen_instance_type]), []
+        return resources_utils.FeasibleResources(_make([chosen_instance_type]),
+                                                 [], None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
-            # Test using python API
-            try:
-                return kubernetes_utils.check_credentials()
-            except Exception as e:  # pylint: disable=broad-except
-                return (False, 'Credential check failed: '
-                        f'{common_utils.format_exception(e)}')
-        else:
-            return (False, 'Credentials not found - '
-                    f'check if {CREDENTIAL_PATH} exists.')
+        # Test using python API
+        try:
+            return kubernetes_utils.check_credentials()
+        except Exception as e:  # pylint: disable=broad-except
+            return (False, 'Credential check failed: '
+                    f'{common_utils.format_exception(e)}')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # Upload kubeconfig to the default path to avoid having to set
-        # KUBECONFIG in the environment.
-        return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # Upload kubeconfig to the default path to avoid having to set
+            # KUBECONFIG in the environment.
+            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+        else:
+            return {}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
@@ -363,18 +442,60 @@ class Kubernetes(clouds.Cloud):
                              ' Cluster used is determined by the kubeconfig.')
         return region, zone
 
-    @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        k8s = kubernetes.get_kubernetes()
-        try:
-            _, current_context = k8s.config.list_kube_config_contexts()
-            if 'namespace' in current_context['context']:
-                namespace = current_context['context']['namespace']
-            else:
-                namespace = kubernetes_utils.DEFAULT_NAMESPACE
+    @staticmethod
+    def get_identity_from_context(context):
+        if 'namespace' in context['context']:
+            namespace = context['context']['namespace']
+        else:
+            namespace = kubernetes_utils.DEFAULT_NAMESPACE
+        user = context['context']['user']
+        cluster = context['context']['cluster']
+        identity_str = f'{cluster}_{user}_{namespace}'
+        return identity_str
 
-            user = current_context['context']['user']
-            cluster = current_context['context']['cluster']
-            return [f'{cluster}_{user}_{namespace}']
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        k8s = kubernetes.kubernetes
+        identities = []
+        try:
+            all_contexts, current_context = (
+                k8s.config.list_kube_config_contexts())
         except k8s.config.config_exception.ConfigException:
             return None
+        # Add current context at the head of the list
+        current_identity = [cls.get_identity_from_context(current_context)]
+        identities.append(current_identity)
+        for context in all_contexts:
+            identity = [cls.get_identity_from_context(context)]
+            identities.append(identity)
+        return identities
+
+    @classmethod
+    def is_label_valid(cls, label_key: str,
+                       label_value: str) -> Tuple[bool, Optional[str]]:
+        # Kubernetes labels can be of the format <domain>/<key>: <value>
+        key_regex = re.compile(
+            # Look-ahead to ensure proper domain formatting up to a slash
+            r'^(?:(?=[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)'
+            # Match domain: starts and ends with alphanum up to 253 chars
+            # including a slash in the domain.
+            r'[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?\/)?'
+            # Match key: starts and ends with alphanum, upto to 63 chars.
+            r'[a-z0-9]([-a-z0-9_.]{0,61}[a-z0-9])?$')
+        value_regex = re.compile(
+            r'^([a-zA-Z0-9]([-a-zA-Z0-9_.]{0,61}[a-zA-Z0-9])?)?$')
+        key_valid = bool(key_regex.match(label_key))
+        value_valid = bool(value_regex.match(label_value))
+        error_msg = None
+        condition_msg = ('Value must consist of alphanumeric characters or '
+                         '\'-\', \'_\', \'.\', and must be no more than 63 '
+                         'characters in length.')
+        if not key_valid:
+            error_msg = (f'Invalid label key {label_key} for Kubernetes. '
+                         f'{condition_msg}')
+        if not value_valid:
+            error_msg = (f'Invalid label value {label_value} for Kubernetes. '
+                         f'{condition_msg}')
+        if not key_valid or not value_valid:
+            return False, error_msg
+        return True, None

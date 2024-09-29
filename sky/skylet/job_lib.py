@@ -1,4 +1,4 @@
-"""Sky job lib, backed by a sqlite database.
+"""Utilities for jobs on a remote cluster, backed by a sqlite database.
 
 This is a remote utility module that provides job queue functionality.
 """
@@ -165,9 +165,9 @@ class JobScheduler:
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
-    def schedule_step(self) -> None:
+    def schedule_step(self, force_update_jobs: bool = False) -> None:
         jobs = self._get_jobs()
-        if len(jobs) > 0:
+        if len(jobs) > 0 or force_update_jobs:
             update_status()
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
@@ -392,15 +392,14 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
                                                  get_ended_time: bool) -> str:
     """Get the job submitted/ended timestamp.
 
-    This function should only be called by the spot controller,
-    which is ok to use `submitted_at` instead of `start_at`,
-    because the spot job duration need to include both setup
-    and running time and the job will not stay in PENDING
-    state.
+    This function should only be called by the jobs controller, which is ok to
+    use `submitted_at` instead of `start_at`, because the managed job duration
+    need to include both setup and running time and the job will not stay in
+    PENDING state.
 
-    The normal job duration will use `start_at` instead of
-    `submitted_at` (in `format_job_queue()`), because the job
-    may stay in PENDING if the cluster is busy.
+    The normal job duration will use `start_at` instead of `submitted_at` (in
+    `format_job_queue()`), because the job may stay in PENDING if the cluster is
+    busy.
     """
     field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
@@ -810,12 +809,17 @@ class JobLibCodeGen:
     """
 
     _PREFIX = [
-        'import os', 'import getpass',
+        'import os',
+        'import getpass',
         'from sky.skylet import job_lib, log_lib, constants',
-        'assert (getattr(constants, "SKYLET_LIB_VERSION", 0) '
-        f'>= {constants.SKYLET_LIB_VERSION}),'
-        '("The SkyPilot runtime on remote cluster is outdated.'
-        ' Please update the runtime with: sky start -f <cluster-name>")'
+        # Backward compatibility for old skylet lib version on the remote
+        # machine. The `job_owner` argument was removed in #3037, and if the
+        # remote machine has an old SkyPilot version before that, we need to
+        # pass the `job_owner` argument to the job_lib functions.
+        # TODO(zhwu): Remove this in 0.7.0 release.
+        'job_owner_kwargs = {} '
+        'if getattr(constants, "SKYLET_LIB_VERSION", 0) >= 1 '
+        'else {"job_owner": getpass.getuser()}',
     ]
 
     @classmethod
@@ -842,7 +846,7 @@ class JobLibCodeGen:
 
     @classmethod
     def update_status(cls) -> str:
-        code = ['job_lib.update_status()']
+        code = ['job_lib.update_status(**job_owner_kwargs)']
         return cls._build(code)
 
     @classmethod
@@ -860,7 +864,7 @@ class JobLibCodeGen:
         """See job_lib.cancel_jobs()."""
         code = [
             (f'cancelled = job_lib.cancel_jobs_encoded_results('
-             f' {job_ids!r}, {cancel_all})'),
+             f' {job_ids!r}, {cancel_all}, **job_owner_kwargs)'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
@@ -875,15 +879,15 @@ class JobLibCodeGen:
     @classmethod
     def tail_logs(cls,
                   job_id: Optional[int],
-                  spot_job_id: Optional[int],
+                  managed_job_id: Optional[int],
                   follow: bool = True) -> str:
         # pylint: disable=line-too-long
         code = [
-            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
+            f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
-            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir,'
-            f' spot_job_id={spot_job_id!r}, follow={follow})',
+            f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, '
+            f'managed_job_id={managed_job_id!r}, follow={follow}, **job_owner_kwargs)',
         ]
         return cls._build(code)
 
@@ -928,4 +932,4 @@ class JobLibCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'python3 -u -c {shlex.quote(code)}'
+        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(code)}'

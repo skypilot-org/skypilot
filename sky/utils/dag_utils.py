@@ -1,15 +1,67 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
+import copy
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
+from sky import jobs
 from sky import sky_logging
-from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Message thrown when APIs sky.{exec,launch,spot.launch}() received a string
+# instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
+# this.
+_ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
+Expected a sky.Task or sky.Dag but received a string.
+
+If you meant to run a command, make it a Task's run command:
+
+    task = sky.Task(run=command)
+
+The command can then be run as:
+
+  sky.exec(task, cluster_name=..., ...)
+  # Or use {'V100': 1}, 'V100:0.5', etc.
+  task.set_resources(sky.Resources(accelerators='V100:1'))
+  sky.exec(task, cluster_name=..., ...)
+
+  sky.launch(task, ...)
+
+  sky.spot.launch(task, ...)
+""".strip()
+
+
+def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
+    """Converts the entrypoint to a sky.Dag and applies the policy.
+
+    Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
+    """
+    # Not suppressing stacktrace: when calling this via API user may want to
+    # see their own program in the stacktrace. Our CLI impl would not trigger
+    # these errors.
+    converted_dag: 'dag_lib.Dag'
+    if isinstance(entrypoint, str):
+        with ux_utils.print_exception_no_traceback():
+            raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
+    elif isinstance(entrypoint, dag_lib.Dag):
+        converted_dag = copy.deepcopy(entrypoint)
+    elif isinstance(entrypoint, task_lib.Task):
+        entrypoint = copy.deepcopy(entrypoint)
+        with dag_lib.Dag() as dag:
+            dag.add(entrypoint)
+            dag.name = entrypoint.name
+        converted_dag = dag
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise TypeError(
+                'Expected a sky.Task or sky.Dag but received argument of type: '
+                f'{type(entrypoint)}')
+
+    return converted_dag
 
 
 def load_chain_dag_from_yaml(
@@ -21,9 +73,9 @@ def load_chain_dag_from_yaml(
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
 
-    'env_overrides' is in effect only when there's exactly one task. It is a
-    list of (key, value) pairs that will be used to update the task's 'envs'
-    section.
+    'env_overrides' is a list of (key, value) pairs that will be used to update
+    the task's 'envs' section. If it is a chain dag, the envs will be updated
+    for all tasks in the chain.
 
     Returns:
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
@@ -40,12 +92,6 @@ def load_chain_dag_from_yaml(
     if len(configs) == 0:
         # YAML has only `name: xxx`. Still instantiate a task.
         configs = [{'name': dag_name}]
-
-    if len(configs) > 1:
-        # TODO(zongheng): in a chain DAG of N tasks, cli.py currently makes the
-        # decision to not apply overrides. Here we maintain this behavior. We
-        # can listen to user feedback to change this.
-        env_overrides = None
 
     current_task = None
     with dag_lib.Dag() as dag:
@@ -93,33 +139,24 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
                 task.name = f'{dag.name}-{task_id}'
 
 
-def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
+def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
         for resources in list(task_.resources):
             change_default_value: Dict[str, Any] = {}
-            if resources.use_spot_specified and not resources.use_spot:
-                logger.info(
-                    'Field `use_spot` is set to false but a managed spot job is '  # pylint: disable=line-too-long
-                    'being launched. Ignoring the field and proceeding to use spot '  # pylint: disable=line-too-long
-                    'instance(s).')
-            change_default_value['use_spot'] = True
-            if resources.spot_recovery is None:
+            if resources.job_recovery is None:
                 change_default_value[
-                    'spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+                    'job_recovery'] = jobs.DEFAULT_RECOVERY_STRATEGY
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)
 
-        spot_recovery_strategy = new_resources_list[0].spot_recovery
+        job_recovery_strategy = new_resources_list[0].job_recovery
         for resource in new_resources_list:
-            if resource.spot_recovery != spot_recovery_strategy:
+            if resource.job_recovery != job_recovery_strategy:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('All resources in the task must have'
-                                     'the same spot recovery strategy.')
+                                     'the same job recovery strategy.')
 
-        if isinstance(task_.resources, list):
-            task_.set_resources(new_resources_list)
-        else:
-            task_.set_resources(set(new_resources_list))
+        task_.set_resources(type(task_.resources)(new_resources_list))

@@ -59,7 +59,7 @@ data:
     
     canonical_gpu_names = [
         'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100', 
-        'A10', 'P100', 'P40', 'P4', 'L4', 'A6000'
+        'A10', 'P100', 'P40', 'P4', 'L4'
     ]
     
     
@@ -108,9 +108,13 @@ data:
                     labelled = True
                     break
             if not labelled:
-                # If we didn't find a canonical name, just use the GPU name
-                # with spaces replaced by dashes
-                gpu_label = gpu_name.lower().replace(' ', '-')
+                # If we didn't find a canonical name:
+                # 1. remove 'NVIDIA ' if present (e.g., 'NVIDIA RTX A6000' -> 'RTX A6000')
+                # 2. remove 'GeForce ' if present (e.g., 'NVIDIA GeForce RTX 3070' -> 'RTX 3070')
+                # 3. replace 'RTX ' with 'RTX' (without spaces) (e.g., 'RTX 6000' -> 'RTX6000')
+                # 4. replace any other spaces with dashes (e.g. 'RTX 2080 Ti' -> 'RTX2080-Ti')
+                gpu_name = gpu_name.lower().replace('nvidia ', '').replace('geforce ', '').replace('rtx ', 'rtx').replace(' ', '-')
+                gpu_label = gpu_name
                 label_node(gpu_label)
                 labelled = True
         else:

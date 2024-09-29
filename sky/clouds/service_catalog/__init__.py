@@ -5,9 +5,10 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.config import fallback_to_default_catalog
+from sky.clouds.service_catalog.constants import ALL_CLOUDS
+from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
-from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -15,8 +16,6 @@ if typing.TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
-              'kubernetes', 'runpod', 'vsphere', 'cudo')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
@@ -36,7 +35,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     for cloud in clouds:
         try:
             cloud_module = importlib.import_module(
-                f'sky.clouds.service_catalog.{cloud}_catalog')
+                f'sky.clouds.service_catalog.{cloud.lower()}_catalog')
         except ModuleNotFoundError:
             raise ValueError(
                 'Cannot find module "sky.clouds.service_catalog'
@@ -116,6 +115,46 @@ def list_accelerator_counts(
     for gpu, counts in accelerator_counts.items():
         ret[gpu] = sorted(counts)
     return ret
+
+
+def list_accelerator_realtime(
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    clouds: CloudFilter = None,
+    case_sensitive: bool = True,
+) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
+    """List all accelerators offered by Sky with their realtime availability.
+
+    Realtime availability is the total number of accelerators in the cluster
+    and number of accelerators available at the time of the call.
+
+    Used for fixed size cluster settings, such as Kubernetes.
+
+    Returns:
+        A tuple of three dictionaries mapping canonical accelerator names to:
+        - A list of available counts. (e.g., [1, 2, 4])
+        - Total number of accelerators in the cluster (capacity).
+        - Number of accelerators available at the time of call (availability).
+    """
+    qtys_map, total_accelerators_capacity, total_accelerators_available = (
+        _map_clouds_catalog(clouds,
+                            'list_accelerators_realtime',
+                            gpus_only,
+                            name_filter,
+                            region_filter,
+                            quantity_filter,
+                            case_sensitive=case_sensitive,
+                            all_regions=False,
+                            require_price=False))
+    accelerator_counts: Dict[str, List[int]] = collections.defaultdict(list)
+    for gpu, items in qtys_map.items():
+        for item in items:
+            accelerator_counts[gpu].append(item.accelerator_count)
+        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+    return (accelerator_counts, total_accelerators_capacity,
+            total_accelerators_available)
 
 
 def instance_type_exists(instance_type: str,
@@ -298,10 +337,13 @@ def get_common_gpus() -> List[str]:
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
     # TODO(wei-lin): refactor below hard-coded list.
+    # There are many TPU configurations available, we show the three smallest
+    # and the largest configuration for the latest gen TPUs.
     return [
-        'tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v2-256', 'tpu-v2-512',
-        'tpu-v3-8', 'tpu-v3-32', 'tpu-v3-64', 'tpu-v3-128', 'tpu-v3-256',
-        'tpu-v3-512', 'tpu-v3-1024', 'tpu-v3-2048'
+        'tpu-v2-512', 'tpu-v3-2048', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
+        'tpu-v4-3968', 'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8',
+        'tpu-v5litepod-256', 'tpu-v5p-8', 'tpu-v5p-32', 'tpu-v5p-128',
+        'tpu-v5p-12288'
     ]
 
 
@@ -336,7 +378,8 @@ __all__ = [
     # Configuration
     'fallback_to_default_catalog',
     # Constants
+    'ALL_CLOUDS',
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',
-    'LOCAL_CATALOG_DIR',
+    'CATALOG_DIR',
 ]

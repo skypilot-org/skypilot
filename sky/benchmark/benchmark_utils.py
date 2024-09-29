@@ -20,12 +20,14 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
+from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -167,19 +169,16 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
-    enabled_clouds = global_user_state.get_enabled_clouds()
-    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
-    if 'AWS' in enabled_clouds:
-        bucket_type = data.StoreType.S3.value
-    elif 'GCP' in enabled_clouds:
-        bucket_type = data.StoreType.GCS.value
-    elif 'AZURE' in enabled_clouds:
-        raise RuntimeError(
-            'Azure Blob Storage is not supported yet. '
-            'Please enable another cloud to create a benchmark bucket.')
-    else:
-        raise RuntimeError('No cloud is enabled. '
-                           'Please enable at least one cloud.')
+    enabled_clouds = storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+        raise_if_no_cloud_access=True)
+    # Sky Benchmark only supports S3 (see _download_remote_dir and
+    # _delete_remote_dir).
+    enabled_clouds = [
+        cloud for cloud in enabled_clouds if cloud in [str(clouds.AWS())]
+    ]
+    assert enabled_clouds, ('No enabled cloud storage found. Sky Benchmark '
+                            'requires GCP or AWS to store logs.')
+    bucket_type = data.StoreType.from_cloud(enabled_clouds[0]).value
 
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')
@@ -249,14 +248,8 @@ def _download_remote_dir(remote_dir: str, local_dir: str,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=True)
-    elif bucket_type == data.StoreType.GCS:
-        remote_dir = f'gs://{remote_dir}'
-        subprocess.run(['gsutil', '-m', 'cp', '-r', remote_dir, local_dir],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
     else:
-        raise RuntimeError('Azure Blob Storage is not supported yet.')
+        raise RuntimeError(f'{bucket_type} is not supported yet.')
 
 
 def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
@@ -267,14 +260,8 @@ def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL,
                        check=True)
-    elif bucket_type == data.StoreType.GCS:
-        remote_dir = f'gs://{remote_dir}'
-        subprocess.run(['gsutil', '-m', 'rm', '-r', remote_dir],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
     else:
-        raise RuntimeError('Azure Blob Storage is not supported yet.')
+        raise RuntimeError(f'{bucket_type} is not supported yet.')
 
 
 def _read_timestamp(path: str) -> float:

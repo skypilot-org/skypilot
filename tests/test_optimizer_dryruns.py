@@ -274,7 +274,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     assert 'n2-highcpu-4' in stdout  # GCP, 4 vCPUs, 4 GB memory
     assert 'c6i.xlarge' in stdout  # AWS, 4 vCPUs, 8 GB memory
     assert 'Standard_F4s_v2' in stdout  # Azure, 4 vCPUs, 8 GB memory
-    assert 'gpu_1x_rtx6000' in stdout  # Lambda, 14 vCPUs, 46 GB memory
+    assert 'cpu_4x_general' in stdout  # Lambda, 4 vCPUs, 16 GB memory
 
     _test_resources_launch(monkeypatch, accelerators='T4')
     stdout, _ = capfd.readouterr()
@@ -468,8 +468,8 @@ def test_invalid_image(monkeypatch):
     assert 'Cloud must be specified' in str(e.value)
 
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
-    assert 'only supported for AWS/GCP/IBM/OCI' in str(e.value)
+        _test_resources(monkeypatch, cloud=sky.Lambda(), image_id='some-image')
+    assert 'only supported for AWS/GCP/Azure/IBM/OCI/Kubernetes' in str(e.value)
 
 
 def test_valid_image(monkeypatch):
@@ -738,7 +738,7 @@ def test_disk_tier_mismatch(enable_all_clouds):
             sky.Resources(cloud=cloud, disk_tier=tier)
         for unsupported_tier in (set(resources_utils.DiskTier) -
                                  cloud._SUPPORTED_DISK_TIERS):
-            with pytest.raises(exceptions.NotSupportedError) as e:
+            with pytest.raises(ValueError) as e:
                 sky.Resources(cloud=cloud, disk_tier=unsupported_tier)
             assert f'is not supported' in str(e.value), str(e.value)
 
@@ -765,9 +765,16 @@ def test_optimize_disk_tier(enable_all_clouds):
         map(clouds.CLOUD_REGISTRY.get,
             ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
 
-    # Only AWS, GCP, OCI supports HIGH disk tier.
+    # Only AWS, GCP, Azure, OCI supports HIGH disk tier.
     high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
     high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
     assert high_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get,
-            ['aws', 'gcp', 'oci'])), high_tier_candidates
+            ['aws', 'gcp', 'azure', 'oci'])), high_tier_candidates
+
+    # Only AWS, GCP supports ULTRA disk tier.
+    ultra_tier_resources = sky.Resources(
+        disk_tier=resources_utils.DiskTier.ULTRA)
+    ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
+    assert ultra_tier_candidates == set(
+        map(clouds.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates

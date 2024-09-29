@@ -21,6 +21,9 @@ _PULL_FREQUENCY_HOURS = 7
 _df = common.read_catalog('azure/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
+_image_df = common.read_catalog('azure/images.csv',
+                                pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
 # We will select from the following three instance families:
 _DEFAULT_INSTANCE_FAMILY = [
     # The latest general-purpose instance family as of Mar. 2023.
@@ -107,7 +110,8 @@ def get_default_instance_type(
         _DEFAULT_INSTANCE_FAMILY)]
 
     def _filter_disk_type(instance_type: str) -> bool:
-        return Azure.check_disk_tier(instance_type, disk_tier)[0]
+        valid, _ = Azure.check_disk_tier(instance_type, disk_tier)
+        return valid
 
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
@@ -168,3 +172,17 @@ def list_accelerators(
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
                                          case_sensitive, all_regions)
+
+
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    """Returns the image id from the tag."""
+    # Azure images are not region-specific.
+    del region  # Unused.
+    return common.get_image_id_from_tag_impl(_image_df, tag, None)
+
+
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
+    """Returns whether the image tag is valid."""
+    # Azure images are not region-specific.
+    del region  # Unused.
+    return common.is_image_tag_valid_impl(_image_df, tag, None)

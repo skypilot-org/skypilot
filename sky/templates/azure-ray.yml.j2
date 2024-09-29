@@ -11,40 +11,40 @@ docker:
   container_name: {{docker_container_name}}
   run_options:
     - --ulimit nofile=1048576:1048576
-    {%- if custom_resources is not none %}
-      --gpus all
-    {%- endif %}
+    {%- for run_option in docker_run_options %}
+    - {{run_option}}
+    {%- endfor %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
 {%- endif %}
 
 provider:
-    type: external
-    module: sky.skylet.providers.azure.AzureNodeProvider
-    location: {{region}}
-    # Ref: https://github.com/ray-project/ray/blob/2367a2cb9033913b68b1230316496ae273c25b54/python/ray/autoscaler/_private/_azure/node_provider.py#L87
-    # For Azure, ray distinguishes different instances by the resource_group,
-    # instead of the cluster_name. This ensures that ray creates new instances
-    # for different cluster_name.
-    resource_group: {{resource_group}}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
-    # Keep (otherwise cannot reuse when re-provisioning).
-    # teardown(terminate=True) will override this.
-    cache_stopped_nodes: True
-    # subscription id of the azure user
-    subscription_id: {{azure_subscription_id}}
-    # Disable launch config check for worker nodes as it can cause resource
-    # leakage.
-    # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
-    # The upper-level SkyPilot code has make sure there will not be resource
-    # leakage.
-    disable_launch_config_check: true
+  type: external
+  module: sky.provision.azure
+  location: {{region}}
+  # Ref: https://github.com/ray-project/ray/blob/2367a2cb9033913b68b1230316496ae273c25b54/python/ray/autoscaler/_private/_azure/node_provider.py#L87
+  # For Azure, ray distinguishes different instances by the resource_group,
+  # instead of the cluster_name. This ensures that ray creates new instances
+  # for different cluster_name.
+  resource_group: {{resource_group}}
+  # Keep (otherwise cannot reuse when re-provisioning).
+  # teardown(terminate=True) will override this.
+  cache_stopped_nodes: True
+  # subscription id of the azure user
+  subscription_id: {{azure_subscription_id}}
+  # Disable launch config check for worker nodes as it can cause resource
+  # leakage.
+  # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
+  # The upper-level SkyPilot code has make sure there will not be resource
+  # leakage.
+  disable_launch_config_check: true
 
 
 auth:
@@ -69,43 +69,22 @@ available_node_types:
             imageVersion: {{image_version}}
             osDiskSizeGB: {{disk_size}}
             osDiskTier: {{disk_tier}}
-            cloudInitSetupCommands: {{cloud_init_setup_commands}}
-            # optionally set priority to use Spot instances
             {%- if use_spot %}
+            # optionally set priority to use Spot instances
             priority: Spot
             # set a maximum price for spot instances if desired
             # billingProfile:
             #     maxPrice: -1
             {%- endif %}
+            cloudInitSetupCommands: |-
+              {%- for cmd in cloud_init_setup_commands %}
+              {{ cmd }}
+              {%- endfor %}
+        need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
+        {%- if disk_performance_tier is not none %}
+        disk_performance_tier: {{disk_performance_tier}}
+        {%- endif %}
         # TODO: attach disk
-{% if num_nodes > 1 %}
-    ray.worker.default:
-      min_workers: {{num_nodes - 1}}
-      max_workers: {{num_nodes - 1}}
-      resources: {}
-      node_config:
-        tags:
-          skypilot-user: {{ user }}
-        azure_arm_parameters:
-            adminUsername: skypilot:ssh_user
-            publicKey: |
-              skypilot:ssh_public_key_content
-            vmSize: {{instance_type}}
-            # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
-            imagePublisher: {{image_publisher}}
-            imageOffer: {{image_offer}}
-            imageSku: "{{image_sku}}"
-            imageVersion: {{image_version}}
-            osDiskSizeGB: {{disk_size}}
-            osDiskTier: {{disk_tier}}
-            cloudInitSetupCommands: {{cloud_init_setup_commands}}
-          {%- if use_spot %}
-            priority: Spot
-            # set a maximum price for spot instances if desired
-            # billingProfile:
-            #     maxPrice: -1
-          {%- endif %}
-{%- endif %}
 
 head_node_type: ray.head.default
 
@@ -118,9 +97,6 @@ file_mounts: {
 {%- endfor %}
 }
 
-rsync_exclude: []
-
-initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
@@ -141,12 +117,8 @@ setup_commands:
   # Line 'sudo mv /etc/nccl.conf /etc/nccl.conf.bak' removes the default nccl.conf which is wrongly configured on many multi-GPU Azure VM, causing failure for multi-GPU workloads using NCCL.
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
-    (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
-    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    source ~/.bashrc;
-    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
-    (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});
-    (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[azure, remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    {{ ray_skypilot_installation_commands }}
+    touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
@@ -156,37 +128,5 @@ setup_commands:
     sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
     sudo mv /etc/nccl.conf /etc/nccl.conf.bak || true;
-
-# Command to start ray on the head node. You don't need to change this.
-# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
-# connection, which is expensive. Try your best to co-locate commands into fewer
-# items! The same comment applies for worker_start_ray_commands.
-#
-# Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 2
-head_start_ray_commands:
-  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
-  - ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1; 
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done; 
-    {{dump_port_command}}; 
-    {{ray_head_wait_initialized_command}}
-
-{%- if num_nodes > 1 %}
-worker_start_ray_commands:
-  - ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-{%- else %}
-worker_start_ray_commands: []
-{%- endif %}
-
-head_node: {}
-worker_nodes: {}
-
-# These fields are required for external cloud providers.
-head_setup_commands: []
-worker_setup_commands: []
-cluster_synced_files: []
-file_mounts_sync_continuously: False

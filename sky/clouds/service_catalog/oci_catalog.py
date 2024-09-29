@@ -15,6 +15,7 @@ import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky.adaptors import oci as oci_adaptor
+from sky.clouds import OCI
 from sky.clouds.service_catalog import common
 from sky.clouds.utils import oci_utils
 from sky.utils import resources_utils
@@ -40,7 +41,7 @@ def _get_df() -> 'pd.DataFrame':
 
         df = common.read_catalog('oci/vms.csv')
         try:
-            oci_adaptor.get_oci()
+            oci_adaptor.oci.load_module()
         except ImportError:
             _df = df
             return _df
@@ -55,8 +56,8 @@ def _get_df() -> 'pd.DataFrame':
 
             subscribed_regions = [r.region_name for r in subscriptions]
 
-        except (oci_adaptor.get_oci().exceptions.ConfigFileNotFound,
-                oci_adaptor.get_oci().exceptions.InvalidConfig) as e:
+        except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
+                oci_adaptor.oci.exceptions.InvalidConfig) as e:
             # This should only happen in testing where oci config is
             # missing, because it means the 'sky check' will fail if
             # enter here (meaning OCI disabled).
@@ -102,7 +103,6 @@ def get_default_instance_type(
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
-    del disk_tier  # unused
     if cpus is None:
         cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
 
@@ -111,12 +111,17 @@ def get_default_instance_type(
     else:
         memory_gb_or_ratio = memory
 
+    def _filter_disk_type(instance_type: str) -> bool:
+        valid, _ = OCI.check_disk_tier(instance_type, disk_tier)
+        return valid
+
     instance_type_prefix = tuple(
         f'{family}' for family in oci_utils.oci_config.DEFAULT_INSTANCE_FAMILY)
 
     df = _get_df()
     df = df[df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
 
     logger.debug(f'# get_default_instance_type: {df}')
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,

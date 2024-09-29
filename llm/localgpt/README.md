@@ -15,7 +15,7 @@ sky check
 ```
 See [docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html) for more.
 
-Once you are done, we will use [SkyPilot YAML for localGPT](localgpt.yaml) to define our task and run it.
+Once you are done, we will use [SkyPilot YAML for localGPT](https://github.com/skypilot-org/skypilot/tree/master/llm/localgpt/localgpt.yaml) to define our task and run it.
 
 
 ## Launching localGPT on your cloud with SkyPilot

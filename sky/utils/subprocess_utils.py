@@ -69,8 +69,7 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: Union[str, Callable[[], str]],
                       stderr: Optional[str] = None,
-                      stream_logs: bool = True,
-                      cluster_name: Optional[str] = None) -> None:
+                      stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -79,15 +78,8 @@ def handle_returncode(returncode: int,
         error_msg: The error message to print.
         stderr: The stderr of the command.
     """
-    echo = logger.error if stream_logs else lambda _: None
+    echo = logger.error if stream_logs else logger.debug
     if returncode != 0:
-        if (stderr is not None and
-                'The SkyPilot runtime on remote cluster is outdated.'
-                in stderr):
-            error_msg = (
-                f'The SkyPilot runtime on remote cluster {cluster_name!r} is '
-                'outdated. Please update the runtime with: '
-                f'sky start -f {cluster_name}')
         if stderr is not None:
             echo(stderr)
 
@@ -175,6 +167,8 @@ def run_with_retries(
         if retry_cnt < max_retry:
             if (retry_returncode is not None and
                     returncode in retry_returncode):
+                logger.debug(
+                    f'Retrying command due to returncode {returncode}: {cmd}')
                 retry_cnt += 1
                 time.sleep(random.uniform(0, 1) * 2)
                 continue

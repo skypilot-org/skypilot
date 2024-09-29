@@ -1,0 +1,14 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 1
+
+
+resources:
+  ports: 8080
+  cpus: 2+
+
+workdir: tests/skyserve/restart
+
+run: python3 user_bug.py
