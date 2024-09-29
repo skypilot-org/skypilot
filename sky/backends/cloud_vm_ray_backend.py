@@ -3333,8 +3333,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
+        job_title = controller_utils.job_starting_title(handle.cluster_name)
         logger.info(
-            ux_utils.format_title('Job Running') + '\nSubmitted with ID: '
+            ux_utils.format_title(job_title) + '\nSubmitted with ID: '
             f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
         try:

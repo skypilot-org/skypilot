@@ -800,3 +800,11 @@ def cluster_launching_title(cluster_name: str) -> str:
     if cluster_name and Controllers.from_name(cluster_name) is not None:
         return 'Controller Launching'
     return 'Cluster Launching'
+
+
+def job_starting_title(cluster_name: str) -> str:
+    controller = Controllers.from_name(cluster_name)
+    if controller is None or controller == Controllers.JOBS_CONTROLLER:
+        return 'Job Starting'
+    else:
+        return 'Service Starting'
