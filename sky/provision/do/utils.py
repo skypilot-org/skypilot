@@ -54,8 +54,7 @@ def _init_client():
             'no credentials file found from '
             f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
 
-    auth_contexts = common_utils.read_yaml(
-        CREDENTIALS_PATH)['auth-contexts']
+    auth_contexts = common_utils.read_yaml(CREDENTIALS_PATH)['auth-contexts']
     for context, api_token in auth_contexts.items():
         try:
             test_client = do.pydo.Client(token=api_token)
@@ -202,6 +201,14 @@ def down_instance(instance: Dict[str, Any]):
     # block storage and instance for autodown
     client().droplets.destroy_with_associated_resources_dangerous(
         droplet_id=instance['id'], x_dangerous=True)
+
+
+def rename_instance(instance: Dict[str, Any], new_name: str):
+    client().droplet_actions.rename(droplet=instance['id'],
+                                    body={
+                                        'type': 'rename',
+                                        'name': new_name
+                                    })
 
 
 def filter_instances(

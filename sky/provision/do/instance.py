@@ -86,13 +86,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     if to_start_count == 0:
         if head_instance is None:
             head_instance = list(exist_instances.values())[0]
-            utils.client().droplet_actions.rename(
-                droplet=head_instance['id'],
-                body={
-                    'type': 'rename',
-                    'name': f'{cluster_name_on_cloud}-'
-                            f'{uuid.uuid4().hex[:4]}-head'
-                })
+            utils.rename_instance(
+                head_instance,
+                f'{cluster_name_on_cloud}-{uuid.uuid4().hex[:4]}-head')
         assert head_instance is not None, ('`head_instance` should not be None')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
                     f'{len(exist_instances)} nodes, no need to start more.')
