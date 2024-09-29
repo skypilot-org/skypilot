@@ -132,9 +132,10 @@ class Kubernetes(clouds.Cloud):
     def _existing_allowed_contexts(cls) -> List[Optional[str]]:
         """Get existing allowed contexts.
 
-        If None is returned, it means that the kubeconfig is not found and we
-        may be running in a pod with in-cluster auth. In this case, we use None
-        context that will use the available service account mounted in the pod.
+        If None is returned in the list, it means that the kubeconfig is not
+        found and we may be running in a pod with in-cluster auth. In this
+        case, we use None context that will use the available service account
+        mounted in the pod.
         """
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
         if all_contexts is None:

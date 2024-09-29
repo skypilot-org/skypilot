@@ -367,6 +367,9 @@ def shared_controller_vars_to_fill(
         # may be running in a Kubernetes cluster with in-cluster auth and may
         # not have kubeconfig available to it. This is the typical case since
         # remote_identity default for Kubernetes is SERVICE_ACCOUNT.
+        # TODO(romilb): We should check the cloud the controller is running on
+        # before popping allowed_contexts. If it is not on Kubernetes,
+        # we may be able to use allowed_contexts.
         local_user_config.pop('allowed_contexts', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
