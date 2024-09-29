@@ -3370,13 +3370,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             elif controller is None:
                 logger.info(f'{ux_utils.format_title("Useful Commands")}'
                             f'\nJob ID: {job_id}'
-                            '\nTo cancel the job:\t'
+                            '\nTo cancel the job:\t\t'
                             f'{constants.BOLD}sky cancel {name} {job_id}'
                             f'{constants.RESET_BOLD}'
-                            '\nTo stream job logs:\t'
+                            '\nTo stream job logs:\t\t'
                             f'{constants.BOLD}sky logs {name} {job_id}'
                             f'{constants.RESET_BOLD}'
-                            '\nTo view the job queue:\t'
+                            '\nTo view the job queue:\t\t'
                             f'{constants.BOLD}sky queue {name}'
                             f'{constants.RESET_BOLD}')
 
