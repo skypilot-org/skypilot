@@ -29,3 +29,7 @@ class Options(enum.Enum):
         """Check if an environment variable is set to True."""
         return os.getenv(self.env_var,
                          str(self.default)).lower() in ('true', '1')
+
+    @property
+    def key(self) -> str:
+        return self.value[0]

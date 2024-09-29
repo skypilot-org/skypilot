@@ -116,7 +116,7 @@ def format_title(title: str) -> str:
     equations = '=' * equation_length
     padding_space = ' ' * (remaining_length % 2)
     title = f'{equations} {title} {padding_space}{equations}'
-    return (f'\n{constants.BOLD}{title}{colorama.Style.RESET_ALL}')
+    return f'\n{constants.BOLD}{title}{colorama.Style.RESET_ALL}'
 
 
 @functools.lru_cache()
