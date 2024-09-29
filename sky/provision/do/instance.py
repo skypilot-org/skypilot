@@ -200,12 +200,10 @@ def terminate_instances(
         if worker_only and instance_name.endswith('-head'):
             continue
         try:
-            utils.client().droplets.destroy_with_associated_resources_dangerous(
-                droplet_id=instance_meta['id'], x_dangerous=True)
+            utils.down_instance(instance_meta)
         except do.exceptions().HttpResponseError as err:
-            logger.warning('Error: {0} {1}: {2}'.format(err.status_code,
-                                                        err.reason,
-                                                        err.error.message))
+            logger.warning(
+                f'Error: {err.status_code} {err.reason}: {err.error.message}')
 
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,

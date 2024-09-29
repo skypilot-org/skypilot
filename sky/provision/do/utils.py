@@ -188,6 +188,13 @@ def stop_instance(instance: Dict[str, Any]):
     )
 
 
+def down_instance(instance: Dict[str, Any]):
+    # We use dangerous destroy to atomically delete
+    # block storage and instance for autodown
+    client().droplets.destroy_with_associated_resources_dangerous(
+        droplet_id=instance['id'], x_dangerous=True)
+
+
 def filter_instances(
         cluster_name_on_cloud: str,
         status_filters: Optional[List[str]] = None) -> Dict[str, Any]:
