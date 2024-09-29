@@ -183,9 +183,9 @@ class SkyServiceSpec:
         vpn_section: Dict[str, Any] = config.get('vpn', None)
         if vpn_section is not None:
             # Get the tailscale auth key from the environment.
-            tailscale_auth_key = vpn_section.get('tailscale_auth_key', None)
-            if tailscale_auth_key is not None:
-                service_config['tailscale_auth_key'] = tailscale_auth_key
+            if vpn_section.get('tailscale'):
+                service_config['tailscale_auth_key'] = os.getenv(
+                    'TAILSCALE_AUTH_KEY')
 
         return SkyServiceSpec(**service_config)
 

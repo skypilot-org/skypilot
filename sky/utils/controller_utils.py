@@ -420,6 +420,12 @@ def shared_controller_vars_to_fill(
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
+    # Check if VPN auth key should be set.
+    if task_config:
+        vpn_config = task_config.get('service', {}).get('vpn', {})
+        if vpn_config.get('tailscale'):
+            env_vars[constants.TAILSCALE_AUTH_KEY_ENV_VAR] = task_config[
+                'tailscale_auth_key']
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

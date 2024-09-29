@@ -379,8 +379,8 @@ def get_service_schema():
                 'type': 'object',
                 'additionalProperties': False,
                 'properties': {
-                    'tailscale_auth_key': {
-                        'type': 'string',
+                    'tailscale': {
+                        'type': 'boolean',
                     },
                 }
             },
