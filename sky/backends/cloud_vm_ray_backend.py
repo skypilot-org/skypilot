@@ -3460,7 +3460,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if controller is not None or down:
             return
         stop_str = ('\nTo stop the cluster:'
-                    f'\t{constants.BOLD}sky stop {name}'
+                    f'\t\t{constants.BOLD}sky stop {name}'
                     f'{constants.RESET_BOLD}')
         logger.info(f'\nCluster name: {name}'
                     '\nTo log into the head VM:\t'
