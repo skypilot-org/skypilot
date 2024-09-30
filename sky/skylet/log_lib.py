@@ -377,10 +377,8 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(
-                    f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Job '
-                    f'finished (status: {status_str}).'
-                )
+                print(f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Job '
+                      f'finished (status: {status_str}).')
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)

@@ -3,7 +3,6 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
-import os
 from typing import List, Optional, Tuple, Union
 
 import colorama
@@ -20,10 +19,8 @@ from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import rich_utils
-from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -330,24 +327,6 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        controller = controller_utils.Controllers.from_name(cluster_name)
-        # if controller is None and not _is_launched_by_sky_serve_controller:
-        #     # UX: print live clusters to make users aware (to save costs).
-        #     #
-        #     # Don't print if this job is launched by the jobs controller,
-        #     # because managed jobs are serverless, there can be many of them,
-        #     # and users tend to continuously monitor managed jobs using `sky
-        #     # job queue`. Also don't print if this job is a skyserve controller
-        #     # job or launched by a skyserve controller job, because the
-        #     # redirect for this subprocess.run won't success and it will
-        #     # pollute the controller logs.
-        #     #
-        #     # Disable the usage collection for this status command.
-        #     env = dict(os.environ,
-        #                **{env_options.Options.DISABLE_LOGGING.key: '1'})
-        #     print()
-        #     subprocess_utils.run(
-        #         'sky status --no-show-managed-jobs --no-show-services', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
     return job_id, handle

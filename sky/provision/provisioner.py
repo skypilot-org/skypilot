@@ -456,8 +456,7 @@ def _post_provision_setup(
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(
             f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} VM{plural} '
-            f'started for cluster: {cluster_name}.'
-        )
+            f'started for cluster: {cluster_name}.')
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
@@ -563,8 +562,7 @@ def _post_provision_setup(
     logger.info(
         f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
         f'launched: {cluster_name}. {colorama.Style.DIM}View logs at: '
-        f'{provision_logging.config.log_path}{colorama.Style.RESET_ALL}'
-    )
+        f'{provision_logging.config.log_path}{colorama.Style.RESET_ALL}')
     return cluster_info
 
 

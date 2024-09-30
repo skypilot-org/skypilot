@@ -1308,8 +1308,7 @@ class RetryingVmProvisioner(object):
         tail_cmd = f'tail -n100 -f {log_path}'
         rich_utils.force_update_status(
             f'[cyan]Launching cluster: {cluster_name}[/]. [dim]View logs with: '
-            f'{tail_cmd}[/]'
-        )
+            f'{tail_cmd}[/]')
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
