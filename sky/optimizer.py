@@ -936,7 +936,7 @@ class Optimizer:
 
             table = _create_table(field_names)
             table.add_rows(rows)
-            logger.info(f'{table}\n')
+            logger.info(f'{table}')
 
             # Warning message for using disk_tier=ultra
             # TODO(yi): Consider price of disks in optimizer and

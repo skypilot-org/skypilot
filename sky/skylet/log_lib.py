@@ -413,9 +413,6 @@ def tail_logs(job_id: Optional[int],
         return
     logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
                  f'{managed_job_id}.')
-    logger.info(f'{colorama.Fore.YELLOW}Streaming job logs: {job_str}.'
-                f'{colorama.Style.RESET_ALL} (Ctrl-C to exit log streaming, '
-                'not kill the job)')
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 

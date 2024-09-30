@@ -408,14 +408,17 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                message = f'{colorama.Style.DIM}Waiting for task resources on {{node_str}}.{colorama.Style.RESET_ALL}'
-                print(message,
-                      flush=True)
+                message = (f'⏳ {colorama.Style.DIM}Waiting for task resources on '
+                           f'{{node_str}}.{colorama.Style.RESET_ALL}')
+                print(message, flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print('{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Job started.',
+                print('{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Job '
+                      'started. Streaming logs... {colorama.Style.DIM}(Ctrl-C '
+                      'to exit log streaming, not kill the job)'
+                      '{colorama.Style.RESET_ALL}',
                       flush=True)
                 """)
         ]
@@ -1305,10 +1308,8 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
-        tail_cmd = f'tail -n100 -f {log_path}'
         rich_utils.force_update_status(
-            f'[cyan]Launching cluster: {cluster_name}[/]. [dim]View logs with: '
-            f'{tail_cmd}[/]')
+            f'Launching. {constants.LOG_PATH_HINT.format(log_path=log_path)}')
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -1628,18 +1629,13 @@ class RetryingVmProvisioner(object):
                                                  terminate=terminate_or_stop)
 
         if to_provision.zone is not None:
-            message = (
-                f'Failed to acquire resources in {to_provision.zone}. '
-                'Try changing resource requirements or use another zone.')
+            message = (f'Failed to acquire resources in {to_provision.zone}. ')
         elif to_provision.region is not None:
             # For public clouds, provision.region is always set.
             message = ('Failed to acquire resources in all zones in '
-                       f'{to_provision.region}. Try changing resource '
-                       'requirements or use another region.')
+                       f'{to_provision.region}. ')
         else:
-            message = (f'Failed to acquire resources in {to_provision.cloud}. '
-                       'Try changing resource requirements or use another '
-                       'cloud provider.')
+            message = (f'Failed to acquire resources in {to_provision.cloud}. ')
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
@@ -1712,10 +1708,10 @@ class RetryingVmProvisioner(object):
         zone_str = logging_info['zone_str']
         style = colorama.Style
         if isinstance(to_provision_cloud, clouds.Kubernetes):
-            logger.info(f'{style.BRIGHT}⚙️ Launching on {to_provision_cloud} '
+            logger.info(f'{style.BRIGHT}🔨 Launching on {to_provision_cloud} '
                         f'{style.RESET_ALL}')
         else:
-            logger.info(f'{style.BRIGHT}⚙️ Launching on {to_provision_cloud} '
+            logger.info(f'{style.BRIGHT}🔨 Launching on {to_provision_cloud} '
                         f'{region_name}{style.RESET_ALL}{zone_str}')
         start = time.time()
 
@@ -2006,9 +2002,6 @@ class RetryingVmProvisioner(object):
                 region_or_zone_str = str(to_provision.region)
             else:
                 region_or_zone_str = str(to_provision.zone)
-            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                           f'{to_provision} in {region_or_zone_str}. '
-                           f'Trying other locations (if any).{style.RESET_ALL}')
             if prev_cluster_status is None:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
@@ -2034,6 +2027,11 @@ class RetryingVmProvisioner(object):
                 prev_cluster_status = None
                 prev_handle = None
 
+            logger.warning(
+                f'\n{fore.GREEN}🔄{style.RESET_ALL} Trying other '
+                f'potential resources. {colorama.Style.DIM}'
+                f'Provision failed for {num_nodes}x {to_provision} '
+                f'in {region_or_zone_str}.{colorama.Style.RESET_ALL}')
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
@@ -2794,9 +2792,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         usage_lib.messages.usage.update_final_cluster_status(
                             None)
                         error_message = (
-                            'Failed to provision all possible launchable '
-                            'resources.'
-                            f' Relax the task\'s resource requirements: '
+                            f'{colorama.Fore.RED}Failed to provision all '
+                            f'possible launchable resources.'
+                            f'{colorama.Style.RESET_ALL}'
+                            ' Relax the task\'s resource requirements: '
                             f'{task.num_nodes}x {list(task.resources)[0]}')
                     if retry_until_up:
                         logger.error(error_message)
@@ -2813,8 +2812,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         time.sleep(gap_seconds)
                         continue
                     error_message += (
-                        '\nTo keep retrying until the cluster is up, use the '
-                        '`--retry-until-up` flag.')
+                        '\n📋 To keep retrying until the cluster is up, use '
+                        'the `--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             error_message,
@@ -3329,7 +3328,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            stderr=stdout + stderr)
 
         logger.info(
-            f'{fore.GREEN}✓{style.RESET_ALL} Job submitted with ID: {job_id}')
+            f'{fore.GREEN}✓{style.RESET_ALL} Job submitted with ID: {job_id}.')
         rich_utils.stop_safe_status()
         try:
             if not detach_run:
@@ -3363,7 +3362,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{constants.BOLD}sky jobs dashboard'
                     f'{constants.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n🔨 Useful Commands'
+                logger.info(f'\n📋 Useful Commands'
                             f'\nJob ID: {job_id}'
                             '\n├── To cancel the job:\t\t'
                             f'{constants.BOLD}sky cancel {name} {job_id}'

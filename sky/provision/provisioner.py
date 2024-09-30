@@ -59,16 +59,15 @@ def _bulk_provision(
 
     if isinstance(cloud, clouds.Kubernetes):
         # Omit the region name for Kubernetes.
-        logger.info(f'{style.BRIGHT}⚙️ Launching on {cloud}{style.RESET_ALL} '
+        logger.info(f'{style.BRIGHT}🔨 Launching on {cloud}{style.RESET_ALL} '
                     f'{cluster_name!r}.')
     else:
-        logger.info(f'{style.BRIGHT}⚙️ Launching on {cloud} '
+        logger.info(f'{style.BRIGHT}🔨 Launching on {cloud} '
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
 
     start = time.time()
     with rich_utils.safe_status(
-            '[bold cyan]Launching[/]. '
-            f'[dim]View logs at: {provision_logging.config.log_path}[/]'
+            f'[bold cyan]Launching[/]. {constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
     ) as status:
         try:
             # TODO(suquark): Should we cache the bootstrapped result?
@@ -84,7 +83,9 @@ def _bulk_provision(
                          f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
                          'with the following error:'
                          f'{colorama.Style.RESET_ALL}\n'
-                         f'{common_utils.format_exception(e)}')
+                         f'{colorama.Style.DIM}'
+                         f'{common_utils.format_exception(e)}'
+                         f'{colorama.Style.RESET_ALL}')
             raise
 
         provision_record = provision.run_instances(provider_name,
@@ -97,7 +98,8 @@ def _bulk_provision(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
         status.update(
             f'[bold cyan]Launching - Checking instance status[/]. '
-            f'[dim]View logs at: {provision_logging.config.log_path}[/]')
+            f'{constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
+        )
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
         time.sleep(1)
@@ -446,7 +448,7 @@ def _post_provision_setup(
 
     with rich_utils.safe_status(
             f'[bold cyan]Launching - Waiting for SSH access[/]. '
-            f'[dim]View logs at: {provision_logging.config.log_path}[/]'
+            f'{constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
     ) as status:
 
         logger.debug(
@@ -462,7 +464,8 @@ def _post_provision_setup(
         if docker_config:
             status.update(
                 f'[bold cyan]Launching - Initializing docker container[/]. '
-                f'[dim]View logs at: {provision_logging.config.log_path}[/]')
+                f'{constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
+            )
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -490,8 +493,9 @@ def _post_provision_setup(
 
         runtime_preparation_str = (
             '[bold cyan]Preparing SkyPilot '
-            'runtime ({step}/3 - {step_name})[/].'
-            f' [dim]View logs at: {provision_logging.config.log_path}[/]')
+            'runtime ({step}/3 - {step_name})[/]. '
+            f'{constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
+        )
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -561,8 +565,8 @@ def _post_provision_setup(
 
     logger.info(
         f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
-        f'launched: {cluster_name}. {colorama.Style.DIM}View logs at: '
-        f'{provision_logging.config.log_path}{colorama.Style.RESET_ALL}')
+        f'launched: {cluster_name}. {constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
+    )
     return cluster_info
 
 

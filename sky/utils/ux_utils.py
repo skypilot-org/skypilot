@@ -6,18 +6,15 @@ import sys
 import traceback
 from typing import Callable
 
-import colorama
 import rich.console as rich_console
 
 from sky import sky_logging
-from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
 console = rich_console.Console()
 
-_TITLE_LENGTH = 25
 
 
 def console_newline():
@@ -108,19 +105,3 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
-
-
-def format_title(title: str) -> str:
-    remaining_length = _TITLE_LENGTH - len(title) - 2
-    equation_length = remaining_length // 2
-    equations = '=' * equation_length
-    padding_space = ' ' * (remaining_length % 2)
-    title = f'{equations} {title} {padding_space}{equations}'
-    return f'\n{constants.BOLD}{title}{colorama.Style.RESET_ALL}'
-
-
-@functools.lru_cache()
-def log_once(msg: str,
-             logger: logging.Logger,
-             log_level: int = logging.INFO) -> None:
-    logger.log(level=log_level, msg=msg)
