@@ -86,6 +86,10 @@ def ssh_options_list(
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
         'IdentitiesOnly': 'yes',
+        # Add the current private key used for this SSH connection to the
+        # SSH agent, so that forward agent parameter will then make SSH
+        # agent forward it.
+        'AddKeysToAgent': 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
         'ExitOnForwardFailure': 'yes',
@@ -650,7 +654,7 @@ class KubernetesCommandRunner(CommandRunner):
 
     def __init__(
         self,
-        node: Tuple[Tuple[str, str], str],
+        node: Tuple[Tuple[str, Optional[str]], str],
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
