@@ -43,6 +43,14 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     return _NoOpConsoleStatus()
 
 
+def stop_safe_status():
+    """Stop the safe status."""
+    global _status
+    if _status is not None:
+        _status.stop()
+        _status = None
+
+
 def force_update_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
     if (threading.current_thread() is threading.main_thread() and

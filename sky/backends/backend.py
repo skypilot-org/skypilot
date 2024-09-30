@@ -4,6 +4,7 @@ from typing import Dict, Generic, Optional
 
 import sky
 from sky.usage import usage_lib
+from sky.utils import rich_utils
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
@@ -96,7 +97,8 @@ class Backend(Generic[_ResourceHandleType]):
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run, dryrun)
+        with rich_utils.safe_status('[bold cyan]Submitting job[/]'):
+            return self._execute(handle, task, detach_run, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:

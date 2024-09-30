@@ -59,14 +59,17 @@ def _bulk_provision(
 
     if isinstance(cloud, clouds.Kubernetes):
         # Omit the region name for Kubernetes.
-        logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
+        logger.info(f'{style.BRIGHT}⚙️ Launching on {cloud}{style.RESET_ALL} '
                     f'{cluster_name!r}.')
     else:
-        logger.info(f'{style.BRIGHT}Launching on {cloud} '
+        logger.info(f'{style.BRIGHT}⚙️ Launching on {cloud} '
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
 
     start = time.time()
-    with rich_utils.safe_status('[bold cyan]Launching[/]') as status:
+    with rich_utils.safe_status(
+            '[bold cyan]Launching[/]. '
+            f'[dim]View logs at: {provision_logging.config.log_path}[/]'
+    ) as status:
         try:
             # TODO(suquark): Should we cache the bootstrapped result?
             #  Currently it is not necessary as bootstrapping takes
@@ -92,7 +95,9 @@ def _bulk_provision(
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        status.update('[bold cyan]Launching - Checking instance status[/]')
+        status.update(
+            f'[bold cyan]Launching - Checking instance status[/]. '
+            f'[dim]View logs at: {provision_logging.config.log_path}[/]')
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
         time.sleep(1)
@@ -440,21 +445,25 @@ def _post_provision_setup(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
 
     with rich_utils.safe_status(
-            '[bold cyan]Launching - Waiting for SSH access[/]') as status:
+            f'[bold cyan]Launching - Waiting for SSH access[/]. '
+            f'[dim]View logs at: {provision_logging.config.log_path}[/]'
+    ) as status:
 
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
-        logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
-                    f'or found existing instance{plural}.'
-                    f'{colorama.Style.RESET_ALL}')
+        logger.info(
+            f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} VM{plural} '
+            f'started for cluster: {cluster_name}.'
+        )
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                '[bold cyan]Launching - Initializing docker container[/]')
+                f'[bold cyan]Launching - Initializing docker container[/]. '
+                f'[dim]View logs at: {provision_logging.config.log_path}[/]')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -480,8 +489,10 @@ def _post_provision_setup(
         # for later.
         file_mounts = config_from_yaml.get('file_mounts', {})
 
-        runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
-                                   'runtime ({step}/3 - {step_name})')
+        runtime_preparation_str = (
+            '[bold cyan]Preparing SkyPilot '
+            'runtime ({step}/3 - {step_name})[/].'
+            f' [dim]View logs at: {provision_logging.config.log_path}[/]')
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -549,8 +560,11 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully provisioned cluster: '
-                f'{cluster_name}{colorama.Style.RESET_ALL}')
+    logger.info(
+        f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
+        f'launched: {cluster_name}. {colorama.Style.DIM}View logs at: '
+        f'{provision_logging.config.log_path}{colorama.Style.RESET_ALL}'
+    )
     return cluster_info
 
 
