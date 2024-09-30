@@ -7,9 +7,7 @@ resources:
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
   HF_TOKEN: # fill
-  NEURON_RT_VISIBLE_CORES: "0-5"
   MASTER_PORT: 12355
-  OMP_NUM_THREADS: 6
 
 setup: |
   # Install transformers-neuronx and its dependencies
@@ -29,7 +27,7 @@ setup: |
   # Reference: https://github.com/vllm-project/vllm/issues/6987
   pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple triton-nightly
 
-  # Install vLLM from source. Avoid using dir name 'vllm' due to imort conflict.
+  # Install vLLM from source. Avoid using dir name 'vllm' due to import conflict.
   # Reference: https://github.com/vllm-project/vllm/issues/1814#issuecomment-1837122930
   git clone https://github.com/vllm-project/vllm.git vllm_repo
   cd vllm_repo
@@ -43,6 +41,16 @@ setup: |
 
 run: |
   source aws_neuron_venv_pytorch/bin/activate
+  # Calculate the tensor parallel size. vLLM requires the tensor parallel size
+  # to be a factor of the number of attention heads, which is 32 for the model.
+  # Here we calculate the largest power of 2 that is less than or equal to the
+  # number of GPUs per node.
+  TENSOR_PARALLEL_SIZE=1
+  while [ $(($TENSOR_PARALLEL_SIZE * 2)) -le $SKYPILOT_NUM_GPUS_PER_NODE ]; do
+    TENSOR_PARALLEL_SIZE=$(($TENSOR_PARALLEL_SIZE * 2))
+  done
+  NEURON_RT_VISIBLE_CORES="0-$(($TENSOR_PARALLEL_SIZE - 1))"
+  OMP_NUM_THREADS=$SKYPILOT_NUM_GPUS_PER_NODE
   LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/ubuntu/miniconda3/lib" \
   numactl --cpunodebind=0 --membind=0 \
     python3 -m vllm.entrypoints.openai.api_server \

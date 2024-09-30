@@ -227,7 +227,7 @@ class AWS(clouds.Cloud):
                     'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
             if acc_name in ['Trainium', 'Inferentia']:
                 image_id = service_catalog.get_image_id_from_tag(
-                    'skypilot:neuron-ubuntu-2004', region_name, clouds='aws')
+                    'skypilot:neuron-ubuntu-2204', region_name, clouds='aws')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in

@@ -390,7 +390,7 @@ _GPU_DESC_UBUNTU_DATE = [
     ('gpu', 'AMI GPU PyTorch 1.10.0', '18.04', '20221114'),
     ('k80', 'AMI GPU PyTorch 1.10.0', '20.04', '20211208'),
     ('k80', 'AMI GPU PyTorch 1.10.0', '18.04', '20211208'),
-    ('neuron', 'Base Neuron AMI', '20.04', '20240923'),
+    ('neuron', 'Base Neuron AMI', '22.04', '20240923'),
 ]
 
 
