@@ -174,7 +174,7 @@ def _get_resources_ports(task_yaml: str) -> str:
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
     assert len(task.resources) >= 1, task
-    task_resources: Resources = list(task.resources)[0]
+    task_resources: 'resources.Resources' = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
     assert task_resources.ports is not None
