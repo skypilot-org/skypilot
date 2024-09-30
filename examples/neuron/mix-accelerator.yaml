@@ -1,7 +1,7 @@
 resources:
   accelerators: {A100:1, Inferentia:6}
   disk_size: 512
-  # ports: 9000
+  ports: 9000
 
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
