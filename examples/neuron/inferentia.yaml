@@ -1,5 +1,4 @@
 resources:
-  cloud: aws
   accelerators: Inferentia:6
   disk_size: 512
   ports: 9000
@@ -7,7 +6,6 @@ resources:
 envs:
   MODEL_NAME: meta-llama/Meta-Llama-3-8B-Instruct
   HF_TOKEN: # fill
-  MASTER_PORT: 12355
 
 setup: |
   # Install transformers-neuronx and its dependencies
@@ -51,12 +49,13 @@ run: |
   done
   NEURON_RT_VISIBLE_CORES="0-$(($TENSOR_PARALLEL_SIZE - 1))"
   OMP_NUM_THREADS=$SKYPILOT_NUM_GPUS_PER_NODE
-  LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/ubuntu/miniconda3/lib" \
+  MASTER_PORT=12355
+  LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/ubuntu/miniconda3/lib"
   numactl --cpunodebind=0 --membind=0 \
     python3 -m vllm.entrypoints.openai.api_server \
       --device neuron \
       --model $MODEL_NAME \
-      --tensor-parallel-size 4 \
+      --tensor-parallel-size $TENSOR_PARALLEL_SIZE \
       --max-num-seqs 16 \
       --max-model-len 32 \
       --block-size 32 \
