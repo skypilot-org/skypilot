@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import clouds
+from sky import global_user_state
 from sky import skypilot_config
 from sky.resources import Resources
 from sky.utils import resources_utils
@@ -34,7 +35,8 @@ def test_get_reservations_available_resources():
 
 
 def _run_label_test(allowed_labels: Dict[str, str],
-                    invalid_labels: Dict[str, str], cloud: clouds.Cloud):
+                    invalid_labels: Dict[str, str],
+                    cloud: clouds.Cloud = None):
     """Run a test for labels with the given allowed and invalid labels."""
     r_allowed = Resources(cloud=cloud, labels=allowed_labels)  # Should pass
     assert r_allowed.labels == allowed_labels, ('Allowed labels '
@@ -90,6 +92,32 @@ def test_kubernetes_labels_resources():
     }
     cloud = clouds.Kubernetes()
     _run_label_test(allowed_labels, invalid_labels, cloud)
+
+
+def test_no_cloud_labels_resources():
+    global_user_state.set_enabled_clouds(['aws', 'gcp'])
+    allowed_labels = {
+        **GLOBAL_VALID_LABELS,
+    }
+    invalid_labels = {
+        **GLOBAL_INVALID_LABELS,
+        'aws:cannotstartwithaws': 'value',
+        'domain/key': 'value',  # Invalid for GCP
+    }
+    _run_label_test(allowed_labels, invalid_labels)
+
+
+def test_no_cloud_labels_resources_single_enabled_cloud():
+    global_user_state.set_enabled_clouds(['aws'])
+    allowed_labels = {
+        **GLOBAL_VALID_LABELS,
+        'domain/key': 'value',  # Valid for AWS
+    }
+    invalid_labels = {
+        **GLOBAL_INVALID_LABELS,
+        'aws:cannotstartwithaws': 'value',
+    }
+    _run_label_test(allowed_labels, invalid_labels)
 
 
 @mock.patch('sky.clouds.service_catalog.instance_type_exists',
