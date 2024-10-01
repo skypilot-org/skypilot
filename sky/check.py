@@ -49,7 +49,7 @@ def check(
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:
-                activated_account = cloud.get_current_user_identity_str()
+                activated_account = cloud.get_active_user_identity_str()
                 if activated_account is not None:
                     echo(f'    Activated account: {activated_account}')
             if reason is not None:

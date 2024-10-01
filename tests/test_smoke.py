@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
@@ -840,6 +841,7 @@ def test_image_no_conda():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
     name = _get_cluster_name()
@@ -1167,6 +1169,61 @@ def test_kubernetes_storage_mounts():
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_context_switch():
+    name = _get_cluster_name()
+    new_context = f'sky-test-context-{int(time.time())}'
+    new_namespace = f'sky-test-namespace-{int(time.time())}'
+
+    test_commands = [
+        # Launch a cluster and run a simple task
+        f'sky launch -y -c {name} --cloud kubernetes "echo Hello from original context"',
+        f'sky logs {name} 1 --status',  # Ensure job succeeded
+
+        # Get current context details and save to a file for later use in cleanup
+        'CURRENT_CONTEXT=$(kubectl config current-context); '
+        'echo "$CURRENT_CONTEXT" > /tmp/sky_test_current_context; '
+        'CURRENT_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.cluster}"); '
+        'CURRENT_USER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\\"$CURRENT_CONTEXT\\")].context.user}"); '
+
+        # Create a new context with a different name and namespace
+        f'kubectl config set-context {new_context} --cluster="$CURRENT_CLUSTER" --user="$CURRENT_USER" --namespace={new_namespace}',
+
+        # Create the new namespace if it doesn't exist
+        f'kubectl create namespace {new_namespace} --dry-run=client -o yaml | kubectl apply -f -',
+
+        # Set the new context as active
+        f'kubectl config use-context {new_context}',
+
+        # Verify the new context is active
+        f'[ "$(kubectl config current-context)" = "{new_context}" ] || exit 1',
+
+        # Try to run sky exec on the original cluster (should still work)
+        f'sky exec {name} "echo Success: sky exec works after context switch"',
+
+        # Test sky queue
+        f'sky queue {name}',
+
+        # Test SSH access
+        f'ssh {name} whoami',
+    ]
+
+    cleanup_commands = (
+        f'kubectl delete namespace {new_namespace}; '
+        f'kubectl config delete-context {new_context}; '
+        'kubectl config use-context $(cat /tmp/sky_test_current_context); '
+        'rm /tmp/sky_test_current_context; '
+        f'sky down -y {name}')
+
+    test = Test(
+        'kubernetes_context_switch',
+        test_commands,
+        cleanup_commands,
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
 
 
 @pytest.mark.parametrize(
@@ -1549,6 +1606,7 @@ def test_job_queue_multinode(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
@@ -1592,6 +1650,7 @@ def test_large_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
@@ -1699,6 +1758,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
@@ -2061,6 +2121,149 @@ def test_task_labels_kubernetes():
         run_one_test(test)
 
 
+# ---------- Pod Annotations on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_add_pod_annotations_for_autodown_with_launch():
+    name = _get_cluster_name()
+    test = Test(
+        'add_pod_annotations_for_autodown_with_launch',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            # Autodown is set.
+            f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop'
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_add_and_remove_pod_annotations_with_autostop():
+    name = _get_cluster_name()
+    test = Test(
+        'add_and_remove_pod_annotations_with_autostop',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Set autodown on the cluster with 'autostop' command.
+            f'sky autostop -y {name} -i 20 --down',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Cancel the set autodown to remove the annotations from the pods.
+            f'sky autostop -y {name} --cancel',
+            # Describe the first pod and check if annotations are removed.
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check if annotations are removed.
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Container logs from task on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_container_logs_multinode_kubernetes():
+    name = _get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    head_logs = ('kubectl get pods '
+                 f' | grep {name} |  grep head | '
+                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    worker_logs = ('kubectl get pods '
+                   f' | grep {name} |  grep worker |'
+                   " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test = Test(
+            'container_logs_multinode_kubernetes',
+            [
+                f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
+                f'{head_logs} | wc -l | grep 9',
+                f'{worker_logs} | wc -l | grep 9',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_container_logs_two_jobs_kubernetes():
+    name = _get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
+    pod_logs = ('kubectl get pods '
+                f' | grep {name} |  grep head |'
+                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test = Test(
+            'test_container_logs_two_jobs_kubernetes',
+            [
+                f'sky launch -y -c {name} {task_yaml}',
+                f'{pod_logs} | wc -l | grep 9',
+                f'sky launch -y -c {name} {task_yaml}',
+                f'{pod_logs} | wc -l | grep 18',
+                f'{pod_logs} | grep 1 | wc -l | grep 2',
+                f'{pod_logs} | grep 2 | wc -l | grep 2',
+                f'{pod_logs} | grep 3 | wc -l | grep 2',
+                f'{pod_logs} | grep 4 | wc -l | grep 2',
+                f'{pod_logs} | grep 5 | wc -l | grep 2',
+                f'{pod_logs} | grep 6 | wc -l | grep 2',
+                f'{pod_logs} | grep 7 | wc -l | grep 2',
+                f'{pod_logs} | grep 8 | wc -l | grep 2',
+                f'{pod_logs} | grep 9 | wc -l | grep 2',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_container_logs_two_simultaneous_jobs_kubernetes():
+    name = _get_cluster_name()
+    task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
+    pod_logs = ('kubectl get pods '
+                f' | grep {name} |  grep head |'
+                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test = Test(
+            'test_container_logs_two_simultaneous_jobs_kubernetes',
+            [
+                f'sky launch -y -c {name}',
+                f'sky exec -c {name} -d {task_yaml}',
+                f'sky exec -c {name} -d {task_yaml}',
+                'sleep 30',
+                f'{pod_logs} | wc -l | grep 18',
+                f'{pod_logs} | grep 1 | wc -l | grep 2',
+                f'{pod_logs} | grep 2 | wc -l | grep 2',
+                f'{pod_logs} | grep 3 | wc -l | grep 2',
+                f'{pod_logs} | grep 4 | wc -l | grep 2',
+                f'{pod_logs} | grep 5 | wc -l | grep 2',
+                f'{pod_logs} | grep 6 | wc -l | grep 2',
+                f'{pod_logs} | grep 7 | wc -l | grep 2',
+                f'{pod_logs} | grep 8 | wc -l | grep 2',
+                f'{pod_logs} | grep 9 | wc -l | grep 2',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
+
+
 # ---------- Task: n=2 nodes with setups. ----------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
@@ -2299,8 +2502,6 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -2308,8 +2509,6 @@ def test_cancel_aws():
 
 
 @pytest.mark.gcp
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -2317,14 +2516,13 @@ def test_cancel_gcp():
 
 
 @pytest.mark.azure
-@pytest.mark.skip(
-    reason='The resnet_app is flaky, due to TF failing to detect GPUs.')
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support V100 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
@@ -3214,11 +3412,11 @@ def test_aws_disk_tier():
                 f'Reservations[].Instances[].InstanceId --output text`; ' +
                 _get_aws_query_command(region, '$id', 'VolumeType',
                                        specs['disk_tier']) +
-                ('' if disk_tier == resources_utils.DiskTier.LOW else
-                 (_get_aws_query_command(region, '$id', 'Iops',
-                                         specs['disk_iops']) +
-                  _get_aws_query_command(region, '$id', 'Throughput',
-                                         specs['disk_throughput']))),
+                ('' if specs['disk_tier']
+                 == 'standard' else _get_aws_query_command(
+                     region, '$id', 'Iops', specs['disk_iops'])) +
+                ('' if specs['disk_tier'] != 'gp3' else _get_aws_query_command(
+                    region, '$id', 'Throughput', specs['disk_throughput'])),
             ],
             f'sky down -y {name}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
@@ -3229,33 +3427,44 @@ def test_aws_disk_tier():
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
-        type = GCP._get_disk_type(disk_tier)
+        disk_types = [GCP._get_disk_type(disk_tier)]
         name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
-        test = Test(
-            'gcp-disk-tier-' + disk_tier.value,
-            [
-                f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier.value} echo "hello sky"',
-                f'name=`gcloud compute instances list --filter='
-                f'"labels.ray-cluster-name:{name_on_cloud}" '
-                '--format="value(name)"`; '
-                f'gcloud compute disks list --filter="name=$name" '
-                f'--format="value(type)" | grep {type} '
-            ],
-            f'sky down -y {name}',
-            timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
-        )
-        run_one_test(test)
+        instance_type_options = ['']
+        if disk_tier == resources_utils.DiskTier.BEST:
+            # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
+            # If using default instance type, it will only enable the high disk tier.
+            disk_types = [
+                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+            ]
+            instance_type_options = ['', '--instance-type n2-standard-64']
+        for disk_type, instance_type_option in zip(disk_types,
+                                                   instance_type_options):
+            test = Test(
+                'gcp-disk-tier-' + disk_tier.value,
+                [
+                    f'sky launch -y -c {name} --cloud gcp --region {region} '
+                    f'--disk-tier {disk_tier.value} {instance_type_option} ',
+                    f'name=`gcloud compute instances list --filter='
+                    f'"labels.ray-cluster-name:{name_on_cloud}" '
+                    '--format="value(name)"`; '
+                    f'gcloud compute disks list --filter="name=$name" '
+                    f'--format="value(type)" | grep {disk_type} '
+                ],
+                f'sky down -y {name}',
+                timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
+            )
+            run_one_test(test)
 
 
 @pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
-        if disk_tier == resources_utils.DiskTier.HIGH:
-            # Azure does not support high disk tier.
+        if disk_tier == resources_utils.DiskTier.HIGH or disk_tier == resources_utils.DiskTier.ULTRA:
+            # Azure does not support high and ultra disk tier.
             continue
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier.value
@@ -3344,6 +3553,43 @@ def test_gcp_zero_quota_failover():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
+
+def test_long_setup_run_script(generic_cloud: str):
+    name = _get_cluster_name()
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
+                                     suffix='.yaml') as f:
+        f.write(
+            textwrap.dedent(""" \
+            setup: |
+              echo "start long setup"
+            """))
+        for i in range(1024 * 120):
+            f.write(f'  echo {i}\n')
+        f.write('  echo "end long setup"\n')
+        f.write(
+            textwrap.dedent(""" \
+            run: |
+              echo "run"
+        """))
+        for i in range(1024 * 120):
+            f.write(f'  echo {i}\n')
+        f.write('  echo "end run"\n')
+        f.flush()
+
+        test = Test(
+            'long-setup-run-script',
+            [
+                f'sky launch -y -c {name} --cloud {generic_cloud} --cpus 2+ {f.name}',
+                f'sky exec {name} "echo hello"',
+                f'sky exec {name} {f.name}',
+                f'sky logs {name} --status 1',
+                f'sky logs {name} --status 2',
+                f'sky logs {name} --status 3',
+            ],
+            f'sky down -y {name}',
+        )
+        run_one_test(test)
 
 
 # ---------- Testing skyserve ----------
@@ -3500,6 +3746,7 @@ def test_skyserve_kubernetes_http():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
@@ -3557,6 +3804,7 @@ def test_skyserve_spot_recovery():
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
@@ -3621,6 +3869,8 @@ def test_skyserve_dynamic_ondemand_fallback():
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -3805,6 +4055,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -3833,6 +4085,8 @@ def test_skyserve_update(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -3869,6 +4123,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -3946,6 +4201,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
@@ -4009,6 +4265,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     run_one_test(test)
 
 
+# TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+@pytest.mark.no_fluidstack
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
@@ -4934,14 +5192,10 @@ class TestStorageWithCredentials:
                 private_bucket).path.strip('/')
         else:
             private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
-        match_str = storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-            name=private_bucket_name)
-        if store_type == 'https':
-            # Azure blob uses a different error string since container may
-            # not exist even though the bucket name is ok.
-            match_str = 'Attempted to fetch a non-existent public container'
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match=match_str):
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
             storage_obj.construct()
 
@@ -5349,3 +5603,89 @@ def test_sky_bench(generic_cloud: str):
         f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_context_failover():
+    """Test if the kubernetes context failover works.
+    
+    This test requires two kubernetes clusters:
+    - kind-skypilot: the local cluster with mock labels for 8 H100 GPUs.
+    - another accessible cluster: with enough CPUs
+    To start the first cluster, run:
+      sky local up
+      # Add mock label for accelerator
+      kubectl label node --overwrite skypilot-control-plane skypilot.co/accelerator=h100 --context kind-skypilot
+      # Get the token for the cluster in context kind-skypilot
+      TOKEN=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.users[0].user.token}\')
+      # Get the API URL for the cluster in context kind-skypilot
+      API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
+      # Add mock capacity for GPU
+      curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+      # Add a new namespace to test the handling of namespaces
+      kubectl create namespace test-namespace --context kind-skypilot
+      # Set the namespace to test-namespace
+      kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
+    """
+    # Get context that is not kind-skypilot
+    contexts = subprocess.check_output('kubectl config get-contexts -o name',
+                                       shell=True).decode('utf-8').split('\n')
+    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    config = textwrap.dedent(f"""\
+    kubernetes:
+      allowed_contexts:
+        - kind-skypilot
+        - {context}
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(config.encode('utf-8'))
+        f.flush()
+        name = _get_cluster_name()
+        test = Test(
+            'kubernetes-context-failover',
+            [
+                # Check if kind-skypilot is provisioned with H100 annotations already
+                'NODE_INFO=$(kubectl get nodes -o yaml --context kind-skypilot) && '
+                'echo "$NODE_INFO" | grep nvidia.com/gpu | grep 8 && '
+                'echo "$NODE_INFO" | grep skypilot.co/accelerator | grep h100 || '
+                '{ echo "kind-skypilot does not exist '
+                'or does not have mock labels for GPUs. Check the instructions in '
+                'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
+                # Check namespace for kind-skypilot is test-namespace
+                'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
+                '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
+                'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
+                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
+                # Get contexts and set current context to the other cluster that is not kind-skypilot
+                f'kubectl config use-context {context}',
+                # H100 should not in the current context
+                '! sky show-gpus --cloud kubernetes | grep H100',
+                f'sky launch -y -c {name}-1 --cpus 1 echo hi',
+                f'sky logs {name}-1 --status',
+                # It should be launched not on kind-skypilot
+                f'sky status -a {name}-1 | grep "{context}"',
+                # Test failure for launching H100 on other cluster
+                f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --cloud kubernetes --region {context} echo hi && exit 1 || true',
+                # Test failover
+                f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --cloud kubernetes echo hi',
+                f'sky logs {name}-3 --status',
+                # Test pods
+                f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
+                # It should be launched on kind-skypilot
+                f'sky status -a {name}-3 | grep "kind-skypilot"',
+                # Should be 7 free GPUs
+                f'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "  7"',
+                # Remove the line with "kind-skypilot"
+                f'sed -i "/kind-skypilot/d" {f.name}',
+                # Should still be able to exec and launch on existing cluster
+                f'sky exec {name}-3 "echo hi"',
+                f'sky logs {name}-3 --status',
+                f'sky status -r {name}-3 | grep UP',
+                f'sky launch -c {name}-3 --gpus h100 echo hi',
+                f'sky logs {name}-3 --status',
+                f'sky status -r {name}-3 | grep UP',
+            ],
+            f'sky down -y {name}-1 {name}-3',
+            env={'SKYPILOT_CONFIG': f.name},
+        )
+        run_one_test(test)

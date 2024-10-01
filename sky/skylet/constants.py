@@ -135,8 +135,9 @@ CONDA_INSTALLATION_COMMANDS = (
     # true.
     '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
-    'conda config --set auto_activate_base true && '
-    f'conda activate base; }}; }}; '
+    # Caller should replace {conda_auto_activate} with either true or false.
+    'conda config --set auto_activate_base {conda_auto_activate} && '
+    'conda activate base; }; }; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
     # If Python version is larger then equal to 3.12, create a new conda env
@@ -145,7 +146,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # costly to create a new conda env, and venv should be a lightweight and
     # faster alternative when the python version satisfies the requirement.
     '[[ $(python3 --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
-    f'echo "Creating conda env with Python 3.10" && '
+    'echo "Creating conda env with Python 3.10" && '
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.

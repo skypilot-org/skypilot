@@ -95,10 +95,21 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
+  # Admin policy to be applied to all tasks. (optional).
+  #
+  # The policy class to be applied to all tasks, which can be used to validate
+  # and mutate user requests.
+  #
+  # This is useful for enforcing certain policies on all tasks, e.g.,
+  # add custom labels; enforce certain resource limits; etc.
+  #
+  # The policy class should implement the sky.AdminPolicy interface.
+  admin_policy: my_package.SkyPilotPolicyV1
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
-    # Tags to assign to all instances launched by SkyPilot (optional).
+    # Tags to assign to all instances and buckets created by SkyPilot (optional).
     #
     # Example use case: cost tracking by user/team/project.
     #
@@ -200,6 +211,35 @@ Available fields and semantics:
     #
     # Default: false.
     disk_encrypted: false
+
+    # Reserved capacity (optional).
+    #
+    # Whether to prioritize capacity reservations (considered as 0 cost) in the
+    # optimizer.
+    #
+    # If you have capacity reservations in your AWS project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation within all regions and AWS will auto consume your reservations
+    # with instance match criteria to "open", and setting to false means
+    # optimizer uses regular, non-zero pricing in optimization (if by chance any
+    # matching reservation exists, AWS will still consume the reservation).
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from AWS when set to true.
+    #
+    # Default: false.
+    prioritize_reservations: false
+    #
+    # The targeted capacity reservations (CapacityReservationId) to be
+    # considered when provisioning clusters on AWS. SkyPilot will automatically
+    # prioritize this reserved capacity (considered as zero cost) if the
+    # requested resources matches the reservation.
+    #
+    # Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-reservations-launch.html
+    specific_reservations:
+      - cr-a1234567
+      - cr-b2345678
+
 
     # Identity to use for AWS instances (optional).
     #
@@ -315,12 +355,15 @@ Available fields and semantics:
     # Setting this to true guarantees the optimizer will pick any matching
     # reservation and GCP will auto consume your reservation, and setting to
     # false means optimizer uses regular, non-zero pricing in optimization (if
-    # by chance any matching reservation is selected, GCP still auto consumes
-    # the reservation).
+    # by chance any matching reservation exists, GCP still auto consumes the
+    # reservation).
     #
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
     # to true.
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from GCP when set to true.
     #
     # Default: false.
     prioritize_reservations: false
@@ -459,6 +502,19 @@ Available fields and semantics:
     #
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
+
+    # Allowed context names to use for Kubernetes clusters (optional).
+    #
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
+    #
+    # If not specified, only the current active context is used for launching
+    # new clusters.
+    allowed_contexts:
+      - context1
+      - context2
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #

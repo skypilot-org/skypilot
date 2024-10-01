@@ -101,6 +101,9 @@ from sky.api.sdk import storage_delete
 from sky.api.sdk import storage_ls
 from sky.api.sdk import stream_and_get
 from sky.api.sdk import tail_logs
+from sky.admin_policy import AdminPolicy
+from sky.admin_policy import MutatedUserRequest
+from sky.admin_policy import UserRequest
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
 from sky.data import Storage
@@ -115,6 +118,7 @@ from sky.jobs.api.sdk import spot_tail_logs
 from sky.optimizer import Optimizer
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
+from sky.skypilot_config import Config
 from sky.task import Task
 from sky.utils.common import OptimizeTarget
 from sky.utils.status_lib import ClusterStatus
@@ -191,4 +195,9 @@ __all__ = [
     # Request APIs
     'get',
     'stream_and_get',
+    # Admin Policy
+    'UserRequest',
+    'MutatedUserRequest',
+    'AdminPolicy',
+    'Config',
 ]

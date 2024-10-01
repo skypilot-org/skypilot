@@ -19,6 +19,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -61,6 +62,8 @@ def launch(
     dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -111,6 +114,7 @@ def launch(
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
+                local_user_config=mutated_user_config,
             ),
         }
 

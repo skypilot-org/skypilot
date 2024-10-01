@@ -1476,6 +1476,20 @@ class S3Store(AbstractStore):
             s3_client.create_bucket(**create_bucket_config)
             logger.info(
                 f'Created S3 bucket {bucket_name!r} in {region or "us-east-1"}')
+
+            # Add AWS tags configured in config.yaml to the bucket.
+            # This is useful for cost tracking and external cleanup.
+            bucket_tags = skypilot_config.get_nested(('aws', 'labels'), {})
+            if bucket_tags:
+                s3_client.put_bucket_tagging(
+                    Bucket=bucket_name,
+                    Tagging={
+                        'TagSet': [{
+                            'Key': k,
+                            'Value': v
+                        } for k, v in bucket_tags.items()]
+                    })
+
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -2570,11 +2584,22 @@ class AzureBlobStore(AbstractStore):
             container_url = data_utils.AZURE_CONTAINER_URL.format(
                 storage_account_name=self.storage_account_name,
                 container_name=self.name)
-            container_client = data_utils.create_az_client(
-                client_type='container',
-                container_url=container_url,
-                storage_account_name=self.storage_account_name,
-                resource_group_name=self.resource_group_name)
+            try:
+                container_client = data_utils.create_az_client(
+                    client_type='container',
+                    container_url=container_url,
+                    storage_account_name=self.storage_account_name,
+                    resource_group_name=self.resource_group_name)
+            except azure.exceptions().ClientAuthenticationError as e:
+                if 'ERROR: AADSTS50020' in str(e):
+                    # Caught when failing to obtain container client due to
+                    # lack of permission to passed given private container.
+                    if self.resource_group_name is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.StorageBucketGetError(
+                                _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                                    name=self.name))
+                raise
             if container_client.exists():
                 is_private = (True if
                               container_client.get_container_properties().get(

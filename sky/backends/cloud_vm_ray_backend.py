@@ -46,6 +46,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -84,7 +85,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.AWS: 90,
     clouds.Azure: 90,
     clouds.GCP: 240,
-    clouds.Lambda: 150,
+    clouds.Lambda: 300,
     clouds.IBM: 160,
     clouds.OCI: 300,
     clouds.Paperspace: 600,
@@ -1935,7 +1936,7 @@ class RetryingVmProvisioner(object):
         while True:
             if (isinstance(to_provision.cloud, clouds.Azure) and
                     to_provision.accelerators is not None and
-                    'A10' in to_provision.accelerators):
+                    'A10' in to_provision.accelerators and prev_handle is None):
                 logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
                                'an A10 cluster on Azure. This may take ~20 '
                                'minutes due to driver installation.'
@@ -1947,7 +1948,7 @@ class RetryingVmProvisioner(object):
                 if dryrun:
                     cloud_user = None
                 else:
-                    cloud_user = to_provision.cloud.get_current_user_identity()
+                    cloud_user = to_provision.cloud.get_active_user_identity()
 
                 requested_features = self._requested_features.copy()
                 # Skip stop feature for Kubernetes and RunPod controllers.
@@ -2083,7 +2084,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
             self,
@@ -2516,6 +2517,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
+
+        if version < 9:
+            # For backward compatibility, we should update the region of a
+            # SkyPilot cluster on Kubernetes to the actual context it is using.
+            # pylint: disable=import-outside-toplevel
+            launched_resources = state['launched_resources']
+            if isinstance(launched_resources.cloud, clouds.Kubernetes):
+                yaml_config = common_utils.read_yaml(
+                    os.path.expanduser(state['_cluster_yaml']))
+                context = kubernetes_utils.get_context_from_config(
+                    yaml_config['provider'])
+                state['launched_resources'] = launched_resources.copy(
+                    region=context)
 
         self.__dict__.update(state)
 
@@ -3114,7 +3128,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             setup_script = log_lib.make_task_bash_script(setup,
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
-            if detach_setup or _is_command_length_over_limit(encoded_script):
+
+            def _dump_setup_script(setup_script: str) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
@@ -3123,6 +3138,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  target=remote_setup_file_name,
                                  up=True,
                                  stream_logs=False)
+
+            if detach_setup or _is_command_length_over_limit(encoded_script):
+                _dump_setup_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
@@ -3130,20 +3148,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             if detach_setup:
                 return
+
             setup_log_path = os.path.join(self.log_dir,
                                           f'setup-{runner.node_id}.log')
-            returncode = runner.run(
-                f'{create_script_code} && {setup_cmd}',
-                log_path=setup_log_path,
-                process_stream=False,
-                # We do not source bashrc for setup, since bashrc is sourced
-                # in the script already.
-                # Skip an empty line and two lines due to the /bin/bash -i and
-                # source ~/.bashrc in the setup_cmd.
-                #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
-                #   bash: no job control in this shell
-                skip_lines=3,
-            )
+
+            def _run_setup(setup_cmd: str) -> int:
+                returncode = runner.run(
+                    setup_cmd,
+                    log_path=setup_log_path,
+                    process_stream=False,
+                    # We do not source bashrc for setup, since bashrc is sourced
+                    # in the script already.
+                    # Skip an empty line and two lines due to the /bin/bash -i
+                    # and source ~/.bashrc in the setup_cmd.
+                    #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
+                    #   bash: no job control in this shell
+                    skip_lines=3)
+                return returncode
+
+            returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
+            if returncode == 255:
+                is_message_too_long = False
+                with open(setup_log_path, 'r', encoding='utf-8') as f:
+                    if 'too long' in f.read():
+                        is_message_too_long = True
+
+                if is_message_too_long:
+                    # If the setup script is too long, we retry it with dumping
+                    # the script to a file and running it with SSH. We use a
+                    # general length limit check before but it could be
+                    # inaccurate on some systems.
+                    logger.debug(
+                        'Failed to run setup command inline due to '
+                        'command length limit. Dumping setup script to '
+                        'file and running it with SSH.')
+                    _dump_setup_script(setup_script)
+                    returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
                 # Use the function to avoid tailing the file in success case
@@ -3225,7 +3265,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
-        if _is_command_length_over_limit(job_submit_cmd):
+
+        def _dump_code_to_file(codegen: str) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
@@ -3240,6 +3281,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+
+        if _is_command_length_over_limit(job_submit_cmd):
+            _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
         if managed_job_dag is not None:
@@ -3265,6 +3309,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        if returncode == 255 and 'too long' in stdout + stderr:
+            # If the generated script is too long, we retry it with dumping
+            # the script to a file and running it with SSH. We use a general
+            # length limit check before but it could be inaccurate on some
+            # systems.
+            logger.debug('Failed to submit job due to command length limit. '
+                         'Dumping job to file and running it with SSH.')
+            _dump_code_to_file(codegen)
+            job_submit_cmd = f'{mkdir_code} && {code}'
+            returncode, stdout, stderr = self.run_on_head(handle,
+                                                          job_submit_cmd,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
 
         # Happens when someone calls `sky exec` but remote is outdated
         # necessitating calling `sky launch`.
@@ -4107,11 +4164,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
                 # Kubernetes and RunPod clusters.
-                assert (controller_utils.Controllers.from_name(
-                    handle.cluster_name) is not None), handle.cluster_name
-                logger.info('Auto-stop is not supported for Kubernetes '
-                            'and RunPod clusters. Skipping.')
-                return
+                controller = controller_utils.Controllers.from_name(
+                    handle.cluster_name)
+                assert (controller is not None), handle.cluster_name
+                if (controller
+                        == controller_utils.Controllers.SKY_SERVE_CONTROLLER and
+                        isinstance(handle.launched_resources.cloud,
+                                   clouds.Kubernetes)):
+                    # For SkyServe controllers on Kubernetes: override autostop
+                    # behavior to force autodown (instead of no-op)
+                    # to avoid dangling controllers.
+                    down = True
+                else:
+                    logger.info('Auto-stop is not supported for Kubernetes '
+                                'and RunPod clusters. Skipping.')
+                    return
 
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
@@ -4129,6 +4196,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
+
+        # Add/Remove autodown annotations to/from Kubernetes pods.
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            kubernetes_utils.set_autodown_annotations(
+                handle=handle,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down)
 
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,

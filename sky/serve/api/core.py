@@ -19,6 +19,7 @@ from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import resources_utils
@@ -127,6 +128,10 @@ def up(
 
     _validate_service_task(task)
 
+    dag, mutated_user_config = admin_policy_utils.apply(
+        task, use_mutated_config_in_current_request=False)
+    task = dag.tasks[0]
+
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
 
@@ -161,6 +166,7 @@ def up(
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
+                local_user_config=mutated_user_config,
             ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,

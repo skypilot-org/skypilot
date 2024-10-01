@@ -24,6 +24,7 @@ class DiskTier(enum.Enum):
     LOW = 'low'
     MEDIUM = 'medium'
     HIGH = 'high'
+    ULTRA = 'ultra'
     BEST = 'best'
 
     @classmethod

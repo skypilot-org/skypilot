@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -17,6 +17,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import registry
@@ -175,6 +176,10 @@ class AWS(clouds.Cloud):
         return regions
 
     @classmethod
+    def optimize_by_zone(cls) -> bool:
+        return aws_utils.use_reservations()
+
+    @classmethod
     def zones_provision_loop(
         cls,
         *,
@@ -198,11 +203,13 @@ class AWS(clouds.Cloud):
                                             zone=None)
         for r in regions:
             assert r.zones is not None, r
-            if num_nodes > 1:
+            if num_nodes > 1 or aws_utils.use_reservations():
                 # When num_nodes > 1, we shouldn't pass a list of zones to the
                 # AWS NodeProvider to try, because it may then place the nodes of
                 # the same cluster in different zones. This is an artifact of the
                 # current AWS NodeProvider implementation.
+                # Also, when using reservations, they are zone-specific, so we
+                # should return one zone at a time.
                 for z in r.zones:
                     yield [z]
             else:
@@ -219,6 +226,9 @@ class AWS(clouds.Cloud):
             if acc_name == 'K80':
                 image_id = service_catalog.get_image_id_from_tag(
                     'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
+            if acc_name in ['Trainium', 'Inferentia']:
+                image_id = service_catalog.get_image_id_from_tag(
+                    'skypilot:neuron-ubuntu-2204', region_name, clouds='aws')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -541,7 +551,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            identity_str = cls.get_current_user_identity_str()
+            identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -578,7 +588,7 @@ class AWS(clouds.Cloud):
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
-            # `get_current_user_identity` does not guarantee this file exists.
+            # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
@@ -642,7 +652,7 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
         These fields come from `aws sts get-caller-identity`. We permit the same
@@ -746,11 +756,13 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_ids
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for AWS. Currently we only support one identity.
+        return [user_ids]
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         identity_str = f'{user_identity[0]} [account={user_identity[1]}]'
@@ -792,7 +804,11 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
-        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
+        if disk_tier == resources_utils.DiskTier.LOW:
+            return 'standard'
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            return 'io2'
+        return 'gp3'
 
     @classmethod
     def _get_disk_specs(
@@ -800,15 +816,19 @@ class AWS(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
+            resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
-            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
-            'disk_iops': tier2iops[tier],
-            'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
+            'disk_iops': tier2iops[tier]
+                         if cls._get_disk_type(tier) != 'standard' else None,
+            # Custom disk throughput is only available for gp3
+            # see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-ebs.html
+            'disk_throughput': tier2iops[tier] // 16
+                               if cls._get_disk_type(tier) == 'gp3' else None,
         }
 
     @classmethod
@@ -842,6 +862,12 @@ class AWS(clouds.Cloud):
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
             return True
 
+        if aws_utils.use_reservations():
+            # When reservations are used, it is possible that a user has
+            # reservations for an instance type, but does not have the quota
+            # for that instance type. Skipping the quota check in this case.
+            return True
+
         client = aws.client('service-quotas', region_name=region)
         try:
             response = client.get_service_quota(ServiceCode='ec2',
@@ -856,6 +882,37 @@ class AWS(clouds.Cloud):
 
         # Quota found to be greater than zero, try provisioning
         return True
+
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = aws_utils.list_reservations_for_instance_type(
+            instance_type, region)
+
+        filtered_reservations = []
+        for r in reservations:
+            if zone != r.zone:
+                continue
+            if r.targeted:
+                if r.name in specific_reservations:
+                    filtered_reservations.append(r)
+            else:
+                filtered_reservations.append(r)
+        reservation_available_resources = {
+            r.name: r.available_resources for r in filtered_reservations
+        }
+        logger.debug('Get AWS reservations available resources:'
+                     f'{region}-{zone}: {reservation_available_resources}')
+        return reservation_available_resources
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

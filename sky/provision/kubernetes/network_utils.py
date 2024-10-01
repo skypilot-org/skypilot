@@ -132,10 +132,10 @@ def fill_ingress_template(namespace: str, service_details: List[Tuple[str, int,
 
 
 def create_or_replace_namespaced_ingress(
-        namespace: str, ingress_name: str,
+        namespace: str, context: Optional[str], ingress_name: str,
         ingress_spec: Dict[str, Union[str, int]]) -> None:
     """Creates an ingress resource for the specified service."""
-    networking_api = kubernetes.networking_api()
+    networking_api = kubernetes.networking_api(context)
 
     try:
         networking_api.read_namespaced_ingress(
@@ -156,9 +156,10 @@ def create_or_replace_namespaced_ingress(
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
-def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
+def delete_namespaced_ingress(namespace: str, context: Optional[str],
+                              ingress_name: str) -> None:
     """Deletes an ingress resource."""
-    networking_api = kubernetes.networking_api()
+    networking_api = kubernetes.networking_api(context)
     try:
         networking_api.delete_namespaced_ingress(
             ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
@@ -170,10 +171,10 @@ def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
 
 
 def create_or_replace_namespaced_service(
-        namespace: str, service_name: str,
+        namespace: str, context: Optional[str], service_name: str,
         service_spec: Dict[str, Union[str, int]]) -> None:
     """Creates a service resource for the specified service."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
 
     try:
         core_api.read_namespaced_service(
@@ -207,9 +208,10 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
         raise e
 
 
-def ingress_controller_exists(ingress_class_name: str = 'nginx') -> bool:
+def ingress_controller_exists(context: Optional[str],
+                              ingress_class_name: str = 'nginx') -> bool:
     """Checks if an ingress controller exists in the cluster."""
-    networking_api = kubernetes.networking_api()
+    networking_api = kubernetes.networking_api(context)
     ingress_classes = networking_api.list_ingress_class(
         _request_timeout=kubernetes.API_TIMEOUT).items
     return any(
@@ -218,10 +220,11 @@ def ingress_controller_exists(ingress_class_name: str = 'nginx') -> bool:
 
 
 def get_ingress_external_ip_and_ports(
+    context: Optional[str],
     namespace: str = 'ingress-nginx'
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
     ingress_services = [
         item for item in core_api.list_namespaced_service(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
@@ -255,11 +258,12 @@ def get_ingress_external_ip_and_ports(
     return external_ip, None
 
 
-def get_loadbalancer_ip(namespace: str,
+def get_loadbalancer_ip(context: Optional[str],
+                        namespace: str,
                         service_name: str,
                         timeout: int = 0) -> Optional[str]:
     """Returns the IP address of the load balancer."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
 
     ip = None
 
@@ -280,9 +284,10 @@ def get_loadbalancer_ip(namespace: str,
     return ip
 
 
-def get_pod_ip(namespace: str, pod_name: str) -> Optional[str]:
+def get_pod_ip(context: Optional[str], namespace: str,
+               pod_name: str) -> Optional[str]:
     """Returns the IP address of the pod."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
     pod = core_api.read_namespaced_pod(pod_name,
                                        namespace,
                                        _request_timeout=kubernetes.API_TIMEOUT)

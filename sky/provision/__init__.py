@@ -189,12 +189,12 @@ def get_cluster_info(
 def get_command_runners(
     provider_name: str,
     cluster_info: common.ClusterInfo,
-    **crednetials: Dict[str, Any],
+    **credentials: Dict[str, Any],
 ) -> List[command_runner.CommandRunner]:
     """Get a command runner for the given cluster."""
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
     return command_runner.SSHCommandRunner.make_runner_list(
         node_list=zip(ip_list, port_list),
-        **crednetials,
+        **credentials,
     )
