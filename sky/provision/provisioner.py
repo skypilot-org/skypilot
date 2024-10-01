@@ -72,7 +72,7 @@ def _bulk_provision(
     log_path_hint = ux_utils.log_path_hint(
         str(provision_logging.config.log_path))
     with rich_utils.safe_status(
-            f'[bold cyan]Launching[/]. {log_path_hint}') as status:
+            f'[bold cyan]Launching[/] {log_path_hint}') as status:
         try:
             # TODO(suquark): Should we cache the bootstrapped result?
             #  Currently it is not necessary as bootstrapping takes
@@ -102,7 +102,7 @@ def _bulk_provision(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
         log_path_hint = ux_utils.log_path_hint(
             str(provision_logging.config.log_path))
-        status.update(f'[bold cyan]Launching - Checking instance status[/]. '
+        status.update(f'[bold cyan]Launching - Checking instance status[/] '
                       f'{log_path_hint}')
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
@@ -453,7 +453,7 @@ def _post_provision_setup(
     log_path_hint = ux_utils.log_path_hint(
         str(provision_logging.config.log_path))
     with rich_utils.safe_status(
-            f'[bold cyan]Launching - Waiting for SSH access[/]. '
+            f'[bold cyan]Launching - Waiting for SSH access[/] '
             f'{log_path_hint}') as status:
 
         logger.debug(
@@ -466,7 +466,7 @@ def _post_provision_setup(
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                f'[bold cyan]Launching - Initializing docker container[/]. '
+                f'[bold cyan]Launching - Initializing docker container[/] '
                 f'{log_path_hint}')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
@@ -494,7 +494,7 @@ def _post_provision_setup(
         file_mounts = config_from_yaml.get('file_mounts', {})
 
         runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
-                                   'runtime ({step}/3 - {step_name})[/]. '
+                                   'runtime ({step}/3 - {step_name})[/] '
                                    f'{log_path_hint}')
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))

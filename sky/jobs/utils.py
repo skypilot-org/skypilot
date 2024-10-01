@@ -291,7 +291,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
-                  '{status_str}[/].')
+                  '{status_str}[/]')
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
     num_tasks = managed_job_state.get_num_tasks(job_id)
 

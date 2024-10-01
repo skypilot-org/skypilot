@@ -116,6 +116,11 @@ def finishing_message(message: str) -> str:
     return f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'
 
 
+def retry_message(message: str) -> str:
+    """Gets the retry message for the given message."""
+    return f'{colorama.Fore.YELLOW}↺{colorama.Style.RESET_ALL} {message}'
+
+
 # Log path hint in the spinner during launching
 _LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
                   f'{colorama.Style.RESET_ALL}')

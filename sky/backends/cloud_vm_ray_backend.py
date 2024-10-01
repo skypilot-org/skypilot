@@ -1307,7 +1307,7 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
-        rich_utils.force_update_status('[cyan]Launching[/]. '
+        rich_utils.force_update_status('[cyan]Launching[/] '
                                        f'{ux_utils.log_path_hint(log_path)}')
 
         # Get previous cluster status
@@ -2017,8 +2017,10 @@ class RetryingVmProvisioner(object):
                        ), prev_cluster_status
                 assert global_user_state.get_handle_from_cluster_name(
                     cluster_name) is None, cluster_name
-                logger.info('Retrying provisioning with requested resources '
-                            f'{task.num_nodes}x {task.resources}')
+                logger.info(
+                    ux_utils.retry_message(
+                        f'Retrying provisioning with requested resources: '
+                        f'{task.num_nodes}x {task.resources}'))
                 # Retry with the current, potentially "smaller" resources:
                 # to_provision == the current new resources (e.g., V100:1),
                 # which may be "smaller" than the original (V100:8).
@@ -2028,11 +2030,12 @@ class RetryingVmProvisioner(object):
                 prev_cluster_status = None
                 prev_handle = None
 
-            logger.warning(
-                f'\n{fore.GREEN}🔄{style.RESET_ALL} Trying other '
-                f'potential resources. {colorama.Style.DIM}'
-                f'Provision failed for {num_nodes}x {to_provision} '
-                f'in {region_or_zone_str}.{colorama.Style.RESET_ALL}')
+            retry_message = ux_utils.retry_message(
+                'Trying other potential resources.')
+            logger.warning(f'{colorama.Style.DIM}'
+                           f'Provision failed for {num_nodes}x {to_provision} '
+                           f'in {region_or_zone_str}.{colorama.Style.RESET_ALL}'
+                           f'\n\n{retry_message}')
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
@@ -2776,8 +2779,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         local_wheel_path,
                         wheel_hash,
                         blocked_resources=task.blocked_resources)
-                    with rich_utils.safe_status(
-                            f'[cyan]Launching cluster: {cluster_name}[/]'):
+                    with rich_utils.safe_status('[cyan]Launching[/]'):
                         config_dict = retry_provisioner.provision_with_retries(
                             task, to_provision_config, dryrun, stream_logs)
                     break
@@ -2798,22 +2800,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{colorama.Style.RESET_ALL}'
                             ' Relax the task\'s resource requirements: '
                             f'{task.num_nodes}x {list(task.resources)[0]}')
+
+                    log_path = retry_provisioner.log_dir + '/provision.log'
                     if retry_until_up:
                         logger.error(error_message)
                         # Sleep and retry.
                         gap_seconds = backoff.current_backoff()
                         plural = 's' if attempt_cnt > 1 else ''
-                        logger.info(
-                            f'{colorama.Style.BRIGHT}=== Retry until up ==='
-                            f'{colorama.Style.RESET_ALL}\n'
-                            f'Retrying provisioning after {gap_seconds:.0f}s '
-                            '(backoff with random jittering). '
-                            f'Already tried {attempt_cnt} attempt{plural}.')
+                        logger.info('\n' +
+                            ux_utils.retry_message(
+                                f'Retry after {gap_seconds:.0f}s '
+                                f'({attempt_cnt} attempt{plural}). '
+                                f'{ux_utils.log_path_hint(log_path)}'
+                                f'{colorama.Style.RESET_ALL}'
+                            ))
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
+                    logger.error(
+                        f'{colorama.Fore.RED}⨯{colorama.Style.RESET_ALL} '
+                        'Failed to provision resources. '
+                        f'{ux_utils.log_path_hint(log_path)}'
+                    )
                     error_message += (
-                        '\n📋 To keep retrying until the cluster is up, use '
+                        '\nTo keep retrying until the cluster is up, use '
                         'the `--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
@@ -3080,7 +3090,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
         rich_utils.force_update_status(
-            f'[cyan]Syncing workdir[/]. {log_path_hint}')
+            f'[cyan]Syncing workdir[/] {log_path_hint}')
         subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
         logger.info(
             ux_utils.finishing_message(f'Workdir synced. {log_path_hint}'))
@@ -4468,7 +4478,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(
-            f'[cyan]Syncing file mounts[/]. {log_path_hint}')
+            f'[cyan]Syncing file mounts[/] {log_path_hint}')
 
         for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -4595,7 +4605,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         plural = 's' if len(storage_mounts) > 1 else ''
         log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(f'[cyan]Mounting {len(storage_mounts)} '
-                                       f'storage{plural}[/]. {log_path_hint}')
+                                       f'storage{plural}[/] {log_path_hint}')
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):

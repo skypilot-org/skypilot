@@ -386,8 +386,8 @@ class Optimizer:
                         f'{fuzzy_candidates}{reset}')
                 error_msg = (
                     f'{source_hint.capitalize()} does not contain any '
-                    f'instances satisfying the request:\n{node}.'
-                    f'\n\nTo fix: relax or change the '
+                    f'instances satisfying the request:\n{node.resources}.'
+                    f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky show-gpus{reset} '
                     'to list available accelerators.\n'
