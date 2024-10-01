@@ -290,23 +290,19 @@ def _execute(
             logger.info('Dryrun finished.')
             return None, None
 
+        do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
+                      task.workdir is not None)
         do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
                           task.file_mounts is not None)
-        if Stage.SYNC_WORKDIR in stages and not dryrun:
-            if task.workdir is not None:
-                backend.sync_workdir(handle, task.workdir)
-                prefix = '├── ' if do_file_mounts else '└── '
-                # TODO(zhwu): Show log path.
-                logger.info(
-                    f'{prefix}{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} '
-                    'Workdir synced.')
+        if do_workdir or do_file_mounts:
+            logger.info('🔨 Mounting files.')
+
+        if do_workdir:
+            backend.sync_workdir(handle, task.workdir)
 
         if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
-            # TODO(zhwu): Show log path.
-            logger.info(f'└── {colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} '
-                        'Files mounted.')
 
         if no_setup:
             logger.info('Setup commands skipped.')

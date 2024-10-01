@@ -4,6 +4,7 @@ import sys
 import traceback
 from typing import Callable
 
+import colorama
 import rich.console as rich_console
 
 from sky import sky_logging
@@ -102,3 +103,13 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+def starting_message(message: str) -> str:
+    """Gets the starting message for the given message."""
+    return f'🔨 {message}'
+
+
+def finishing_message(message: str) -> str:
+    """Gets the finishing message for the given message."""
+    return f'  {colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'

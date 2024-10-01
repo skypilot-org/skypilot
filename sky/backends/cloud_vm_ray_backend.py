@@ -402,6 +402,9 @@ class RayCodeGen:
                     **gpu_dict,
                 })
 
+        streaming_message = ux_utils.finishing_message(
+            f'Job started. Streaming logs... {colorama.Style.DIM}(Ctrl-C to '
+            f'exit log streaming, not kill the job){colorama.Style.RESET_ALL}')
         self._code += [
             textwrap.dedent(f"""\
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
@@ -415,11 +418,7 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print('{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Job '
-                      'started. Streaming logs... {colorama.Style.DIM}(Ctrl-C '
-                      'to exit log streaming, not kill the job)'
-                      '{colorama.Style.RESET_ALL}',
-                      flush=True)
+                print({streaming_message}, flush=True)
                 """)
         ]
 
@@ -1562,10 +1561,11 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
+                log_path_hint = constants.LOG_PATH_HINT.format(
+                    cluster_name=cluster_name)
                 logger.info(
-                    f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
-                    f'Launched: {cluster_name}. {colorama.Style.DIM}View logs '
-                    f'at: {log_path}{colorama.Style.RESET_ALL}')
+                    ux_utils.finishing_message(
+                        f'Cluster Launched: {cluster_name}. {log_path_hint}'))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -1708,11 +1708,13 @@ class RetryingVmProvisioner(object):
         zone_str = logging_info['zone_str']
         style = colorama.Style
         if isinstance(to_provision_cloud, clouds.Kubernetes):
-            logger.info(f'{style.BRIGHT}🔨 Launching on {to_provision_cloud} '
-                        f'{style.RESET_ALL}')
+            logger.info(
+                ux_utils.starting_message(
+                    f'Launching on {to_provision_cloud}.'))
         else:
-            logger.info(f'{style.BRIGHT}🔨 Launching on {to_provision_cloud} '
-                        f'{region_name}{style.RESET_ALL}{zone_str}')
+            logger.info(
+                ux_utils.starting_message(f'Launching on {to_provision_cloud} '
+                                          f'{region_name}{zone_str}.'))
         start = time.time()
 
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
@@ -3082,6 +3084,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.system(f'touch {log_path}')
         rich_utils.force_update_status(f'Syncing workdir. {log_path_hint}')
         subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+        logger.info(
+            ux_utils.finishing_message(f'Workdir synced. {log_path_hint}'))
 
     def _sync_file_mounts(
         self,
@@ -3099,8 +3103,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
-        style = colorama.Style
-        fore = colorama.Fore
 
         if task.setup is None:
             return
@@ -3208,7 +3210,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_nodes = len(runners)
         plural = 's' if num_nodes > 1 else ''
         if not detach_setup:
-            logger.info(f'🔨 Running setup on {num_nodes} node{plural}.')
+            logger.info(
+                ux_utils.starting_message(
+                    f'Running setup on {num_nodes} node{plural}.'))
         # TODO(zhwu): run_in_parallel uses multi-thread to run the commands,
         # which can cause the program waiting for all the threads to finish,
         # even if some of them raise exceptions. We should replace it with
@@ -3220,11 +3224,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Only set this when setup needs to be run outside the self._setup()
             # as part of a job (--detach-setup).
             self._setup_cmd = setup_cmd
-            logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup submitted.')
+            logger.info(ux_utils.finishing_message('Setup completed.'))
             return
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
-        logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup completed.')
+        logger.info(ux_utils.finishing_message('Setup completed.'))
 
     def _exec_code_on_head(
         self,
@@ -3327,7 +3331,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            stderr=stdout + stderr)
 
         logger.info(
-            f'{fore.GREEN}✓{style.RESET_ALL} Job submitted with ID: {job_id}.')
+            ux_utils.starting_message(f'Job submitted with ID: {job_id}.'))
         rich_utils.stop_safe_status()
         try:
             if not detach_run:
@@ -4560,6 +4564,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.run_in_parallel(_symlink_node, runners)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
+        logger.info(
+            ux_utils.finishing_message(f'Files mounted. {log_path_hint}'))
 
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
@@ -4645,8 +4651,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
-        logger.info(f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Storage '
-                    'mounted.')
+        logger.info(
+            ux_utils.finishing_message(f'Storage mounted. {log_path_hint}'))
 
     def _set_storage_mounts_metadata(
             self, cluster_name: str,

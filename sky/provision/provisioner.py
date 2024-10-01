@@ -459,8 +459,8 @@ def _post_provision_setup(
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(
-            f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} VM{plural} '
-            f'started for cluster: {cluster_name}.')
+            ux_utils.finishing_message(
+                f'VM{plural} started for cluster: {cluster_name}.'))
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
@@ -562,8 +562,9 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
-                f'launched: {cluster_name}. {log_path_hint}')
+    logger.info(
+        ux_utils.finishing_message(
+            f'Cluster launched: {cluster_name}. {log_path_hint}'))
     return cluster_info
 
 

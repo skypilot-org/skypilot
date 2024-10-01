@@ -21,6 +21,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
@@ -377,8 +378,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Job '
-                      f'finished (status: {status_str}).')
+                print(
+                    ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).'))
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
