@@ -19,8 +19,7 @@ if typing.TYPE_CHECKING:
 
 
 def _get_db_path() -> str:
-    """
-    Workaround to collapse multi-step Path ops for type checker.
+    """Workaround to collapse multi-step Path ops for type checker.
     Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
     """
     path = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'

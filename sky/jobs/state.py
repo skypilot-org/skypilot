@@ -22,8 +22,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 def _get_db_path() -> str:
-    """
-    Workaround to collapse multi-step Path ops for type checker.
+    """Workaround to collapse multi-step Path ops for type checker.
     Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
     """
     path = pathlib.Path('~/.sky/spot_jobs.db')
