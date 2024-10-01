@@ -1,4 +1,6 @@
-"""REST API for SkyPilot."""
+import ray
+import contextlib
+import subprocess
 import argparse
 import asyncio
 import json
@@ -24,7 +26,7 @@ from sky import sky_logging
 from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
-from sky.api.requests import requests
+from sky.api.requests import requests as requests_lib
 from sky.clouds import service_catalog
 from sky.jobs.api import rest as jobs_rest
 from sky.serve.api import rest as serve_rest
@@ -54,19 +56,6 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
-app = fastapi.FastAPI(prefix='/api/v1', debug=True)
-
-app.add_middleware(
-    cors.CORSMiddleware,
-    allow_origins=['*'],  # Specify the correct domains for production
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-    expose_headers=['X-Request-ID'])
-app.add_middleware(RequestIDMiddleware)
-app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
-app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
-
 
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
@@ -84,13 +73,29 @@ def refresh_cluster_status_event():
 events = {'status': refresh_cluster_status_event}
 
 
-@app.on_event('startup')
-async def startup():
+@contextlib.asynccontextmanager
+async def lifespan(app: fastapi.FastAPI):
+    # Startup: Run background tasks
     for event_id, (event_name, event) in enumerate(events.items()):
-        executor.start_background_request(request_id=str(event_id),
+        executor.start_background_request(num_cpus=0,
+                                          request_id=str(event_id),
                                           request_name=event_name,
                                           request_body={},
                                           func=event)
+    yield
+    # Shutdown: Add any cleanup code here if needed
+
+app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
+app.add_middleware(
+    cors.CORSMiddleware,
+    allow_origins=['*'],  # Specify the correct domains for production
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+    expose_headers=['X-Request-ID'])
+app.add_middleware(RequestIDMiddleware)
+app.include_router(jobs_rest.router, prefix='/jobs', tags=['jobs'])
+app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 
 
 @app.post('/check')
@@ -511,14 +516,14 @@ async def long_running_request(request: fastapi.Request):
 
 
 @app.get('/get')
-async def get(request_id: str) -> requests.RequestTaskPayload:
+async def get(request_id: str) -> requests_lib.RequestPayload:
     while True:
-        request_task = requests.get_request(request_id)
+        request_task = requests_lib.get_request(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
-        if request_task.status > requests.RequestStatus.RUNNING:
+        if request_task.status > requests_lib.RequestStatus.RUNNING:
             return request_task.encode()
         await asyncio.sleep(1)
 
@@ -528,8 +533,8 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
         while True:
             line = f.readline()
             if not line:
-                request_task = requests.get_request(request_id)
-                if request_task.status > requests.RequestStatus.RUNNING:
+                request_task = requests_lib.get_request(request_id)
+                if request_task.status > requests_lib.RequestStatus.RUNNING:
                     break
                 await asyncio.sleep(1)
                 continue
@@ -538,7 +543,7 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
 
 @app.get('/stream')
 async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
-    request_task = requests.get_request(request_id)
+    request_task = requests_lib.get_request(request_id)
     if request_task is None:
         print(f'No task with request ID {request_id}')
         raise fastapi.HTTPException(status_code=404,
@@ -552,16 +557,16 @@ async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
 @app.post('/abort')
 async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
-    with requests.update_rest_task(abort_body.request_id) as rest_task:
+    with requests_lib.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:
             print(f'No task with request ID {abort_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {abort_body.request_id} not found')
-        if rest_task.status > requests.RequestStatus.RUNNING:
+        if rest_task.status > requests_lib.RequestStatus.RUNNING:
             print(f'Request {abort_body.request_id} already finished')
             return
-        rest_task.status = requests.RequestStatus.ABORTED
+        rest_task.status = requests_lib.RequestStatus.ABORTED
         print(f'Killing request process {rest_task.pid}', flush=True)
         if rest_task.pid is not None:
             executor.start_background_request(
@@ -574,11 +579,11 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
 
 
 @app.get('/requests')
-async def requests(request_id: Optional[str] = None) -> List[requests.RequestTask]:
+async def requests(request_id: Optional[str] = None) -> List[requests_lib.Request]:
     if request_id is None:
-        return requests.get_request_tasks()
+        return requests_lib.get_request_tasks()
     else:
-        request_task = requests.get_request(request_id)
+        request_task = requests_lib.get_request(request_id)
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
@@ -591,11 +596,9 @@ async def health() -> str:
             f'Healthy{colorama.Style.RESET_ALL}\n')
 
 
-# @app.get('/version', response_class=fastapi.responses.PlainTextResponse)
-
 if __name__ == '__main__':
     import uvicorn
-    requests.reset_db()
+    requests_lib.reset_db()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='0.0.0.0')
@@ -606,6 +609,10 @@ if __name__ == '__main__':
     workers = None
     if cmd_args.deploy:
         workers = os.cpu_count()
+    
+    ray.init()
+
+    logger.info('Starting API server')
     uvicorn.run('sky.api.rest:app',
                 host=cmd_args.host,
                 port=cmd_args.port,

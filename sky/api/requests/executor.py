@@ -1,5 +1,6 @@
 """Executor for the requests."""
 import multiprocessing
+import ray
 import os
 import sys
 import traceback
@@ -22,6 +23,7 @@ P = ParamSpec('P')
 logger = sky_logging.init_logger(__name__)
 
 
+@ray.remote
 def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
              ignore_return_value: bool, *args: P.args, **kwargs: P.kwargs):
     """Wrapper for a request task."""
@@ -94,6 +96,8 @@ def start_background_request(
         request_body: Dict[str, Any],
         func: Callable[P, Any],
         ignore_return_value: bool = False,
+        num_cpus: float = 0.5,
+        memory: float = 0.0,
         # pylint: disable=keyword-arg-before-vararg
         *args: P.args,
         **kwargs: P.kwargs):
@@ -112,7 +116,4 @@ def start_background_request(
     request.log_path.touch()
     kwargs['env_vars'] = request_body.get('env_vars', {})
     kwargs['ignore_return_value'] = ignore_return_value
-    process = multiprocessing.Process(target=_wrapper,
-                                      args=(func, request_id, *args),
-                                      kwargs=kwargs)
-    process.start()
+    _wrapper.options(num_cpus=num_cpus, memory=memory).remote(func, request_id, *args, **kwargs)
