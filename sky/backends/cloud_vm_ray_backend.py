@@ -418,7 +418,7 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print({streaming_message}, flush=True)
+                print({streaming_message!r}, flush=True)
                 """)
         ]
 
