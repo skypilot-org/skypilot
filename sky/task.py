@@ -21,9 +21,9 @@ from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils import vpn_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -286,6 +286,9 @@ class Task:
         # Only set when 'self' is a sky serve controller task.
         self.service_name: Optional[str] = None
 
+        # Only set when VPN is enabled.
+        self._vpn_config: Optional[vpn_utils.VPNConfig] = None
+
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
         # Check if the task is legal.
@@ -490,13 +493,16 @@ class Task:
                 '_cluster_config_overrides'] = cluster_config_override
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
+        vpn_config = config.pop('vpn', None)
+        if vpn_config is not None:
+            vpn_config = vpn_utils.VPNConfig.from_yaml_config(vpn_config)
+            task.set_vpn_config(vpn_config)
+
         service = config.pop('service', None)
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
-            if service.tailscale_auth_key is not None:
-                tailscale_setup = controller_utils.TAILSCALE_SETUP_CMD.format(
-                    tailscale_auth_key=service.tailscale_auth_key)
-                task.setup = _append_setup_command(task.setup, tailscale_setup)
+            if vpn_config is not None:
+                service.set_vpn_config(vpn_config)
         task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
@@ -1086,6 +1092,31 @@ class Task:
                 d[k] = v
         return d
 
+    @property
+    def vpn_config(self) -> Optional[vpn_utils.VPNConfig]:
+        """Returns the VPN configuration for this task."""
+        return self._vpn_config
+
+    def set_vpn_config(self,
+                       vpn_config: Optional[vpn_utils.VPNConfig]) -> 'Task':
+        """Sets the VPN configuration for this task.
+
+        Args:
+          vpn_config: a VPNConfig object.
+
+        Returns:
+          self: The current task, with VPN configuration set.
+        """
+        self._vpn_config = vpn_config
+        return self
+
+    def get_custom_setup_commands(self) -> List[str]:
+        """Returns the custom setup commands for this task."""
+        setup_commands = []
+        if self.vpn_config is not None:
+            setup_commands.extend(self.vpn_config.get_setup_commands())
+        return setup_commands
+
     def to_yaml_config(self) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 
@@ -1112,6 +1143,9 @@ class Task:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 
         add_if_not_none('resources', tmp_resource_config)
+
+        if self.vpn_config:
+            add_if_not_none('vpn', self.vpn_config.to_yaml_config())
 
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())

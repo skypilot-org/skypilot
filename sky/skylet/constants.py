@@ -287,6 +287,3 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
-
-# Constants for Tailscale VPN
-TAILSCALE_AUTH_KEY_ENV_VAR = 'TAILSCALE_AUTH_KEY'

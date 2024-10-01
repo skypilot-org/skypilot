@@ -10,6 +10,7 @@ from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+from sky.utils import vpn_utils
 
 
 class SkyServiceSpec:
@@ -36,7 +37,6 @@ class SkyServiceSpec:
         # Deprecated: replaced by the target_qps_per_replica.
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
-        tailscale_auth_key: Optional[str] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -92,7 +92,7 @@ class SkyServiceSpec:
             int] = base_ondemand_fallback_replicas
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
-        self._tailscale_auth_key: Optional[str] = tailscale_auth_key
+        self._vpn_config: Optional[vpn_utils.VPNConfig] = None
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -180,19 +180,6 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
-        vpn_section: Dict[str, Any] = config.get('vpn', None)
-        if vpn_section is not None:
-            # Get the tailscale auth key from the environment.
-            use_tailscale = vpn_section.get('tailscale', None)
-            if use_tailscale:
-                auth_key = os.getenv('TAILSCALE_AUTH_KEY')
-                if auth_key is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'Please set the TAILSCALE_AUTH_KEY environment '
-                            'variable to use Tailscale VPN.')
-                service_config['tailscale_auth_key'] = auth_key
-
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -248,8 +235,6 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
-        if self.tailscale_auth_key is not None:
-            add_if_not_none('vpn', 'tailscale', True)
         return config
 
     def probe_str(self):
@@ -293,6 +278,9 @@ class SkyServiceSpec:
         return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
+
+    def set_vpn_config(self, vpn_config: vpn_utils.VPNConfig) -> None:
+        self._vpn_config = vpn_config
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
@@ -353,8 +341,8 @@ class SkyServiceSpec:
         return self._downscale_delay_seconds
 
     @property
-    def tailscale_auth_key(self) -> Optional[str]:
-        return self._tailscale_auth_key
+    def vpn_config(self) -> Optional[vpn_utils.VPNConfig]:
+        return self._vpn_config
 
     @property
     def use_ondemand_fallback(self) -> bool:

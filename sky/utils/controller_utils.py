@@ -9,6 +9,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
+import yaml
 
 from sky import check as sky_check
 from sky import clouds
@@ -51,16 +52,6 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
 # cloud as controller.
 _LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX = (
     '__skypilot:local_skypilot_config_path.yaml')
-
-# The command to install tailscale VPN on the controller.
-TAILSCALE_SETUP_CMD = (
-    'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | '
-    'sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null; '
-    'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | '  # pylint: disable=line-too-long
-    'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null; '
-    'sudo apt-get update > /dev/null 2>&1; '
-    'sudo apt-get install tailscale -y > /dev/null 2>&1; '
-    'sudo tailscale login --auth-key {tailscale_auth_key}')
 
 
 @dataclasses.dataclass
@@ -199,8 +190,7 @@ class Controllers(enum.Enum):
 # can be cleaned up by another process.
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
-        controller: Controllers,  # yapf: disable
-        service_config: Optional[SkyServiceSpec]) -> List[str]:
+        controller: Controllers) -> List[str]:
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
@@ -296,14 +286,6 @@ def _get_cloud_dependencies_installation_commands(
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
                         aws_dependencies_installation)
-
-    # install tailscale VPN if needed
-    if service_config is not None:
-        if service_config.tailscale_auth_key:
-            commands.append(
-                TAILSCALE_SETUP_CMD.format(
-                    tailscale_auth_key=service_config.tailscale_auth_key))
-
     commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
                     'clouds."')
     return commands
@@ -393,8 +375,7 @@ def shared_controller_vars_to_fill(
 
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(
-                controller, service_config),
+            _get_cloud_dependencies_installation_commands(controller),
         # We need to activate the python environment on the controller to ensure
         # cloud SDKs are installed in SkyPilot runtime environment and can be
         # accessed.
@@ -420,10 +401,11 @@ def shared_controller_vars_to_fill(
     # Check if VPN auth key should be set.
     if service_config:
         # Only support Tailscale VPN now
-        if service_config.tailscale_auth_key:
-            env_vars[
-                constants.
-                TAILSCALE_AUTH_KEY_ENV_VAR] = service_config.tailscale_auth_key
+        if service_config.vpn_config:
+            env_vars.update(service_config.vpn_config.get_setup_env_vars())
+            vpn_config_yaml = yaml.dump(
+                service_config.vpn_config.to_yaml_config())
+            vars_to_fill['vpn_config'] = vpn_config_yaml
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

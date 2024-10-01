@@ -8,6 +8,7 @@ import json
 import math
 import os
 import pathlib
+import pprint
 import re
 import shlex
 import signal
@@ -63,6 +64,7 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import vpn_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -2078,6 +2080,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Launched resources
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
+    - (optional) VPN configuration
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
@@ -2115,6 +2118,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        # VPN config. We only store the essential configuration of the VPN
+        # for simplicity. Specifically, we store 'TAILSCALE_API_KEY' for
+        # Tailscale VPN.
+        self.vpn_config: Optional[Dict[str, Any]] = None
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
         # Backward compatibility for TPU nodes created before #2943.
@@ -2228,8 +2235,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             max_attempts: int = 1,
             internal_ips: Optional[List[Optional[str]]] = None,
             external_ips: Optional[List[Optional[str]]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None
-    ) -> None:
+            cluster_info: Optional[provision_common.ClusterInfo] = None,
+            vpn_config: Optional[vpn_utils.VPNConfig] = None) -> None:
         """Updates the cluster IPs cached in the handle.
 
         We cache the cluster IPs in the handle to avoid having to retrieve
@@ -2260,6 +2267,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
+            # Update cluster config by private IPs (if available).
+            # TODO(yi): add support for multiple nodes.
+            # TODO(yi): add support for other VPNs.
+            if vpn_config is not None:
+                self.vpn_config = vpn_config.to_backend_config()
+                for (instance_id, instance_list
+                    ) in self.cached_cluster_info.instances.items():
+                    if len(instance_list) > 1:
+                        logger.warning(
+                            'VPN is not supported for multi-node clusters.')
+                        break
+                    instance = instance_list[0]
+                    instance.external_ip = vpn_config.get_private_ip_vpn(
+                        instance_id, 'tailscale')
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
             cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
                 force_internal_ips=True)
@@ -2616,8 +2637,31 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
+        def _check_vpn_unchanged() -> Optional[str]:
+            """Check if the VPN configuration is unchanged.
+
+            Returns:
+                None if the VPN configuration is unchanged, otherwise a string
+                indicating the mismatch.
+            """
+            new_vpn_config = task.vpn_config.to_backend_config(
+            ) if task.vpn_config is not None else None
+            use_or_not_mismatch_str = (
+                '{} VPN, but current config requires the opposite')
+            if handle.vpn_config is None:
+                if new_vpn_config is None:
+                    return None
+                return use_or_not_mismatch_str.format('without')
+            if new_vpn_config is None:
+                return use_or_not_mismatch_str.format('with')
+            if new_vpn_config == handle.vpn_config:
+                return None
+            return (f'with VPN config\n{pprint.pformat(handle.vpn_config)}, '
+                    f'but current config is\n{pprint.pformat(new_vpn_config)}')
+
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
+
         valid_resource = None
         requested_resource_list = []
         for resource in task.resources:
@@ -2630,6 +2674,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 break
             else:
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
+
+        # VPN check
+        vpn_check_result = _check_vpn_unchanged()
+        if vpn_check_result is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'VPN configuration mismatch:'
+                    f' {vpn_check_result}\n{mismatch_str}.')
 
         if valid_resource is None:
             for example_resource in task.resources:
@@ -2817,6 +2869,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 provision_record = config_dict['provision_record']
                 resources_vars = config_dict['resources_vars']
 
+                # Prepare setup commands
+                # Some setup commands need to be run before the cluster finishes
+                # provisioning, e.g., setting up the VPN connection.
+                custom_setup_commands = task.get_custom_setup_commands()
+
                 # Setup SkyPilot runtime after the cluster is provisioned
                 # 1. Wait for SSH to be ready.
                 # 2. Mount the cloud credentials, skypilot wheel,
@@ -2830,7 +2887,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle.cluster_yaml,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
-                    log_dir=self.log_dir)
+                    log_dir=self.log_dir,
+                    custom_setup_commands=custom_setup_commands)
+
                 # We use the IPs from the cluster_info to update_cluster_ips,
                 # when the provisioning is done, to make sure the cluster IPs
                 # are up-to-date.
@@ -2840,7 +2899,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # from cluster_info.
                 handle.docker_user = cluster_info.docker_user
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          cluster_info=cluster_info)
+                                          cluster_info=cluster_info,
+                                          vpn_config=task.vpn_config)
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 # Update launched resources.
@@ -4103,6 +4163,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{common_utils.format_exception(e, use_bracket=True)}')
                 else:
                     raise
+        if terminate and handle.vpn_config is not None:
+            # Delete the VPN records when terminating the cluster.
+            vpn_config = vpn_utils.VPNConfig.from_backend_config(
+                handle.vpn_config)
+            if handle.cached_cluster_info is not None:
+                for instance_id in handle.cached_cluster_info.instances.keys():
+                    vpn_config.remove_host(instance_id)
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
