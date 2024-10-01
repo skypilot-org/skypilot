@@ -2527,8 +2527,7 @@ class AzureBlobStore(AbstractStore):
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
                     f'Syncing [green]{source_message}[/] to [green]'
-                    f'{container_endpoint}/'
-                )):
+                    f'{container_endpoint}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
