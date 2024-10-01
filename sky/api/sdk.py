@@ -25,7 +25,7 @@ from sky import backends
 from sky import sky_logging
 from sky.api import common as api_common
 from sky.api.requests import payloads
-from sky.api.requests import tasks
+from sky.api.requests import requests
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -530,8 +530,8 @@ def get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/get?request_id={request_id}',
         timeout=(5, None))
-    request_task = tasks.RequestTask.decode(
-        tasks.RequestTaskPayload(**response.json()))
+    request_task = requests.Request.decode(
+        requests.RequestPayload(**response.json()))
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']

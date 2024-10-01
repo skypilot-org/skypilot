@@ -21,8 +21,13 @@ from sky.utils import db_utils
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 
+# TODO(zhwu): For scalability, there are several TODOs:
+# 1. Use Redis + Celery for task execution.
+# 2. Move logs to persistent place.
+# 3. Deploy API server in a autoscaling fashion.
+
 class RequestStatus(enum.Enum):
-    """The status of a task."""
+    """The status of a request."""
 
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
@@ -35,7 +40,7 @@ class RequestStatus(enum.Enum):
                 list(RequestStatus).index(other))
 
 
-REQUEST_TASK_COLUMNS = [
+REQUEST_COLUMNS = [
     'request_id',
     'name',
     'entrypoint',
@@ -48,7 +53,7 @@ REQUEST_TASK_COLUMNS = [
 
 
 @dataclasses.dataclass
-class RequestTaskPayload:
+class RequestPayload:
     request_id: str
     name: str
     entrypoint: str
@@ -60,8 +65,8 @@ class RequestTaskPayload:
 
 
 @dataclasses.dataclass
-class RequestTask:
-    """A REST task."""
+class Request:
+    """A REST request."""
 
     request_id: str
     name: str
@@ -112,18 +117,18 @@ class RequestTask:
         return decoders.get_handler(self.name)(self.return_value)
 
     @classmethod
-    def from_row(cls, row: Tuple[Any, ...]) -> 'RequestTask':
+    def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         return cls.decode(
-            RequestTaskPayload(**dict(zip(REQUEST_TASK_COLUMNS, row))))
+            RequestPayload(**dict(zip(REQUEST_COLUMNS, row))))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
-        return tuple(getattr(payload, k) for k in REQUEST_TASK_COLUMNS)
+        return tuple(getattr(payload, k) for k in REQUEST_COLUMNS)
 
-    def encode(self) -> RequestTaskPayload:
+    def encode(self) -> RequestPayload:
         """Serialize the request task."""
         try:
-            return RequestTaskPayload(
+            return RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=self.entrypoint,
@@ -142,7 +147,7 @@ class RequestTask:
             raise
 
     @classmethod
-    def decode(cls, payload: RequestTaskPayload) -> 'RequestTask':
+    def decode(cls, payload: RequestPayload) -> 'Request':
         """Deserialize the request task."""
         return cls(
             request_id=payload.request_id,
@@ -226,7 +231,7 @@ def update_rest_task(request_id: str):
         _dump_request_no_lock(rest_task)
 
 
-def _get_rest_task_no_lock(request_id: str) -> Optional[RequestTask]:
+def _get_rest_task_no_lock(request_id: str) -> Optional[Request]:
     """Get a REST task."""
     assert _DB is not None
     with _DB.conn:
@@ -236,18 +241,18 @@ def _get_rest_task_no_lock(request_id: str) -> Optional[RequestTask]:
         row = cursor.fetchone()
         if row is None:
             return None
-    return RequestTask.from_row(row)
+    return Request.from_row(row)
 
 
 @init_db
-def get_request(request_id: str) -> Optional[RequestTask]:
+def get_request(request_id: str) -> Optional[Request]:
     """Get a REST task."""
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_rest_task_no_lock(request_id)
 
 
 @init_db
-def create_if_not_exists(request: RequestTask) -> bool:
+def create_if_not_exists(request: Request) -> bool:
     """Create a REST task if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
         if _get_rest_task_no_lock(request.request_id) is not None:
@@ -257,7 +262,7 @@ def create_if_not_exists(request: RequestTask) -> bool:
 
 
 @init_db
-def get_request_tasks() -> List[RequestTask]:
+def get_request_tasks() -> List[Request]:
     """Get a REST task."""
     assert _DB is not None
     with _DB.conn:
@@ -268,12 +273,12 @@ def get_request_tasks() -> List[RequestTask]:
             return []
     rest_tasks = []
     for row in rows:
-        rest_task = RequestTask.from_row(row)
+        rest_task = Request.from_row(row)
         rest_tasks.append(rest_task)
     return rest_tasks
 
 
-def _dump_request_no_lock(request_task: RequestTask):
+def _dump_request_no_lock(request_task: Request):
     """Dump a REST task."""
     row = request_task.to_row()
     fill_str = ', '.join(['?'] * len(row))
@@ -285,7 +290,7 @@ def _dump_request_no_lock(request_task: RequestTask):
 
 
 @init_db
-def dump_reqest(request: RequestTask):
+def dump_reqest(request: Request):
     """Dump a REST task."""
     with filelock.FileLock(request_lock_path(request.request_id)):
         _dump_request_no_lock(request)

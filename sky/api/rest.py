@@ -24,7 +24,7 @@ from sky import sky_logging
 from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
-from sky.api.requests import tasks
+from sky.api.requests import requests
 from sky.clouds import service_catalog
 from sky.jobs.api import rest as jobs_rest
 from sky.serve.api import rest as serve_rest
@@ -511,14 +511,14 @@ async def long_running_request(request: fastapi.Request):
 
 
 @app.get('/get')
-async def get(request_id: str) -> tasks.RequestTaskPayload:
+async def get(request_id: str) -> requests.RequestTaskPayload:
     while True:
-        request_task = tasks.get_request(request_id)
+        request_task = requests.get_request(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
-        if request_task.status > tasks.RequestStatus.RUNNING:
+        if request_task.status > requests.RequestStatus.RUNNING:
             return request_task.encode()
         await asyncio.sleep(1)
 
@@ -528,8 +528,8 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
         while True:
             line = f.readline()
             if not line:
-                request_task = tasks.get_request(request_id)
-                if request_task.status > tasks.RequestStatus.RUNNING:
+                request_task = requests.get_request(request_id)
+                if request_task.status > requests.RequestStatus.RUNNING:
                     break
                 await asyncio.sleep(1)
                 continue
@@ -538,7 +538,7 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
 
 @app.get('/stream')
 async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
-    request_task = tasks.get_request(request_id)
+    request_task = requests.get_request(request_id)
     if request_task is None:
         print(f'No task with request ID {request_id}')
         raise fastapi.HTTPException(status_code=404,
@@ -552,16 +552,16 @@ async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
 @app.post('/abort')
 async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
-    with tasks.update_rest_task(abort_body.request_id) as rest_task:
+    with requests.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:
             print(f'No task with request ID {abort_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {abort_body.request_id} not found')
-        if rest_task.status > tasks.RequestStatus.RUNNING:
+        if rest_task.status > requests.RequestStatus.RUNNING:
             print(f'Request {abort_body.request_id} already finished')
             return
-        rest_task.status = tasks.RequestStatus.ABORTED
+        rest_task.status = requests.RequestStatus.ABORTED
         print(f'Killing request process {rest_task.pid}', flush=True)
         if rest_task.pid is not None:
             executor.start_background_request(
@@ -574,11 +574,11 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
 
 
 @app.get('/requests')
-async def requests(request_id: Optional[str] = None) -> List[tasks.RequestTask]:
+async def requests(request_id: Optional[str] = None) -> List[requests.RequestTask]:
     if request_id is None:
-        return tasks.get_request_tasks()
+        return requests.get_request_tasks()
     else:
-        request_task = tasks.get_request(request_id)
+        request_task = requests.get_request(request_id)
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
@@ -595,7 +595,7 @@ async def health() -> str:
 
 if __name__ == '__main__':
     import uvicorn
-    tasks.reset_db()
+    requests.reset_db()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='0.0.0.0')

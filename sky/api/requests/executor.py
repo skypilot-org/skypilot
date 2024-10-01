@@ -6,7 +6,7 @@ import traceback
 from typing import Any, Callable, Dict
 
 from sky import sky_logging
-from sky.api.requests import tasks
+from sky.api.requests import requests
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import ux_utils
@@ -49,11 +49,11 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running task {request_id} with pid {pid}')
-    with tasks.update_rest_task(request_id) as request_task:
+    with requests.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
         request_task.pid = pid
-        request_task.status = tasks.RequestStatus.RUNNING
+        request_task.status = requests.RequestStatus.RUNNING
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
@@ -70,17 +70,17 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
                 stacktrace = traceback.format_exc()
             setattr(e, 'stacktrace', stacktrace)
             usage_lib.store_exception(e)
-            with tasks.update_rest_task(request_id) as request_task:
+            with requests.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
-                request_task.status = tasks.RequestStatus.FAILED
+                request_task.status = requests.RequestStatus.FAILED
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Task {request_id} failed due to {e}')
             return None
         else:
-            with tasks.update_rest_task(request_id) as request_task:
+            with requests.update_rest_task(request_id) as request_task:
                 assert request_task is not None, request_id
-                request_task.status = tasks.RequestStatus.SUCCEEDED
+                request_task.status = requests.RequestStatus.SUCCEEDED
                 if not ignore_return_value:
                     request_task.set_return_value(return_value)
             restore_output(original_stdout, original_stderr)
@@ -98,16 +98,18 @@ def start_background_request(
         *args: P.args,
         **kwargs: P.kwargs):
     """Start a task."""
-    request_task = tasks.RequestTask(request_id=request_id,
+    request = requests.Request(request_id=request_id,
                                      name=request_name,
                                      entrypoint=func.__module__,
                                      request_body=request_body,
-                                     status=tasks.RequestStatus.PENDING)
-    if not tasks.create_if_not_exists(request_task):
+                                     status=requests.RequestStatus.PENDING)
+
+    # TODO(zhwu): move this to Redis + Celery.
+    if not requests.create_if_not_exists(request):
         logger.debug(f'Request {request_id} already exists.')
         return
 
-    request_task.log_path.touch()
+    request.log_path.touch()
     kwargs['env_vars'] = request_body.get('env_vars', {})
     kwargs['ignore_return_value'] = ignore_return_value
     process = multiprocessing.Process(target=_wrapper,
