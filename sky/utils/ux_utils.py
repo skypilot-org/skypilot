@@ -1,5 +1,6 @@
 """Utility functions for UX."""
 import contextlib
+import os
 import sys
 import traceback
 from typing import Callable
@@ -113,3 +114,16 @@ def starting_message(message: str) -> str:
 def finishing_message(message: str) -> str:
     """Gets the finishing message for the given message."""
     return f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'
+
+
+# Log path hint in the spinner during launching
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
+                  f'{colorama.Style.RESET_ALL}')
+
+
+def log_path_hint(log_path: str) -> str:
+    """Gets the log path hint for the given log path."""
+    expanded_home = os.path.expanduser('~')
+    if log_path.startswith(expanded_home):
+        log_path = '~/' + log_path[len(expanded_home):]
+    return _LOG_PATH_HINT.format(log_path=log_path)

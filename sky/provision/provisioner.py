@@ -59,15 +59,18 @@ def _bulk_provision(
 
     if isinstance(cloud, clouds.Kubernetes):
         # Omit the region name for Kubernetes.
-        logger.info(ux_utils.starting_message(f'Launching on {cloud} '
-                    f'{cluster_name!r}.'))
+        logger.info(
+            ux_utils.starting_message(f'Launching on {cloud} '
+                                      f'{cluster_name!r}.'))
     else:
-        logger.info(ux_utils.starting_message(f'Launching on {cloud} '
-                    f'{region_name}{style.RESET_ALL} ({zone_str})'))
+        logger.info(
+            ux_utils.starting_message(
+                f'Launching on {cloud} '
+                f'{region_name}{style.RESET_ALL} ({zone_str})'))
 
     start = time.time()
-    log_path_hint = constants.LOG_PATH_HINT.format(
-        log_path=provision_logging.config.log_path)
+    log_path_hint = ux_utils.log_path_hint(
+        str(provision_logging.config.log_path))
     with rich_utils.safe_status(
             f'[bold cyan]Launching[/]. {log_path_hint}') as status:
         try:
@@ -97,8 +100,8 @@ def _bulk_provision(
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        log_path_hint = constants.LOG_PATH_HINT.format(
-            log_path=provision_logging.config.log_path)
+        log_path_hint = ux_utils.log_path_hint(
+            str(provision_logging.config.log_path))
         status.update(f'[bold cyan]Launching - Checking instance status[/]. '
                       f'{log_path_hint}')
         # AWS would take a very short time (<<1s) updating the state of the
@@ -447,8 +450,8 @@ def _post_provision_setup(
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
 
-    log_path_hint = constants.LOG_PATH_HINT.format(
-        log_path=provision_logging.config.log_path)
+    log_path_hint = ux_utils.log_path_hint(
+        str(provision_logging.config.log_path))
     with rich_utils.safe_status(
             f'[bold cyan]Launching - Waiting for SSH access[/]. '
             f'{log_path_hint}') as status:
@@ -456,11 +459,10 @@ def _post_provision_setup(
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+        logger.debug(f'SSH Connection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(
-            ux_utils.finishing_message(
-                f'VM{plural} started for cluster: {cluster_name}.'))
+            f'VM{plural} provisioned or found for cluster: {cluster_name}.')
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:

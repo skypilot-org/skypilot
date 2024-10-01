@@ -402,8 +402,8 @@ class RayCodeGen:
                     **gpu_dict,
                 })
 
-        streaming_message = ux_utils.finishing_message(
-            f'Job started. Streaming logs... {colorama.Style.DIM}(Ctrl-C to '
+        streaming_message = (
+            f'  Job started. Streaming logs... {colorama.Style.DIM}(Ctrl-C to '
             f'exit log streaming, not kill the job){colorama.Style.RESET_ALL}')
         self._code += [
             textwrap.dedent(f"""\
@@ -411,7 +411,7 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                message = (f'⏳ {colorama.Style.DIM}Waiting for task resources on '
+                message = (f'  {colorama.Style.DIM}Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -1307,8 +1307,8 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
-        rich_utils.force_update_status(
-            f'Launching. {constants.LOG_PATH_HINT.format(log_path=log_path)}')
+        rich_utils.force_update_status('[cyan]Launching[/]. '
+                                       f'{ux_utils.log_path_hint(log_path)}')
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -1561,8 +1561,7 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
-                log_path_hint = constants.LOG_PATH_HINT.format(
-                    cluster_name=cluster_name)
+                log_path_hint = ux_utils.log_path_hint(log_path)
                 logger.info(
                     ux_utils.finishing_message(
                         f'Cluster Launched: {cluster_name}. {log_path_hint}'))
@@ -3059,7 +3058,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
-        log_path_hint = constants.LOG_PATH_HINT.format(log_path=log_path)
+        log_path_hint = ux_utils.log_path_hint(log_path)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = handle.get_command_runners()
@@ -3076,10 +3075,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
         logger.info(
-            f'  {fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
-            f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
-            f' -> '
-            f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+            f'  {style.DIM}Syncing workdir (to {num_nodes} node{plural}): '
+            f'{workdir} -> {SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
         rich_utils.force_update_status(f'Syncing workdir. {log_path_hint}')
@@ -4468,7 +4465,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
 
-        log_path_hint = constants.LOG_PATH_HINT.format(log_path=log_path)
+        log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(f'Syncing file mounts. {log_path_hint}')
 
         for dst, src in file_mounts.items():
@@ -4594,7 +4591,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         plural = 's' if len(storage_mounts) > 1 else ''
-        log_path_hint = constants.LOG_PATH_HINT.format(log_path=log_path)
+        log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(f'Mounting {len(storage_mounts)} '
                                        f'storage{plural}. {log_path_hint}')
 
