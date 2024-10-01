@@ -2807,11 +2807,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         # Sleep and retry.
                         gap_seconds = backoff.current_backoff()
                         plural = 's' if attempt_cnt > 1 else ''
-                        logger.info('\n' + ux_utils.retry_message(
+                        retry_message = ux_utils.retry_message(
                             f'Retry after {gap_seconds:.0f}s '
-                            f'({attempt_cnt} attempt{plural}). '
-                            f'{ux_utils.log_path_hint(log_path)}'
-                            f'{colorama.Style.RESET_ALL}'))
+                            f'({attempt_cnt} attempt{plural}). ')
+                        logger.info(f'\n{retry_message} '
+                                    f'{ux_utils.log_path_hint(log_path)}'
+                                    f'{colorama.Style.RESET_ALL}')
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
