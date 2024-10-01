@@ -965,7 +965,9 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: Optional[str],
+                                disk_size: int,
                                 disk_tier: resources_utils.DiskTier) -> None:
+        del disk_size  # Unused.
         ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
             with ux_utils.print_exception_no_traceback():

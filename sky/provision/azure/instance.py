@@ -285,6 +285,45 @@ def _create_instances(
             subprocess_utils.run_no_outputs(
                 f'az disk update -n {name} -g {resource_group} '
                 f'--set tier={performance_tier}')
+    if node_config.get('enable_disk_bursting', False):
+
+        def _wait_all_instance_reach_status(status: AzureInstanceStatus):
+            filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+            while True:
+                instances = _filter_instances(compute_client, resource_group,
+                                              filters)
+                if all(
+                        _get_instance_status(compute_client, ins,
+                                             resource_group) == status
+                        for ins in instances):
+                    break
+                time.sleep(1)
+
+        # Disk bursting can only be enabled when the VM is stopped.
+        # Here we stop the instances, enable disk bursting, and start the
+        # instances again.
+        start_time = time.time()
+        stop_instances(cluster_name_on_cloud, provider_config)
+        _wait_all_instance_reach_status(AzureInstanceStatus.STOPPED)
+        logger.info('Stopped instances to enable disk bursting in '
+                    f'{time.time() - start_time:.2f} seconds.')
+
+        start_time = time.time()
+        disks = compute_client.disks.list_by_resource_group(resource_group)
+        for disk in disks:
+            name = disk.name
+            # TODO(tian): Investigate if we can use Python SDK to update this.
+            subprocess_utils.run_no_outputs(
+                f'az disk update -n {name} -g {resource_group} '
+                '--enable-bursting true')
+        logger.info('Enabled disk bursting for {len(disks)} disks in '
+                    f'{time.time() - start_time:.2f} seconds.')
+
+        start_time = time.time()
+        _start_instances(cluster_name_on_cloud, provider_config)
+        _wait_all_instance_reach_status(AzureInstanceStatus.RUNNING)
+        logger.info('Started instances to enable disk bursting in '
+                    f'{time.time() - start_time:.2f} seconds.')
 
     filters = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
@@ -293,6 +332,35 @@ def _create_instances(
     instances = _filter_instances(compute_client, resource_group, filters)
     assert len(instances) == count, (len(instances), count)
     return instances
+
+
+def _start_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    instances_to_start: Optional[List[Any]] = None,
+) -> None:
+    """Start all instances in the cluster.
+
+    Args:
+        cluster_name_on_cloud: The name of the cluster on the cloud.
+        provider_config: The provider configuration.
+        instances_to_start: Instances to start. If None, all instances in
+          the cluster will be started.
+    """
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+
+    subscription_id = provider_config['subscription_id']
+    resource_group = provider_config['resource_group']
+    compute_client = azure.get_client('compute', subscription_id)
+    nodes = instances_to_start
+    if nodes is None:
+        tag_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+        nodes = _filter_instances(compute_client, resource_group, tag_filters)
+    start_virtual_machine = _get_azure_sdk_function(
+        client=compute_client.virtual_machines, function_name='start')
+    with pool.ThreadPool() as p:
+        p.starmap(start_virtual_machine,
+                  [(resource_group, node.name) for node in nodes])
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -428,12 +496,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         instances_to_resume_ids = [t.name for t in instances_to_resume]
         logger.debug('run_instances: Resuming stopped instances '
                      f'{instances_to_resume_ids}.')
-        start_virtual_machine = _get_azure_sdk_function(
-            compute_client.virtual_machines, 'start')
-        with pool.ThreadPool() as p:
-            p.starmap(
-                start_virtual_machine,
-                [(resource_group, inst.name) for inst in instances_to_resume])
+        _start_instances(cluster_name_on_cloud, provider_config,
+                         instances_to_resume)
         resumed_instance_ids = instances_to_resume_ids
 
     to_start_count -= len(resumed_instance_ids)
