@@ -1,4 +1,4 @@
-# AWS Neuron Accelerators
+# AWS Inferentia
 
 SkyPilot supports the Neuron SDK for AWS Inferentia accelerators. The Neuron SDK is a runtime and compiler for running deep learning models on AWS Inferentia chips. Here is an example of how to use the Neuron SDK to launch an Llama 3 8b model on an Inferentia chip:
 
