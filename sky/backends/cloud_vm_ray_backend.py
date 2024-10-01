@@ -3156,7 +3156,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # and source ~/.bashrc in the setup_cmd.
                     #   bash: cannot set terminal process group (7398): Inappropriate ioctl for device # pylint: disable=line-too-long
                     #   bash: no job control in this shell
-                    skip_lines=3)
+                    skip_num_lines=3)
                 return returncode
 
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
