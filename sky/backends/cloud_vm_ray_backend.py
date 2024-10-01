@@ -411,7 +411,7 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                message = (f'  ⏳ {colorama.Style.DIM}Waiting for task resources on '
+                message = (f'⏳ {colorama.Style.DIM}Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
                 # FIXME: This will print the error message from autoscaler if

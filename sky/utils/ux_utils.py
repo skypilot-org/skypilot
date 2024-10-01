@@ -107,9 +107,9 @@ class RedirectOutputForProcess:
 
 def starting_message(message: str) -> str:
     """Gets the starting message for the given message."""
-    return f'🔨 {message}'
+    return f'⚙️ {message}'
 
 
 def finishing_message(message: str) -> str:
     """Gets the finishing message for the given message."""
-    return f'  {colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'
+    return f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'

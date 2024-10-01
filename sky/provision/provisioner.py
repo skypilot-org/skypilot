@@ -59,11 +59,11 @@ def _bulk_provision(
 
     if isinstance(cloud, clouds.Kubernetes):
         # Omit the region name for Kubernetes.
-        logger.info(f'{style.BRIGHT}🔨 Launching on {cloud}{style.RESET_ALL} '
-                    f'{cluster_name!r}.')
+        logger.info(ux_utils.starting_message(f'Launching on {cloud} '
+                    f'{cluster_name!r}.'))
     else:
-        logger.info(f'{style.BRIGHT}🔨 Launching on {cloud} '
-                    f'{region_name}{style.RESET_ALL} ({zone_str})')
+        logger.info(ux_utils.starting_message(f'Launching on {cloud} '
+                    f'{region_name}{style.RESET_ALL} ({zone_str})'))
 
     start = time.time()
     log_path_hint = constants.LOG_PATH_HINT.format(
