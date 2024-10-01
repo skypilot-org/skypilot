@@ -4588,8 +4588,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode, decompress_command,
                 'Failed to inflate or remove skypilot-filemounts.zip, '
                 f'check permissions. Log: {log_path}')
-        subprocess_utils.run_in_parallel(_decompress_filemount_zips,
-                                             runners)
+
+        subprocess_utils.run_in_parallel(_decompress_filemount_zips, runners)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
