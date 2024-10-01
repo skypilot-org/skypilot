@@ -1,7 +1,6 @@
 """Constants for SkyPilot."""
 from typing import List, Tuple
 
-import colorama
 from packaging import version
 
 import sky
@@ -292,7 +291,3 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
 # UX constants
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
-
-# Log path hint in the spinner during launching
-LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
-                 f'{colorama.Style.RESET_ALL}')

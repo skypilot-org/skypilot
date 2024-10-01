@@ -461,8 +461,7 @@ def _post_provision_setup(
         wait_for_ssh(cluster_info, ssh_credentials)
         logger.debug(f'SSH Connection ready for {cluster_name!r}')
         plural = '' if len(cluster_info.instances) == 1 else 's'
-        logger.info(
-            f'VM{plural} provisioned or found for cluster: {cluster_name}.')
+        logger.info(f'  VM{plural} provisioned or found.')
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:

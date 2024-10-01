@@ -1564,7 +1564,7 @@ class RetryingVmProvisioner(object):
                 log_path_hint = ux_utils.log_path_hint(log_path)
                 logger.info(
                     ux_utils.finishing_message(
-                        f'Cluster Launched: {cluster_name}. {log_path_hint}'))
+                        f'Cluster {cluster_name!r} launched. {log_path_hint}'))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -3079,7 +3079,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{workdir} -> {SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
-        rich_utils.force_update_status(f'Syncing workdir. {log_path_hint}')
+        rich_utils.force_update_status(
+            f'[cyan]Syncing workdir[/]. {log_path_hint}')
         subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
         logger.info(
             ux_utils.finishing_message(f'Workdir synced. {log_path_hint}'))
@@ -4466,7 +4467,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.system(f'touch {log_path}')
 
         log_path_hint = ux_utils.log_path_hint(log_path)
-        rich_utils.force_update_status(f'Syncing file mounts. {log_path_hint}')
+        rich_utils.force_update_status(
+            f'[cyan]Syncing file mounts[/]. {log_path_hint}')
 
         for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -4592,8 +4594,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         plural = 's' if len(storage_mounts) > 1 else ''
         log_path_hint = ux_utils.log_path_hint(log_path)
-        rich_utils.force_update_status(f'Mounting {len(storage_mounts)} '
-                                       f'storage{plural}. {log_path_hint}')
+        rich_utils.force_update_status(f'[cyan]Mounting {len(storage_mounts)} '
+                                       f'storage{plural}[/]. {log_path_hint}')
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):

@@ -61,7 +61,7 @@ class Backend(Generic[_ResourceHandleType]):
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
     def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        with rich_utils.safe_status('Syncing workdir.'):
+        with rich_utils.safe_status('[cyan]Syncing workdir.[/]'):
             return self._sync_workdir(handle, workdir)
 
     @timeline.event
@@ -72,7 +72,7 @@ class Backend(Generic[_ResourceHandleType]):
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
-        with rich_utils.safe_status('Syncing files.'):
+        with rich_utils.safe_status('[cyan]Syncing files.[/]'):
             return self._sync_file_mounts(handle, all_file_mounts,
                                           storage_mounts)
 
@@ -80,7 +80,7 @@ class Backend(Generic[_ResourceHandleType]):
     @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
               detach_setup: bool) -> None:
-        with rich_utils.safe_status('Running setup.'):
+        with rich_utils.safe_status('[cyan]Running setup.[/]'):
             return self._setup(handle, task, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:

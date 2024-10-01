@@ -125,5 +125,5 @@ def log_path_hint(log_path: str) -> str:
     """Gets the log path hint for the given log path."""
     expanded_home = os.path.expanduser('~')
     if log_path.startswith(expanded_home):
-        log_path = '~/' + log_path[len(expanded_home):]
+        log_path = '~' + log_path[len(expanded_home):]
     return _LOG_PATH_HINT.format(log_path=log_path)
