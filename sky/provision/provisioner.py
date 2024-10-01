@@ -466,8 +466,7 @@ def _post_provision_setup(
         if docker_config:
             status.update(
                 f'[bold cyan]Launching - Initializing docker container[/]. '
-                f'{constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
-            )
+                f'{log_path_hint}')
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -493,11 +492,9 @@ def _post_provision_setup(
         # for later.
         file_mounts = config_from_yaml.get('file_mounts', {})
 
-        runtime_preparation_str = (
-            '[bold cyan]Preparing SkyPilot '
-            'runtime ({step}/3 - {step_name})[/]. '
-            f'{constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
-        )
+        runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
+                                   'runtime ({step}/3 - {step_name})[/]. '
+                                   f'{log_path_hint}')
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -565,10 +562,8 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
-    logger.info(
-        f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
-        f'launched: {cluster_name}. {constants.LOG_PATH_HINT.format(log_path=provision_logging.config.log_path)}'
-    )
+    logger.info(f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Cluster '
+                f'launched: {cluster_name}. {log_path_hint}')
     return cluster_info
 
 

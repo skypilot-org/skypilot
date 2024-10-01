@@ -3051,14 +3051,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         dir_size = backend_utils.path_size_megabytes(full_workdir)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
-                f'{fore.YELLOW}The size of workdir {workdir!r} '
-                f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as large sizes will slow '
-                f'down rsync.{style.RESET_ALL}')
+                f'  {fore.YELLOW}The size of workdir {workdir!r} '
+                f'is {dir_size} MB. Keep workdir small or use '
+                '.gitignore to exclude large files, for faster rsync.'
+                f'{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
-        log_path_hint = common_utils.log_path_hint(log_path)
-        rich_utils.force_update_status(f'Syncing workdir. {log_path_hint}')
+        log_path_hint = constants.LOG_PATH_HINT.format(log_path=log_path)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = handle.get_command_runners()
@@ -3075,18 +3074,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
         logger.info(
-            f'{fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
+            f'  {fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
-        tail_cmd = f'tail -n100 -f {log_path}'
-        logger.info('To view detailed progress: '
-                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        rich_utils.force_update_status(f'Syncing workdir. {log_path_hint}')
         subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
-
-
 
     def _sync_file_mounts(
         self,
@@ -3213,12 +3208,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         num_nodes = len(runners)
         plural = 's' if num_nodes > 1 else ''
         if not detach_setup:
-            logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
-                        f'{style.RESET_ALL}')
+            logger.info(f'🔨 Running setup on {num_nodes} node{plural}.')
         # TODO(zhwu): run_in_parallel uses multi-thread to run the commands,
         # which can cause the program waiting for all the threads to finish,
         # even if some of them raise exceptions. We should replace it with
         # multi-process.
+        rich_utils.stop_safe_status()
         subprocess_utils.run_in_parallel(_setup_node, range(num_nodes))
 
         if detach_setup:
@@ -3227,9 +3222,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._setup_cmd = setup_cmd
             logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup submitted.')
             return
-        logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup completed.')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
+        logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup completed.')
 
     def _exec_code_on_head(
         self,
@@ -4457,13 +4452,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 src_size = backend_utils.path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
-                        f'{fore.YELLOW}The size of file mount src {src!r} '
-                        f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as large sizes '
-                        f'will slow down rsync. {style.RESET_ALL}')
+                        f'  {fore.YELLOW}The size of file mount src {src!r} '
+                        f'is {src_size} MB. Keep src small or use .gitignore '
+                        'to exclude large files, for faster rsync.'
+                        f'{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
-                        f'{fore.YELLOW}Source path {src!r} is a symlink. '
+                        f'  {fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
