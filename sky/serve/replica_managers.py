@@ -23,10 +23,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
-
-if typing.TYPE_CHECKING:
-    from sky import resources
-
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -40,6 +36,7 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
