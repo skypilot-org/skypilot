@@ -10,6 +10,7 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 import zipfile
+
 import colorama
 
 from sky import check as sky_check
@@ -992,6 +993,9 @@ class Storage(object):
 
     def _compress_sync_store(self, store: AbstractStore):
         """Same as sync_store, but compresses before uploading"""
+        if self.source is None:
+            self._sync_store(store)
+            return
         zip_filepath = os.path.join(os.getcwd(), f'{store.name}-compressed')
         zip_filename = os.path.join(zip_filepath, 'skypilot-filemounts.zip')
         filepaths = self.source
