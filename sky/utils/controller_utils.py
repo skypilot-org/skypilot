@@ -25,6 +25,7 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
+from sky.serve.service_spec import SkyServiceSpec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -199,7 +200,7 @@ class Controllers(enum.Enum):
 # TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
         controller: Controllers,  # yapf: disable
-        task_config: Optional[Dict[str, Any]]) -> List[str]:
+        service_config: Optional[SkyServiceSpec]) -> List[str]:
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
@@ -297,15 +298,11 @@ def _get_cloud_dependencies_installation_commands(
                         aws_dependencies_installation)
 
     # install tailscale VPN if needed
-    if task_config is not None:
-        vpn_section: Dict[str, Any] = task_config.get('service',
-                                                      {}).get('vpn', None)
-        if vpn_section:
-            tailscale_auth_key = vpn_section.get('tailscale_auth_key', None)
-            assert tailscale_auth_key
+    if service_config is not None:
+        if service_config.tailscale_auth_key:
             commands.append(
                 TAILSCALE_SETUP_CMD.format(
-                    tailscale_auth_key=tailscale_auth_key))
+                    tailscale_auth_key=service_config.tailscale_auth_key))
 
     commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
                     'clouds."')
@@ -380,7 +377,7 @@ def shared_controller_vars_to_fill(
         controller: Controllers,
         remote_user_config_path: str,
         local_user_config: Dict[str, Any],
-        task_config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+        service_config: Optional[SkyServiceSpec] = None) -> Dict[str, str]:
     if not local_user_config:
         local_user_config_path = None
     else:
@@ -397,7 +394,7 @@ def shared_controller_vars_to_fill(
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
             _get_cloud_dependencies_installation_commands(
-                controller, task_config),
+                controller, service_config),
         # We need to activate the python environment on the controller to ensure
         # cloud SDKs are installed in SkyPilot runtime environment and can be
         # accessed.
@@ -421,11 +418,12 @@ def shared_controller_vars_to_fill(
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     # Check if VPN auth key should be set.
-    if task_config:
-        vpn_config = task_config.get('service', {}).get('vpn', {})
-        if vpn_config.get('tailscale'):
-            env_vars[constants.TAILSCALE_AUTH_KEY_ENV_VAR] = task_config[
-                'tailscale_auth_key']
+    if service_config:
+        # Only support Tailscale VPN now
+        if service_config.tailscale_auth_key:
+            env_vars[
+                constants.
+                TAILSCALE_AUTH_KEY_ENV_VAR] = service_config.tailscale_auth_key
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

@@ -183,9 +183,15 @@ class SkyServiceSpec:
         vpn_section: Dict[str, Any] = config.get('vpn', None)
         if vpn_section is not None:
             # Get the tailscale auth key from the environment.
-            if vpn_section.get('tailscale'):
-                service_config['tailscale_auth_key'] = os.getenv(
-                    'TAILSCALE_AUTH_KEY')
+            use_tailscale = vpn_section.get('tailscale', None)
+            if use_tailscale:
+                auth_key = os.getenv('TAILSCALE_AUTH_KEY')
+                if auth_key is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Please set the TAILSCALE_AUTH_KEY environment '
+                            'variable to use Tailscale VPN.')
+                service_config['tailscale_auth_key'] = auth_key
 
         return SkyServiceSpec(**service_config)
 
@@ -242,7 +248,8 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
-        add_if_not_none('vpn', 'tailscale_auth_key', self.tailscale_auth_key)
+        if self.tailscale_auth_key is not None:
+            add_if_not_none('vpn', 'tailscale', True)
         return config
 
     def probe_str(self):
