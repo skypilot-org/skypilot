@@ -34,6 +34,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -57,11 +58,12 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
-_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the task to start'
-                               '{status_str}.[/] It may take a few minutes.')
+_JOB_WAITING_STATUS_MESSAGE = (
+    ux_utils.spinner_message('Waiting for the task to start') +
+    '{status_str}. It may take a few minutes.')
 _JOB_CANCELLED_MESSAGE = (
-    '[bold cyan]Waiting for the task status to be updated.'
-    '[/] It may take a minute.')
+    ux_utils.spinner_message('Waiting for the task status to be updated.') +
+    ' It may take a minute.')
 
 # The maximum time to wait for the managed job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
@@ -290,8 +292,8 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
-                  '{status_str}[/]')
+    status_msg = ux_utils.spinner_message(
+        'Waiting for controller process to be RUNNING{status_str}')
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
     num_tasks = managed_job_state.get_num_tasks(job_id)
 

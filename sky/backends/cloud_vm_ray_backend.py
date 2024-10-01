@@ -1307,8 +1307,8 @@ class RetryingVmProvisioner(object):
         if not dryrun:
             os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
             os.system(f'touch {log_path}')
-        rich_utils.force_update_status('[cyan]Launching[/] '
-                                       f'{ux_utils.log_path_hint(log_path)}')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Launching', log_path))
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
@@ -1628,13 +1628,16 @@ class RetryingVmProvisioner(object):
                                                  terminate=terminate_or_stop)
 
         if to_provision.zone is not None:
-            message = (f'Failed to acquire resources in {to_provision.zone}. ')
+            message = (
+                f'Failed to acquire resources in {to_provision.zone} for '
+                f'{requested_resources}. ')
         elif to_provision.region is not None:
             # For public clouds, provision.region is always set.
             message = ('Failed to acquire resources in all zones in '
-                       f'{to_provision.region}. ')
+                       f'{to_provision.region} for {requested_resources}. ')
         else:
-            message = (f'Failed to acquire resources in {to_provision.cloud}. ')
+            message = (f'Failed to acquire resources in {to_provision.cloud} '
+                       f'for {requested_resources}. ')
         # Do not failover to other locations if the cluster was ever up, since
         # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
@@ -1999,10 +2002,6 @@ class RetryingVmProvisioner(object):
                 # Provisioning succeeded.
                 break
 
-            if to_provision.zone is None:
-                region_or_zone_str = str(to_provision.region)
-            else:
-                region_or_zone_str = str(to_provision.zone)
             if prev_cluster_status is None:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
@@ -2032,10 +2031,7 @@ class RetryingVmProvisioner(object):
 
             retry_message = ux_utils.retry_message(
                 'Trying other potential resources.')
-            logger.warning(f'{colorama.Style.DIM}'
-                           f'Provision failed for {num_nodes}x {to_provision} '
-                           f'in {region_or_zone_str}.{colorama.Style.RESET_ALL}'
-                           f'\n\n{retry_message}')
+            logger.warning(f'\n{retry_message}')
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
@@ -2779,7 +2775,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         local_wheel_path,
                         wheel_hash,
                         blocked_resources=task.blocked_resources)
-                    with rich_utils.safe_status('[cyan]Launching[/]'):
+                    log_path = os.path.join(self.log_dir, 'provision.log')
+                    with rich_utils.safe_status(
+                            ux_utils.spinner_message('Launching', log_path)):
                         config_dict = retry_provisioner.provision_with_retries(
                             task, to_provision_config, dryrun, stream_logs)
                     break
@@ -2933,7 +2931,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # and restarted if necessary.
             logger.debug('Checking if skylet is running on the head node.')
             with rich_utils.safe_status(
-                    '[bold cyan]Preparing SkyPilot runtime[/]'):
+                    ux_utils.spinner_message('Preparing SkyPilot runtime')):
                 # We need to source bashrc for skylet to make sure the autostop
                 # event can access the path to the cloud CLIs.
                 self.run_on_head(handle,
@@ -2976,7 +2974,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cmd = job_lib.JobLibCodeGen.update_status()
             logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
-                    '[bold cyan]Preparing SkyPilot runtime'):
+                    ux_utils.spinner_message('Preparing SkyPilot runtime')):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)
@@ -3011,7 +3009,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if not (cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
-                        '[bold cyan]Launching - Opening new ports'):
+                        ux_utils.spinner_message(
+                            'Launching - Opening new ports')):
                     self._open_ports(handle)
 
         with timeline.Event('backend.provision.post_process'):
@@ -3087,9 +3086,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{workdir} -> {SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
-        rich_utils.force_update_status(
-            f'[cyan]Syncing workdir[/] {log_path_hint}')
-        subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Syncing workdir', log_path)):
+            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
         logger.info(
             ux_utils.finishing_message(f'Workdir synced. {log_path_hint}'))
 
@@ -3100,11 +3099,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
         """Mounts all user files to the remote nodes."""
-        controller_utils.replace_skypilot_config_path_in_file_mounts(
-            handle.launched_resources.cloud, all_file_mounts)
-        self._execute_file_mounts(handle, all_file_mounts)
-        self._execute_storage_mounts(handle, storage_mounts)
-        self._set_storage_mounts_metadata(handle.cluster_name, storage_mounts)
+        with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
+            controller_utils.replace_skypilot_config_path_in_file_mounts(
+                handle.launched_resources.cloud, all_file_mounts)
+            self._execute_file_mounts(handle, all_file_mounts)
+            self._execute_storage_mounts(handle, storage_mounts)
+            self._set_storage_mounts_metadata(handle.cluster_name,
+                                              storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -3974,8 +3975,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
-                with rich_utils.safe_status(f'[bold cyan]{teardown_verb} '
-                                            f'[green]{cluster_name}'):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message(
+                            f'{teardown_verb} [green]{cluster_name}')):
                     # FIXME(zongheng): support retries. This call can fail for
                     # example due to GCP returning list requests per limit
                     # exceeded.
@@ -4055,7 +4057,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             config = common_utils.read_yaml(handle.cluster_yaml)
             tpu_node_config = config['provider'].get('tpu_node')
             if tpu_node_config is None:
-                with rich_utils.safe_status('[bold cyan]Terminating TPU...'):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message('Terminating TPU')):
                     tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
                         ['bash', handle.tpu_delete_script],
                         log_abs_path,
@@ -4476,7 +4479,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(
-            f'[cyan]Syncing file mounts[/] {log_path_hint}')
+            ux_utils.spinner_message('Syncing file mounts', log_path))
 
         for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -4572,7 +4575,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
         logger.info(
-            ux_utils.finishing_message(f'Files mounted. {log_path_hint}'))
+            ux_utils.finishing_message(f'Files synced. {log_path_hint}'))
 
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
@@ -4602,8 +4605,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         plural = 's' if len(storage_mounts) > 1 else ''
         log_path_hint = ux_utils.log_path_hint(log_path)
-        rich_utils.force_update_status(f'[cyan]Mounting {len(storage_mounts)} '
-                                       f'storage{plural}[/] {log_path_hint}')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message(
+                f'Mounting {len(storage_mounts)} storage{plural}', log_path))
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):

@@ -8,6 +8,7 @@ import prettytable
 
 from sky import sky_logging
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -36,7 +37,8 @@ class RayUpLineProcessor(LineProcessor):
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
-        self.status_display = rich_utils.safe_status('[bold cyan]Launching')
+        self.status_display = rich_utils.safe_status(
+            ux_utils.spinner_message('Launching'))
         self.status_display.start()
 
     def process_line(self, log_line):
@@ -45,19 +47,21 @@ class RayUpLineProcessor(LineProcessor):
             logger.info(f'{colorama.Fore.GREEN}Head node is up.'
                         f'{colorama.Style.RESET_ALL}')
             self.status_display.update(
-                '[bold cyan]Launching - Preparing SkyPilot runtime')
+                ux_utils.spinner_message(
+                    'Launching - Preparing SkyPilot runtime'))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
         if ('Pulling from' in log_line and
                 self.state == self.ProvisionStatus.RUNTIME_SETUP):
             self.status_display.update(
-                '[bold cyan]Launching - Pulling docker images')
+                ux_utils.spinner_message('Launching - Pulling docker images'))
             self.state = self.ProvisionStatus.PULLING_DOCKER_IMAGES
         if ('Status: Downloaded newer image' in log_line and
                 self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
             logger.info(f'{colorama.Fore.GREEN}Docker image is downloaded.'
                         f'{colorama.Style.RESET_ALL}')
             self.status_display.update(
-                '[bold cyan]Launching - Preparing SkyPilot runtime')
+                ux_utils.spinner_message(
+                    'Launching - Preparing SkyPilot runtime'))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
     def __exit__(self, except_type, except_value, traceback):
@@ -69,8 +73,9 @@ class SkyLocalUpLineProcessor(LineProcessor):
     """A processor for `sky local up` log lines."""
 
     def __enter__(self):
-        status = rich_utils.safe_status('[bold cyan]Creating local cluster - '
-                                        'initializing Kubernetes')
+        status = rich_utils.safe_status(
+            ux_utils.spinner_message('Creating local cluster - '
+                                     'initializing Kubernetes'))
         self.status_display = status
         self.status_display.start()
 
@@ -79,31 +84,37 @@ class SkyLocalUpLineProcessor(LineProcessor):
             logger.info(f'{colorama.Fore.GREEN}Kubernetes is running.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Installing NVIDIA GPU operator...' in log_line:
-            self.status_display.update('[bold cyan]Creating local cluster - '
-                                       'Installing NVIDIA GPU operator')
+            self.status_display.update(
+                ux_utils.spinner_message('Creating local cluster - '
+                                         'Installing NVIDIA GPU operator'))
         if 'Starting wait for GPU operator installation...' in log_line:
             self.status_display.update(
-                '[bold cyan]Creating local cluster - '
-                'waiting for NVIDIA GPU operator installation to complete')
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'waiting for NVIDIA GPU operator installation to complete'))
             logger.info('To check NVIDIA GPU operator status, '
                         'see pods: kubectl get pods -n gpu-operator')
         if 'GPU operator installed' in log_line:
             logger.info(f'{colorama.Fore.GREEN}NVIDIA GPU Operator installed.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Pulling SkyPilot GPU image...' in log_line:
-            self.status_display.update('[bold cyan]Creating local cluster - '
-                                       'pulling and loading SkyPilot GPU image')
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'pulling and loading SkyPilot GPU image'))
         if 'SkyPilot GPU image loaded into kind cluster' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SkyPilot GPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Labelling nodes with GPUs...' in log_line:
-            self.status_display.update('[bold cyan]Creating local cluster - '
-                                       'launching GPU labelling jobs')
+            self.status_display.update(
+                ux_utils.spinner_message('Creating local cluster - '
+                                         'launching GPU labelling jobs'))
         if ('Starting wait for SkyPilot GPU labeling jobs to complete'
                 in log_line):
             self.status_display.update(
-                '[bold cyan]Creating local cluster - '
-                'waiting for GPU labelling jobs to complete')
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'waiting for GPU labelling jobs to complete'))
             logger.info(
                 'To check GPU labelling status, see jobs: '
                 'kubectl get jobs -n kube-system -l job=sky-gpu-labeler')
@@ -111,14 +122,17 @@ class SkyLocalUpLineProcessor(LineProcessor):
             logger.info(f'{colorama.Fore.GREEN}GPU labelling complete.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Pulling SkyPilot CPU image...' in log_line:
-            self.status_display.update('[bold cyan]Creating local cluster - '
-                                       'pulling and loading SkyPilot CPU image')
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'pulling and loading SkyPilot CPU image'))
         if 'SkyPilot CPU image loaded into kind cluster' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Starting installation of Nginx Ingress Controller...' in log_line:
             self.status_display.update(
-                '[bold cyan]Creating Nginx Ingress Controller')
+                ux_utils.spinner_message('Creating local cluster - '
+                                         'creating Nginx Ingress Controller'))
         if 'Nginx Ingress Controller installed' in log_line:
             logger.info(
                 f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'

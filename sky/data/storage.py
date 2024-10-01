@@ -1318,8 +1318,9 @@ class S3Store(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
+                ux_utils.spinner_message(
+                    f'Syncing [green]{source_message}[/] to '
+                    f'[green]s3://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -1487,7 +1488,8 @@ class S3Store(AbstractStore):
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
+                    ux_utils.spinner_message(
+                        f'Deleting S3 bucket [green]{bucket_name}')):
                 subprocess.check_output(remove_command.split(' '),
                                         stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -1727,8 +1729,9 @@ class GcsStore(AbstractStore):
                         f'cp -e -n -r -I gs://{self.name}')
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+                ux_utils.spinner_message(
+                    f'Syncing [green]{source_message}[/] to '
+                    f'[green]gs://{self.name}/')):
             data_utils.run_upload_cli(sync_command,
                                       self._ACCESS_DENIED_MESSAGE,
                                       bucket_name=self.name)
@@ -1783,8 +1786,9 @@ class GcsStore(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+                ux_utils.spinner_message(
+                    f'Syncing [green]{source_message}[/] to '
+                    f'[green]gs://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -1921,7 +1925,8 @@ class GcsStore(AbstractStore):
         """
 
         with rich_utils.safe_status(
-                f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
+                ux_utils.spinner_message(
+                    f'Deleting GCS bucket [green]{bucket_name}')):
             try:
                 self.client.get_bucket(bucket_name)
             except gcp.forbidden_exception() as e:
@@ -2308,8 +2313,9 @@ class AzureBlobStore(AbstractStore):
                         resource_group_name)
                 except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                            '[bold cyan]Setting up resource group: '
-                            f'{resource_group_name}'):
+                            ux_utils.spinner_message(
+                                f'Setting up resource group: '
+                                f'{resource_group_name}')):
                         self.resource_client.resource_groups.create_or_update(
                             resource_group_name, {'location': self.region})
                     logger.info('Created Azure resource group '
@@ -2321,8 +2327,9 @@ class AzureBlobStore(AbstractStore):
                         resource_group_name, storage_account_name)
                 except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                            '[bold cyan]Setting up storage account: '
-                            f'{storage_account_name}'):
+                            ux_utils.spinner_message(
+                                f'Setting up storage account: '
+                                f'{storage_account_name}')):
                         self._create_storage_account(resource_group_name,
                                                      storage_account_name)
                         # wait until new resource creation propagates to Azure.
@@ -2517,9 +2524,10 @@ class AzureBlobStore(AbstractStore):
         container_endpoint = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=self.storage_account_name,
             container_name=self.name)
-        with rich_utils.safe_status(f'[bold cyan]Syncing '
-                                    f'[green]{source_message}[/] to '
-                                    f'[green]{container_endpoint}/[/]'):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    f'Syncing [green]{source_message}[/] to [green]{container_endpoint}/'
+                )):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2703,7 +2711,8 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting Azure container {container_name}[/]'):
+                    ux_utils.spinner_message(
+                        f'Deleting Azure container {container_name}')):
                 # Check for the existance of the container before deletion.
                 self.storage_client.blob_containers.get(
                     self.resource_group_name,
@@ -2920,8 +2929,9 @@ class R2Store(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]r2://{self.name}/[/]'):
+                ux_utils.spinner_message(
+                    f'Syncing [green]{source_message}[/] to '
+                    f'[green]r2://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -3091,7 +3101,8 @@ class R2Store(AbstractStore):
             f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
+                    ux_utils.spinner_message(
+                        f'Deleting R2 bucket {bucket_name}')):
                 subprocess.check_output(remove_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True)
@@ -3358,9 +3369,9 @@ class IBMCosStore(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to '
-                f'[green]cos://{self.region}/{self.name}/[/]'):
+                ux_utils.spinner_message(
+                    f'Syncing [green]{source_message}[/] to '
+                    f'[green]cos://{self.region}/{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,

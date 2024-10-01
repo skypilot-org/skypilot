@@ -1163,7 +1163,7 @@ def wait_until_ray_cluster_ready(
     runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
                                              **ssh_credentials)
     with rich_utils.safe_status(
-            '[bold cyan]Waiting for workers...') as worker_status:
+            ux_utils.spinner_message('Waiting for workers')) as worker_status:
         while True:
             rc, output, stderr = runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -1179,9 +1179,10 @@ def wait_until_ray_cluster_ready(
             ready_head, ready_workers = _count_healthy_nodes_from_ray(
                 output, is_local_cloud=is_local_cloud)
 
-            worker_status.update('[bold cyan]'
-                                 f'{ready_workers} out of {num_nodes - 1} '
-                                 'workers ready')
+            worker_status.update(
+                ux_utils.spinner_message(
+                    f'{ready_workers} out of {num_nodes - 1} '
+                    'workers ready'))
 
             # In the local case, ready_head=0 and ready_workers=num_nodes. This
             # is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
@@ -2477,9 +2478,9 @@ def get_clusters(
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
-        total=len(records))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'Refreshing status for {len(records)} cluster{plural}'),
+                             total=len(records))
 
     def _refresh_cluster(cluster_name):
         try:

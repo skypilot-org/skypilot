@@ -184,11 +184,12 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                           f'{colorama.Style.RESET_ALL}')
 
         rich_utils.force_update_status(
-            '[cyan] Checking managed jobs - restarting '
-            'controller[/]')
+            ux_utils.spinner_message('Checking managed jobs - restarting '
+                                     'controller'))
         handle = sky.start(jobs_controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
-        rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Checking managed jobs'))
 
     assert handle is not None, (controller_status, refresh)
 

@@ -215,7 +215,8 @@ def up(
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
         with rich_utils.safe_status(
-                '[cyan]Waiting for the service to register[/]'):
+                ux_utils.spinner_message(
+                    'Waiting for the service to register')):
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.

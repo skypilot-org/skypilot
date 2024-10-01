@@ -6,6 +6,7 @@ import sky
 from sky.usage import usage_lib
 from sky.utils import rich_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -61,8 +62,7 @@ class Backend(Generic[_ResourceHandleType]):
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
     def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        with rich_utils.safe_status('[cyan]Syncing workdir.[/]'):
-            return self._sync_workdir(handle, workdir)
+        return self._sync_workdir(handle, workdir)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
@@ -72,15 +72,13 @@ class Backend(Generic[_ResourceHandleType]):
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
-        with rich_utils.safe_status('[cyan]Syncing files.[/]'):
-            return self._sync_file_mounts(handle, all_file_mounts,
-                                          storage_mounts)
+        return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
               detach_setup: bool) -> None:
-        with rich_utils.safe_status('[cyan]Running setup.[/]'):
+        with rich_utils.safe_status(ux_utils.spinner_message('Running setup')):
             return self._setup(handle, task, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
@@ -101,7 +99,7 @@ class Backend(Generic[_ResourceHandleType]):
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        with rich_utils.safe_status('[bold cyan]Submitting job[/]'):
+        with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
             return self._execute(handle, task, detach_run, dryrun)
 
     @timeline.event

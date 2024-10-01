@@ -269,7 +269,7 @@ class Optimizer:
             launchable_resources_list: List[resources_lib.Resources] = sum(
                 launchable_resources.values(), [])
             with rich_utils.safe_status(
-                    '[cyan]Checking reserved resources...[/]'):
+                    ux_utils.spinner_message('Checking reserved resources')):
                 subprocess_utils.run_in_parallel(
                     get_reservations_available_resources,
                     launchable_resources_list)

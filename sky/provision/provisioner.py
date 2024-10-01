@@ -66,63 +66,56 @@ def _bulk_provision(
         logger.info(
             ux_utils.starting_message(
                 f'Launching on {cloud} '
-                f'{region_name}{style.RESET_ALL} ({zone_str})'))
+                f'{region_name}{style.RESET_ALL} ({zone_str}).'))
 
     start = time.time()
-    log_path_hint = ux_utils.log_path_hint(
-        str(provision_logging.config.log_path))
-    with rich_utils.safe_status(
-            f'[bold cyan]Launching[/] {log_path_hint}') as status:
+    try:
+        # TODO(suquark): Should we cache the bootstrapped result?
+        #  Currently it is not necessary as bootstrapping takes
+        #  only ~3s, caching it seems over-engineering and could
+        #  cause other issues like the cache is not synced
+        #  with the cloud configuration.
+        config = provision.bootstrap_instances(provider_name, region_name,
+                                               cluster_name.name_on_cloud,
+                                               bootstrap_config)
+    except Exception as e:
+        logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
+                     f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
+                     'with the following error:'
+                     f'{colorama.Style.RESET_ALL}\n'
+                     f'{colorama.Style.DIM}'
+                     f'{common_utils.format_exception(e)}'
+                     f'{colorama.Style.RESET_ALL}')
+        raise
+
+    provision_record = provision.run_instances(provider_name,
+                                               region_name,
+                                               cluster_name.name_on_cloud,
+                                               config=config)
+
+    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
+    logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching - Checking instance status',
+                                 str(provision_logging.config.log_path)))
+    # AWS would take a very short time (<<1s) updating the state of the
+    # instance.
+    time.sleep(1)
+    for retry_cnt in range(_MAX_RETRY):
         try:
-            # TODO(suquark): Should we cache the bootstrapped result?
-            #  Currently it is not necessary as bootstrapping takes
-            #  only ~3s, caching it seems over-engineering and could
-            #  cause other issues like the cache is not synced
-            #  with the cloud configuration.
-            config = provision.bootstrap_instances(provider_name, region_name,
-                                                   cluster_name.name_on_cloud,
-                                                   bootstrap_config)
-        except Exception as e:
-            logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
-                         f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
-                         'with the following error:'
-                         f'{colorama.Style.RESET_ALL}\n'
-                         f'{colorama.Style.DIM}'
-                         f'{common_utils.format_exception(e)}'
-                         f'{colorama.Style.RESET_ALL}')
-            raise
-
-        provision_record = provision.run_instances(provider_name,
-                                                   region_name,
-                                                   cluster_name.name_on_cloud,
-                                                   config=config)
-
-        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-        logger.debug(
-            f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        log_path_hint = ux_utils.log_path_hint(
-            str(provision_logging.config.log_path))
-        status.update(f'[bold cyan]Launching - Checking instance status[/] '
-                      f'{log_path_hint}')
-        # AWS would take a very short time (<<1s) updating the state of the
-        # instance.
-        time.sleep(1)
-        for retry_cnt in range(_MAX_RETRY):
-            try:
-                provision.wait_instances(provider_name,
-                                         region_name,
-                                         cluster_name.name_on_cloud,
-                                         state=status_lib.ClusterStatus.UP)
-                break
-            except (aws.botocore_exceptions().WaiterError, RuntimeError):
-                time.sleep(backoff.current_backoff())
-        else:
-            raise RuntimeError(
-                f'Failed to wait for instances of {cluster_name!r} to be '
-                f'ready on the cloud provider after max retries {_MAX_RETRY}.')
-        logger.debug(
-            f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-            'retries.')
+            provision.wait_instances(provider_name,
+                                     region_name,
+                                     cluster_name.name_on_cloud,
+                                     state=status_lib.ClusterStatus.UP)
+            break
+        except (aws.botocore_exceptions().WaiterError, RuntimeError):
+            time.sleep(backoff.current_backoff())
+    else:
+        raise RuntimeError(
+            f'Failed to wait for instances of {cluster_name!r} to be '
+            f'ready on the cloud provider after max retries {_MAX_RETRY}.')
+    logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+                 'retries.')
 
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
@@ -450,24 +443,26 @@ def _post_provision_setup(
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
 
-    log_path_hint = ux_utils.log_path_hint(
-        str(provision_logging.config.log_path))
     with rich_utils.safe_status(
-            f'[bold cyan]Launching - Waiting for SSH access[/] '
-            f'{log_path_hint}') as status:
+            ux_utils.spinner_message(
+                'Launching - Waiting for SSH access',
+                provision_logging.config.log_path)) as status:
 
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
         logger.debug(f'SSH Connection ready for {cluster_name!r}')
+        vm_str = 'VM' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
-        logger.info(f'  VM{plural} provisioned or found.')
+        verb = 'is' if len(cluster_info.instances) == 1 else 'are'
+        logger.info(f'  {vm_str}{plural} {verb} up.')
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                f'[bold cyan]Launching - Initializing docker container[/] '
-                f'{log_path_hint}')
+                ux_utils.spinner_message(
+                    'Launching - Initializing docker container',
+                    provision_logging.config.log_path))
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -493,9 +488,9 @@ def _post_provision_setup(
         # for later.
         file_mounts = config_from_yaml.get('file_mounts', {})
 
-        runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
-                                   'runtime ({step}/3 - {step_name})[/] '
-                                   f'{log_path_hint}')
+        runtime_preparation_str = (ux_utils.spinner_message(
+            'Preparing SkyPilot runtime ({step}/3 - {step_name})',
+            provision_logging.config.log_path))
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -563,6 +558,7 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
+    log_path_hint = ux_utils.log_path_hint(provision_logging.config.log_path)
     logger.info(
         ux_utils.finishing_message(
             f'Cluster launched: {cluster_name}. {log_path_hint}'))
