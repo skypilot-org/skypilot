@@ -1,7 +1,5 @@
 """Utility functions for UX."""
 import contextlib
-import functools
-import logging
 import sys
 import traceback
 from typing import Callable
@@ -14,7 +12,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 console = rich_console.Console()
-
 
 
 def console_newline():

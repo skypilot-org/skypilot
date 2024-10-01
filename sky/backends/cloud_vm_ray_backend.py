@@ -3057,6 +3057,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'down rsync.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
+        log_path_hint = common_utils.log_path_hint(log_path)
+        rich_utils.force_update_status(f'Syncing workdir. {log_path_hint}')
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = handle.get_command_runners()
@@ -3082,8 +3084,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        with rich_utils.safe_status('[bold cyan]Syncing[/]'):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+        subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+
+
 
     def _sync_file_mounts(
         self,
@@ -3222,8 +3225,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Only set this when setup needs to be run outside the self._setup()
             # as part of a job (--detach-setup).
             self._setup_cmd = setup_cmd
+            logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup submitted.')
             return
-        logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
+        logger.info(f'{fore.GREEN}✓{style.RESET_ALL} Setup completed.')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
 
@@ -4440,7 +4444,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         symlink_commands = []
         fore = colorama.Fore
         style = colorama.Style
-        logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
         runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
@@ -4465,13 +4468,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
-        tail_cmd = f'tail -n100 -f {log_path}'
 
-        cluster_launching_title = controller_utils.cluster_launching_title(
-            handle.cluster_name)
-        ux_utils.log_once(cluster_launching_title, logger)
-        logger.info('To view detailed progress: '
-                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        log_path_hint = constants.LOG_PATH_HINT.format(log_path=log_path)
+        rich_utils.force_update_status(f'Syncing file mounts. {log_path_hint}')
 
         for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -4589,15 +4588,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle cases when there aren't any Storages with MOUNT mode.
         if not storage_mounts:
             return
-
-        fore = colorama.Fore
-        style = colorama.Style
-        plural = 's' if len(storage_mounts) > 1 else ''
-        logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
-                    f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
         runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
+
+        plural = 's' if len(storage_mounts) > 1 else ''
+        log_path_hint = constants.LOG_PATH_HINT.format(log_path=log_path)
+        rich_utils.force_update_status(f'Mounting {len(storage_mounts)} '
+                                       f'storage{plural}. {log_path_hint}')
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
@@ -4652,6 +4650,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
+        logger.info(f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} Storage '
+                    'mounted.')
 
     def _set_storage_mounts_metadata(
             self, cluster_name: str,

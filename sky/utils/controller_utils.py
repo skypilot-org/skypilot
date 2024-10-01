@@ -794,20 +794,3 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
-
-
-def cluster_launching_title(cluster_name: str) -> str:
-    if cluster_name and Controllers.from_name(cluster_name) is not None:
-        return ux_utils.format_title('Controller Launching')
-    return ux_utils.format_title('Cluster Launching')
-
-
-def job_starting_title(cluster_name: str, job_id: int) -> str:
-    controller = Controllers.from_name(cluster_name)
-    if controller is None or controller == Controllers.JOBS_CONTROLLER:
-        return (ux_utils.format_title('Job Starting') +
-                f'\nSubmitted with ID: {colorama.Style.BRIGHT}{job_id}'
-                f'{colorama.Style.RESET_ALL}')
-    else:
-        return (ux_utils.format_title('Service Starting') +
-                '\nService submitted.')

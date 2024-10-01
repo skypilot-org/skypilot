@@ -61,7 +61,8 @@ class Backend(Generic[_ResourceHandleType]):
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
     def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        return self._sync_workdir(handle, workdir)
+        with rich_utils.safe_status('Syncing workdir.'):
+            return self._sync_workdir(handle, workdir)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
@@ -71,13 +72,16 @@ class Backend(Generic[_ResourceHandleType]):
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
-        return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
+        with rich_utils.safe_status('Syncing files.'):
+            return self._sync_file_mounts(handle, all_file_mounts,
+                                          storage_mounts)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
               detach_setup: bool) -> None:
-        return self._setup(handle, task, detach_setup)
+        with rich_utils.safe_status('Running setup.'):
+            return self._setup(handle, task, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
