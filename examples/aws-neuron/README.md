@@ -33,6 +33,10 @@ $ curl http://$ENDPOINT/v1/chat/completions \
 
 SkyPilot support the multiple resources feature, i.e. you can specify multiple accelerator choices in the YAML. You can also use Neuron accelerators or Nvidia GPUs in the same YAML file. Here is an example (See `multi-accelerator.yaml`):
 
+<details>
+
+<summary>Example YAML for multiple accelerators.</summary>
+
 ```yaml
 resources:
   accelerators: {A100:1, Inferentia:6}
@@ -109,3 +113,5 @@ run: |
     --block-size 32 \
     --port 9000
 ```
+
+</details>
