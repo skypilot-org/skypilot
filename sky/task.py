@@ -23,7 +23,6 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-import zipfile
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -1036,9 +1035,10 @@ class Task:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '
                                          'does not exist!')
-    
+
     def compress_local_sync_storage_mounts(self) -> None:
-        """(INTERNAL) Eagerly syncs local storage mounts to cloud storage after compressing
+        """(INTERNAL) Eagerly syncs local storage mounts to cloud storage
+        after compression
 
         After syncing up, COPY-mode storage mounts are translated into regular
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>

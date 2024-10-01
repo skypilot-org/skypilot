@@ -989,31 +989,32 @@ class Storage(object):
         """Syncs the source and destinations of all stores in the Storage"""
         for _, store in self.stores.items():
             self._sync_store(store)
-    
+
     def _compress_sync_store(self, store: AbstractStore):
-        """
-        TODO: WARRICK HE
-        Compresses everything in source and uploads that, specific to local->bucket
-        """
-        zip_filepath = os.path.join(os.getcwd(),f'{store.name}-compressed')
-        zip_filename = os.path.join(zip_filepath,f'skypilot-filemounts.zip') #can change name later
+        """Same as sync_store, but compresses before uploading"""
+        zip_filepath = os.path.join(os.getcwd(), f'{store.name}-compressed')
+        zip_filename = os.path.join(zip_filepath, 'skypilot-filemounts.zip')
         filepaths = self.source
-        if type(self.source) == str:
+        if isinstance(self.source, str):
             filepaths = [self.source]
         try:
             if not os.path.exists(zip_filepath):
                 os.mkdir(zip_filepath)
-            with zipfile.ZipFile(os.path.join(zip_filepath,zip_filename), 'w', zipfile.ZIP_DEFLATED) as zipf:
+            with zipfile.ZipFile(os.path.join(zip_filepath, zip_filename), 'w',
+                                 zipfile.ZIP_DEFLATED) as zipf:
                 for filepath in filepaths:
-                    logger.info(f"Filepath: {filepath}")
+                    logger.info('Filepath: {filepath}')
                     if os.path.isdir(os.path.expanduser(filepath)):
-                        for root, dirs, files in os.walk(filepath):
+                        for root, _, files in os.walk(filepath):
                             for file in files:
-                                if file == "skypilot-filemounts.zip":
+                                if file == 'skypilot-filemounts.zip':
                                     continue
-                                zipf.write(os.path.join(root, file), os.path.join(root.replace(filepath, '', 1), file) + '/')
+                                zipf.write(
+                                    os.path.join(root, file),
+                                    os.path.join(root.replace(filepath, '', 1),
+                                                 file) + '/')
                     else:
-                        logger.info(f"Filepath Zipping {filepath}")
+                        logger.info(f'Filepath Zipping {filepath}')
                         zipf.write(filepath, filepath.replace(os.path.sep, '/'))
         except:
             if os.path.exists(zip_filename):
@@ -1042,7 +1043,6 @@ class Storage(object):
         # Upload succeeded - update state
         if store.is_sky_managed:
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
-
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
