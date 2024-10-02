@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shlex
+import sqlite3
 import subprocess
 import time
 import typing
@@ -55,6 +56,20 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 
 def create_table(cursor, conn):
+    # Enable WAL mode to avoid locking issues.
+    # See: issue #3863, #1441 and PR #1509
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if not common_utils.is_wsl():
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
