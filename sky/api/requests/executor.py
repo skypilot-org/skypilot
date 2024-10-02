@@ -178,7 +178,8 @@ def schedule_request(request_id: str,
                                name=request_name,
                                entrypoint=func,
                                request_body=request_body,
-                               status=requests.RequestStatus.PENDING)
+                               status=requests.RequestStatus.PENDING,
+                               created_at=time.time())
 
     if not requests.create_if_not_exists(request):
         logger.debug(f'Request {request_id} already exists.')

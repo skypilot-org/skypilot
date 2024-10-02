@@ -533,15 +533,20 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
 
 @app.get('/requests')
 async def requests(
-        request_id: Optional[str] = None) -> List[requests_lib.Request]:
-    if request_id is None:
-        return requests_lib.get_request_tasks()
+    request: fastapi.Request, request_ls_body: payloads.RequestLsBody
+) -> List[requests_lib.RequestPayload]:
+    if request_ls_body.request_id is None:
+        return [
+            request_task.readable_encode()
+            for request_task in requests_lib.get_request_tasks()
+        ]
     else:
-        request_task = requests_lib.get_request(request_id)
+        request_task = requests_lib.get_request(request_ls_body.request_id)
         if request_task is None:
             raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id} not found')
-        return [request_task]
+                status_code=404,
+                detail=f'Request {request_ls_body.request_id} not found')
+        return [request_task.readable_encode()]
 
 
 @app.get('/health', response_class=fastapi.responses.PlainTextResponse)
@@ -568,6 +573,7 @@ if __name__ == '__main__':
         num_queue_workers = os.cpu_count()
         if num_queue_workers is None:
             num_queue_workers = 4
+        num_queue_workers *= 2
         workers = executor.start_request_queue_workers(
             num_queue_workers=num_queue_workers)
 

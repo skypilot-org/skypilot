@@ -62,10 +62,9 @@ def enabled_clouds() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def realtime_gpu_availability(
-    context: Optional[str] = None,
-    name_filter: Optional[str] = None,
-    quantity_filter: Optional[int] = None) -> str:
+def realtime_gpu_availability(context: Optional[str] = None,
+                              name_filter: Optional[str] = None,
+                              quantity_filter: Optional[int] = None) -> str:
     body = payloads.RealtimeGpuAvailabilityRequestBody(
         context=context,
         name_filter=name_filter,
@@ -648,3 +647,15 @@ def abort(request_id: str) -> str:
                              json=json.loads(body.model_dump_json()),
                              timeout=5)
     return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+def requests_ls(
+        request_id: Optional[str] = None) -> List[requests_lib.RequestPayload]:
+    body = payloads.RequestLsBody(request_id=request_id)
+    response = requests.get(f'{api_common.get_server_url()}/requests',
+                            json=json.loads(body.model_dump_json()),
+                            timeout=5)
+    return [
+        requests_lib.RequestPayload(**request) for request in response.json()
+    ]

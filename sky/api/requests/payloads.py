@@ -179,6 +179,10 @@ class RequestIdBody(RequestBody):
     request_id: str
 
 
+class RequestLsBody(RequestBody):
+    request_id: Optional[str] = None
+
+
 class EndpointBody(RequestBody):
     cluster_name: str
     port: Optional[Union[int, str]] = None

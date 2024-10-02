@@ -50,6 +50,7 @@ REQUEST_COLUMNS = [
     'return_value',
     'error',
     'pid',
+    'created_at',
 ]
 
 
@@ -60,6 +61,7 @@ class RequestPayload:
     entrypoint: str
     request_body: str
     status: str
+    created_at: float
     return_value: str
     error: str
     pid: Optional[int]
@@ -74,6 +76,7 @@ class Request:
     entrypoint: Callable
     request_body: payloads.RequestBody
     status: RequestStatus
+    created_at: float
     return_value: Any = None
     error: Optional[Dict[str, Any]] = None
     pid: Optional[int] = None
@@ -125,6 +128,22 @@ class Request:
         payload = self.encode()
         return tuple(getattr(payload, k) for k in REQUEST_COLUMNS)
 
+    def readable_encode(self) -> RequestPayload:
+        """Serialize the request task."""
+        assert isinstance(self.request_body,
+                          payloads.RequestBody), (self.name, self.request_body)
+        return RequestPayload(
+            request_id=self.request_id,
+            name=self.name,
+            entrypoint=self.entrypoint.__name__,
+            request_body=self.request_body.model_dump_json(),
+            status=self.status.value,
+            return_value=json.dumps(None),
+            error=json.dumps(None),
+            pid=None,
+            created_at=self.created_at,
+        )
+
     def encode(self) -> RequestPayload:
         """Serialize the request task."""
         assert isinstance(self.request_body,
@@ -139,13 +158,15 @@ class Request:
                 return_value=json.dumps(self.return_value),
                 error=json.dumps(self.error),
                 pid=self.pid,
+                created_at=self.created_at,
             )
         except TypeError as e:
             print(f'Error encoding: {e}\n'
                   f'{self.request_id}\n'
                   f'{self.name}\n'
                   f'{self.request_body}\n'
-                  f'{self.return_value}\n')
+                  f'{self.return_value}\n'
+                  f'{self.created_at}\n')
             raise
 
     @classmethod
@@ -161,6 +182,7 @@ class Request:
             return_value=json.loads(payload.return_value),
             error=json.loads(payload.error),
             pid=payload.pid,
+            created_at=payload.created_at,
         )
 
 
@@ -192,6 +214,7 @@ def create_table(cursor, conn):
         entrypoint TEXT,
         request_body TEXT,
         status TEXT,
+        created_at REAL,
         return_value TEXT,
         error BLOB,
         pid INTEGER)""")

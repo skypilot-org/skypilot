@@ -5405,6 +5405,23 @@ def api_abort(request_id: str):
     sdk.abort(request_id)
 
 
+@api.command('ls', cls=_DocumentedCodeCommand)
+@click.argument('request_id', required=False, type=str)
+@usage_lib.entrypoint
+def api_ls(request_id: Optional[str]):
+    """List requests on API server."""
+    request_list = sdk.requests_ls(request_id)
+    table = log_utils.create_table([
+        'ID',
+        'Name',
+        'Entrypoint',
+        'Status',
+    ])
+    for request in request_list:
+        table.add_row([request.request_id, request.name, request.entrypoint, request.status])
+    click.echo(table)
+
+
 @api.command('server_logs', cls=_DocumentedCodeCommand)
 @click.option('--follow',
               '-f',
