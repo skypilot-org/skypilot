@@ -32,7 +32,8 @@ async def queue(request: fastapi.Request,
         request_name='jobs/queue',
         request_body=jobs_queue_body,
         func=core.queue,
-        schedule_type=(executor.ScheduleType.QUEUE if jobs_queue_body.refresh else executor.ScheduleType.DIRECT),
+        schedule_type=(executor.ScheduleType.QUEUE if jobs_queue_body.refresh
+                       else executor.ScheduleType.DIRECT),
     )
 
 

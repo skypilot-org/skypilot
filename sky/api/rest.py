@@ -74,15 +74,14 @@ events = {'status': refresh_cluster_status_event}
 
 
 @contextlib.asynccontextmanager
-async def lifespan():
+async def lifespan(app: fastapi.FastAPI):
     # Startup: Run background tasks
     for event_id, (event_name, event) in enumerate(events.items()):
-        executor.start_background_request(
-            request_id=str(event_id),
-            request_name=event_name,
-            request_body=payloads.RequestBody(),
-            func=event,
-            queue_type=executor.ScheduleType.DIRECT)
+        executor.schedule_request(request_id=str(event_id),
+                                  request_name=event_name,
+                                  request_body=payloads.RequestBody(),
+                                  func=event,
+                                  schedule_type=executor.ScheduleType.DIRECT)
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -508,28 +507,27 @@ async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
 @app.post('/abort')
 async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
-    with requests_lib.update_rest_task(abort_body.request_id) as rest_task:
-        if rest_task is None:
+    with requests_lib.update_rest_task(abort_body.request_id) as request_record:
+        if request_record is None:
             print(f'No task with request ID {abort_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {abort_body.request_id} not found')
-        if rest_task.status > requests_lib.RequestStatus.RUNNING:
+        if request_record.status > requests_lib.RequestStatus.RUNNING:
             print(f'Request {abort_body.request_id} already finished')
             return
-        rest_task.status = requests_lib.RequestStatus.ABORTED
-        print(f'Killing request process {rest_task.pid}', flush=True)
-        # TODO(zhwu): We can no longer kill the process here as the process is
-        # actually the worker process.
-        if rest_task.pid is not None:
-            executor.schedule_request(
-                request_id=request.state.request_id,
-                request_name='kill_children_processes',
-                request_body=payloads.KillChildrenProcessesBody(
-                    parent_pids=[rest_task.pid], force=True),
-                func=subprocess_utils.kill_children_processes,
-                schedule_type=executor.ScheduleType.DIRECT,
-            )
+        request_record.status = requests_lib.RequestStatus.ABORTED
+        pid = request_record.pid
+    if pid is not None:
+        print(f'Killing request process {pid}', flush=True)
+        executor.schedule_request(
+            request_id=request.state.request_id,
+            request_name='kill_children_processes',
+            request_body=payloads.KillChildrenProcessesBody(parent_pids=[pid],
+                                                            force=True),
+            func=subprocess_utils.kill_children_processes,
+            schedule_type=executor.ScheduleType.QUEUE,
+        )
 
 
 @app.get('/requests')
@@ -566,7 +564,7 @@ if __name__ == '__main__':
         num_workers = os.cpu_count()
 
     try:
-        workers = executor.start_request_workers(num_workers=1 + len(events))
+        workers = executor.start_request_queue_workers(num_queue_workers=os.cpu_count())
 
         logger.info('Starting API server')
         uvicorn.run('sky.api.rest:app',

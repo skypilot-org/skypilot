@@ -200,16 +200,32 @@ def request_worker(worker_id: int):
             time.sleep(.1)
             continue
         request_id, ignore_return_value = request
+        request = requests.get_request(request_id)
+        if request.status == requests.RequestStatus.ABORTED:
+            continue
         logger.info(
             f'Request worker {worker_id} -- running request: {request_id}')
-        _wrapper(request_id, ignore_return_value)
+        # Start additional process to run the request, so that it can be aborted
+        # when requested by a user.
+        process = multiprocessing.Process(target=_wrapper,
+                                          args=(request_id,
+                                                ignore_return_value))
+        process.start()
+
+        # Wait for the request to finish.
+        try:
+            process.join()
+        except Exception as e:
+            logger.error(
+                f'Request worker {worker_id} -- request {request_id} failed: {e}'
+            )
 
 
-def start_request_workers(
-        num_workers: int = 1) -> List[multiprocessing.Process]:
+def start_request_queue_workers(
+        num_queue_workers: int = 1) -> List[multiprocessing.Process]:
     """Start the request workers."""
     workers = []
-    for worker_id in range(num_workers):
+    for worker_id in range(num_queue_workers):
         worker = multiprocessing.Process(target=request_worker,
                                          args=(worker_id,))
         logger.info(f'Starting request worker: {worker_id}')
