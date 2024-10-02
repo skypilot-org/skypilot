@@ -153,8 +153,8 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 assert request_task is not None, request_id
                 request_task.status = requests.RequestStatus.FAILED
                 request_task.set_error(e)
-            restore_output(original_stdout, original_stderr)
             logger.info(f'Task {request_id} failed due to {e}')
+            restore_output(original_stdout, original_stderr)
             return None
         else:
             with requests.update_rest_task(request_id) as request_task:
