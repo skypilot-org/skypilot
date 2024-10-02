@@ -1007,7 +1007,6 @@ class Storage(object):
             with zipfile.ZipFile(os.path.join(zip_filepath, zip_filename), 'w',
                                  zipfile.ZIP_DEFLATED) as zipf:
                 for filepath in filepaths:
-                    logger.info('Filepath: {filepath}')
                     if os.path.isdir(os.path.expanduser(filepath)):
                         for root, _, files in os.walk(filepath):
                             for file in files:
