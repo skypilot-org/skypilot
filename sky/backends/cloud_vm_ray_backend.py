@@ -2550,9 +2550,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     yaml_config['provider'])
                 state['launched_resources'] = launched_resources.copy(
                     region=context)
-        
+
         if version < 10:
-            self.vpn_config = None    
+            self.vpn_config = None
 
         self.__dict__.update(state)
 
