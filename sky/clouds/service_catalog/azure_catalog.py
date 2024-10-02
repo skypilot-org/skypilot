@@ -106,14 +106,20 @@ def get_default_instance_type(
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
-    df = _df[_df['InstanceType'].apply(_get_instance_family).isin(
-        _DEFAULT_INSTANCE_FAMILY)]
 
     def _filter_disk_type(instance_type: str) -> bool:
         valid, _ = Azure.check_disk_tier(instance_type, disk_tier)
         return valid
 
-    df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
+    df = _df.loc[_df['InstanceType'].apply(_filter_disk_type)]
+
+    default_instance_type_df = _df[_df['InstanceType'].apply(
+        _get_instance_family).isin(_DEFAULT_INSTANCE_FAMILY)]
+    default_instance_type = common.get_instance_type_for_cpus_mem_impl(
+        default_instance_type_df, cpus, memory_gb_or_ratio)
+    if default_instance_type is not None:
+        return default_instance_type
+
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
 
