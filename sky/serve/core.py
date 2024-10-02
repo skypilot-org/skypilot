@@ -129,8 +129,9 @@ def up(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
 
-    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
-                                                                   path='serve')
+    with rich_utils.safe_status(ux_utils.spinner_message('Initializing service')):
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
+                                                                       path='serve')
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
@@ -271,38 +272,35 @@ def up(
             assert endpoint is not None, 'Did not get endpoint for controller.'
 
         sky_logging.print(
-            f'{fore.CYAN}Service name: '
-            f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
-            f'\n{fore.CYAN}Endpoint URL: '
+            f'\n{colorama.Fore.CYAN}Service name: '
+            f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
+            f'\n{colorama.Fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
-            '\nTo see detailed info:\t\t'
+            f'\n📋 Useful Commands'
+            '\n├── To check the status:\t\t'
             f'{constants.BOLD}sky serve status {service_name} '
             f'[--endpoint]{constants.RESET_BOLD}'
-            '\nTo teardown the service:\t'
+            '\n├── To teardown the service:\t'
             f'{constants.BOLD}sky serve down {service_name}'
             f'{constants.RESET_BOLD}'
-            '\n'
-            '\nTo see logs of a replica:\t'
+            '\n├── To see replica logs:\t'
             f'{constants.BOLD}sky serve logs {service_name} [REPLICA_ID]'
             f'{constants.RESET_BOLD}'
-            '\nTo see logs of load balancer:\t'
+            '\n├── To see load balancer logs:\t'
             f'{constants.BOLD}sky serve logs --load-balancer {service_name}'
             f'{constants.RESET_BOLD}'
-            '\nTo see logs of controller:\t'
+            '\n├── To see controller logs:\t'
             f'{constants.BOLD}sky serve logs --controller {service_name}'
             f'{constants.RESET_BOLD}'
-            '\n'
-            '\nTo monitor replica status:\t'
+            '\n├── To monitor the status:\t'
             f'{constants.BOLD}watch -n10 sky serve status {service_name}'
             f'{constants.RESET_BOLD}'
-            '\nTo send a test request:\t\t'
+            '\n└── To send a test request:\t\t'
             f'{constants.BOLD}curl {endpoint}'
             f'{constants.RESET_BOLD}'
-            '\n'
-            f'\n{fore.GREEN}SkyServe is spinning up your service now.'
-            f'{style.RESET_ALL}'
-            f'\n{fore.GREEN}The replicas should be ready within a '
-            f'short time.{style.RESET_ALL}')
+            '\n\n' +
+            ux_utils.finishing_message('Service is spinning up and replicas '
+                                       'will be ready shortly.'))
         return service_name, endpoint
 
 
@@ -375,8 +373,9 @@ def update(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
-    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
-                                                                   path='serve')
+    with rich_utils.safe_status(ux_utils.spinner_message('Initializing service')):
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
+                                                                       path='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
     returncode, version_string_payload, stderr = backend.run_on_head(

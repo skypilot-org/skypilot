@@ -3359,8 +3359,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
 
-        logger.info(
-            ux_utils.starting_message(f'Job submitted with ID: {job_id}.'))
+        controller = controller_utils.Controllers.from_name(handle.cluster_name)
+        if controller == controller_utils.Controllers.SERVE_CONTROLLER:
+            logger.info(
+                ux_utils.starting_message(f'Service submitted.'))
+        else:
+            logger.info(
+                ux_utils.starting_message(f'Job submitted with ID: {job_id}.'))
         rich_utils.stop_safe_status()
         try:
             if not detach_run:

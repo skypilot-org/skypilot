@@ -1447,7 +1447,8 @@ class S3Store(AbstractStore):
                 }
             s3_client.create_bucket(**create_bucket_config)
             logger.info(
-                f'Created S3 bucket {bucket_name!r} in {region or "us-east-1"}')
+                f'  {colorama.Style.DIM}Created S3 bucket {bucket_name!r} in '
+                f'{region or "us-east-1"}{colorama.Style.RESET_ALL}')
 
             # Add AWS tags configured in config.yaml to the bucket.
             # This is useful for cost tracking and external cleanup.
@@ -1910,8 +1911,9 @@ class GcsStore(AbstractStore):
                     f'Attempted to create a bucket {self.name} but failed.'
                 ) from e
         logger.info(
-            f'Created GCS bucket {new_bucket.name} in {new_bucket.location} '
-            f'with storage class {new_bucket.storage_class}')
+            f'  {colorama.Style.DIM}Created GCS bucket {new_bucket.name!r} in '
+            f'{new_bucket.location} with storage class '
+            f'{new_bucket.storage_class}{colorama.Style.RESET_ALL}')
         return new_bucket
 
     def _delete_gcs_bucket(self, bucket_name: str) -> bool:
@@ -2318,7 +2320,7 @@ class AzureBlobStore(AbstractStore):
                                 f'{resource_group_name}')):
                         self.resource_client.resource_groups.create_or_update(
                             resource_group_name, {'location': self.region})
-                    logger.info('Created Azure resource group '
+                    logger.info('  Created Azure resource group '
                                 f'{resource_group_name!r}.')
                 # check if the storage account name already exists under the
                 # given resource group name.
@@ -2334,7 +2336,7 @@ class AzureBlobStore(AbstractStore):
                                                      storage_account_name)
                         # wait until new resource creation propagates to Azure.
                         time.sleep(1)
-                    logger.info('Created Azure storage account '
+                    logger.info('  Created Azure storage account '
                                 f'{storage_account_name!r}.')
 
         return storage_account_name, resource_group_name
@@ -2676,9 +2678,10 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name,
                 container_name,
                 blob_container={})
-            logger.info('Created AZ Container '
+            logger.info(f'  {colorama.Style.DIM}Created AZ Container '
                         f'{container_name!r} in {self.region!r} under storage '
-                        f'account {self.storage_account_name!r}.')
+                        f'account {self.storage_account_name!r}.'
+                        f'{colorama.Style.RESET_ALL}')
         except azure.exceptions().ResourceExistsError as e:
             if 'container is being deleted' in e.error.message:
                 with ux_utils.print_exception_no_traceback():
@@ -3069,7 +3072,9 @@ class R2Store(AbstractStore):
                 location = {'LocationConstraint': region}
                 r2_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
-                logger.info(f'Created R2 bucket {bucket_name} in {region}')
+                logger.info(f'  {colorama.Style.DIM}Created R2 bucket '
+                            f'{bucket_name!r} in {region}'
+                            f'{colorama.Style.RESET_ALL}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -3505,8 +3510,10 @@ class IBMCosStore(AbstractStore):
                 CreateBucketConfiguration={
                     'LocationConstraint': f'{region}-smart'
                 })
-            logger.info(f'Created IBM COS bucket {bucket_name} in {region} '
-                        f'with storage class smart tier')
+            logger.info(f'  {colorama.Style.DIM}Created IBM COS bucket '
+                        f'{bucket_name!r} in {region} '
+                        'with storage class smart tier'
+                        f'{colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
         except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
