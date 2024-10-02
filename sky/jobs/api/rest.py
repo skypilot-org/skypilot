@@ -20,6 +20,7 @@ async def launch(request: fastapi.Request,
         request_name='jobs/launch',
         request_body=jobs_launch_body,
         func=core.launch,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
@@ -31,6 +32,7 @@ async def queue(request: fastapi.Request,
         request_name='jobs/queue',
         request_body=jobs_queue_body,
         func=core.queue,
+        schedule_type=(executor.ScheduleType.QUEUE if jobs_queue_body.refresh else executor.ScheduleType.DIRECT),
     )
 
 
@@ -42,6 +44,7 @@ async def cancel(request: fastapi.Request,
         request_name='jobs/cancel',
         request_body=jobs_cancel_body,
         func=core.cancel,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -53,4 +56,5 @@ async def logs(request: fastapi.Request,
         request_name='jobs/logs',
         request_body=jobs_logs_body,
         func=core.tail_logs,
+        schedule_type=executor.ScheduleType.DIRECT,
     )

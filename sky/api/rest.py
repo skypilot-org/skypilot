@@ -264,7 +264,8 @@ async def status(
         request_name='status',
         request_body=status_body,
         func=core.status,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=(executor.ScheduleType.QUEUE if status_body.refresh else
+                       executor.ScheduleType.DIRECT),
     )
 
 
