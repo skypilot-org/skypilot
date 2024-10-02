@@ -870,6 +870,7 @@ def enabled_clouds() -> List[clouds.Cloud]:
 
 @usage_lib.entrypoint
 def realtime_gpu_availability(
+    context: Optional[str] = None,
     name_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None
 ) -> List[common.RealtimeGpuAvailability]:
@@ -878,7 +879,7 @@ def realtime_gpu_availability(
         gpus_only=True,
         clouds='kubernetes',
         name_filter=name_filter,
-        region_filter=None,
+        region_filter=context,
         quantity_filter=quantity_filter,
         case_sensitive=False)
     assert (set(counts.keys()) == set(capacity.keys()) == set(

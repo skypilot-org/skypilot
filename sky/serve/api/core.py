@@ -204,7 +204,6 @@ def up(
         controller_job_id, controller_handle = execution.launch(
             task=controller_task,
             cluster_name=controller_name,
-            detach_run=True,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
             _disable_controller_check=True,

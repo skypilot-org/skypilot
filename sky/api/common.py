@@ -164,9 +164,11 @@ def upload_mounts_to_api_server(
                 storage_source = storage.source
                 if (storage_source is not None and
                         not data_utils.is_cloud_store_url(storage_source)):
-                    upload_list.append(_full_path(storage_source))
-                    file_mounts_mapping[storage_source] = _full_path(
-                        storage_source)
+                    if isinstance(storage_source, str):
+                        storage_source = [storage_source]
+                    for src in storage_source:
+                        upload_list.append(_full_path(src))
+                        file_mounts_mapping[src] = _full_path(src)
         task_.file_mounts_mapping = file_mounts_mapping
 
     server_url = get_server_url()
@@ -236,7 +238,7 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                     raise ValueError(f'Unexpected file_mounts value: {src}')
 
     translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
-    common_utils.dump_yaml(translated_client_task_path, task_configs)
+    common_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
     dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
     return dag

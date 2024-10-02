@@ -920,10 +920,12 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
+# Detach setup/run should always be true to avoid blocking the request queue on
+# API server.
 @click.option(
-    '--detach-setup',
-    '-s',
-    default=False,
+    '--detach-setup/--no-detach-setup',
+    '-s/-no-s',
+    default=True,
     is_flag=True,
     help=
     ('If True, run setup in non-interactive mode as part of the job itself. '
@@ -933,7 +935,7 @@ def cli():
      'running setup commands.'))
 @click.option(
     '--detach-run',
-    '-d',
+    '-d/-no-d',
     default=False,
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
@@ -1044,6 +1046,9 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    if not detach_setup:
+        click.secho('--no-detach-setup is no longer supported and will be '
+                    'ignored', fg='yellow')
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
@@ -1092,15 +1097,10 @@ def launch(
             f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
             f'{colorama.Style.RESET_ALL}')
 
-    detach_setup = detach_setup or async_call
-    detach_run = detach_run or async_call
-
     request_id = sdk.launch(
         task,
         dryrun=dryrun,
         cluster_name=cluster,
-        detach_setup=detach_setup,
-        detach_run=detach_run,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
@@ -1111,10 +1111,13 @@ def launch(
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Launch')
     if not async_call:
-        handle = job_id_handle[1]
+        job_id, handle = job_id_handle
         # Add ssh config for the cluster
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])
+        if not detach_run:
+            click.secho(f'Streaming logs', fg='yellow')
+            sdk.stream(sdk.tail_logs(handle.get_cluster_name(), job_id, True))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1137,7 +1140,7 @@ def launch(
                 **_get_shell_complete_args(_complete_file_name))
 @click.option(
     '--detach-run',
-    '-d',
+    '-d/-no-d',
     default=False,
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
@@ -1256,9 +1259,12 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     request_id = sdk.exec(task,
-                          cluster_name=cluster,
-                          detach_run=detach_run or async_call)
-    _async_call_or_wait(request_id, async_call, 'Exec')
+                          cluster_name=cluster)
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'Exec')
+    if not async_call and not detach_run:
+        job_id, _ = job_id_handle
+        click.secho(f'Streaming logs...', fg='yellow')
+        sdk.stream(sdk.tail_logs(cluster, job_id, True))
 
 
 def _get_managed_jobs(
@@ -3069,7 +3075,9 @@ def show_gpus(
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
         realtime_gpu_availability_list = sdk.stream_and_get(
-            sdk.realtime_gpu_availability(name_filter=name_filter,
+            sdk.realtime_gpu_availability(
+                context=context,
+                name_filter=name_filter,
                                           quantity_filter=quantity_filter))
         if not realtime_gpu_availability_list:
             err_msg = 'No GPUs found in Kubernetes cluster. '
@@ -3088,11 +3096,12 @@ def show_gpus(
             raise ValueError(full_err_msg)
 
         for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
+            gpu_availability = common.RealtimeGpuAvailability(*realtime_gpu_availability            )
             realtime_gpu_table.add_row([
-                realtime_gpu_availability.gpu,
-                _list_to_str(realtime_gpu_availability.counts),
-                realtime_gpu_availability.capacity,
-                realtime_gpu_availability.available,
+                gpu_availability.gpu,
+                _list_to_str(gpu_availability.counts),
+                gpu_availability.capacity,
+                gpu_availability.available,
             ])
         return realtime_gpu_table
 
@@ -3626,10 +3635,12 @@ def jobs_launch(
 
     request_id = managed_jobs.launch(dag,
                                      name,
-                                     detach_run=detach_run,
                                      retry_until_up=retry_until_up,
                                      need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
+    if not async_call and not detach_run:
+        job_id = job_id_handle.job_id
+        sdk.stream_and_get(managed_jobs.tail_logs(name=None, job_id=job_id, follow=True, controller=False))
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)

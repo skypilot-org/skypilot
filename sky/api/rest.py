@@ -1,3 +1,5 @@
+"""REST API for SkyPilot."""
+
 import argparse
 import asyncio
 import contextlib
@@ -73,6 +75,7 @@ events = {'status': refresh_cluster_status_event}
 
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
+    """FastAPI lifespan context manager."""
     # Startup: Run background tasks
     for event_id, (event_name, event) in enumerate(events.items()):
         executor.schedule_request(request_id=str(event_id),
@@ -562,8 +565,11 @@ if __name__ == '__main__':
         num_workers = os.cpu_count()
 
     try:
+        num_queue_workers = os.cpu_count()
+        if num_queue_workers is None:
+            num_queue_workers = 4
         workers = executor.start_request_queue_workers(
-            num_queue_workers=os.cpu_count())
+            num_queue_workers=num_queue_workers)
 
         logger.info('Starting API server')
         uvicorn.run('sky.api.rest:app',

@@ -22,7 +22,6 @@ if typing.TYPE_CHECKING:
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
-    detach_run: bool = False,
     retry_until_up: bool = False,
     need_confirmation: bool = False,
 ) -> str:
@@ -44,7 +43,6 @@ def launch(
     body = payloads.JobsLaunchBody(
         task=dag_str,
         name=name,
-        detach_run=detach_run,
         retry_until_up=retry_until_up,
     )
     response = requests.post(

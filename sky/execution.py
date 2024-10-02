@@ -377,8 +377,6 @@ def launch(
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
-    detach_setup: bool = False,
-    detach_run: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     # Internal only:
@@ -491,8 +489,8 @@ def launch(
         retry_until_up=retry_until_up,
         optimize_target=optimize_target,
         cluster_name=cluster_name,
-        detach_setup=detach_setup,
-        detach_run=detach_run,
+        detach_setup=True,
+        detach_run=True,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
@@ -511,7 +509,6 @@ def exec(  # pylint: disable=redefined-builtin
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    detach_run: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task on an existing cluster.
@@ -549,8 +546,6 @@ def exec(  # pylint: disable=redefined-builtin
         stream_logs: if True, show the logs in the terminal.
         backend: backend to use.  If None, use the default backend
             (CloudVMRayBackend).
-        detach_run: if True, detach from logging once the task has been
-            submitted.
 
     Raises:
         ValueError: if the specified cluster does not exist or is not in UP
@@ -586,5 +581,5 @@ def exec(  # pylint: disable=redefined-builtin
             Stage.EXEC,
         ],
         cluster_name=cluster_name,
-        detach_run=detach_run,
+        detach_run=True,
     )

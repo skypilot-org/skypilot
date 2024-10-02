@@ -887,7 +887,9 @@ class Storage(object):
                             f'storage account {storage_account_name!r}.')
             else:
                 logger.info(f'Storage type {store_type} already exists.')
-            return self.stores[store_type]
+            store = self.stores[store_type]
+            assert store is not None, self
+            return store
 
         store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:

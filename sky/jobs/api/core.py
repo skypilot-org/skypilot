@@ -2,7 +2,7 @@
 import os
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -39,9 +39,8 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
-    detach_run: bool = False,
     retry_until_up: bool = False,
-) -> None:
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 
@@ -51,12 +50,16 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
-        detach_run: Whether to detach the run.
+
+    Returns:
+        - Job ID for the managed job
+        - Handle of the controller
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
+
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
@@ -136,9 +139,8 @@ def launch(
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
         sky_logging.print('Launching jobs controller...')
-        execution.launch(task=controller_task,
+        return execution.launch(task=controller_task,
                          cluster_name=controller_name,
-                         detach_run=detach_run,
                          stream_logs=stream_logs,
                          idle_minutes_to_autostop=skylet_constants.
                          CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,

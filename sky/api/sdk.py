@@ -30,6 +30,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -61,9 +62,12 @@ def enabled_clouds() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def realtime_gpu_availability(name_filter: Optional[str] = None,
-                              quantity_filter: Optional[int] = None) -> str:
+def realtime_gpu_availability(
+    context: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None) -> str:
     body = payloads.RealtimeGpuAvailabilityRequestBody(
+        context=context,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
     )
@@ -143,8 +147,6 @@ def launch(
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional[backends.Backend] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
-    detach_setup: bool = False,
-    detach_run: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     need_confirmation: bool = False,
@@ -213,8 +215,6 @@ def launch(
         down=down,
         backend=backend.NAME if backend else None,
         optimize_target=optimize_target,
-        detach_setup=detach_setup,
-        detach_run=detach_run,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         # For internal use
@@ -240,7 +240,6 @@ def exec(  # pylint: disable=redefined-builtin
     dryrun: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional[backends.Backend] = None,
-    detach_run: bool = False,
 ) -> str:
     """Execute a task."""
     dag = dag_utils.convert_entrypoint_to_dag(task)
@@ -253,7 +252,6 @@ def exec(  # pylint: disable=redefined-builtin
         dryrun=dryrun,
         down=down,
         backend=backend.NAME if backend else None,
-        detach_run=detach_run,
     )
 
     response = requests.post(
@@ -570,6 +568,7 @@ def stream_and_get(request_id: str) -> Any:
         return get(request_id)
     except Exception as e:
         logger.info(f'Check more loggings with: sky api get {request_id}')
+        logger.debug(common_utils.format_exception(e, use_bracket=True))
 
 
 # === API server management ===

@@ -1,6 +1,7 @@
 """Payloads for the Sky API requests."""
 import functools
 import os
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
@@ -25,6 +26,11 @@ class RequestBody(pydantic.BaseModel):
     env_vars: Dict[str, str] = request_body_env_vars()
 
     def to_kwargs(self) -> Dict[str, Any]:
+        """Convert the request body to a kwargs dictionary on API server.
+
+        This converts the request body into kwargs for the underlying SkyPilot
+        backend's function.
+        """
         kwargs = self.model_dump()
         kwargs.pop('env_vars')
         return kwargs
@@ -40,9 +46,10 @@ class OptimizeBody(RequestBody):
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST
 
     def to_kwargs(self) -> Dict[str, Any]:
-        import tempfile
-
-        from sky.utils import dag_utils
+        # Import here to avoid requirement of the whole SkyPilot dependency on
+        # local clients.
+        from sky.utils import (
+            dag_utils)  # pylint: disable=import-outside-toplevel
 
         kwargs = super().to_kwargs()
 
@@ -64,8 +71,6 @@ class LaunchBody(RequestBody):
     down: bool = False
     backend: Optional[str] = None
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST
-    detach_setup: bool = False
-    detach_run: bool = False
     no_setup: bool = False
     clone_disk_from: Optional[str] = None
     # Internal only:
@@ -102,7 +107,6 @@ class ExecBody(RequestBody):
     dryrun: bool = False
     down: bool = False
     backend: Optional[str] = None
-    detach_run: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
         from sky.api import common
@@ -188,7 +192,6 @@ class JobStatusBody(RequestBody):
 class JobsLaunchBody(RequestBody):
     task: str
     name: Optional[str]
-    detach_run: bool
     retry_until_up: bool
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -271,6 +274,7 @@ class ServeStatusBody(RequestBody):
 
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
+    context: Optional[str]
     name_filter: Optional[str]
     quantity_filter: Optional[int]
 

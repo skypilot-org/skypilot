@@ -2,7 +2,7 @@
 import enum
 import multiprocessing
 import os
-import queue
+import queue as queue_lib
 import sys
 import time
 import traceback
@@ -81,8 +81,15 @@ class RequestQueue:
         else:
             try:
                 return self.queue.get(block=False)
-            except queue.Empty:
+            except queue_lib.Empty:
                 return None
+
+    def __len__(self):
+        # TODO(zhwu): we should autoscale based on the queue length.
+        if isinstance(self.queue, redis.Redis):
+            return self.queue.llen(self.name)
+        else:
+            return self.queue.qsize()
 
 
 _queue_backend = get_queue_backend()
@@ -218,8 +225,7 @@ def request_worker(worker_id: int):
         except Exception as e:
             logger.error(
                 f'Request worker {worker_id} -- request {request_id} failed: '
-                f'{e}'
-            )
+                f'{e}')
         logger.info(
             f'Request worker {worker_id} -- request {request_id} finished')
 

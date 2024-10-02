@@ -1,9 +1,7 @@
 """REST API for managed jobs."""
-import json
 
 import fastapi
 
-from sky.api import common
 from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.jobs.api import core

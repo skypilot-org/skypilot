@@ -289,8 +289,6 @@ class StrategyExecutor:
                 # by the controller process (job_status -> FAILED_SETUP).
                 execution.launch(self.dag,
                                  cluster_name=self.cluster_name,
-                                 detach_setup=True,
-                                 detach_run=True,
                                  _is_launched_by_jobs_controller=True)
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,

@@ -97,8 +97,6 @@ def launch_cluster(replica_id: int,
             usage_lib.messages.usage.set_internal()
             execution.launch(task,
                              cluster_name,
-                             detach_setup=True,
-                             detach_run=True,
                              retry_until_up=True,
                              _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
