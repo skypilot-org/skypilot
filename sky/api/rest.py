@@ -82,7 +82,7 @@ async def lifespan():
             request_name=event_name,
             request_body=payloads.RequestBody(),
             func=event,
-            queue_type=executor.QueueType.BACKGROUND)
+            queue_type=executor.ScheduleType.DIRECT)
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -103,23 +103,23 @@ app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 @app.post('/check')
 async def check(request: fastapi.Request, check_body: payloads.CheckBody):
     """Check enabled clouds."""
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='check',
         request_body=check_body,
         func=sky_check.check,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.get('/enabled_clouds')
 async def enabled_clouds(request: fastapi.Request) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
         request_body=payloads.RequestBody(),
         func=core.enabled_clouds,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -128,12 +128,12 @@ async def realtime_gpu_availability(
     request: fastapi.Request,
     realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
 ) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='realtime_gpu_availability',
         request_body=realtime_gpu_availability_body,
         func=core.realtime_gpu_availability,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -141,12 +141,12 @@ async def realtime_gpu_availability(
 async def list_accelerators(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
         func=service_catalog.list_accelerators,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -154,25 +154,25 @@ async def list_accelerators(
 async def list_accelerator_counts(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
         func=service_catalog.list_accelerator_counts,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/optimize')
 async def optimize(optimize_body: payloads.OptimizeBody,
                    request: fastapi.Request):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='optimize',
         request_body=optimize_body,
         ignore_return_value=True,
         func=optimizer.Optimizer.optimize,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -221,12 +221,12 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     """
 
     request_id = request.state.request_id
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id,
         request_name='launch',
         request_body=launch_body,
         func=execution.launch,
-        queue_type=executor.QueueType.LOW_PRIORITY,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
@@ -234,23 +234,23 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
 
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
-        queue_type=executor.QueueType.LOW_PRIORITY,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
 @app.post('/stop')
 async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='stop',
         request_body=stop_body,
         func=core.stop,
-        queue_type=executor.QueueType.LOW_PRIORITY,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
@@ -259,47 +259,47 @@ async def status(
     request: fastapi.Request,
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',
         request_body=status_body,
         func=core.status,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/endpoints')
 async def endpoints(request: fastapi.Request,
                     endpoint_body: payloads.EndpointBody) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='endpoints',
         request_body=endpoint_body,
         func=core.endpoints,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/down')
 async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='down',
         request_body=down_body,
         func=core.down,
-        queue_type=executor.QueueType.LOW_PRIORITY,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
 @app.post('/start')
 async def start(request: fastapi.Request, start_body: payloads.StartBody):
     """Restart a cluster."""
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='start',
         request_body=start_body,
         func=core.start,
-        queue_type=executor.QueueType.LOW_PRIORITY,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
@@ -307,24 +307,24 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
 async def autostop(request: fastapi.Request,
                    autostop_body: payloads.AutostopBody):
     """Set the autostop time for a cluster."""
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='autostop',
         request_body=autostop_body,
         func=core.autostop,
-        queue_type=executor.QueueType.LOW_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/queue')
 async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     """Get the queue of tasks for a cluster."""
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='queue',
         request_body=queue_body,
         func=core.queue,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -332,36 +332,36 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody):
     """Get the status of a job."""
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='job_status',
         request_body=job_status_body,
         func=core.job_status,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/cancel')
 async def cancel(request: fastapi.Request,
                  cancel_body: payloads.CancelBody) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='cancel',
         request_body=cancel_body,
         func=core.cancel,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/logs')
 async def logs(request: fastapi.Request,
                cluster_job_body: payloads.ClusterJobBody) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        queue_type=executor.QueueType.HIGH_PRIORITY,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
@@ -381,53 +381,58 @@ async def logs(request: fastapi.Request,
 
 @app.get('/cost_report')
 async def cost_report(request: fastapi.Request) -> None:
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='cost_report',
         request_body=payloads.RequestBody(),
         func=core.cost_report,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='storage_ls',
         request_body=payloads.RequestBody(),
         func=core.storage_ls,
+        schedule_type=executor.ScheduleType.DIRECT,
     )
 
 
 @app.post('/storage/delete')
 async def storage_delete(request: fastapi.Request,
                          storage_body: payloads.StorageBody):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='storage_delete',
         request_body=storage_body,
         func=core.storage_delete,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
 @app.post('/local_up')
 async def local_up(request: fastapi.Request,
                    local_up_body: payloads.LocalUpBody):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='local_up',
         request_body=local_up_body,
         func=core.local_up,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
 @app.post('/local_down')
 async def local_down(request: fastapi.Request):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='local_down',
         request_body=payloads.RequestBody(),
         func=core.local_down,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
@@ -440,11 +445,12 @@ def long_running_request_inner():
 
 @app.get('/long_running_request')
 async def long_running_request(request: fastapi.Request):
-    executor.enqueue_request(
+    executor.schedule_request(
         request_id=request.state.request_id,
         request_name='long_running_request',
         request_body=payloads.RequestBody(),
         func=long_running_request_inner,
+        schedule_type=executor.ScheduleType.QUEUE,
     )
 
 
@@ -512,14 +518,16 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
             return
         rest_task.status = requests_lib.RequestStatus.ABORTED
         print(f'Killing request process {rest_task.pid}', flush=True)
+        # TODO(zhwu): We can no longer kill the process here as the process is
+        # actually the worker process.
         if rest_task.pid is not None:
-            executor.enqueue_request(
+            executor.schedule_request(
                 request_id=request.state.request_id,
                 request_name='kill_children_processes',
                 request_body=payloads.KillChildrenProcessesBody(
                     parent_pids=[rest_task.pid], force=True),
                 func=subprocess_utils.kill_children_processes,
-                queue_type=executor.QueueType.HIGH_PRIORITY,
+                schedule_type=executor.ScheduleType.DIRECT,
             )
 
 

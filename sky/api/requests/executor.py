@@ -29,10 +29,14 @@ P = ParamSpec('P')
 logger = sky_logging.init_logger(__name__)
 
 
-class QueueType(enum.Enum):
-    HIGH_PRIORITY = 'high_priority'
-    LOW_PRIORITY = 'low_priority'
-    BACKGROUND = 'background'
+class ScheduleType(enum.Enum):
+    QUEUE = 'queue'
+    # Directly execute the request in a different process.
+    DIRECT = 'direct'
+
+    @classmethod
+    def active_queues(cls) -> List['ScheduleType']:
+        return [cls.QUEUE]
 
 
 class _QueueBackend(enum.Enum):
@@ -83,7 +87,7 @@ class RequestQueue:
 
 _queue_backend = get_queue_backend()
 queues = {}
-for queue_type in QueueType:
+for queue_type in ScheduleType.active_queues():
     queues[queue_type] = RequestQueue(queue_type.value,
                                       queue_type=_queue_backend)
 
@@ -156,12 +160,12 @@ def _wrapper(request_id: str, ignore_return_value: bool):
         return return_value
 
 
-def enqueue_request(request_id: str,
-                    request_name: str,
-                    request_body: payloads.RequestBody,
-                    func: Callable[P, Any],
-                    ignore_return_value: bool = False,
-                    queue_type: QueueType = QueueType.LOW_PRIORITY):
+def schedule_request(request_id: str,
+                     request_name: str,
+                     request_body: payloads.RequestBody,
+                     func: Callable[P, Any],
+                     ignore_return_value: bool = False,
+                     schedule_type: ScheduleType = ScheduleType.QUEUE):
     """Enqueue a request to the request queue."""
     request = requests.Request(request_id=request_id,
                                name=request_name,
@@ -176,17 +180,19 @@ def enqueue_request(request_id: str,
     request.log_path.touch()
     input_tuple = (request_id, ignore_return_value)
     # Enqueue the request to the Redis list.
-    queues[queue_type].put(input_tuple)
+    if schedule_type == ScheduleType.DIRECT:
+        multiprocessing.Process(target=_wrapper,
+                                args=(request_id, ignore_return_value)).start()
+    else:
+        queues[schedule_type].put(input_tuple)
 
 
 def request_worker(worker_id: int):
     """Worker for the requests."""
-    logger.info(
-        f'Request worker {worker_id} -- started with pid '
-        f'{multiprocessing.current_process().pid}'
-    )
+    logger.info(f'Request worker {worker_id} -- started with pid '
+                f'{multiprocessing.current_process().pid}')
     while True:
-        for queue_type in QueueType:
+        for queue_type in ScheduleType.active_queues():
             request = queues[queue_type].get()
             if request is not None:
                 break
