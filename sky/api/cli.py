@@ -1117,7 +1117,7 @@ def launch(
             clusters=[handle.get_cluster_name()])
         if not detach_run:
             click.secho(f'Streaming logs', fg='yellow')
-            sdk.stream(sdk.tail_logs(handle.get_cluster_name(), job_id, True))
+            sdk.stream_and_get(sdk.tail_logs(handle.get_cluster_name(), job_id, True))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1264,7 +1264,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
         click.secho(f'Streaming logs...', fg='yellow')
-        sdk.stream(sdk.tail_logs(cluster, job_id, True))
+        sdk.stream_and_get(sdk.tail_logs(cluster, job_id, True))
 
 
 def _get_managed_jobs(
