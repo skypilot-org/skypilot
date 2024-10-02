@@ -2084,7 +2084,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
             self,
@@ -2118,9 +2118,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
-        # VPN config. We only store the essential configuration of the VPN
-        # for simplicity. Specifically, we store 'TAILSCALE_API_KEY' for
-        # Tailscale VPN.
+        # VPN configuration for the cluster.
         self.vpn_config: Optional[Dict[str, Any]] = None
         # Deprecated. SkyPilot new provisioner API handles the TPU node
         # creation/deletion.
@@ -2229,6 +2227,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 raise exceptions.FetchClusterInfoError(
                     exceptions.FetchClusterInfoError.Reason.HEAD)
             self.cached_cluster_info = cluster_info
+            if self.vpn_config is not None:
+                vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
+                                                      self.vpn_config)
 
     def update_cluster_ips(
             self,
@@ -2269,18 +2270,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cached_cluster_info = cluster_info
             # Update cluster config by private IPs (if available).
             # TODO(yi): add support for multiple nodes.
-            # TODO(yi): add support for other VPNs.
             if vpn_config is not None:
+                vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
+                                                      vpn_config)
                 self.vpn_config = vpn_config.to_backend_config()
-                for (instance_id, instance_list
-                    ) in self.cached_cluster_info.instances.items():
-                    if len(instance_list) > 1:
-                        logger.warning(
-                            'VPN is not supported for multi-node clusters.')
-                        break
-                    instance = instance_list[0]
-                    instance.external_ip = vpn_config.get_private_ip_vpn(
-                        instance_id, 'tailscale')
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
             cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
                 force_internal_ips=True)
@@ -2295,6 +2288,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                         all(ip is not None for ip in ips))
 
             use_internal_ips = self._use_internal_ips()
+
+            # Currently VPN is not supported.
+            # TODO(yi): move this warning earlier, or consider to move
+            # VPN into the features.
+            if vpn_config is not None:
+                logger.warning('VPN is not supported for clouds that do not '
+                               'support the new provisioner API. Ignoring the '
+                               'provided VPN configuration.')
 
             # cluster_feasible_ips is the list of IPs of the nodes in the
             # cluster which can be used to connect to the cluster. It is a list
@@ -2535,6 +2536,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
+
+        if version < 9:
+            self.vpn_config = None
 
         self.__dict__.update(state)
 

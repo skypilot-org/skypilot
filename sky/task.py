@@ -495,6 +495,7 @@ class Task:
 
         vpn_config = config.pop('vpn', None)
         if vpn_config is not None:
+            # TODO(yi): we may need to test if it supports TPU VM.
             vpn_config = vpn_utils.VPNConfig.from_yaml_config(vpn_config)
             task.set_vpn_config(vpn_config)
 
