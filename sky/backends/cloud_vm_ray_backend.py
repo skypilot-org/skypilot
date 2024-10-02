@@ -2085,7 +2085,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 9
+    _VERSION = 10
 
     def __init__(
             self,
@@ -2550,6 +2550,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     yaml_config['provider'])
                 state['launched_resources'] = launched_resources.copy(
                     region=context)
+        
+        if version < 10:
+            self.vpn_config = None    
 
         self.__dict__.update(state)
 
