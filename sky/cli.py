@@ -5364,6 +5364,62 @@ def local_down():
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
 
 
+@cli.command('code', cls=_DocumentedCodeCommand)
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              **_get_shell_complete_args(_complete_cluster_name),
+              help=_CLUSTER_FLAG_HELP)
+@click.option("--new-window/--no-new-window",
+              default=True,
+              help="Open Code in a new window.")
+@click.option("--profile",
+              type=str,
+              default="",
+              help="Open with a VSCode profile")
+# TODO: A way to default to the sky_workdir would simplify this
+@click.option("--workdir",
+              type=str,
+              default="",
+              help="The working directory to open in VSCode.")
+@usage_lib.entrypoint
+def code(
+    cluster: Optional[str],
+    new_window: bool,
+    profile: Optional[str],
+    workdir: str,
+):
+    """Open and attach VSCode to a cluster."""
+
+    if not cluster:
+        raise click.UsageError('Please specify a cluster with ---cluster/-c.')
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster {cluster!r} not found. '
+                                 'Use `sky launch` to provision first.')
+
+    code_bin = shutil.which('code')
+    if not code_bin:
+        raise click.UsageError(
+            '"code" is not available in your path. Ensure VSCode in installed'
+            ' and the shell command is available on your path '
+            'https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line'
+        )
+
+    command = [
+        code_bin, '--disable-workspace-trust',
+        f'--folder-uri=vscode-remote://ssh-remote+{cluster}{workdir}'
+    ]
+    if new_window:
+        command.append('--new-window')
+    if profile:
+        command += ['--profile', profile]
+
+    subprocess.check_call(command)
+
+
 def main():
     return cli()
 
