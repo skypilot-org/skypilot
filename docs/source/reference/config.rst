@@ -495,6 +495,19 @@ Available fields and semantics:
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
 
+    # Allowed context names to use for Kubernetes clusters (optional).
+    #
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
+    #
+    # If not specified, only the current active context is used for launching
+    # new clusters.
+    allowed_contexts:
+      - context1
+      - context2
+
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #
     # Uses the same schema as Kubernetes metadata object: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#objectmeta-v1-meta

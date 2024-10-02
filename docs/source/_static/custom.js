@@ -27,10 +27,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const newItems = [
         { selector: '.caption-text', text: 'SkyServe: Model Serving' },
         { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Llama-3.1 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Pixtral (Mistral AI)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Reserved, Capacity Blocks, DWS' },
+        { selector: '.toctree-l1 > a', text: 'Llama 3.2 (Meta)' },
+        { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
+        { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
