@@ -3594,7 +3594,7 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
+                fg='cyan')
     dag = sky.optimize(dag)
 
     if not yes:
@@ -3740,10 +3740,11 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message='All managed jobs should have finished.',
-        exit_if_not_accessible=True)
+    with rich_utils.safe_status(ux_utils.spinner_message('Checking managed jobs')):
+        backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            stopped_message='All managed jobs should have finished.',
+            exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:

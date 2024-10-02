@@ -59,10 +59,11 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_WAITING_STATUS_MESSAGE = (
-    ux_utils.spinner_message('Waiting for the task to start') +
-    '{status_str}. It may take a few minutes.')
+    ux_utils.spinner_message('Waiting for task to start') +
+    '{status_str}. It may take minutes.\n' +
+    '  [dim]View controller logs: sky jobs logs --controller {job_id}')
 _JOB_CANCELLED_MESSAGE = (
-    ux_utils.spinner_message('Waiting for the task status to be updated.') +
+    ux_utils.spinner_message('Waiting for task status to be updated.') +
     ' It may take a minute.')
 
 # The maximum time to wait for the managed job status to transition to terminal
@@ -293,7 +294,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
     status_msg = ux_utils.spinner_message(
-        'Waiting for controller process to be RUNNING{status_str}')
+        'Waiting for controller process to be RUNNING') + '{status_str}'
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
@@ -312,7 +313,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
             controller_status = job_lib.get_status(job_id)
 
-        msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
+        msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
         status_display.update(msg)
         prev_msg = msg
         managed_job_status = managed_job_state.get_status(job_id)
@@ -358,7 +359,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str)
+                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
+                                                         job_id=job_id)
                 if msg != prev_msg:
                     status_display.update(msg)
                     prev_msg = msg
@@ -446,8 +448,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
-    logger.info(f'Logs finished for job {job_id} '
-                f'(status: {managed_job_status.value}).')
+    logger.info(
+        ux_utils.finishing_message(f'Managed job finished: {job_id} '
+                                   f'(status: {managed_job_status.value}).'))
     return ''
 
 

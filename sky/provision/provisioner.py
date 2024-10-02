@@ -49,24 +49,11 @@ def _bulk_provision(
     provider_name = repr(cloud)
     region_name = region.name
 
-    style = colorama.Style
-
     if not zones:
         # For Azure, zones is always an empty list.
         zone_str = 'all zones'
     else:
         zone_str = ','.join(z.name for z in zones)
-
-    if isinstance(cloud, clouds.Kubernetes):
-        # Omit the region name for Kubernetes.
-        logger.info(
-            ux_utils.starting_message(f'Launching on {cloud} '
-                                      f'{cluster_name!r}.'))
-    else:
-        logger.info(
-            ux_utils.starting_message(
-                f'Launching on {cloud} '
-                f'{region_name}{style.RESET_ALL} ({zone_str}).'))
 
     start = time.time()
     try:
@@ -80,7 +67,7 @@ def _bulk_provision(
                                                bootstrap_config)
     except Exception as e:
         logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
-                     f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
+                     f'{cluster_name!r} on {cloud} {region_name} ({zone_str}) '
                      'with the following error:'
                      f'{colorama.Style.RESET_ALL}\n'
                      f'{colorama.Style.DIM}'

@@ -1222,9 +1222,10 @@ class RetryingVmProvisioner(object):
 
             if prev_cluster_status != status_lib.ClusterStatus.UP:
                 logger.info(
-                    f'Cluster {cluster_name!r} (status: '
-                    f'{prev_cluster_status.value}) was previously launched '
-                    f'in {cloud} {region.name}. Relaunching in that region.')
+                    f'  {colorama.Style.DIM}Cluster {cluster_name!r} (status: '
+                    f'{prev_cluster_status.value}) was previously in '
+                    f'{cloud} ({region.name}). Restarting.'
+                    f'{colorama.Style.RESET_ALL}')
             yield zones
 
             # If it reaches here: the cluster status in the database gets
@@ -1476,6 +1477,23 @@ class RetryingVmProvisioner(object):
                     if to_provision.cloud.OPEN_PORTS_VERSION <=
                     clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
+                    controller = controller_utils.Controllers.from_name(
+                        cluster_name)
+                    controller_str = ('' if controller is None else
+                                      f' {controller.value.name}')
+                    if isinstance(to_provision.cloud, clouds.Kubernetes):
+                        # Omit the region name for Kubernetes.
+                        logger.info(
+                            ux_utils.starting_message(
+                                f'Launching{controller_str} on '
+                                f'{to_provision.cloud}.'))
+                    else:
+                        logger.info(
+                            ux_utils.starting_message(
+                                f'Launching{controller_str} on '
+                                f'{to_provision.cloud} '
+                                f'{region.name}{colorama.Style.RESET_ALL}'
+                                f'{zone_str}.'))
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
                         region,
@@ -3216,10 +3234,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         num_nodes = len(runners)
         plural = 's' if num_nodes > 1 else ''
+        node_str = f'{num_nodes} VM{plural}'
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            node_str = f'{num_nodes} pod{plural}'
+        controller = controller_utils.Controllers.from_name(handle.cluster_name)
+        if controller is not None:
+            node_str = controller.value.name
         if not detach_setup:
             logger.info(
-                ux_utils.starting_message(
-                    f'Running setup on {num_nodes} node{plural}.'))
+                ux_utils.starting_message(f'Running setup on {node_str}.'))
         # TODO(zhwu): run_in_parallel uses multi-thread to run the commands,
         # which can cause the program waiting for all the threads to finish,
         # even if some of them raise exceptions. We should replace it with
@@ -3247,7 +3270,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
-        fore = colorama.Fore
 
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
@@ -3354,21 +3376,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 logger.info(
-                    f'{fore.CYAN}Managed Job ID: '
+                    f'\n📋 Useful Commands'
+                    f'\nManaged Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                    '\nTo cancel the job:\t\t'
+                    '\n├── To cancel the job:\t\t\t'
                     f'{constants.BOLD}sky jobs cancel {job_id}'
                     f'{constants.RESET_BOLD}'
-                    '\nTo stream job logs:\t\t'
+                    '\n├── To stream job logs:\t\t\t'
                     f'{constants.BOLD}sky jobs logs {job_id}'
                     f'{constants.RESET_BOLD}'
-                    f'\nTo stream controller logs:\t'
+                    '\n├── To stream controller logs:\t\t'
                     f'{constants.BOLD}sky jobs logs --controller {job_id}'
                     f'{constants.RESET_BOLD}'
-                    '\nTo view all managed jobs:\t'
+                    '\n├── To view all managed jobs:\t\t'
                     f'{constants.BOLD}sky jobs queue'
                     f'{constants.RESET_BOLD}'
-                    '\nTo view managed job dashboard:\t'
+                    '\n└── To view managed job dashboard:\t'
                     f'{constants.BOLD}sky jobs dashboard'
                     f'{constants.RESET_BOLD}')
             elif controller is None:

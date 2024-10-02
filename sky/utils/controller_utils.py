@@ -192,7 +192,7 @@ def _get_cloud_dependencies_installation_commands(
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
-    prefix_str = 'Check & install cloud dependencies on controller: '
+    prefix_str = '⠇ Check & install cloud dependencies on controller: '
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
     empty_str = ' ' * 10
@@ -284,8 +284,9 @@ def _get_cloud_dependencies_installation_commands(
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
                         aws_dependencies_installation)
-    commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
-                    'clouds."')
+    commands.append(
+        f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for {len(commands)} '
+        'clouds."')
     return commands
 
 

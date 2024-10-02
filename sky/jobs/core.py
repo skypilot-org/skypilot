@@ -127,7 +127,6 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky_logging.print('Launching jobs controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
