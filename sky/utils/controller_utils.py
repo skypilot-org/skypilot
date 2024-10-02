@@ -28,8 +28,8 @@ from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.utils import ux_utils
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
@@ -603,6 +603,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
+
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -622,8 +623,12 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     elif has_local_source_paths_workdir:
         msg = 'workdir'
     if msg:
-        rich_utils.force_status_update(ux_utils.spinner_message(
-            f'Translating {msg} to SkyPilot Storage...'))
+        logger.info(
+            ux_utils.starting_message(f'Translating {msg} to '
+                                      'SkyPilot Storage...'))
+        rich_utils.force_update_status(
+            ux_utils.spinner_message(
+                f'Translating {msg} to SkyPilot Storage...'))
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -710,8 +715,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         logger.info(f'  {colorama.Style.DIM}Files (listed below) '
                     f' -> storage: {file_bucket_name}:'
                     f'\n    {sources_str}{colorama.Style.RESET_ALL}')
-    rich_utils.force_status_update(ux_utils.spinner_message(
-        f'Uploading translated local files/folders'))
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Uploading translated local files/folders'))
     task.update_storage_mounts(new_storage_mounts)
 
     # Step 4: Upload storage from sources
@@ -721,10 +726,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     if task.storage_mounts:
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.
-        rich_utils.force_status_update(ux_utils.spinner_message(
-            f'  Uploading storage local sources '
-            f'{colorama.Style.DIM}View storages: sky storage ls'
-            f'{colorama.Style.RESET_ALL}'))
+        rich_utils.force_update_status(
+            ux_utils.spinner_message(
+                f'  Uploading storage local sources '
+                f'{colorama.Style.DIM}View storages: sky storage ls'
+                f'{colorama.Style.RESET_ALL}'))
     try:
         task.sync_storage_mounts()
     except ValueError as e:
@@ -807,3 +813,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
+    if msg:
+        logger.info(
+            ux_utils.finishing_message(f'Uploaded local files/folders.'))

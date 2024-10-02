@@ -77,10 +77,11 @@ def launch(
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    with rich_utils.safe_status(ux_utils.spinner_message('Initializing managed job')):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing managed job')):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='jobs')
+                task_, path='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:

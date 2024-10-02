@@ -129,9 +129,10 @@ def up(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
 
-    with rich_utils.safe_status(ux_utils.spinner_message('Initializing service')):
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
-                                                                       path='serve')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing service')):
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task, path='serve')
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
@@ -210,7 +211,6 @@ def up(
         )
 
         style = colorama.Style
-        fore = colorama.Fore
 
         assert controller_job_id is not None and controller_handle is not None
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
@@ -373,9 +373,10 @@ def update(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
-    with rich_utils.safe_status(ux_utils.spinner_message('Initializing service')):
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
-                                                                       path='serve')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing service')):
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task, path='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
     returncode, version_string_payload, stderr = backend.run_on_head(

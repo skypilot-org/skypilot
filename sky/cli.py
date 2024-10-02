@@ -3740,7 +3740,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    with rich_utils.safe_status(ux_utils.spinner_message('Checking managed jobs')):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
         backend_utils.is_controller_accessible(
             controller=controller_utils.Controllers.JOBS_CONTROLLER,
             stopped_message='All managed jobs should have finished.',

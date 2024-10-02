@@ -3360,9 +3360,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            stderr=stdout + stderr)
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
-        if controller == controller_utils.Controllers.SERVE_CONTROLLER:
-            logger.info(
-                ux_utils.starting_message(f'Service submitted.'))
+        if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
+            logger.info(ux_utils.starting_message('Service submitted.'))
         else:
             logger.info(
                 ux_utils.starting_message(f'Job submitted with ID: {job_id}.'))
