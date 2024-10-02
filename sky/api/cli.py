@@ -5407,18 +5407,26 @@ def api_abort(request_id: str):
 
 @api.command('ls', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
+@click.option('--all',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show all requests.')
 @usage_lib.entrypoint
-def api_ls(request_id: Optional[str]):
+def api_ls(request_id: Optional[str], all: bool):
     """List requests on API server."""
     request_list = sdk.requests_ls(request_id)
     table = log_utils.create_table([
         'ID',
         'Name',
-        'Entrypoint',
+        'Created',
         'Status',
     ])
     for request in request_list:
-        table.add_row([request.request_id, request.name, request.entrypoint, request.status])
+        request_id = request.request_id
+        if not all:
+            request_id = status_utils.truncate_long_string(request_id, 8)
+        table.add_row([request_id, request.name, log_utils.readable_time_duration(request.created_at), request.status])
     click.echo(table)
 
 

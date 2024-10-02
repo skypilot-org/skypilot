@@ -293,7 +293,8 @@ def get_request_tasks() -> List[Request]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM requests')
+        cursor.execute('SELECT * FROM requests '
+                       'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:
             return []
