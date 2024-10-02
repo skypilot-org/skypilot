@@ -217,8 +217,11 @@ def request_worker(worker_id: int):
             process.join()
         except Exception as e:
             logger.error(
-                f'Request worker {worker_id} -- request {request_id} failed: {e}'
+                f'Request worker {worker_id} -- request {request_id} failed: '
+                f'{e}'
             )
+        logger.info(
+            f'Request worker {worker_id} -- request {request_id} finished')
 
 
 def start_request_queue_workers(

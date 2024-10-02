@@ -26,8 +26,6 @@ from sky.api.requests import requests as requests_lib
 from sky.clouds import service_catalog
 from sky.jobs.api import rest as jobs_rest
 from sky.serve.api import rest as serve_rest
-from sky.utils import dag_utils
-from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
@@ -564,7 +562,8 @@ if __name__ == '__main__':
         num_workers = os.cpu_count()
 
     try:
-        workers = executor.start_request_queue_workers(num_queue_workers=os.cpu_count())
+        workers = executor.start_request_queue_workers(
+            num_queue_workers=os.cpu_count())
 
         logger.info('Starting API server')
         uvicorn.run('sky.api.rest:app',
