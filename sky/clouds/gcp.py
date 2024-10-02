@@ -94,6 +94,11 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
     f'\nTo query common AI images: {colorama.Style.BRIGHT}gcloud compute images list --project deeplearning-platform-release | less{colorama.Style.RESET_ALL}'
 )
 
+# Image ID tags
+DEFAULT_CPU_IMAGE_ID = 'skypilot:cpu-debian-11'
+DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
+DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-debian-11'
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -422,7 +427,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = 'skypilot:cpu-debian-11'
+        image_id = DEFAULT_CPU_IMAGE_ID
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
             if (r.disk_tier is not None and
@@ -487,10 +492,10 @@ class GCP(clouds.Cloud):
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = 'skypilot:k80-debian-10'
+                    image_id = DEFAULT_GPU_K80_IMAGE_ID
                 else:
                     # CUDA driver version 535.86.10, CUDA Library 12.2
-                    image_id = 'skypilot:gpu-debian-11'
+                    image_id = DEFAULT_GPU_IMAGE_ID
 
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
