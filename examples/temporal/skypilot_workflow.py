@@ -1,8 +1,8 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
-import subprocess
 import os
+import subprocess
 
 from temporalio import activity
 from temporalio import workflow
@@ -39,12 +39,10 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
     command = f'sky launch -y -c {input.cluster_name} {input.flags} {input.entrypoint}'
 
     try:
-        result = subprocess.run(
-            command.split(),
-            capture_output=True,
-            text=True,
-            check=True
-        )
+        result = subprocess.run(command.split(),
+                                capture_output=True,
+                                text=True,
+                                check=True)
         activity.logger.info(f'Sky launch output: {result.stdout}')
         return result.stdout.strip()  # Return the output from the subprocess
     except subprocess.CalledProcessError as e:
@@ -132,11 +130,13 @@ async def run_git_clone(input: GitCloneInput) -> str:
         activity.logger.error(f'Git clone failed with error: {e}')
         raise  # Re-raise the exception to indicate failure
 
+
 @dataclass
 class SkyPilotWorkflowInput:
     cluster_prefix: str
     repo_url: str
     data_bucket_url: str = None
+
 
 @workflow.defn
 class SkyPilotWorkflow:
@@ -228,8 +228,9 @@ async def main():
             SkyPilotWorkflow.run,
             SkyPilotWorkflowInput(
                 cluster_prefix='my-workflow',  # cluster name prefix
-                repo_url='https://github.com/romilbhardwaj/mock_train_workflow.git',
-                data_bucket_url='gs://sky-example-data'), # repo url
+                repo_url=
+                'https://github.com/romilbhardwaj/mock_train_workflow.git',
+                data_bucket_url='gs://sky-example-data'),  # repo url
             id='skypilot-workflow-id',
             task_queue='skypilot-task-queue',
         )
