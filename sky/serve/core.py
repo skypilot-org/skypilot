@@ -272,7 +272,7 @@ def up(
             assert endpoint is not None, 'Did not get endpoint for controller.'
 
         sky_logging.print(
-            f'\n{colorama.Fore.CYAN}Service name: '
+            f'{colorama.Fore.CYAN}Service name: '
             f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
             f'\n{colorama.Fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'

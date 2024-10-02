@@ -728,7 +728,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # whenever task.storage_mounts is non-empty.
         rich_utils.force_update_status(
             ux_utils.spinner_message(
-                f'  Uploading storage local sources '
+                '  Uploading storage local sources '
                 f'{colorama.Style.DIM}View storages: sky storage ls'
                 f'{colorama.Style.RESET_ALL}'))
     try:
@@ -814,5 +814,4 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
     if msg:
-        logger.info(
-            ux_utils.finishing_message(f'Uploaded local files/folders.'))
+        logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))

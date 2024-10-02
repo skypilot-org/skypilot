@@ -1319,8 +1319,8 @@ class S3Store(AbstractStore):
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Syncing [green]{source_message}[/] to '
-                    f'[green]s3://{self.name}/')):
+                    f'Syncing {source_message} -> '
+                    f's3://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -1731,8 +1731,8 @@ class GcsStore(AbstractStore):
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Syncing [green]{source_message}[/] to '
-                    f'[green]gs://{self.name}/')):
+                    f'Syncing {source_message} -> '
+                    f'gs://{self.name}/')):
             data_utils.run_upload_cli(sync_command,
                                       self._ACCESS_DENIED_MESSAGE,
                                       bucket_name=self.name)
@@ -1788,8 +1788,8 @@ class GcsStore(AbstractStore):
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Syncing [green]{source_message}[/] to '
-                    f'[green]gs://{self.name}/')):
+                    f'Syncing {source_message} -> '
+                    f'gs://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2528,8 +2528,7 @@ class AzureBlobStore(AbstractStore):
             container_name=self.name)
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Syncing [green]{source_message}[/] to [green]'
-                    f'{container_endpoint}/')):
+                    f'Syncing {source_message} -> {container_endpoint}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2933,8 +2932,7 @@ class R2Store(AbstractStore):
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Syncing [green]{source_message}[/] to '
-                    f'[green]r2://{self.name}/')):
+                    f'Syncing {source_message} -> r2://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -3375,8 +3373,8 @@ class IBMCosStore(AbstractStore):
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Syncing [green]{source_message}[/] to '
-                    f'[green]cos://{self.region}/{self.name}/')):
+                    f'Syncing {source_message} -> '
+                    f'cos://{self.region}/{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
