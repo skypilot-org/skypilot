@@ -1,12 +1,18 @@
 """Executor for the requests."""
+import enum
 import multiprocessing
-import ray
 import os
+import queue
 import sys
+import time
 import traceback
-from typing import Any, Callable, Dict
+from typing import Any, Callable, List, Optional, Union
+
+import redis
+from redis import exceptions as redis_exceptions
 
 from sky import sky_logging
+from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.usage import usage_lib
 from sky.utils import common
@@ -23,9 +29,66 @@ P = ParamSpec('P')
 logger = sky_logging.init_logger(__name__)
 
 
-@ray.remote
-def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
-             ignore_return_value: bool, *args: P.args, **kwargs: P.kwargs):
+class QueueType(enum.Enum):
+    HIGH_PRIORITY = 'high_priority'
+    LOW_PRIORITY = 'low_priority'
+    BACKGROUND = 'background'
+
+
+class _QueueBackend(enum.Enum):
+    REDIS = 'redis'
+    MULTIPROCESSING = 'multiprocessing'
+
+
+def get_queue_backend() -> _QueueBackend:
+    try:
+        queue = redis.Redis(host='localhost',
+                            port=46581,
+                            db=0,
+                            socket_timeout=0.1)
+        queue.ping()
+        return _QueueBackend.REDIS
+    except redis_exceptions.ConnectionError:
+        return _QueueBackend.MULTIPROCESSING
+
+
+class RequestQueue:
+
+    def __init__(self, name: str, queue_type: Optional[_QueueBackend] = None):
+        self.name = name
+        self.queue: Union[multiprocessing.Queue, redis.Redis]
+        if queue_type == _QueueBackend.MULTIPROCESSING:
+            self.queue = multiprocessing.Queue()
+        else:
+            self.queue = redis.Redis(host='localhost',
+                                     port=46581,
+                                     db=0,
+                                     socket_timeout=0.1)
+
+    def put(self, object: Any):
+        if isinstance(self.queue, redis.Redis):
+            self.queue.lpush(self.name, object)
+        else:
+            self.queue.put(object)
+
+    def get(self):
+        if isinstance(self.queue, redis.Redis):
+            return self.queue.rpop(self.name)
+        else:
+            try:
+                return self.queue.get(block=False)
+            except queue.Empty:
+                return None
+
+
+_queue_backend = get_queue_backend()
+queues = {}
+for queue_type in QueueType:
+    queues[queue_type] = RequestQueue(queue_type.value,
+                                      queue_type=_queue_backend)
+
+
+def _wrapper(request_id: str, ignore_return_value: bool):
     """Wrapper for a request task."""
 
     def redirect_output(file):
@@ -56,17 +119,20 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
         log_path = request_task.log_path
         request_task.pid = pid
         request_task.status = requests.RequestStatus.RUNNING
+        func = request_task.entrypoint
+        request_body = request_task.request_body
+
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
         try:
-            os.environ.update(env_vars)
+            os.environ.update(request_body.env_vars)
             # Force color to be enabled.
             os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()
             from sky import skypilot_config
             logger.debug(f'skypilot_config: {skypilot_config._dict}')
-            return_value = func(*args, **kwargs)
+            return_value = func(**request_body.to_kwargs())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
                 stacktrace = traceback.format_exc()
@@ -90,30 +156,57 @@ def _wrapper(func: Callable[P, Any], request_id: str, env_vars: Dict[str, str],
         return return_value
 
 
-def start_background_request(
-        request_id: str,
-        request_name: str,
-        request_body: Dict[str, Any],
-        func: Callable[P, Any],
-        ignore_return_value: bool = False,
-        num_cpus: float = 0.5,
-        memory: float = 0.0,
-        # pylint: disable=keyword-arg-before-vararg
-        *args: P.args,
-        **kwargs: P.kwargs):
-    """Start a task."""
+def enqueue_request(request_id: str,
+                    request_name: str,
+                    request_body: payloads.RequestBody,
+                    func: Callable[P, Any],
+                    ignore_return_value: bool = False,
+                    queue_type: QueueType = QueueType.LOW_PRIORITY):
+    """Enqueue a request to the request queue."""
     request = requests.Request(request_id=request_id,
-                                     name=request_name,
-                                     entrypoint=func.__module__,
-                                     request_body=request_body,
-                                     status=requests.RequestStatus.PENDING)
+                               name=request_name,
+                               entrypoint=func,
+                               request_body=request_body,
+                               status=requests.RequestStatus.PENDING)
 
-    # TODO(zhwu): move this to Redis + Celery.
     if not requests.create_if_not_exists(request):
         logger.debug(f'Request {request_id} already exists.')
         return
 
     request.log_path.touch()
-    kwargs['env_vars'] = request_body.get('env_vars', {})
-    kwargs['ignore_return_value'] = ignore_return_value
-    _wrapper.options(num_cpus=num_cpus, memory=memory).remote(func, request_id, *args, **kwargs)
+    input_tuple = (request_id, ignore_return_value)
+    # Enqueue the request to the Redis list.
+    queues[queue_type].put(input_tuple)
+
+
+def request_worker(worker_id: int):
+    """Worker for the requests."""
+    logger.info(
+        f'Request worker {worker_id} -- started with pid '
+        f'{multiprocessing.current_process().pid}'
+    )
+    while True:
+        for queue_type in QueueType:
+            request = queues[queue_type].get()
+            if request is not None:
+                break
+        if request is None:
+            time.sleep(.1)
+            continue
+        request_id, ignore_return_value = request
+        logger.info(
+            f'Request worker {worker_id} -- running request: {request_id}')
+        _wrapper(request_id, ignore_return_value)
+
+
+def start_request_workers(
+        num_workers: int = 1) -> List[multiprocessing.Process]:
+    """Start the request workers."""
+    workers = []
+    for worker_id in range(num_workers):
+        worker = multiprocessing.Process(target=request_worker,
+                                         args=(worker_id,))
+        logger.info(f'Starting request worker: {worker_id}')
+        worker.start()
+        workers.append(worker)
+    return workers

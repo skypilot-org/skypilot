@@ -83,6 +83,9 @@ _set_http_proxy_env_vars()
 from sky import backends
 from sky import benchmark
 from sky import clouds
+from sky.admin_policy import AdminPolicy
+from sky.admin_policy import MutatedUserRequest
+from sky.admin_policy import UserRequest
 # from sky.api.sdk import download_logs
 from sky.api.sdk import autostop
 from sky.api.sdk import cancel
@@ -101,9 +104,6 @@ from sky.api.sdk import storage_delete
 from sky.api.sdk import storage_ls
 from sky.api.sdk import stream_and_get
 from sky.api.sdk import tail_logs
-from sky.admin_policy import AdminPolicy
-from sky.admin_policy import MutatedUserRequest
-from sky.admin_policy import UserRequest
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag
 from sky.data import Storage

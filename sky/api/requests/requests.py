@@ -7,7 +7,7 @@ import json
 import os
 import pathlib
 import sqlite3
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import filelock
 
@@ -15,16 +15,17 @@ from sky import exceptions
 from sky.api import common
 from sky.api.requests import decoders
 from sky.api.requests import encoders
+from sky.api.requests import payloads
 from sky.utils import common_utils
 from sky.utils import db_utils
 
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
-
 # TODO(zhwu): For scalability, there are several TODOs:
 # 1. Use Redis + Celery for task execution.
 # 2. Move logs to persistent place.
 # 3. Deploy API server in a autoscaling fashion.
+
 
 class RequestStatus(enum.Enum):
     """The status of a request."""
@@ -70,8 +71,8 @@ class Request:
 
     request_id: str
     name: str
-    entrypoint: str
-    request_body: Dict[str, Any]
+    entrypoint: Callable
+    request_body: payloads.RequestBody
     status: RequestStatus
     return_value: Any = None
     error: Optional[Dict[str, Any]] = None
@@ -118,8 +119,7 @@ class Request:
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
-        return cls.decode(
-            RequestPayload(**dict(zip(REQUEST_COLUMNS, row))))
+        return cls.decode(RequestPayload(**dict(zip(REQUEST_COLUMNS, row))))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
@@ -127,12 +127,14 @@ class Request:
 
     def encode(self) -> RequestPayload:
         """Serialize the request task."""
+        assert isinstance(self.request_body,
+                          payloads.RequestBody), (self.name, self.request_body)
         try:
             return RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
-                entrypoint=self.entrypoint,
-                request_body=json.dumps(self.request_body),
+                entrypoint=encoders.pickle_and_encode(self.entrypoint),
+                request_body=encoders.pickle_and_encode(self.request_body),
                 status=self.status.value,
                 return_value=json.dumps(self.return_value),
                 error=json.dumps(self.error),
@@ -149,11 +151,12 @@ class Request:
     @classmethod
     def decode(cls, payload: RequestPayload) -> 'Request':
         """Deserialize the request task."""
+
         return cls(
             request_id=payload.request_id,
             name=payload.name,
-            entrypoint=payload.entrypoint,
-            request_body=json.loads(payload.request_body),
+            entrypoint=decoders.decode_and_unpickle(payload.entrypoint),
+            request_body=decoders.decode_and_unpickle(payload.request_body),
             status=RequestStatus(payload.status),
             return_value=json.loads(payload.return_value),
             error=json.loads(payload.error),
@@ -183,7 +186,7 @@ def create_table(cursor, conn):
 
     # Table for Clusters
     cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS rest_tasks (
+        CREATE TABLE IF NOT EXISTS requests (
         request_id TEXT PRIMARY KEY,
         name TEXT,
         entrypoint TEXT,
@@ -236,7 +239,7 @@ def _get_rest_task_no_lock(request_id: str) -> Optional[Request]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM rest_tasks WHERE request_id LIKE ?',
+        cursor.execute('SELECT * FROM requests WHERE request_id LIKE ?',
                        (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
@@ -267,15 +270,15 @@ def get_request_tasks() -> List[Request]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM rest_tasks')
+        cursor.execute('SELECT * FROM requests')
         rows = cursor.fetchall()
         if rows is None:
             return []
-    rest_tasks = []
+    requests = []
     for row in rows:
         rest_task = Request.from_row(row)
-        rest_tasks.append(rest_task)
-    return rest_tasks
+        requests.append(rest_task)
+    return requests
 
 
 def _dump_request_no_lock(request_task: Request):
@@ -285,7 +288,7 @@ def _dump_request_no_lock(request_task: Request):
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'INSERT OR REPLACE INTO rest_tasks VALUES ({fill_str})',
+        cursor.execute(f'INSERT OR REPLACE INTO requests VALUES ({fill_str})',
                        row)
 
 

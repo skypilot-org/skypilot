@@ -41,33 +41,53 @@ class Control(enum.Enum):
         return cls(control_str), encoded_msg
 
 
-class EncodedStatus:
+class EncodedStatusMessage:
     """A class to encode status messages."""
 
     def __init__(self, msg: str):
         self.msg = msg
-        print(message_utils.encode_payload(Control.INIT.encode(self.msg)),
-              flush=True)
+
+    def init(self) -> str:
+        return message_utils.encode_payload(Control.INIT.encode(self.msg))
+
+    def enter(self) -> str:
+        return message_utils.encode_payload(Control.START.encode(self.msg))
+
+    def exit(self) -> str:
+        return message_utils.encode_payload(Control.STOP.encode(''))
+
+    def update(self, msg: str) -> str:
+        return message_utils.encode_payload(Control.UPDATE.encode(msg))
+
+    def stop(self) -> str:
+        return message_utils.encode_payload(Control.STOP.encode(''))
+
+    def start(self) -> str:
+        return message_utils.encode_payload(Control.START.encode(self.msg))
+
+
+class EncodedStatus:
+    """A class to encode status messages."""
+
+    def __init__(self, msg: str):
+        self.encoded_msg = EncodedStatusMessage(msg)
+        print(self.encoded_msg.init(), flush=True)
 
     def __enter__(self):
-        print(message_utils.encode_payload(Control.START.encode(self.msg)),
-              flush=True)
+        print(self.encoded_msg.enter(), flush=True)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        print(message_utils.encode_payload(Control.STOP.encode('')), flush=True)
+        print(self.encoded_msg.exit(), flush=True)
 
     def update(self, msg: str):
-        print(message_utils.encode_payload(Control.UPDATE.encode(msg)),
-              flush=True)
-        self.msg = msg
+        print(self.encoded_msg.update(msg), flush=True)
 
     def stop(self):
-        print(message_utils.encode_payload(Control.STOP.encode('')), flush=True)
+        print(self.encoded_msg.stop(), flush=True)
 
     def start(self):
-        print(message_utils.encode_payload(Control.START.encode(self.msg)),
-              flush=True)
+        print(self.encoded_msg.start(), flush=True)
 
 
 class _NoOpConsoleStatus:

@@ -48,7 +48,7 @@ logger = sky_logging.init_logger(__name__)
 def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.post(f'{api_common.get_server_url()}/check',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -94,7 +94,7 @@ def list_accelerators(gpus_only: bool = True,
         case_sensitive=case_sensitive,
     )
     response = requests.post(f'{api_common.get_server_url()}/list_accelerators',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -128,7 +128,7 @@ def optimize(dag: 'sky.Dag') -> str:
 
     body = payloads.OptimizeBody(dag=dag_str)
     response = requests.post(f'{api_common.get_server_url()}/optimize',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -273,7 +273,7 @@ def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
         follow=follow,
     )
     response = requests.post(f'{api_common.get_server_url()}/logs',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -285,7 +285,7 @@ def download_logs(cluster_name: str, job_ids: Optional[int]) -> str:
         job_ids=job_ids,
     )
     response = requests.post(f'{api_common.get_server_url()}/download_logs',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -420,7 +420,7 @@ def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
         job_ids=job_ids,
     )
     response = requests.post(f'{api_common.get_server_url()}/job_status',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -477,7 +477,7 @@ def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
         port=port,
     )
     response = requests.post(f'{api_common.get_server_url()}/endpoints',
-                            json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -570,7 +570,6 @@ def stream_and_get(request_id: str) -> Any:
         return get(request_id)
     except Exception as e:
         logger.info(f'Check more loggings with: sky api get {request_id}')
-    
 
 
 # === API server management ===

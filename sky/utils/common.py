@@ -43,8 +43,8 @@ def reload():
     # env vars, but since controller_utils is imported before the env vars are
     # set, it doesn't get updated. So we need to reload it here.
     # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
     from sky import skypilot_config
+    from sky.utils import controller_utils
     global SKY_SERVE_CONTROLLER_NAME
     global JOB_CONTROLLER_NAME
     global LEGACY_JOB_CONTROLLER_NAME

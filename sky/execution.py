@@ -17,8 +17,8 @@ from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
-from sky.utils import common
 from sky.utils import admin_policy_utils
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -566,11 +566,6 @@ def exec(  # pylint: disable=redefined-builtin
         if dryrun.
     """
     entrypoint = task
-    if isinstance(entrypoint, sky.Dag):
-        logger.warning(
-            f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
-            'deprecated. Pass sky.Task instead.'
-            f'{colorama.Style.RESET_ALL}')
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
 

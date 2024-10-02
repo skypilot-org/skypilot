@@ -1,13 +1,9 @@
-import ray
-import contextlib
-import subprocess
 import argparse
 import asyncio
-import json
+import contextlib
 import os
 import pathlib
 import sys
-import tempfile
 import time
 from typing import List, Optional
 import uuid
@@ -32,6 +28,7 @@ from sky.jobs.api import rest as jobs_rest
 from sky.serve.api import rest as serve_rest
 from sky.utils import dag_utils
 from sky.utils import registry
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
@@ -44,6 +41,10 @@ P = ParamSpec('P')
 
 logger = sky_logging.init_logger(__name__)
 
+# TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
+# need to be detached from the main requests queue. Otherwise, the streaming
+# response will block other requests from being processed.
+
 
 class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add a request ID to each request."""
@@ -54,7 +55,6 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers['X-Request-ID'] = request_id
         return response
-
 
 
 def refresh_cluster_status_event():
@@ -74,16 +74,18 @@ events = {'status': refresh_cluster_status_event}
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: fastapi.FastAPI):
+async def lifespan():
     # Startup: Run background tasks
     for event_id, (event_name, event) in enumerate(events.items()):
-        executor.start_background_request(num_cpus=0,
-                                          request_id=str(event_id),
-                                          request_name=event_name,
-                                          request_body={},
-                                          func=event)
+        executor.start_background_request(
+            request_id=str(event_id),
+            request_name=event_name,
+            request_body=payloads.RequestBody(),
+            func=event,
+            queue_type=executor.QueueType.BACKGROUND)
     yield
     # Shutdown: Add any cleanup code here if needed
+
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(
@@ -101,23 +103,23 @@ app.include_router(serve_rest.router, prefix='/serve', tags=['serve'])
 @app.post('/check')
 async def check(request: fastapi.Request, check_body: payloads.CheckBody):
     """Check enabled clouds."""
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='check',
-        request_body=json.loads(check_body.model_dump_json()),
+        request_body=check_body,
         func=sky_check.check,
-        clouds=check_body.clouds,
-        verbose=check_body.verbose,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
 @app.get('/enabled_clouds')
 async def enabled_clouds(request: fastapi.Request) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='enabled_clouds',
-        request_body={},
+        request_body=payloads.RequestBody(),
         func=core.enabled_clouds,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
@@ -126,14 +128,12 @@ async def realtime_gpu_availability(
     request: fastapi.Request,
     realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
 ) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='realtime_gpu_availability',
-        request_body=json.loads(
-            realtime_gpu_availability_body.model_dump_json()),
+        request_body=realtime_gpu_availability_body,
         func=core.realtime_gpu_availability,
-        name_filter=realtime_gpu_availability_body.name_filter,
-        quantity_filter=realtime_gpu_availability_body.quantity_filter,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
@@ -141,17 +141,12 @@ async def realtime_gpu_availability(
 async def list_accelerators(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='list_accelerators',
-        request_body=json.loads(list_accelerator_counts_body.model_dump_json()),
+        request_body=list_accelerator_counts_body,
         func=service_catalog.list_accelerators,
-        gpus_only=list_accelerator_counts_body.gpus_only,
-        clouds=list_accelerator_counts_body.clouds,
-        region_filter=list_accelerator_counts_body.region_filter,
-        all_regions=list_accelerator_counts_body.all_regions,
-        require_price=list_accelerator_counts_body.require_price,
-        case_sensitive=list_accelerator_counts_body.case_sensitive,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
@@ -159,33 +154,25 @@ async def list_accelerators(
 async def list_accelerator_counts(
         request: fastapi.Request,
         list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',
-        request_body=json.loads(list_accelerator_counts_body.model_dump_json()),
+        request_body=list_accelerator_counts_body,
         func=service_catalog.list_accelerator_counts,
-        gpus_only=list_accelerator_counts_body.gpus_only,
-        clouds=list_accelerator_counts_body.clouds,
-        region_filter=list_accelerator_counts_body.region_filter,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
 @app.post('/optimize')
 async def optimize(optimize_body: payloads.OptimizeBody,
                    request: fastapi.Request):
-    with tempfile.NamedTemporaryFile(mode='w') as f:
-        f.write(optimize_body.dag)
-        f.flush()
-        dag = dag_utils.load_chain_dag_from_yaml(f.name)
-    request_id = request.state.request_id
-    executor.start_background_request(
-        request_id,
+    executor.enqueue_request(
+        request_id=request.state.request_id,
         request_name='optimize',
-        request_body=json.loads(optimize_body.model_dump_json()),
+        request_body=optimize_body,
         ignore_return_value=True,
         func=optimizer.Optimizer.optimize,
-        dag=dag,
-        minimize=optimize_body.minimize,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
@@ -232,74 +219,38 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     Args:
         task: The YAML string of the task to launch.
     """
-    dag = common.process_mounts_in_task(launch_body.task,
-                                        launch_body.env_vars,
-                                        workdir_only=False)
 
-    backend = registry.BACKEND_REGISTRY.from_str(launch_body.backend)
     request_id = request.state.request_id
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id,
         request_name='launch',
-        request_body=json.loads(launch_body.model_dump_json()),
+        request_body=launch_body,
         func=execution.launch,
-        task=dag,
-        cluster_name=launch_body.cluster_name,
-        retry_until_up=launch_body.retry_until_up,
-        idle_minutes_to_autostop=launch_body.idle_minutes_to_autostop,
-        dryrun=launch_body.dryrun,
-        down=launch_body.down,
-        backend=backend,
-        optimize_target=launch_body.optimize_target,
-        detach_setup=launch_body.detach_setup,
-        detach_run=launch_body.detach_run,
-        no_setup=launch_body.no_setup,
-        clone_disk_from=launch_body.clone_disk_from,
-        _quiet_optimizer=launch_body.quiet_optimizer,
-        _is_launched_by_jobs_controller=launch_body.
-        is_launched_by_jobs_controller,
-        _is_launched_by_sky_serve_controller=launch_body.
-        is_launched_by_sky_serve_controller,
-        _disable_controller_check=launch_body.disable_controller_check,
+        queue_type=executor.QueueType.LOW_PRIORITY,
     )
 
 
 @app.post('/exec')
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
-    dag = common.process_mounts_in_task(exec_body.task,
-                                        exec_body.env_vars,
-                                        workdir_only=True)
-    if len(dag.tasks) != 1:
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail='The DAG for exec must have exactly one task.')
-    task = dag.tasks[0]
-    backend = registry.BACKEND_REGISTRY.from_str(exec_body.backend)
 
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='exec',
-        request_body=json.loads(exec_body.model_dump_json()),
+        request_body=exec_body,
         func=execution.exec,
-        task=task,
-        cluster_name=exec_body.cluster_name,
-        backend=backend,
-        dryrun=exec_body.dryrun,
-        down=exec_body.down,
-        detach_run=exec_body.detach_run,
+        queue_type=executor.QueueType.LOW_PRIORITY,
     )
 
 
 @app.post('/stop')
 async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='stop',
-        request_body=json.loads(stop_body.model_dump_json()),
+        request_body=stop_body,
         func=core.stop,
-        cluster_name=stop_body.cluster_name,
-        purge=stop_body.purge,
+        queue_type=executor.QueueType.LOW_PRIORITY,
     )
 
 
@@ -308,54 +259,47 @@ async def status(
     request: fastapi.Request,
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='status',
-        request_body=json.loads(status_body.model_dump_json()),
+        request_body=status_body,
         func=core.status,
-        cluster_names=status_body.cluster_names,
-        refresh=status_body.refresh,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
 @app.post('/endpoints')
 async def endpoints(request: fastapi.Request,
                     endpoint_body: payloads.EndpointBody) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='endpoints',
-        request_body=json.loads(endpoint_body.model_dump_json()),
+        request_body=endpoint_body,
         func=core.endpoints,
-        cluster_name=endpoint_body.cluster_name,
-        port=endpoint_body.port,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
 @app.post('/down')
 async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='down',
-        request_body=json.loads(down_body.model_dump_json()),
+        request_body=down_body,
         func=core.down,
-        cluster_name=down_body.cluster_name,
-        purge=down_body.purge,
+        queue_type=executor.QueueType.LOW_PRIORITY,
     )
 
 
 @app.post('/start')
 async def start(request: fastapi.Request, start_body: payloads.StartBody):
     """Restart a cluster."""
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='start',
-        request_body=json.loads(start_body.model_dump_json()),
+        request_body=start_body,
         func=core.start,
-        cluster_name=start_body.cluster_name,
-        idle_minutes_to_autostop=start_body.idle_minutes_to_autostop,
-        retry_until_up=start_body.retry_until_up,
-        down=start_body.down,
-        force=start_body.force,
+        queue_type=executor.QueueType.LOW_PRIORITY,
     )
 
 
@@ -363,28 +307,24 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
 async def autostop(request: fastapi.Request,
                    autostop_body: payloads.AutostopBody):
     """Set the autostop time for a cluster."""
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='autostop',
-        request_body=json.loads(autostop_body.model_dump_json()),
+        request_body=autostop_body,
         func=core.autostop,
-        cluster_name=autostop_body.cluster_name,
-        idle_minutes=autostop_body.idle_minutes,
-        down=autostop_body.down,
+        queue_type=executor.QueueType.LOW_PRIORITY,
     )
 
 
 @app.post('/queue')
 async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
     """Get the queue of tasks for a cluster."""
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='queue',
-        request_body=json.loads(queue_body.model_dump_json()),
+        request_body=queue_body,
         func=core.queue,
-        cluster_name=queue_body.cluster_name,
-        skip_finished=queue_body.skip_finished,
-        all_users=queue_body.all_users,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
@@ -392,41 +332,36 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
 async def job_status(request: fastapi.Request,
                      job_status_body: payloads.JobStatusBody):
     """Get the status of a job."""
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='job_status',
-        request_body=json.loads(job_status_body.model_dump_json()),
+        request_body=job_status_body,
         func=core.job_status,
-        cluster_name=job_status_body.cluster_name,
-        job_ids=job_status_body.job_ids,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
 @app.post('/cancel')
 async def cancel(request: fastapi.Request,
                  cancel_body: payloads.CancelBody) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='cancel',
-        request_body=json.loads(cancel_body.model_dump_json()),
+        request_body=cancel_body,
         func=core.cancel,
-        cluster_name=cancel_body.cluster_name,
-        job_ids=cancel_body.job_ids,
-        all=cancel_body.all,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
 @app.post('/logs')
 async def logs(request: fastapi.Request,
                cluster_job_body: payloads.ClusterJobBody) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='logs',
-        request_body=json.loads(cluster_job_body.model_dump_json()),
+        request_body=cluster_job_body,
         func=core.tail_logs,
-        cluster_name=cluster_job_body.cluster_name,
-        job_id=cluster_job_body.job_id,
-        follow=cluster_job_body.follow,
+        queue_type=executor.QueueType.HIGH_PRIORITY,
     )
 
 
@@ -446,20 +381,20 @@ async def logs(request: fastapi.Request,
 
 @app.get('/cost_report')
 async def cost_report(request: fastapi.Request) -> None:
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='cost_report',
-        request_body={},
+        request_body=payloads.RequestBody(),
         func=core.cost_report,
     )
 
 
 @app.get('/storage/ls')
 async def storage_ls(request: fastapi.Request):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='storage_ls',
-        request_body={},
+        request_body=payloads.RequestBody(),
         func=core.storage_ls,
     )
 
@@ -467,33 +402,31 @@ async def storage_ls(request: fastapi.Request):
 @app.post('/storage/delete')
 async def storage_delete(request: fastapi.Request,
                          storage_body: payloads.StorageBody):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='storage_delete',
-        request_body=json.loads(storage_body.model_dump_json()),
+        request_body=storage_body,
         func=core.storage_delete,
-        name=storage_body.name,
     )
 
 
 @app.post('/local_up')
 async def local_up(request: fastapi.Request,
                    local_up_body: payloads.LocalUpBody):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='local_up',
-        request_body=json.loads(local_up_body.model_dump_json()),
+        request_body=local_up_body,
         func=core.local_up,
-        gpus=local_up_body.gpus,
     )
 
 
 @app.post('/local_down')
 async def local_down(request: fastapi.Request):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='local_down',
-        request_body={},
+        request_body=payloads.RequestBody(),
         func=core.local_down,
     )
 
@@ -507,10 +440,10 @@ def long_running_request_inner():
 
 @app.get('/long_running_request')
 async def long_running_request(request: fastapi.Request):
-    executor.start_background_request(
+    executor.enqueue_request(
         request_id=request.state.request_id,
         request_name='long_running_request',
-        request_body={},
+        request_body=payloads.RequestBody(),
         func=long_running_request_inner,
     )
 
@@ -529,6 +462,17 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
 
 
 async def log_streamer(request_id: str, log_path: pathlib.Path):
+    request_task = requests_lib.get_request(request_id)
+    encoded_rich_status = rich_utils.EncodedStatusMessage(
+        f'Checking request: {request_id}')
+    yield encoded_rich_status.init()
+    while request_task.status < requests_lib.RequestStatus.RUNNING:
+        encoded_rich_status.update(
+            f'Waiting for request to start: {request_id}')
+        await asyncio.sleep(1)
+        request_task = requests_lib.get_request(request_id)
+
+    yield encoded_rich_status.stop()
     with log_path.open('rb') as f:
         while True:
             line = f.readline()
@@ -569,17 +513,19 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
         rest_task.status = requests_lib.RequestStatus.ABORTED
         print(f'Killing request process {rest_task.pid}', flush=True)
         if rest_task.pid is not None:
-            executor.start_background_request(
+            executor.enqueue_request(
                 request_id=request.state.request_id,
                 request_name='kill_children_processes',
-                request_body={},
+                request_body=payloads.KillChildrenProcessesBody(
+                    parent_pids=[rest_task.pid], force=True),
                 func=subprocess_utils.kill_children_processes,
-                parent_pids=[rest_task.pid],
-                force=True)
+                queue_type=executor.QueueType.HIGH_PRIORITY,
+            )
 
 
 @app.get('/requests')
-async def requests(request_id: Optional[str] = None) -> List[requests_lib.Request]:
+async def requests(
+        request_id: Optional[str] = None) -> List[requests_lib.Request]:
     if request_id is None:
         return requests_lib.get_request_tasks()
     else:
@@ -606,15 +552,19 @@ if __name__ == '__main__':
     parser.add_argument('--reload', action='store_true')
     parser.add_argument('--deploy', action='store_true')
     cmd_args = parser.parse_args()
-    workers = None
+    num_workers = None
     if cmd_args.deploy:
-        workers = os.cpu_count()
-    
-    ray.init()
+        num_workers = os.cpu_count()
 
-    logger.info('Starting API server')
-    uvicorn.run('sky.api.rest:app',
-                host=cmd_args.host,
-                port=cmd_args.port,
-                reload=cmd_args.reload,
-                workers=workers)
+    try:
+        workers = executor.start_request_workers(num_workers=1 + len(events))
+
+        logger.info('Starting API server')
+        uvicorn.run('sky.api.rest:app',
+                    host=cmd_args.host,
+                    port=cmd_args.port,
+                    reload=cmd_args.reload,
+                    workers=num_workers)
+    finally:
+        for worker in workers:
+            worker.terminate()

@@ -5085,6 +5085,9 @@ def local():
 
 
 def _deploy_local_cluster(gpus: bool):
+    from sky import check as sky_check
+    from sky.skylet import log_lib
+
     cluster_created = False
 
     # Check if GPUs are available on the host
@@ -5212,6 +5215,8 @@ def _deploy_local_cluster(gpus: bool):
 
 def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
                            cleanup: bool):
+    from sky.skylet import log_lib
+
     success = False
     path_to_package = os.path.dirname(os.path.dirname(__file__))
     up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
@@ -5433,7 +5438,7 @@ def api_login(endpoint: Optional[str]):
         else:
             config = skypilot_config.set_nested(('api_server', 'endpoint'),
                                                 endpoint)
-        common_utils.dump_yaml(config_path, config)
+        common_utils.dump_yaml(str(config_path), config)
         click.secho(f'Logged in to API server at {endpoint}', fg='green')
 
 

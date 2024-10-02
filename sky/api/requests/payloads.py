@@ -1,7 +1,7 @@
 """Payloads for the Sky API requests."""
 import functools
 import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
 
@@ -24,6 +24,11 @@ def request_body_env_vars() -> dict:
 class RequestBody(pydantic.BaseModel):
     env_vars: Dict[str, str] = request_body_env_vars()
 
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = self.model_dump()
+        kwargs.pop('env_vars')
+        return kwargs
+
 
 class CheckBody(RequestBody):
     clouds: Optional[Tuple[str]]
@@ -33,6 +38,20 @@ class CheckBody(RequestBody):
 class OptimizeBody(RequestBody):
     dag: str
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        import tempfile
+
+        from sky.utils import dag_utils
+
+        kwargs = super().to_kwargs()
+
+        with tempfile.NamedTemporaryFile(mode='w') as f:
+            f.write(self.dag)
+            f.flush()
+            dag = dag_utils.load_chain_dag_from_yaml(f.name)
+        kwargs['dag'] = dag
+        return kwargs
 
 
 class LaunchBody(RequestBody):
@@ -56,6 +75,26 @@ class LaunchBody(RequestBody):
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
 
+    def to_kwargs(self) -> Dict[str, Any]:
+        from sky.api import common
+        from sky.utils import registry
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task(self.task,
+                                            self.env_vars,
+                                            workdir_only=False)
+
+        backend = registry.BACKEND_REGISTRY.from_str(self.backend)
+        kwargs['task'] = dag
+        kwargs['backend'] = backend
+        kwargs['_quiet_optimizer'] = kwargs.pop('quiet_optimizer')
+        kwargs['_is_launched_by_jobs_controller'] = kwargs.pop(
+            'is_launched_by_jobs_controller')
+        kwargs['_is_launched_by_sky_serve_controller'] = kwargs.pop(
+            'is_launched_by_sky_serve_controller')
+        kwargs['_disable_controller_check'] = kwargs.pop(
+            'disable_controller_check')
+        return kwargs
+
 
 class ExecBody(RequestBody):
     task: str
@@ -64,6 +103,19 @@ class ExecBody(RequestBody):
     down: bool = False
     backend: Optional[str] = None
     detach_run: bool = False
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        from sky.api import common
+        from sky.utils import registry
+
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task(self.task,
+                                            self.env_vars,
+                                            workdir_only=True)
+        backend = registry.BACKEND_REGISTRY.from_str(self.backend)
+        kwargs['task'] = dag
+        kwargs['backend'] = backend
+        return kwargs
 
 
 class StopOrDownBody(RequestBody):
@@ -139,6 +191,14 @@ class JobsLaunchBody(RequestBody):
     detach_run: bool
     retry_until_up: bool
 
+    def to_kwargs(self) -> Dict[str, Any]:
+        from sky.api import common
+        kwargs = super().to_kwargs()
+        kwargs['task'] = common.process_mounts_in_task(self.task,
+                                                       self.env_vars,
+                                                       workdir_only=False)
+        return kwargs
+
 
 class JobsQueueBody(RequestBody):
     refresh: bool = False
@@ -162,11 +222,35 @@ class ServeUpBody(RequestBody):
     task: str
     service_name: str
 
+    def to_kwargs(self) -> Dict[str, Any]:
+        from sky.api import common
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task(self.task,
+                                            self.env_vars,
+                                            workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a service.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
 
 class ServeUpdateBody(RequestBody):
     task: str
     service_name: str
     mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        from sky.api import common
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task(self.task,
+                                            self.env_vars,
+                                            workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a service.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
 
 
 class ServeDownBody(RequestBody):
@@ -204,3 +288,8 @@ class ListAcceleratorsBody(RequestBody):
 
 class LocalUpBody(RequestBody):
     gpus: bool = True
+
+
+class KillChildrenProcessesBody(RequestBody):
+    parent_pids: List[int]
+    force: bool = False
