@@ -277,7 +277,7 @@ def up(
             f'\n{colorama.Fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
             f'\n📋 Useful Commands'
-            '\n├── To check the status:\t\t'
+            '\n├── To check service status:\t'
             f'{constants.BOLD}sky serve status {service_name} '
             f'[--endpoint]{constants.RESET_BOLD}'
             '\n├── To teardown the service:\t'
@@ -295,7 +295,7 @@ def up(
             '\n├── To monitor the status:\t'
             f'{constants.BOLD}watch -n10 sky serve status {service_name}'
             f'{constants.RESET_BOLD}'
-            '\n└── To send a test request:\t\t'
+            '\n└── To send a test request:\t'
             f'{constants.BOLD}curl {endpoint}'
             f'{constants.RESET_BOLD}'
             '\n\n' +

@@ -1318,9 +1318,8 @@ class S3Store(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Syncing {source_message} -> '
-                    f's3://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f's3://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -1730,9 +1729,8 @@ class GcsStore(AbstractStore):
                         f'cp -e -n -r -I gs://{self.name}')
 
         with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Syncing {source_message} -> '
-                    f'gs://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f'gs://{self.name}/')):
             data_utils.run_upload_cli(sync_command,
                                       self._ACCESS_DENIED_MESSAGE,
                                       bucket_name=self.name)
@@ -1787,9 +1785,8 @@ class GcsStore(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Syncing {source_message} -> '
-                    f'gs://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f'gs://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -3372,9 +3369,8 @@ class IBMCosStore(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Syncing {source_message} -> '
-                    f'cos://{self.region}/{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f'cos://{self.region}/{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
