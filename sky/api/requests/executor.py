@@ -93,6 +93,8 @@ class RequestQueue:
             assert isinstance(self.queue, redis.Redis), "Redis is not installed"
             self.queue.lpush(self.name, object)
         else:
+            assert isinstance(self.queue,
+                              multiprocessing.Queue), type(self.queue)
             self.queue.put(object)
 
     def get(self):
