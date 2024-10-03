@@ -7,6 +7,7 @@ import rich.console as rich_console
 
 console = rich_console.Console()
 _status = None
+_status_nesting_level = 0
 
 _logging_lock = threading.RLock()
 
@@ -30,25 +31,52 @@ class _NoOpConsoleStatus:
         pass
 
 
+class NestedStatus:
+    """Handle nested status: inner one does not exit spinner when finished."""
+
+    def __enter__(self):
+        global _status_nesting_level
+        _status_nesting_level += 1
+        _status.__enter__()
+        return _status
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _status_nesting_level, _status
+        _status_nesting_level -= 1
+        if _status_nesting_level == 0:
+            _status.__exit__(exc_type, exc_val, exc_tb)
+            _status = None
+
+    def update(self, *args, **kwargs):
+        _status.update(*args, **kwargs)
+
+    def stop(self):
+        _status.stop()
+
+    def start(self):
+        _status.start()
+
+
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
+    global _status
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
-        global _status
         if _status is None:
             _status = console.status(msg)
         _status.update(msg)
-        return _status
+        return NestedStatus()
     return _NoOpConsoleStatus()
 
 
 def stop_safe_status():
     """Stop the safe status."""
-    global _status
+    global _status, _status_nesting_level
     if _status is not None:
         _status.stop()
         _status = None
+        _status_nesting_level = 0
 
 
 def force_update_status(msg: str):
