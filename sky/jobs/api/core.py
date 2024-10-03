@@ -140,12 +140,12 @@ def launch(
             f'{colorama.Style.RESET_ALL}')
         sky_logging.print('Launching jobs controller...')
         return execution.launch(task=controller_task,
-                         cluster_name=controller_name,
-                         stream_logs=stream_logs,
-                         idle_minutes_to_autostop=skylet_constants.
-                         CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                         retry_until_up=True,
-                         _disable_controller_check=True)
+                                cluster_name=controller_name,
+                                stream_logs=stream_logs,
+                                idle_minutes_to_autostop=skylet_constants.
+                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                retry_until_up=True,
+                                _disable_controller_check=True)
 
 
 @usage_lib.entrypoint

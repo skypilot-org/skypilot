@@ -20,12 +20,13 @@ if typing.TYPE_CHECKING:
     import redis
     from redis import exceptions as redis_exceptions
 else:
+    redis = None
+    redis_exceptions = None
     try:
         import redis
         from redis import exceptions as redis_exceptions
     except ImportError:
-        redis = None  # type: ignore
-        redis_exceptions = None  # type: ignore
+        pass
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -39,6 +40,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 class ScheduleType(enum.Enum):
+    """The schedule type for the requests."""
     BLOCKING = 'blocking'
     # Queue for requests that should be executed in non-blocking manner.
     NON_BLOCKING = 'non_blocking'
@@ -61,19 +63,21 @@ def get_queue_backend() -> _QueueBackend:
     if redis is None:
         return _QueueBackend.MULTIPROCESSING
     try:
-        assert redis is not None, "Redis is not installed"
+        assert redis is not None, 'Redis is not installed'
         queue = redis.Redis(host='localhost',
                             port=46581,
                             db=0,
                             socket_timeout=0.1)
         queue.ping()
         return _QueueBackend.REDIS
+    # pylint: disable=broad-except
     except (redis_exceptions.ConnectionError
             if redis_exceptions is not None else Exception):
         return _QueueBackend.MULTIPROCESSING
 
 
 class RequestQueue:
+    """The queue for the requests, either redis or multiprocessing."""
 
     def __init__(self, name: str, queue_type: Optional[_QueueBackend] = None):
         self.name = name
@@ -82,24 +86,24 @@ class RequestQueue:
         if queue_type == _QueueBackend.MULTIPROCESSING:
             self.queue = multiprocessing.Queue()
         else:
-            assert redis is not None, "Redis is not installed"
+            assert redis is not None, 'Redis is not installed'
             self.queue = redis.Redis(host='localhost',
                                      port=46581,
                                      db=0,
                                      socket_timeout=0.1)
 
-    def put(self, object: Any):
+    def put(self, obj: Any):
         if self.queue_type == _QueueBackend.REDIS:
-            assert isinstance(self.queue, redis.Redis), "Redis is not installed"
-            self.queue.lpush(self.name, object)
+            assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
+            self.queue.lpush(self.name, obj)
         else:
             assert isinstance(self.queue,
                               multiprocessing.queues.Queue), type(self.queue)
-            self.queue.put(object)
+            self.queue.put(obj)
 
     def get(self):
         if self.queue_type == _QueueBackend.REDIS:
-            assert isinstance(self.queue, redis.Redis), "Redis is not installed"
+            assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
             return self.queue.rpop(self.name)
         else:
             try:
@@ -117,9 +121,8 @@ class RequestQueue:
 
 _queue_backend = get_queue_backend()
 queues = {}
-for queue_type in list(ScheduleType):
-    queues[queue_type] = RequestQueue(queue_type.value,
-                                      queue_type=_queue_backend)
+for t in list(ScheduleType):
+    queues[t] = RequestQueue(t.value, queue_type=_queue_backend)
 
 
 def _wrapper(request_id: str, ignore_return_value: bool):
@@ -164,8 +167,6 @@ def _wrapper(request_id: str, ignore_return_value: bool):
             # Force color to be enabled.
             os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()
-            from sky import skypilot_config
-            logger.debug(f'skypilot_config: {skypilot_config._dict}')
             return_value = func(**request_body.to_kwargs())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
@@ -246,7 +247,7 @@ def request_worker(worker_id: int, non_blocking: bool = False):
             # Wait for the request to finish.
             try:
                 process.join()
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.error(
                     f'Request worker {worker_id} -- request {request_id} '
                     f'failed: {e}')
@@ -271,7 +272,7 @@ def start_request_queue_workers(
 
     # Start a non-blocking worker.
     worker = multiprocessing.Process(target=request_worker, args=(-1, True))
-    logger.info(f'Starting non-blocking request worker')
+    logger.info('Starting non-blocking request worker')
     worker.start()
     workers.append(worker)
     return workers

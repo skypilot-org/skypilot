@@ -30,7 +30,6 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
-from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -657,7 +656,7 @@ def abort(request_id: Optional[str] = None) -> str:
 @usage_lib.entrypoint
 def requests_ls(
         request_id: Optional[str] = None) -> List[requests_lib.RequestPayload]:
-    body = payloads.RequestLsBody(request_id=request_id)
+    body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(f'{api_common.get_server_url()}/requests',
                             json=json.loads(body.model_dump_json()),
                             timeout=5)

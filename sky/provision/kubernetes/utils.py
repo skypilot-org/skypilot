@@ -1052,7 +1052,6 @@ def construct_ssh_jump_command(
     if ssh_jump_port is not None:
         ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
-        original_proxy_cmd_path = proxy_cmd_path
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)

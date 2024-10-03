@@ -1047,8 +1047,10 @@ def launch(
     and they undergo job queue scheduling.
     """
     if not detach_setup:
-        click.secho('--no-detach-setup is no longer supported and will be '
-                    'ignored', fg='yellow')
+        click.secho(
+            '--no-detach-setup is no longer supported and will be '
+            'ignored',
+            fg='yellow')
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
@@ -1116,8 +1118,9 @@ def launch(
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])
         if not detach_run:
-            click.secho(f'Streaming logs', fg='yellow')
-            sdk.stream_and_get(sdk.tail_logs(handle.get_cluster_name(), job_id, True))
+            click.secho('Streaming logs...', fg='yellow')
+            sdk.stream_and_get(
+                sdk.tail_logs(handle.get_cluster_name(), job_id, True))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1258,12 +1261,11 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     task = task_or_dag
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    request_id = sdk.exec(task,
-                          cluster_name=cluster)
+    request_id = sdk.exec(task, cluster_name=cluster)
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        click.secho(f'Streaming logs...', fg='yellow')
+        click.secho('Streaming logs...', fg='yellow')
         sdk.stream_and_get(sdk.tail_logs(cluster, job_id, True))
 
 
@@ -1907,7 +1909,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     user_str = 'all users' if all_users else 'current user'
     for cluster, job_table in job_tables.items():
         click.echo(f'\nJob queue of {user_str} on cluster {cluster}\n'
-        f'{job_table}')
+                   f'{job_table}')
 
     if unsupported_clusters:
         click.secho(
@@ -3075,9 +3077,8 @@ def show_gpus(
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
         realtime_gpu_availability_list = sdk.stream_and_get(
-            sdk.realtime_gpu_availability(
-                context=context,
-                name_filter=name_filter,
+            sdk.realtime_gpu_availability(context=context,
+                                          name_filter=name_filter,
                                           quantity_filter=quantity_filter))
         if not realtime_gpu_availability_list:
             err_msg = 'No GPUs found in Kubernetes cluster. '
@@ -3096,7 +3097,8 @@ def show_gpus(
             raise ValueError(full_err_msg)
 
         for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
-            gpu_availability = common.RealtimeGpuAvailability(*realtime_gpu_availability            )
+            gpu_availability = common.RealtimeGpuAvailability(
+                *realtime_gpu_availability)
             realtime_gpu_table.add_row([
                 gpu_availability.gpu,
                 _list_to_str(gpu_availability.counts),
@@ -3640,7 +3642,11 @@ def jobs_launch(
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
     if not async_call and not detach_run:
         job_id = job_id_handle.job_id
-        sdk.stream_and_get(managed_jobs.tail_logs(name=None, job_id=job_id, follow=True, controller=False))
+        sdk.stream_and_get(
+            managed_jobs.tail_logs(name=None,
+                                   job_id=job_id,
+                                   follow=True,
+                                   controller=False))
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -5095,7 +5101,9 @@ def local():
     pass
 
 
+# TODO(zhwu) This should be fixed for client-server architecture.
 def _deploy_local_cluster(gpus: bool):
+    # pylint: disable=import-outside-toplevel
     from sky import check as sky_check
     from sky.skylet import log_lib
 
@@ -5224,8 +5232,10 @@ def _deploy_local_cluster(gpus: bool):
             f'{gpu_hint}')
 
 
+# TODO(zhwu): This should be fixed for client-server architecture.
 def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
                            cleanup: bool):
+    # pylint: disable=import-outside-toplevel
     from sky.skylet import log_lib
 
     success = False
@@ -5315,6 +5325,7 @@ def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
              cleanup: bool):
     """Creates a local or remote cluster."""
+
     # TODO(zhwu): figure out this for client-server architecture.
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5406,11 +5417,12 @@ def api_get(request_id: Optional[str]):
               required=False,
               help='Abort all requests.')
 @usage_lib.entrypoint
+# pylint: disable=redefined-builtin
 def api_abort(request_id: Optional[str], all: bool):
     """Abort a request running on API server."""
     if request_id is None and not all:
         raise click.BadParameter('Either specify a request ID or use --all to '
-                                'abort all requests.')
+                                 'abort all requests.')
     if all:
         request_id = None
     sdk.abort(request_id)
@@ -5424,6 +5436,7 @@ def api_abort(request_id: Optional[str], all: bool):
               required=False,
               help='Show all requests.')
 @usage_lib.entrypoint
+# pylint: disable=redefined-builtin
 def api_ls(request_id: Optional[str], all: bool):
     """List requests on API server."""
     request_list = sdk.requests_ls(request_id)
@@ -5434,10 +5447,13 @@ def api_ls(request_id: Optional[str], all: bool):
         'Status',
     ])
     for request in request_list:
-        id = request.request_id
+        r_id = request.request_id
         if not all:
-            id = status_utils.truncate_long_string(id, 8)
-        table.add_row([id, request.name, log_utils.readable_time_duration(request.created_at), request.status])
+            r_id = status_utils.truncate_long_string(r_id, 8)
+        table.add_row([
+            r_id, request.name,
+            log_utils.readable_time_duration(request.created_at), request.status
+        ])
     click.echo(table)
 
 

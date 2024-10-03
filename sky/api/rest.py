@@ -7,7 +7,7 @@ import os
 import pathlib
 import sys
 import time
-from typing import List, Optional
+from typing import List
 import uuid
 import zipfile
 
@@ -74,8 +74,9 @@ events = {'status': refresh_cluster_status_event}
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: fastapi.FastAPI):
+async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
+    del app  # unused
     # Startup: Run background tasks
     for event_id, (event_name, event) in enumerate(events.items()):
         executor.schedule_request(
@@ -547,8 +548,10 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
 
 @app.get('/requests')
 async def requests(
-    request: fastapi.Request, request_ls_body: payloads.RequestLsBody
+    request: fastapi.Request, request_ls_body: payloads.RequestIdBody
 ) -> List[requests_lib.RequestPayload]:
+    """Get the list of requests."""
+    del request  # Unused.
     if request_ls_body.request_id is None:
         return [
             request_task.readable_encode()
@@ -583,6 +586,7 @@ if __name__ == '__main__':
     if cmd_args.deploy:
         num_workers = os.cpu_count()
 
+    workers = []
     try:
         num_queue_workers = os.cpu_count()
         if num_queue_workers is None:

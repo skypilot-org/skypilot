@@ -4,11 +4,11 @@ See `Stage` for a Task's life cycle.
 """
 import enum
 import os
+import typing
 from typing import List, Optional, Tuple, Union
 
 import colorama
 
-import sky
 from sky import admin_policy
 from sky import backends
 from sky import clouds
@@ -27,6 +27,9 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 

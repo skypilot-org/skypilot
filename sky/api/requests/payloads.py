@@ -7,9 +7,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import pydantic
 
 from sky import serve
+from sky.api import common
 from sky.skylet import constants
-from sky.utils import common
+from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import registry
 
 
 @functools.lru_cache()
@@ -23,6 +25,7 @@ def request_body_env_vars() -> dict:
 
 
 class RequestBody(pydantic.BaseModel):
+    """The request body for the SkyPilot API."""
     env_vars: Dict[str, str] = request_body_env_vars()
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -37,13 +40,15 @@ class RequestBody(pydantic.BaseModel):
 
 
 class CheckBody(RequestBody):
+    """The request body for the check endpoint."""
     clouds: Optional[Tuple[str]]
     verbose: bool
 
 
 class OptimizeBody(RequestBody):
+    """The request body for the optimize endpoint."""
     dag: str
-    minimize: common.OptimizeTarget = common.OptimizeTarget.COST
+    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
 
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
@@ -70,7 +75,7 @@ class LaunchBody(RequestBody):
     dryrun: bool = False
     down: bool = False
     backend: Optional[str] = None
-    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST
+    optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
     no_setup: bool = False
     clone_disk_from: Optional[str] = None
     # Internal only:
@@ -81,8 +86,7 @@ class LaunchBody(RequestBody):
     disable_controller_check: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
-        from sky.api import common
-        from sky.utils import registry
+
         kwargs = super().to_kwargs()
         dag = common.process_mounts_in_task(self.task,
                                             self.env_vars,
@@ -102,6 +106,7 @@ class LaunchBody(RequestBody):
 
 
 class ExecBody(RequestBody):
+    """The request body for the exec endpoint."""
     task: str
     cluster_name: str
     dryrun: bool = False
@@ -109,8 +114,6 @@ class ExecBody(RequestBody):
     backend: Optional[str] = None
 
     def to_kwargs(self) -> Dict[str, Any]:
-        from sky.api import common
-        from sky.utils import registry
 
         kwargs = super().to_kwargs()
         dag = common.process_mounts_in_task(self.task,
@@ -128,11 +131,13 @@ class StopOrDownBody(RequestBody):
 
 
 class StatusBody(RequestBody):
+    """The request body for the status endpoint."""
     cluster_names: Optional[List[str]] = None
-    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+    refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
 
 
 class StartBody(RequestBody):
+    """The request body for the start endpoint."""
     cluster_name: str
     idle_minutes_to_autostop: Optional[int] = None
     retry_until_up: bool = False
@@ -141,18 +146,21 @@ class StartBody(RequestBody):
 
 
 class AutostopBody(RequestBody):
+    """The request body for the autostop endpoint."""
     cluster_name: str
     idle_minutes: int
     down: bool = False
 
 
 class QueueBody(RequestBody):
+    """The request body for the queue endpoint."""
     cluster_name: str
     skip_finished: bool = False
     all_users: bool = False
 
 
 class CancelBody(RequestBody):
+    """The request body for the cancel endpoint."""
     cluster_name: str
     job_ids: Optional[List[int]]
     all: bool = False
@@ -161,45 +169,42 @@ class CancelBody(RequestBody):
 
 
 class ClusterJobBody(RequestBody):
+    """The request body for the cluster job endpoint."""
     cluster_name: str
     job_id: Optional[int]
     follow: bool = True
 
 
 class ClusterJobsBody(RequestBody):
+    """The request body for the cluster jobs endpoint."""
     cluster_name: str
     job_ids: Optional[List[int]]
 
 
 class StorageBody(RequestBody):
+    """The request body for the storage endpoint."""
     name: str
 
 
-class RequestIdBody(RequestBody):
-    request_id: Optional[str]
-
-
-class RequestLsBody(RequestBody):
-    request_id: Optional[str] = None
-
-
 class EndpointBody(RequestBody):
+    """The request body for the endpoint."""
     cluster_name: str
     port: Optional[Union[int, str]] = None
 
 
 class JobStatusBody(RequestBody):
+    """The request body for the job status endpoint."""
     cluster_name: str
     job_ids: Optional[List[int]]
 
 
 class JobsLaunchBody(RequestBody):
+    """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
     retry_until_up: bool
 
     def to_kwargs(self) -> Dict[str, Any]:
-        from sky.api import common
         kwargs = super().to_kwargs()
         kwargs['task'] = common.process_mounts_in_task(self.task,
                                                        self.env_vars,
@@ -208,29 +213,37 @@ class JobsLaunchBody(RequestBody):
 
 
 class JobsQueueBody(RequestBody):
+    """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False
 
 
 class JobsCancelBody(RequestBody):
+    """The request body for the jobs cancel endpoint."""
     name: Optional[str]
     job_ids: Optional[List[int]]
     all: bool = False
 
 
 class JobsLogsBody(RequestBody):
+    """The request body for the jobs logs endpoint."""
     name: Optional[str]
     job_id: Optional[int]
     follow: bool = True
     controller: bool = False
 
 
+class RequestIdBody(RequestBody):
+    """The request body for the API request endpoint."""
+    request_id: Optional[str]
+
+
 class ServeUpBody(RequestBody):
+    """The request body for the serve up endpoint."""
     task: str
     service_name: str
 
     def to_kwargs(self) -> Dict[str, Any]:
-        from sky.api import common
         kwargs = super().to_kwargs()
         dag = common.process_mounts_in_task(self.task,
                                             self.env_vars,
@@ -243,12 +256,12 @@ class ServeUpBody(RequestBody):
 
 
 class ServeUpdateBody(RequestBody):
+    """The request body for the serve update endpoint."""
     task: str
     service_name: str
     mode: serve.UpdateMode
 
     def to_kwargs(self) -> Dict[str, Any]:
-        from sky.api import common
         kwargs = super().to_kwargs()
         dag = common.process_mounts_in_task(self.task,
                                             self.env_vars,
@@ -261,12 +274,14 @@ class ServeUpdateBody(RequestBody):
 
 
 class ServeDownBody(RequestBody):
+    """The request body for the serve down endpoint."""
     service_names: Optional[Union[str, List[str]]]
     all: bool = False
     purge: bool = False
 
 
 class ServeLogsBody(RequestBody):
+    """The request body for the serve logs endpoint."""
     service_name: str
     target: Union[str, serve.ServiceComponent]
     replica_id: Optional[int] = None
@@ -274,16 +289,19 @@ class ServeLogsBody(RequestBody):
 
 
 class ServeStatusBody(RequestBody):
+    """The request body for the serve status endpoint."""
     service_names: Optional[Union[str, List[str]]]
 
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
+    """The request body for the realtime GPU availability endpoint."""
     context: Optional[str]
     name_filter: Optional[str]
     quantity_filter: Optional[int]
 
 
 class ListAcceleratorsBody(RequestBody):
+    """The request body for the list accelerators endpoint."""
     gpus_only: bool = True
     name_filter: Optional[str] = None
     region_filter: Optional[str] = None
@@ -295,9 +313,11 @@ class ListAcceleratorsBody(RequestBody):
 
 
 class LocalUpBody(RequestBody):
+    """The request body for the local up endpoint."""
     gpus: bool = True
 
 
 class KillChildrenProcessesBody(RequestBody):
+    """The request body for the kill children processes endpoint."""
     parent_pids: List[int]
     force: bool = False
