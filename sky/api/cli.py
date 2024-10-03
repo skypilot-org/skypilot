@@ -5398,10 +5398,21 @@ def api_get(request_id: Optional[str]):
 
 
 @api.command('abort', cls=_DocumentedCodeCommand)
-@click.argument('request_id', required=True, type=str)
+@click.argument('request_id', required=False, type=Optional[str])
+@click.option('--all',
+              '-a',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Abort all requests.')
 @usage_lib.entrypoint
-def api_abort(request_id: str):
+def api_abort(request_id: Optional[str], all: bool):
     """Abort a request running on API server."""
+    if request_id is None and not all:
+        raise click.BadParameter('Either specify a request ID or use --all to '
+                                'abort all requests.')
+    if all:
+        request_id = None
     sdk.abort(request_id)
 
 
@@ -5423,10 +5434,10 @@ def api_ls(request_id: Optional[str], all: bool):
         'Status',
     ])
     for request in request_list:
-        request_id = request.request_id
+        id = request.request_id
         if not all:
-            request_id = status_utils.truncate_long_string(request_id, 8)
-        table.add_row([request_id, request.name, log_utils.readable_time_duration(request.created_at), request.status])
+            id = status_utils.truncate_long_string(id, 8)
+        table.add_row([id, request.name, log_utils.readable_time_duration(request.created_at), request.status])
     click.echo(table)
 
 

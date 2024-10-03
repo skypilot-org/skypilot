@@ -78,11 +78,12 @@ async def lifespan(app: fastapi.FastAPI):
     """FastAPI lifespan context manager."""
     # Startup: Run background tasks
     for event_id, (event_name, event) in enumerate(events.items()):
-        executor.schedule_request(request_id=str(event_id),
-                                  request_name=event_name,
-                                  request_body=payloads.RequestBody(),
-                                  func=event,
-                                  schedule_type=executor.ScheduleType.DIRECT)
+        executor.schedule_request(
+            request_id=str(event_id),
+            request_name=event_name,
+            request_body=payloads.RequestBody(),
+            func=event,
+            schedule_type=executor.ScheduleType.NON_BLOCKING)
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -108,7 +109,7 @@ async def check(request: fastapi.Request, check_body: payloads.CheckBody):
         request_name='check',
         request_body=check_body,
         func=sky_check.check,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -119,7 +120,7 @@ async def enabled_clouds(request: fastapi.Request) -> None:
         request_name='enabled_clouds',
         request_body=payloads.RequestBody(),
         func=core.enabled_clouds,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -133,7 +134,7 @@ async def realtime_gpu_availability(
         request_name='realtime_gpu_availability',
         request_body=realtime_gpu_availability_body,
         func=core.realtime_gpu_availability,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -146,7 +147,7 @@ async def list_accelerators(
         request_name='list_accelerators',
         request_body=list_accelerator_counts_body,
         func=service_catalog.list_accelerators,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -159,7 +160,7 @@ async def list_accelerator_counts(
         request_name='list_accelerator_counts',
         request_body=list_accelerator_counts_body,
         func=service_catalog.list_accelerator_counts,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -172,7 +173,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_body=optimize_body,
         ignore_return_value=True,
         func=optimizer.Optimizer.optimize,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -226,7 +227,7 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
         request_name='launch',
         request_body=launch_body,
         func=execution.launch,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -239,7 +240,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody):
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -250,7 +251,7 @@ async def stop(request: fastapi.Request, stop_body: payloads.StopOrDownBody):
         request_name='stop',
         request_body=stop_body,
         func=core.stop,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -264,8 +265,8 @@ async def status(
         request_name='status',
         request_body=status_body,
         func=core.status,
-        schedule_type=(executor.ScheduleType.QUEUE if status_body.refresh else
-                       executor.ScheduleType.DIRECT),
+        schedule_type=(executor.ScheduleType.BLOCKING if status_body.refresh
+                       else executor.ScheduleType.NON_BLOCKING),
     )
 
 
@@ -277,7 +278,7 @@ async def endpoints(request: fastapi.Request,
         request_name='endpoints',
         request_body=endpoint_body,
         func=core.endpoints,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -288,7 +289,7 @@ async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
         request_name='down',
         request_body=down_body,
         func=core.down,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -300,7 +301,7 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
         request_name='start',
         request_body=start_body,
         func=core.start,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -313,7 +314,7 @@ async def autostop(request: fastapi.Request,
         request_name='autostop',
         request_body=autostop_body,
         func=core.autostop,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -325,7 +326,7 @@ async def queue(request: fastapi.Request, queue_body: payloads.QueueBody):
         request_name='queue',
         request_body=queue_body,
         func=core.queue,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -338,7 +339,7 @@ async def job_status(request: fastapi.Request,
         request_name='job_status',
         request_body=job_status_body,
         func=core.job_status,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -350,7 +351,7 @@ async def cancel(request: fastapi.Request,
         request_name='cancel',
         request_body=cancel_body,
         func=core.cancel,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -362,7 +363,7 @@ async def logs(request: fastapi.Request,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -387,7 +388,7 @@ async def cost_report(request: fastapi.Request) -> None:
         request_name='cost_report',
         request_body=payloads.RequestBody(),
         func=core.cost_report,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -398,7 +399,7 @@ async def storage_ls(request: fastapi.Request):
         request_name='storage_ls',
         request_body=payloads.RequestBody(),
         func=core.storage_ls,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -410,7 +411,7 @@ async def storage_delete(request: fastapi.Request,
         request_name='storage_delete',
         request_body=storage_body,
         func=core.storage_delete,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -422,7 +423,7 @@ async def local_up(request: fastapi.Request,
         request_name='local_up',
         request_body=local_up_body,
         func=core.local_up,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -433,7 +434,7 @@ async def local_down(request: fastapi.Request):
         request_name='local_down',
         request_body=payloads.RequestBody(),
         func=core.local_down,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -451,7 +452,7 @@ async def long_running_request(request: fastapi.Request):
         request_name='long_running_request',
         request_body=payloads.RequestBody(),
         func=long_running_request_inner,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -510,7 +511,13 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     request_ids = []
     if abort_body.request_id is None:
         print('Aborting all requests')
-        request_ids = [request_task.request_id for request_task in requests_lib.get_request_tasks(status=[requests_lib.RequestStatus.RUNNING, requests_lib.RequestStatus.PENDING])]
+        request_ids = [
+            request_task.request_id
+            for request_task in requests_lib.get_request_tasks(status=[
+                requests_lib.RequestStatus.RUNNING,
+                requests_lib.RequestStatus.PENDING
+            ])
+        ]
     else:
         print(f'Aborting request ID: {abort_body.request_id}')
         request_ids = [abort_body.request_id]
@@ -520,8 +527,7 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
             if request_record is None:
                 print(f'No task with request ID {request_id}')
                 raise fastapi.HTTPException(
-                    status_code=404,
-                    detail=f'Request {request_id} not found')
+                    status_code=404, detail=f'Request {request_id} not found')
             if request_record.status > requests_lib.RequestStatus.RUNNING:
                 print(f'Request {request_id} already finished')
                 return
@@ -532,10 +538,10 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
             executor.schedule_request(
                 request_id=request.state.request_id,
                 request_name='kill_children_processes',
-                request_body=payloads.KillChildrenProcessesBody(parent_pids=[pid],
-                                                                force=True),
+                request_body=payloads.KillChildrenProcessesBody(
+                    parent_pids=[pid], force=True),
                 func=subprocess_utils.kill_children_processes,
-                schedule_type=executor.ScheduleType.QUEUE,
+                schedule_type=executor.ScheduleType.BLOCKING,
             )
 
 

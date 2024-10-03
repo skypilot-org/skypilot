@@ -22,9 +22,9 @@ from sky.utils import db_utils
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 # TODO(zhwu): For scalability, there are several TODOs:
-# 1. Use Redis + Celery for task execution.
-# 2. Move logs to persistent place.
-# 3. Deploy API server in a autoscaling fashion.
+# [x] Have a way to queue requests.
+# [ ] Move logs to persistent place.
+# [ ] Deploy API server in a autoscaling fashion.
 
 
 class RequestStatus(enum.Enum):
@@ -288,11 +288,13 @@ def create_if_not_exists(request: Request) -> bool:
 
 
 @init_db
-def get_request_tasks(status: Optional[List[RequestStatus]] = None) -> List[Request]:
+def get_request_tasks(
+        status: Optional[List[RequestStatus]] = None) -> List[Request]:
     """Get a REST task."""
     status_filter = ''
     if status is not None:
-        status_filter = (f'WHERE status IN ({",".join(status.value for status in status)})')
+        status_filter = (
+            f'WHERE status IN ({",".join(status.value for status in status)})')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()

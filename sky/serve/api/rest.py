@@ -19,7 +19,7 @@ async def up(
         request_name='serve/up',
         request_body=up_body,
         func=core.up,
-        schedule_type=executor.ScheduleType.QUEUE,
+        schedule_type=executor.ScheduleType.BLOCKING,
     )
 
 
@@ -33,7 +33,7 @@ async def update(
         request_name='serve/update',
         request_body=update_body,
         func=core.update,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -47,7 +47,7 @@ async def down(
         request_name='serve/down',
         request_body=down_body,
         func=core.down,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -61,7 +61,7 @@ async def status(
         request_name='serve/status',
         request_body=status_body,
         func=core.status,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -75,5 +75,5 @@ async def tail_logs(
         request_name='serve/logs',
         request_body=log_body,
         func=core.tail_logs,
-        schedule_type=executor.ScheduleType.DIRECT,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
     )

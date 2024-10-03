@@ -30,13 +30,17 @@ logger = sky_logging.init_logger(__name__)
 
 
 class ScheduleType(enum.Enum):
-    QUEUE = 'queue'
-    # Directly execute the request in a different process.
-    DIRECT = 'direct'
+    BLOCKING = 'blocking'
+    # Queue for requests that should be executed in non-blocking manner.
+    NON_BLOCKING = 'non_blocking'
 
     @classmethod
-    def active_queues(cls) -> List['ScheduleType']:
-        return [cls.QUEUE]
+    def blocking_queues(cls) -> List['ScheduleType']:
+        return [cls.BLOCKING]
+
+    @classmethod
+    def non_blocking_queues(cls) -> List['ScheduleType']:
+        return [cls.NON_BLOCKING]
 
 
 class _QueueBackend(enum.Enum):
@@ -94,7 +98,7 @@ class RequestQueue:
 
 _queue_backend = get_queue_backend()
 queues = {}
-for queue_type in ScheduleType.active_queues():
+for queue_type in list(ScheduleType):
     queues[queue_type] = RequestQueue(queue_type.value,
                                       queue_type=_queue_backend)
 
@@ -172,7 +176,7 @@ def schedule_request(request_id: str,
                      request_body: payloads.RequestBody,
                      func: Callable[P, Any],
                      ignore_return_value: bool = False,
-                     schedule_type: ScheduleType = ScheduleType.QUEUE):
+                     schedule_type: ScheduleType = ScheduleType.BLOCKING):
     """Enqueue a request to the request queue."""
     request = requests.Request(request_id=request_id,
                                name=request_name,
@@ -187,20 +191,19 @@ def schedule_request(request_id: str,
 
     request.log_path.touch()
     input_tuple = (request_id, ignore_return_value)
-    # Enqueue the request to the Redis list.
-    if schedule_type == ScheduleType.DIRECT:
-        multiprocessing.Process(target=_wrapper,
-                                args=(request_id, ignore_return_value)).start()
-    else:
-        queues[schedule_type].put(input_tuple)
+    queues[schedule_type].put(input_tuple)
 
 
-def request_worker(worker_id: int):
+def request_worker(worker_id: int, non_blocking: bool = False):
     """Worker for the requests."""
     logger.info(f'Request worker {worker_id} -- started with pid '
                 f'{multiprocessing.current_process().pid}')
+    if non_blocking:
+        queue_types = ScheduleType.non_blocking_queues()
+    else:
+        queue_types = ScheduleType.blocking_queues()
     while True:
-        for queue_type in ScheduleType.active_queues():
+        for queue_type in queue_types:
             request = queues[queue_type].get()
             if request is not None:
                 break
@@ -220,15 +223,20 @@ def request_worker(worker_id: int):
                                                 ignore_return_value))
         process.start()
 
-        # Wait for the request to finish.
-        try:
-            process.join()
-        except Exception as e:
-            logger.error(
-                f'Request worker {worker_id} -- request {request_id} failed: '
-                f'{e}')
-        logger.info(
-            f'Request worker {worker_id} -- request {request_id} finished')
+        if queue_type == ScheduleType.BLOCKING:
+            # Wait for the request to finish.
+            try:
+                process.join()
+            except Exception as e:
+                logger.error(
+                    f'Request worker {worker_id} -- request {request_id} '
+                    f'failed: {e}')
+            logger.info(
+                f'Request worker {worker_id} -- request {request_id} finished')
+        else:
+            # Non-blocking requests are handled by the non-blocking worker.
+            logger.info(
+                f'Request worker {worker_id} -- request {request_id} submitted')
 
 
 def start_request_queue_workers(
@@ -241,4 +249,10 @@ def start_request_queue_workers(
         logger.info(f'Starting request worker: {worker_id}')
         worker.start()
         workers.append(worker)
+
+    # Start a non-blocking worker.
+    worker = multiprocessing.Process(target=request_worker, args=(-1, True))
+    logger.info(f'Starting non-blocking request worker')
+    worker.start()
+    workers.append(worker)
     return workers
