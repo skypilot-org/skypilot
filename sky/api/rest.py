@@ -507,28 +507,36 @@ async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
 
 @app.post('/abort')
 async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
-    print(f'Trying to kill request ID {abort_body.request_id}')
-    with requests_lib.update_rest_task(abort_body.request_id) as request_record:
-        if request_record is None:
-            print(f'No task with request ID {abort_body.request_id}')
-            raise fastapi.HTTPException(
-                status_code=404,
-                detail=f'Request {abort_body.request_id} not found')
-        if request_record.status > requests_lib.RequestStatus.RUNNING:
-            print(f'Request {abort_body.request_id} already finished')
-            return
-        request_record.status = requests_lib.RequestStatus.ABORTED
-        pid = request_record.pid
-    if pid is not None:
-        print(f'Killing request process {pid}', flush=True)
-        executor.schedule_request(
-            request_id=request.state.request_id,
-            request_name='kill_children_processes',
-            request_body=payloads.KillChildrenProcessesBody(parent_pids=[pid],
-                                                            force=True),
-            func=subprocess_utils.kill_children_processes,
-            schedule_type=executor.ScheduleType.QUEUE,
-        )
+    request_ids = []
+    if abort_body.request_id is None:
+        print('Aborting all requests')
+        request_ids = [request_task.request_id for request_task in requests_lib.get_request_tasks(status=[requests_lib.RequestStatus.RUNNING, requests_lib.RequestStatus.PENDING])]
+    else:
+        print(f'Aborting request ID: {abort_body.request_id}')
+        request_ids = [abort_body.request_id]
+
+    for request_id in request_ids:
+        with requests_lib.update_rest_task(request_id) as request_record:
+            if request_record is None:
+                print(f'No task with request ID {request_id}')
+                raise fastapi.HTTPException(
+                    status_code=404,
+                    detail=f'Request {request_id} not found')
+            if request_record.status > requests_lib.RequestStatus.RUNNING:
+                print(f'Request {request_id} already finished')
+                return
+            request_record.status = requests_lib.RequestStatus.ABORTED
+            pid = request_record.pid
+        if pid is not None:
+            print(f'Killing request process {pid}', flush=True)
+            executor.schedule_request(
+                request_id=request.state.request_id,
+                request_name='kill_children_processes',
+                request_body=payloads.KillChildrenProcessesBody(parent_pids=[pid],
+                                                                force=True),
+                func=subprocess_utils.kill_children_processes,
+                schedule_type=executor.ScheduleType.QUEUE,
+            )
 
 
 @app.get('/requests')

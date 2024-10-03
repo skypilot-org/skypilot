@@ -288,12 +288,15 @@ def create_if_not_exists(request: Request) -> bool:
 
 
 @init_db
-def get_request_tasks() -> List[Request]:
+def get_request_tasks(status: Optional[List[RequestStatus]] = None) -> List[Request]:
     """Get a REST task."""
+    status_filter = ''
+    if status is not None:
+        status_filter = (f'WHERE status IN ({",".join(status.value for status in status)})')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM requests '
+        cursor.execute(f'SELECT * FROM requests {status_filter}'
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:

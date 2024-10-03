@@ -640,7 +640,12 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 
 @usage_lib.entrypoint
-def abort(request_id: str) -> str:
+def abort(request_id: Optional[str] = None) -> str:
+    """Abort a request or all requests.
+
+    Args:
+        request_id: the ID of the request to abort. If None, abort all requests.
+    """
     body = payloads.RequestIdBody(request_id=request_id)
     print(f'Sending abort request to API server for {request_id}')
     response = requests.post(f'{api_common.get_server_url()}/abort',

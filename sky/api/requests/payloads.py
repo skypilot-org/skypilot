@@ -176,7 +176,7 @@ class StorageBody(RequestBody):
 
 
 class RequestIdBody(RequestBody):
-    request_id: str
+    request_id: Optional[str]
 
 
 class RequestLsBody(RequestBody):
