@@ -1,0 +1,10 @@
+resources:
+  cloud: gcp
+  accelerators: L4:1
+  use_spot: True
+  disk_size: 50
+  image_id: projects/deeplearning-platform-release/global/images/common-cu121-v20231105-debian-11-py310
+
+setup: |
+  sudo rm -rf /home/gcpuser/.config/gcloud/
+  sudo rm /home/gcpuser/.sky/user_hash
