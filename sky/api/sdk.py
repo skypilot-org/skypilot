@@ -443,8 +443,9 @@ def cancel(
 @usage_lib.entrypoint
 @api_common.check_health
 def status(
-        cluster_names: Optional[List[str]] = None,
-        refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+    cluster_names: Optional[List[str]] = None,
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
+    all_users: bool = False,
 ) -> str:
     """Get the status of clusters.
 
@@ -459,6 +460,7 @@ def status(
     body = payloads.StatusBody(
         cluster_names=cluster_names,
         refresh=refresh,
+        all_users=all_users,
     )
     response = requests.post(f'{api_common.get_server_url()}/status',
                              json=json.loads(body.model_dump_json()))

@@ -121,10 +121,11 @@ else:
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
+    all_users: bool = False,
 ) -> List[dict]:
     """Returns a list of clusters that match the glob pattern."""
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
-    request_id = sdk.status(clusters, refresh=refresh)
+    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
     for record in cluster_records:
@@ -1481,11 +1482,16 @@ def _get_services(service_names: Optional[List[str]],
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
+@click.option('--all-users/--no-all-users',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all clusters, including those not owned by the current user.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, clusters: List[str]):
+           show_services: bool, clusters: List[str], all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1617,7 +1623,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if refresh:
             refresh_mode = common.StatusRefreshMode.FORCE
         cluster_records = _get_cluster_records_and_set_ssh_config(
-            query_clusters, refresh_mode)
+            query_clusters, refresh_mode, all_users)
 
         # TOOD(zhwu): setup the ssh config for status
         if ip or show_endpoints:
@@ -1692,7 +1698,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
-            normal_clusters + controllers, all)
+            normal_clusters + controllers, all, all_users)
 
         def _try_get_future_result(future) -> Tuple[bool, Any]:
             result = None

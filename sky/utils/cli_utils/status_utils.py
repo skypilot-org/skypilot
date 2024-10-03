@@ -58,8 +58,8 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[_ClusterRecord],
-                      show_all: bool) -> int:
+def show_status_table(cluster_records: List[_ClusterRecord], show_all: bool,
+                      show_user: bool) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -70,6 +70,10 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     status_columns = [
         StatusColumn('NAME', _get_name),
+    ]
+    if show_user:
+        status_columns.append(StatusColumn('USER', _get_user))
+    status_columns += [
         StatusColumn('LAUNCHED', _get_launched),
         StatusColumn('RESOURCES',
                      _get_resources,
@@ -202,6 +206,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # _ClusterCostReportRecord, which is okay as we guarantee the queried fields
 # exist in those cases.
 _get_name = (lambda cluster_record: cluster_record['name'])
+_get_user = (lambda cluster_record: cluster_record['user_hash'])
 _get_launched = (lambda cluster_record: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_region = (

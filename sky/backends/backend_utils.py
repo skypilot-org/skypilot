@@ -2167,9 +2167,9 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
 
 
 def get_clusters(
-    include_controller: bool,
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
+    all_users: bool = False,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 
@@ -2194,11 +2194,11 @@ def get_clusters(
         terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
-
-    if not include_controller:
+    if not all_users:
+        current_user_hash = common_utils.get_user_hash()
         records = [
             record for record in records
-            if controller_utils.Controllers.from_name(record['name']) is None
+            if record['user_hash'] == current_user_hash
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2547,8 +2547,7 @@ def get_endpoints(cluster: str,
         except ValueError:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid endpoint {port!r}.') from None
-    cluster_records = get_clusters(include_controller=True,
-                                   refresh=common.StatusRefreshMode.NONE,
+    cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster])
     assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]

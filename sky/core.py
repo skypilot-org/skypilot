@@ -45,7 +45,8 @@ logger = sky_logging.init_logger(__name__)
 @usage_lib.entrypoint
 def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
-    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
+    all_users: bool = False,
 ) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get cluster statuses.
@@ -67,6 +68,7 @@ def status(
             'autostop': (int) idle time before autostop,
             'to_down': (bool) whether autodown is used instead of autostop,
             'metadata': (dict) metadata of the cluster,
+            'user_hash': (str) user hash of the cluster,
         }
 
     Each cluster can have one of the following statuses:
@@ -115,18 +117,9 @@ def status(
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    clusters = backend_utils.get_clusters(include_controller=True,
-                                          refresh=refresh,
-                                          cluster_names=cluster_names)
-    # Extract additional fields from resource handle to cluster records so that
-    # dashboard can use the fields to render the UI.
-    for record in clusters:
-        handle = record['handle']
-        if handle is None:
-            continue
-        record['accelerators'] = handle.launched_resources.accelerators
-        record['cloud'] = str(handle.launched_resources.cloud)
-        record['num_nodes'] = handle.launched_nodes
+    clusters = backend_utils.get_clusters(refresh=refresh,
+                                          cluster_names=cluster_names,
+                                          all_users=all_users)
     return clusters
 
 

@@ -134,6 +134,7 @@ class StatusBody(RequestBody):
     """The request body for the status endpoint."""
     cluster_names: Optional[List[str]] = None
     refresh: common_lib.StatusRefreshMode = common_lib.StatusRefreshMode.NONE
+    all_users: bool = False
 
 
 class StartBody(RequestBody):
