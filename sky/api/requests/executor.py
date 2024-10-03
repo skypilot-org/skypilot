@@ -6,6 +6,7 @@ import queue as queue_lib
 import sys
 import time
 import traceback
+import typing
 from typing import Any, Callable, List, Optional, Union
 
 from sky import sky_logging
@@ -15,12 +16,16 @@ from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import ux_utils
 
-try:
+if typing.TYPE_CHECKING:
     import redis
     from redis import exceptions as redis_exceptions
-except ImportError:
-    redis = None
-    redis_exceptions = None
+else:
+    try:
+        import redis
+        from redis import exceptions as redis_exceptions
+    except ImportError:
+        redis = None  # type: ignore
+        redis_exceptions = None  # type: ignore
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -56,13 +61,15 @@ def get_queue_backend() -> _QueueBackend:
     if redis is None:
         return _QueueBackend.MULTIPROCESSING
     try:
+        assert redis is not None, "Redis is not installed"
         queue = redis.Redis(host='localhost',
                             port=46581,
                             db=0,
                             socket_timeout=0.1)
         queue.ping()
         return _QueueBackend.REDIS
-    except redis_exceptions.ConnectionError:
+    except (redis_exceptions.ConnectionError
+            if redis_exceptions is not None else Exception):
         return _QueueBackend.MULTIPROCESSING
 
 
@@ -70,23 +77,27 @@ class RequestQueue:
 
     def __init__(self, name: str, queue_type: Optional[_QueueBackend] = None):
         self.name = name
-        self.queue: Union[multiprocessing.Queue, redis.Redis]
+        self.queue_type = queue_type
+        self.queue: Union[multiprocessing.Queue, 'redis.Redis']
         if queue_type == _QueueBackend.MULTIPROCESSING:
             self.queue = multiprocessing.Queue()
         else:
+            assert redis is not None, "Redis is not installed"
             self.queue = redis.Redis(host='localhost',
                                      port=46581,
                                      db=0,
                                      socket_timeout=0.1)
 
     def put(self, object: Any):
-        if isinstance(self.queue, redis.Redis):
+        if self.queue_type == _QueueBackend.REDIS:
+            assert isinstance(self.queue, redis.Redis), "Redis is not installed"
             self.queue.lpush(self.name, object)
         else:
             self.queue.put(object)
 
     def get(self):
-        if isinstance(self.queue, redis.Redis):
+        if self.queue_type == _QueueBackend.REDIS:
+            assert isinstance(self.queue, redis.Redis), "Redis is not installed"
             return self.queue.rpop(self.name)
         else:
             try:

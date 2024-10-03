@@ -48,8 +48,8 @@ class OptimizeBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
         # local clients.
-        from sky.utils import (
-            dag_utils)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import dag_utils
 
         kwargs = super().to_kwargs()
 
