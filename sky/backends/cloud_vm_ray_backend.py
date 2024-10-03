@@ -411,7 +411,17 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                message = (f'  {colorama.Style.DIM}Waiting for task resources on '
+                # We have this `INFO: Tip:` message only for backward
+                # compatibility, as if a cluster has the old SkyPilot version,
+                # it relies on this message to start the log streaming.
+                # This message will be skipped for new clusters, because we use
+                # start_streaming_at for the `Waiting for task resources on`
+                # message.
+                # TODO: Remove this message in v0.9.0.
+                message = (f'  {colorama.Style.DIM}INFO: Tip: use Ctrl-C to '
+                           'exit log streaming, not kill the job.'
+                           f'{colorama.Style.RESET_ALL}')
+                message += (f'  {colorama.Style.DIM}Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
                 # FIXME: This will print the error message from autoscaler if
