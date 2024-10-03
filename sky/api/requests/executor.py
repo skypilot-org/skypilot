@@ -8,15 +8,19 @@ import time
 import traceback
 from typing import Any, Callable, List, Optional, Union
 
-import redis
-from redis import exceptions as redis_exceptions
-
 from sky import sky_logging
 from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import ux_utils
+
+try:
+    import redis
+    from redis import exceptions as redis_exceptions
+except ImportError:
+    redis = None
+    redis_exceptions = None
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -49,6 +53,8 @@ class _QueueBackend(enum.Enum):
 
 
 def get_queue_backend() -> _QueueBackend:
+    if redis is None:
+        return _QueueBackend.MULTIPROCESSING
     try:
         queue = redis.Redis(host='localhost',
                             port=46581,
