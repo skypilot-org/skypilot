@@ -78,7 +78,7 @@ class RequestQueue:
     def __init__(self, name: str, queue_type: Optional[_QueueBackend] = None):
         self.name = name
         self.queue_type = queue_type
-        self.queue: Union[multiprocessing.Queue, 'redis.Redis']
+        self.queue: Union[multiprocessing.queues.Queue, 'redis.Redis']
         if queue_type == _QueueBackend.MULTIPROCESSING:
             self.queue = multiprocessing.Queue()
         else:
@@ -94,7 +94,7 @@ class RequestQueue:
             self.queue.lpush(self.name, object)
         else:
             assert isinstance(self.queue,
-                              multiprocessing.Queue), type(self.queue)
+                              multiprocessing.queues.Queue), type(self.queue)
             self.queue.put(object)
 
     def get(self):
