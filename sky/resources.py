@@ -973,20 +973,22 @@ class Resources:
         """
         if not self._labels:
             return
-
-        if self.cloud is None:
-            # Because each cloud has its own label format, we cannot validate
-            # the labels without knowing the cloud.
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cloud must be specified when labels are provided.')
-
-        # Check if the label key value pairs are valid.
+        if self.cloud is not None:
+            validated_clouds = [self.cloud]
+        else:
+            # If no specific cloud is set, validate label against ALL clouds.
+            # The label will be dropped if invalid for any one of the cloud
+            validated_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
         invalid_table = log_utils.create_table(['Label', 'Reason'])
         for key, value in self._labels.items():
-            valid, err_msg = self.cloud.is_label_valid(key, value)
-            if not valid:
-                invalid_table.add_row([f'{key}: {value}', err_msg])
+            for cloud in validated_clouds:
+                valid, err_msg = cloud.is_label_valid(key, value)
+                if not valid:
+                    invalid_table.add_row([
+                        f'{key}: {value}',
+                        f'Label rejected due to {cloud}: {err_msg}'
+                    ])
+                    break
         if len(invalid_table.rows) > 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
