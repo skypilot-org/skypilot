@@ -2060,6 +2060,9 @@ class RetryingVmProvisioner(object):
             retry_message = ux_utils.retry_message(
                 'Trying other potential resources.')
             logger.warning(f'\n{retry_message}')
+            log_path = os.path.join(self.log_dir, 'provision.log')
+            rich_utils.force_update_status(
+                ux_utils.spinner_message('Looking for resources', log_path))
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
