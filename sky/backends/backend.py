@@ -56,8 +56,9 @@ class Backend(Generic[_ResourceHandleType]):
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
-        return self._provision(task, to_provision, dryrun, stream_logs,
-                               cluster_name, retry_until_up)
+        with rich_utils.safe_status(ux_utils.spinner_message('Launching')):
+            return self._provision(task, to_provision, dryrun, stream_logs,
+                                   cluster_name, retry_until_up)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')

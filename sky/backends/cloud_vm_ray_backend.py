@@ -420,7 +420,7 @@ class RayCodeGen:
                 # TODO: Remove this message in v0.9.0.
                 message = (f'  {colorama.Style.DIM}INFO: Tip: use Ctrl-C to '
                            'exit log streaming, not kill the job.'
-                           f'{colorama.Style.RESET_ALL}\n')
+                           f'{colorama.Style.RESET_ALL}\\n')
                 message += (f'  {colorama.Style.DIM}Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
