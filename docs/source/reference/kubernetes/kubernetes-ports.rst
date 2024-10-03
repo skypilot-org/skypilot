@@ -61,7 +61,7 @@ Depending on your cloud, set the appropriate annotation in the SkyPilot config f
 
 .. tab-set::
 
-    .. tab-item:: GKE
+    .. tab-item:: GCP
         :sync: internal-lb-gke
 
         .. code-block:: yaml
