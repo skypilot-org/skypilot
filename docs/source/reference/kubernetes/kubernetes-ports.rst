@@ -55,14 +55,14 @@ These load balancers will be automatically terminated when the cluster is delete
 Internal Load Balancers
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `Internal Load Balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
+To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
 
 Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/config.yaml``):
 
 .. tab-set::
 
     .. tab-item:: GKE
-        :sync: internal-service-gke
+        :sync: internal-lb-gke
 
         .. code-block:: yaml
 
@@ -73,7 +73,7 @@ Depending on your cloud, set the appropriate annotation in the SkyPilot config f
                    networking.gke.io/load-balancer-type: "Internal"
 
     .. tab-item:: AWS
-        :sync: internal-service-gke
+        :sync: internal-lb-aws
 
         .. code-block:: yaml
 
@@ -84,7 +84,7 @@ Depending on your cloud, set the appropriate annotation in the SkyPilot config f
                   service.beta.kubernetes.io/aws-load-balancer-internal: "true"
 
     .. tab-item:: Azure
-        :sync: internal-service-gke
+        :sync: internal-lb-azure
 
         .. code-block:: yaml
 
