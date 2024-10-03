@@ -52,10 +52,10 @@ These load balancers will be automatically terminated when the cluster is delete
 
     To work around this issue, make sure all your ports have services running behind them.
 
-Internal LoadBalancers
-^^^^^^^^^^^^^^^^^^^^^^
+Internal Load Balancers
+^^^^^^^^^^^^^^^^^^^^^^^
 
-To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `Internal LoadBalancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
+To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `Internal Load Balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
 
 Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/config.yaml``):
 
