@@ -516,20 +516,13 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
         RuntimeError: if failed to terminate the replica.
     """
-    cluster_status, handle = backend_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'No service is running now. Please spin up a service first.',
         non_existent_message='To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
-    if handle is None or handle.head_ip is None:
-        # The error message is already printed in
-        # backend_utils.is_controller_up
-        # TODO(zhwu): Move the error message into the exception.
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(message='',
-                                               cluster_status=cluster_status)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
