@@ -76,19 +76,20 @@ class TailscaleVPN(VPN):
         self._network_name = network_name
         self._enable_api = enable_api
         if not enable_api:
-            logger.warning('TAILSCALE_API_KEY or TAILSCALE_NETWORK_NAME is'
-                           ' not set. Tailscale API will be disabled. You'
-                           ' may need to remove hosts manually.')
+            logger.warning('TAILSCALE_API_KEY or TAILSCALE_NETWORK_NAME is '
+                           'not set. Tailscale API will be disabled. You '
+                           'may need to remove hosts manually.')
         elif not api_key or not network_name:
-            raise ValueError('Both TAILSCALE_API_KEY and TAILSCALE_NETWORK_NAME'
-                             ' must be set to enable the Tailscale API.')
+            raise ValueError(
+                'Both TAILSCALE_API_KEY and TAILSCALE_NETWORK_NAME '
+                'must be set to enable the Tailscale API.')
 
     @staticmethod
     def from_env_vars() -> 'TailscaleVPN':
         # Parse Tailscale auth key from environment variable.
         # This is required for all Tailscale operations.
         auth_key = os.environ.get('TAILSCALE_AUTH_KEY')
-        if not auth_key:
+        if auth_key is None:
             raise ValueError('TAILSCALE_AUTH_KEY is not set.')
 
         # Parse Tailscale API key and network name
@@ -132,6 +133,11 @@ class TailscaleVPN(VPN):
 
     def get_private_ip(self, hostname: str) -> str:
         """Get the private IP address from the hostname."""
+        if self._enable_api:
+            device_id = self._get_device_id_from_hostname(hostname)
+            url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
+            resp = requests.get(url_to_query, headers=self._get_auth_headers())
+            return resp.json().get('addresses', [])[0]
         query_cmd = f'tailscale ip -4 {hostname}'
         rc, stdout, stderr = subprocess_utils.run_with_retries(
             query_cmd,

@@ -407,9 +407,9 @@ def shared_controller_vars_to_fill(
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     # Check if VPN auth key should be set.
-    if service_config:
+    if service_config is not None:
         # Only support Tailscale VPN now
-        if service_config.vpn_config:
+        if service_config.vpn_config is not None:
             env_vars.update(service_config.vpn_config.get_setup_env_vars())
             vpn_config_yaml = yaml.dump(
                 service_config.vpn_config.to_yaml_config())

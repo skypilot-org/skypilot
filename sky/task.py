@@ -1145,7 +1145,7 @@ class Task:
 
         add_if_not_none('resources', tmp_resource_config)
 
-        if self.vpn_config:
+        if self.vpn_config is not None:
             add_if_not_none('vpn', self.vpn_config.to_yaml_config())
 
         if self.service is not None:

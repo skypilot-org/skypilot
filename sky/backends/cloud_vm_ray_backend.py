@@ -2698,8 +2698,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if vpn_check_result is not None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
-                    'VPN configuration mismatch:'
-                    f' {vpn_check_result}\n{mismatch_str}.')
+                    'VPN configuration mismatch: '
+                    f'{vpn_check_result}\n{mismatch_str}.')
 
         if valid_resource is None:
             for example_resource in task.resources:

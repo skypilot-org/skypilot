@@ -160,11 +160,12 @@ def up(
             'remote_user_config_path': remote_config_yaml_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
-            **controller_utils.shared_controller_vars_to_fill(  # yapf: disable
+            **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
                 local_user_config=mutated_user_config,
-                service_config=task.service),
+                service_config=task.service,
+            ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                    vars_to_fill,
