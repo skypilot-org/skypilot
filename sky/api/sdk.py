@@ -565,9 +565,9 @@ def stream_and_get(request_id: str) -> Any:
                 if msg is not None:
                     print(msg)
         return get(request_id)
-    except Exception as e:
+    except Exception:  # pylint: disable=broad-except
         logger.info(f'Check more loggings with: sky api get {request_id}')
-        logger.debug(common_utils.format_exception(e, use_bracket=True))
+        raise
 
 
 # === API server management ===
