@@ -90,6 +90,8 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     f'{replica_ingress_port} in different resources. '
                     'Please specify the same port instead.')
 
+logger = sky_logging.init_logger(__name__)
+
 
 @usage_lib.entrypoint
 def up(
@@ -595,6 +597,26 @@ def status(
         raise RuntimeError(e.error_msg) from e
 
     return serve_utils.load_service_status(serve_status_payload)
+
+
+@usage_lib.entrypoint
+def sync_down_logs(service_name: str,
+                   service_component: Optional[serve_utils.ServiceComponent],
+                   replica_id: Optional[int]) -> None:
+    logger.info(f'Syncing down logs for {service_name}...')
+    controller_status, controller_handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message='No service is found.')
+    if controller_handle is None or controller_handle.head_ip is None:
+        msg = 'No service is found.'
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg = ('The SkyServe controller being initialized. Please '
+                   'wait for it to be ready.')
+        raise exceptions.ClusterNotUpError(msg,
+                                           cluster_status=controller_status)
+    backend = backend_utils.get_backend_from_handle(controller_handle)
+    backend.sync_down_serve_logs(controller_handle, service_name,
+                                 service_component, replica_id)
 
 
 @usage_lib.entrypoint
