@@ -27,7 +27,7 @@ POSSIBLE_CREDENTIALS_PATHS = [
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
-SSH_KEY_NAME = f'sky-key-{common_utils.get_user_hash()}'
+SSH_KEY_NAME_ON_DO = f'sky-key-{common_utils.get_user_hash()}'
 
 CREDENTIALS_PATH = '~/.config/doctl/config.yaml'
 _client = None
@@ -104,7 +104,7 @@ def ssh_key_id(public_key: str):
 
         request = {
             'public_key': public_key,
-            'name': SSH_KEY_NAME,
+            'name': SSH_KEY_NAME_ON_DO,
         }
         _ssh_key_id = client().ssh_keys.create(body=request)['ssh_key']
     return _ssh_key_id
