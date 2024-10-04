@@ -14,6 +14,7 @@ import colorama
 
 import sky
 from sky import clouds
+from sky import exceptions
 from sky import provision
 from sky import sky_logging
 from sky import status_lib
@@ -49,31 +50,16 @@ def _bulk_provision(
     provider_name = repr(cloud)
     region_name = region.name
 
-    if not zones:
-        # For Azure, zones is always an empty list.
-        zone_str = 'all zones'
-    else:
-        zone_str = ','.join(z.name for z in zones)
-
     start = time.time()
-    try:
-        # TODO(suquark): Should we cache the bootstrapped result?
-        #  Currently it is not necessary as bootstrapping takes
-        #  only ~3s, caching it seems over-engineering and could
-        #  cause other issues like the cache is not synced
-        #  with the cloud configuration.
-        config = provision.bootstrap_instances(provider_name, region_name,
-                                               cluster_name.name_on_cloud,
-                                               bootstrap_config)
-    except Exception as e:
-        logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
-                     f'{cluster_name!r} on {cloud} {region_name} ({zone_str}) '
-                     'with the following error:'
-                     f'{colorama.Style.RESET_ALL}\n'
-                     f'{colorama.Style.DIM}'
-                     f'{common_utils.format_exception(e)}'
-                     f'{colorama.Style.RESET_ALL}')
-        raise
+    # TODO(suquark): Should we cache the bootstrapped result?
+    #  Currently it is not necessary as bootstrapping takes
+    #  only ~3s, caching it seems over-engineering and could
+    #  cause other issues like the cache is not synced
+    #  with the cloud configuration.
+    config = provision.bootstrap_instances(provider_name, region_name,
+                                            cluster_name.name_on_cloud,
+                                            bootstrap_config)
+
 
     provision_record = provision.run_instances(provider_name,
                                                region_name,
@@ -155,7 +141,10 @@ def bulk_provision(
                 f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
             return _bulk_provision(cloud, region, zones, cluster_name,
                                    bootstrap_config)
-        except Exception:  # pylint: disable=broad-except
+        except exceptions.NoClusterLaunchedError as e:
+            # Skip the teardown if the cluster was never launched.
+            raise
+        except Exception as e:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)

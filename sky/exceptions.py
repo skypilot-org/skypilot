@@ -291,3 +291,7 @@ class PortDoesNotExistError(Exception):
 class UserRequestRejectedByPolicy(Exception):
     """Raised when a user request is rejected by an admin policy."""
     pass
+
+class NoClusterLaunchedError(Exception):
+    """Raised when no cluster is launched."""
+    pass

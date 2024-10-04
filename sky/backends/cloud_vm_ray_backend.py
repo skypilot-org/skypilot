@@ -934,6 +934,10 @@ class FailoverCloudErrorHandlerV2:
             _add_to_blocked_resources(
                 blocked_resources,
                 resources_lib.Resources(cloud=clouds.Azure()))
+        elif 'ClientAuthenticationError' in str(err):
+            _add_to_blocked_resources(
+                blocked_resources,
+                resources_lib.Resources(cloud=clouds.Azure()))
         else:
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=None))
