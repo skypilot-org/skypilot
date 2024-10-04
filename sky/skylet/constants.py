@@ -154,6 +154,7 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'PYTHON_EXEC=$(conda run -n {SKY_REMOTE_PYTHON_ENV_NAME} which python3); '
     '}; '
+    '$PYTHON_EXEC --version; '
     # Check the python version is not larger than 3.12
     '[[ $( $PYTHON_EXEC --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
     ' which $PYTHON_EXEC && echo "Python version is still larger than 3.12, '
