@@ -1,6 +1,8 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
 import dataclasses
 import enum
+from enum import auto
+from enum import Enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
@@ -10,7 +12,6 @@ import time
 import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple
-from enum import auto, Enum
 
 import colorama
 import psutil
@@ -826,7 +827,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         REMOVE_PREEMPTION = auto()
         REMOVE_VERSION_MISMATCH = auto()
 
-    def get_replica_record_action(self, info: ReplicaInfo) -> ReplicaRecordAction:
+    def get_replica_record_action(self,
+                                  info: ReplicaInfo) -> ReplicaRecordAction:
         if info.status_property.is_scale_down:
             # This means the cluster is deleted due to an autoscaler
             # decision or the cluster is recovering from preemption.
@@ -839,7 +841,6 @@ class SkyPilotReplicaManager(ReplicaManager):
             # since user should fixed the error before update.
             return self.ReplicaRecordAction.REMOVE_VERSION_MISMATCH
         return self.ReplicaRecordAction.KEEP
-
 
     @with_lock
     def _refresh_process_pool(self) -> None:
