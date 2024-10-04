@@ -90,6 +90,7 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     f'{replica_ingress_port} in different resources. '
                     'Please specify the same port instead.')
 
+
 logger = sky_logging.init_logger(__name__)
 
 
@@ -529,15 +530,20 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 
     code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id,
                                                       purge)
-    returncode = backend.run_on_head(handle,
-                                     code,
-                                     require_outputs=False,
-                                     stream_logs=False)
+    returncode, _, stderr = backend.run_on_head(handle,
+                                                code,
+                                                require_outputs=False,
+                                                stream_logs=False,
+                                                separate_stderr=True)
     try:
-        subprocess_utils.handle_returncode(
-            returncode, code, f'Failed to terminate replica {replica_id}')
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to terminate the replica',
+                                           stderr,
+                                           stream_logs=True)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
+
     logger.info(
         f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '
         f'{service_name!r} has been scheduled.{colorama.Style.RESET_ALL}\n'

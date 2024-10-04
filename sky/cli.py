@@ -4392,8 +4392,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
 
     if replica_id_is_defined:
         if not yes:
-            click.confirm(f'Terminating replica ID {replica_id} in '
-                          f'{service_names[0]!r}. Proceed?')
+            click.confirm(
+                f'Terminating replica ID {replica_id} in '
+                f'{service_names[0]!r}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
         serve_lib.terminate_replica(service_names[0], replica_id, purge)
     else:
         if not yes:
