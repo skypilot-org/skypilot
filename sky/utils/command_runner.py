@@ -30,7 +30,8 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # Note that "-" is mandatory for rsync and means all patterns in the ignore
 # files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
 # do_not_exclude" doesn't work, even though git allows it.
-RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
+RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 
 _HASH_MAX_LENGTH = 10
@@ -237,12 +238,15 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
 
         # --filter
-        rsync_command.append(RSYNC_FILTER_OPTION)
+        # The source is a local path, so we need to resolve it.
+        resolved_source = pathlib.Path(source).expanduser().resolve()
+        if (resolved_source / constants.SKY_IGNORE_FILE).exists():
+            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
+        else:
+            rsync_command.append(RSYNC_FILTER_GITIGNORE)
 
         if up:
             # Build --exclude-from argument.
-            # The source is a local path, so we need to resolve it.
-            resolved_source = pathlib.Path(source).expanduser().resolve()
             if (resolved_source / GIT_EXCLUDE).exists():
                 # Ensure file exists; otherwise, rsync will error out.
                 #
