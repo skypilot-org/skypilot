@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
+from fastapi import responses 
 
 from sky import serve
 from sky import sky_logging
@@ -107,7 +108,7 @@ class SkyServeController:
             try:
                 version = request_data.get('version', None)
                 if version is None:
-                    return {'message': 'Error: version is not specified.'}
+                    return responses.JSONResponse(content={'message': 'Error: version is not specified.'}, status_code=400)
                 update_mode_str = request_data.get(
                     'mode', serve_utils.DEFAULT_UPDATE_MODE.value)
                 update_mode = serve_utils.UpdateMode(update_mode_str)
@@ -136,11 +137,11 @@ class SkyServeController:
                 self._autoscaler.update_version(version,
                                                 service,
                                                 update_mode=update_mode)
-                return {'message': 'Success'}
+                return responses.JSONResponse(content={'message': 'Success'}, status_code=200)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in update_service: '
                              f'{common_utils.format_exception(e)}')
-                return {'message': 'Error'}
+                return responses.JSONResponse(content={'message': 'Error'}, status_code=500)
 
         @self._app.on_event('startup')
         def configure_logger():
