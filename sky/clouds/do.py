@@ -28,9 +28,6 @@ class DO(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             'Spot instances are '
             f'not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.IMAGE_ID:
-            'Specifying image ID '
-            f'is not supported for {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             'Custom disk tiers'
             f' is not supported in {_REPR}.',

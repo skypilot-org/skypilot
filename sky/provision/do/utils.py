@@ -93,8 +93,7 @@ def ssh_key_id(public_key: str):
                         _ssh_key_id = ssh_key
                         return _ssh_key_id
             except do.exceptions().HttpResponseError as err:
-                raise DigitalOceanError('Error: {0} {1}: {2}'.format(
-                    err.status_code, err.reason, err.error.message)) from err
+                raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
 
             pages = resp['links']
             if 'pages' in pages and 'next' in pages['pages']:
@@ -117,8 +116,7 @@ def _create_volume(request: Dict[str, Any]) -> Dict[str, Any]:
         resp = client().volumes.create(body=request)
         volume = resp['volume']
     except do.exceptions().HttpResponseError as err:
-        raise DigitalOceanError('Error: {0} {1}: {2}'.format(
-            err.status_code, err.reason, err.error.message)) from err
+        raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
     else:
         return volume
 
@@ -131,8 +129,7 @@ def _create_droplet(request: Dict[str, Any]) -> Dict[str, Any]:
         get_resp = client().droplets.get(droplet_id)
         droplet = get_resp['droplet']
     except do.exceptions().HttpResponseError as err:
-        raise DigitalOceanError('Error: {0} {1}: {2}'.format(
-            err.status_code, err.reason, err.error.message)) from err
+        raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
     return droplet
 
 
@@ -157,16 +154,18 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         **tags
     }
     tags = [f'{key}:{value}' for key, value in tags.items()]
+    default_image = constants.GPU_IMAGES.get(
+            config.node_config['InstanceType'],
+            'ubuntu-22-04-x64',
+        )
+    import pdb; pdb.set_trace()
     instance_name = (f'{cluster_name_on_cloud}-'
                      f'{uuid.uuid4().hex[:4]}-{instance_type}')
     instance_request = {
         'name': instance_name,
         'region': region,
         'size': config.node_config['InstanceType'],
-        'image': constants.GPU_IMAGES.get(
-            config.node_config['InstanceType'],
-            'ubuntu-22-04-x64',
-        ),
+        'image': default_image,
         'ssh_keys': [
             ssh_key_id(
                 config.authentication_config['ssh_public_key'])['fingerprint']
@@ -189,8 +188,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     try:
         client().volume_actions.post_by_id(volume['id'], attach_request)
     except do.exceptions().HttpResponseError as err:
-        raise DigitalOceanError('Error: {0} {1}: {2}'.format(
-            err.status_code, err.reason, err.error.message)) from err
+        raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
     logger.debug(f'{instance_name} created')
     return instance
 
@@ -242,8 +240,7 @@ def filter_instances(
                         'status'] in status_filters:
                     filtered_instances[instance['name']] = instance
         except do.exceptions().HttpResponseError as err:
-            DigitalOceanError(
-                f'Error: {err.status_code} {err.reason}: {err.error.message}')
+            DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
 
         pages = resp['links']
         if 'pages' in pages and 'next' in pages['pages']:
