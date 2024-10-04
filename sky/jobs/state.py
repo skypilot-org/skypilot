@@ -20,10 +20,18 @@ CallbackType = Callable[[str], None]
 
 logger = sky_logging.init_logger(__name__)
 
-_DB_PATH = pathlib.Path('~/.sky/spot_jobs.db')
-_DB_PATH = _DB_PATH.expanduser().absolute()
-_DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
-_DB_PATH = str(_DB_PATH)
+
+def _get_db_path() -> str:
+    """Workaround to collapse multi-step Path ops for type checker.
+    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
+    """
+    path = pathlib.Path('~/.sky/spot_jobs.db')
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_PATH = _get_db_path()
 
 # Module-level connection/cursor; thread-safe as the module is only imported
 # once.
