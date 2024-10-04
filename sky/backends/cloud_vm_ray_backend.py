@@ -3710,8 +3710,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             controller_handle.cluster_yaml, controller_handle.docker_user)
         runner = command_runner.SSHCommandRunner(
-            # controller_handle.head_ip,
-            # port=controller_handle.head_ssh_port,
             node=(controller_handle.head_ip, controller_handle.head_ssh_port),
             **ssh_credentials,
         )
