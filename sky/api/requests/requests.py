@@ -293,8 +293,8 @@ def get_request_tasks(
     """Get a REST task."""
     status_filter = ''
     if status is not None:
-        status_filter = (
-            f'WHERE status IN ({",".join(repr(status.value) for status in status)})')
+        status_list_str = ",".join(repr(status.value) for status in status)
+        status_filter = f'WHERE status IN ({status_list_str})'
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
