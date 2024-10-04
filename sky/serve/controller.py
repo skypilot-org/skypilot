@@ -49,7 +49,13 @@ class SkyServeController:
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._host = host
         self._port = port
-        self._app = fastapi.FastAPI()
+        self._app = fastapi.FastAPI(lifespan=self.lifespan)
+
+    async def lifespan(self, app: fastapi.FastAPI):
+        uvicorn_access_logger = logging.getLogger('uvicorn.access')
+        for handler in uvicorn_access_logger.handlers:
+            handler.setFormatter(sky_logging.FORMATTER)
+        yield
 
     def _run_autoscaler(self):
         logger.info('Starting autoscaler.')
@@ -141,12 +147,6 @@ class SkyServeController:
                 logger.error(f'Error in update_service: '
                              f'{common_utils.format_exception(e)}')
                 return {'message': 'Error'}
-
-        @self._app.on_event('startup')
-        def configure_logger():
-            uvicorn_access_logger = logging.getLogger('uvicorn.access')
-            for handler in uvicorn_access_logger.handlers:
-                handler.setFormatter(sky_logging.FORMATTER)
 
         threading.Thread(target=self._run_autoscaler).start()
 
