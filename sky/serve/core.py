@@ -606,19 +606,13 @@ def sync_down_logs(service_name: str,
                    service_component: Optional[serve_utils.ServiceComponent],
                    replica_id: Optional[int]) -> None:
     logger.info(f'Syncing down logs for {service_name}...')
-    controller_status, controller_handle = backend_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
-    if controller_handle is None or controller_handle.head_ip is None:
-        msg = 'No service is found.'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg = ('The SkyServe controller being initialized. Please '
-                   'wait for it to be ready.')
-        raise exceptions.ClusterNotUpError(msg,
-                                           cluster_status=controller_status)
-    backend = backend_utils.get_backend_from_handle(controller_handle)
-    backend.sync_down_serve_logs(controller_handle, service_name,
-                                 service_component, replica_id)
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    backend.sync_down_serve_logs(handle, service_name, service_component,
+                                 replica_id)
 
 
 @usage_lib.entrypoint
