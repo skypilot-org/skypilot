@@ -147,7 +147,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # We don't use a separate conda env for SkyPilot dependencies because it is
     # costly to create a new conda env, and venv should be a lightweight and
     # faster alternative when the python version satisfies the requirement.
-    f'PYTHON_EXEC={SKY_PYTHON_CMD}'
+    f'PYTHON_EXEC={SKY_PYTHON_CMD}; '
     f'[[ $( $PYTHON_EXEC --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
     '{ '
     'echo "Creating conda env with Python 3.10" && '
@@ -155,7 +155,7 @@ CONDA_INSTALLATION_COMMANDS = (
     f'PYTHON_EXEC=$(conda run -n {SKY_REMOTE_PYTHON_ENV_NAME} which python3); '
     '}; '
     # Check the python version is not larger than 3.12
-    '[[ $( $PYTHON_EXEC --version | cut -d " " -f 2 | cut -d "." -xf 2) -ge 12 ]] && '
+    '[[ $( $PYTHON_EXEC --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
     ' which $PYTHON_EXEC && echo "Python version is still larger than 3.12, '
     'something is wrong" && exit 1;'
     # Create a separate conda environment for SkyPilot dependencies.
