@@ -10,6 +10,7 @@ import time
 import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple
+from enum import auto, Enum
 
 import colorama
 import psutil
@@ -819,6 +820,27 @@ class SkyPilotReplicaManager(ReplicaManager):
     # ReplicaManager Daemon Threads #
     #################################
 
+    class ReplicaRecordAction(Enum):
+        KEEP = auto()
+        REMOVE_SCALE_DOWN = auto()
+        REMOVE_PREEMPTION = auto()
+        REMOVE_VERSION_MISMATCH = auto()
+
+    def get_replica_record_action(self, info: ReplicaInfo) -> ReplicaRecordAction:
+        if info.status_property.is_scale_down:
+            # This means the cluster is deleted due to an autoscaler
+            # decision or the cluster is recovering from preemption.
+            # Delete the replica info so it won't count as a replica.
+            if info.status_property.preempted:
+                return self.ReplicaRecordAction.REMOVE_PREEMPTION
+            return self.ReplicaRecordAction.REMOVE_SCALE_DOWN
+        if info.version != self.latest_version:
+            # Don't keep failed record for version mismatch replicas,
+            # since user should fixed the error before update.
+            return self.ReplicaRecordAction.REMOVE_VERSION_MISMATCH
+        return self.ReplicaRecordAction.KEEP
+
+
     @with_lock
     def _refresh_process_pool(self) -> None:
         """Refresh the launch/down process pool.
@@ -891,34 +913,22 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # re-provision. However, there is a special case that if the
                 # replica is UP for longer than initial_delay_seconds, we
                 # assume it is just some random failure and we should restart
-                # the replica. Please refer to the implementation of
-                # `is_scale_down_succeeded` for more details.
+                # the replica. Please refer to the assignment of
+                # `status_property.is_scale_down` for more details.
                 # TODO(tian): Currently, restart replicas that failed within
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
-                removal_reason = None
-                if info.status_property.is_scale_down:
-                    # This means the cluster is deleted due to an autoscaler
-                    # decision or the cluster is recovering from preemption.
-                    # Delete the replica info so it won't count as a replica.
-                    if info.status_property.preempted:
-                        removal_reason = 'for preemption recovery'
-                    else:
-                        removal_reason = 'normally'
-                # Don't keep failed record for version mismatch replicas,
-                # since user should fixed the error before update.
-                elif info.version != self.latest_version:
-                    removal_reason = 'for version outdated'
-                else:
+                action = self.get_replica_record_action(info)
+                if action == self.ReplicaRecordAction.KEEP:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
                                 'failure detected.')
                     serve_state.add_or_update_replica(self._service_name,
                                                       replica_id, info)
-                if removal_reason is not None:
+                else:
                     serve_state.remove_replica(self._service_name, replica_id)
                     logger.info(f'Replica {replica_id} removed from the '
-                                f'replica table {removal_reason}.')
+                                f'replica table {action.value}.')
 
         # Clean old version
         replica_infos = serve_state.get_replica_infos(self._service_name)
