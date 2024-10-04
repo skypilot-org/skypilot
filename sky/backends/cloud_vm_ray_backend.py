@@ -3855,12 +3855,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
-                    handle.cluster_name, acquire_per_cluster_status_lock=False))
+                        handle.cluster_name,
+                        acquire_per_cluster_status_lock=False))
                 cluster_status_fetched = True
             except exceptions.ClusterStatusFetchingError:
                 logger.warning(
-                    f'Failed to fetch cluster status for {handle.cluster_name!r}. '
-                    'Assuming the cluster is still up.')
+                    'Failed to fetch cluster status for '
+                    f'{handle.cluster_name!r}. Assuming the cluster is still '
+                    'up.')
         if not cluster_status_fetched:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)

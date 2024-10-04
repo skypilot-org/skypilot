@@ -1164,7 +1164,8 @@ def wait_until_ray_cluster_ready(
     runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
                                              **ssh_credentials)
     with rich_utils.safe_status(
-            ux_utils.spinner_message('Waiting for workers', log_path=log_path)) as worker_status:
+            ux_utils.spinner_message('Waiting for workers',
+                                     log_path=log_path)) as worker_status:
         while True:
             rc, output, stderr = runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -1183,7 +1184,8 @@ def wait_until_ray_cluster_ready(
             worker_status.update(
                 ux_utils.spinner_message(
                     f'{ready_workers} out of {num_nodes - 1} '
-                    'workers ready', log_path=log_path))
+                    'workers ready',
+                    log_path=log_path))
 
             # In the local case, ready_head=0 and ready_workers=num_nodes. This
             # is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
