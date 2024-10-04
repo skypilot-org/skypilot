@@ -245,6 +245,8 @@ class ReplicaStatusProperty:
     is_scale_down: bool = False
     # The replica's spot instance was preempted.
     preempted: bool = False
+    # Whether the replica is purged.
+    purged: bool = False
 
     def remove_terminated_replica(self) -> bool:
         """Whether to remove the replica record from the replica table.
@@ -304,6 +306,8 @@ class ReplicaStatusProperty:
         if self.user_app_failed:
             return False
         if self.preempted:
+            return False
+        if self.purged:
             return False
         return True
 
@@ -588,7 +592,7 @@ class ReplicaManager:
         """
         raise NotImplementedError
 
-    def scale_down(self, replica_id: int) -> None:
+    def scale_down(self, replica_id: int, purge: bool = False) -> None:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
@@ -677,7 +681,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                            replica_id: int,
                            sync_down_logs: bool,
                            replica_drain_delay_seconds: int,
-                           is_scale_down: bool = False) -> None:
+                           is_scale_down: bool = False,
+                           purge: bool = False) -> None:
 
         if replica_id in self._launch_process_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
@@ -761,16 +766,18 @@ class SkyPilotReplicaManager(ReplicaManager):
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         info.status_property.is_scale_down = is_scale_down
+        info.status_property.purged = purge
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_id: int) -> None:
+    def scale_down(self, replica_id: int, purge: bool = False) -> None:
         self._terminate_replica(
             replica_id,
             sync_down_logs=False,
             replica_drain_delay_seconds=_DEFAULT_DRAIN_SECONDS,
-            is_scale_down=True)
+            is_scale_down=True,
+            purge=purge)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
@@ -909,6 +916,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # since user should fixed the error before update.
                 elif info.version != self.latest_version:
                     removal_reason = 'for version outdated'
+                elif info.status_property.purged:
+                    removal_reason = 'for purge'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '

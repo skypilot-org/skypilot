@@ -87,36 +87,36 @@ class SkyServeController:
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(self._autoscaler.get_decision_interval())
 
-    def _purge_replica(self, replica_id: int) -> Dict[str, str]:
+    def _purge_replica(
+            self, replica_info: replica_managers.ReplicaInfo) -> Dict[str, str]:
+        replica_id = replica_info.replica_id
+
         logger.info(f'Purging replica {replica_id}...')
-        replica_info = serve_state.get_replica_info_from_id(
-            self._service_name, replica_id)
-        assert replica_info is not None
-        replica_cluster_is_remaining = False
-        if replica_info.status in serve_state.ReplicaStatus.failed_statuses():
-            if global_user_state.get_cluster_from_name(
-                    replica_info.cluster_name) is not None:
-                replica_cluster_is_remaining = True
-            serve_state.remove_replica(self._service_name, replica_id)
-            if replica_cluster_is_remaining:
-                return {
-                    'message':
-                        f'{colorama.Fore.YELLOW}Purged replica {replica_id} '
-                        f'with failed status ({replica_info.status}). This may'
-                        f' indicate a resource leak. Please check the following'
-                        f' SkyPilot cluster on the controller: '
-                        f'{replica_info.cluster_name}{colorama.Style.RESET_ALL}'
-                }
-            else:
-                return {
-                    'message': f'Successfully purged replica '
-                               f'{replica_id}'
-                }
-        else:
+
+        if replica_info.status not in serve_state.ReplicaStatus.failed_statuses(
+        ):
             return {
                 'message': f'No purging for replica {replica_id} since '
                            f'the replica does not have a failed status.'
             }
+
+        replica_cluster_is_remaining = global_user_state.get_cluster_from_name(
+            replica_info.cluster_name) is not None
+
+        self._replica_manager.scale_down(replica_id, purge=True)
+        if replica_cluster_is_remaining:
+            return {
+                'message':
+                    f'{colorama.Fore.YELLOW}Purged replica {replica_id} '
+                    f'with failed status ({replica_info.status}). This may'
+                    f' indicate a resource leak. Please check the following'
+                    f' SkyPilot cluster on the controller: '
+                    f'{replica_info.cluster_name}{colorama.Style.RESET_ALL}'
+            }
+        return {
+            'message': f'Successfully purged replica '
+                       f'{replica_id}'
+        }
 
     def run(self) -> None:
 
@@ -181,34 +181,37 @@ class SkyServeController:
             try:
                 replica_id = request_data.get('replica_id')
                 if replica_id is None:
-                    return {'code': 400,
-                        'message': 'Error: replica ID is not specified.'}
+                    return {
+                        'code': 400,
+                        'message': 'Error: replica ID is not specified.'
+                    }
                 purge = request_data.get('purge')
                 if purge is None:
-                    return {'code': 400,
-                            'message': 'Error: purge is not specified.'}
+                    return {
+                        'code': 400,
+                        'message': 'Error: purge is not specified.'
+                    }
                 replica_info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 if replica_info is None:
-                    return {'code': 400,
-                            'message': f'Error: replica {replica_id} does not exist.'}
-                
-                if purge:
-                    return self._purge_replica(replica_id)
-                else:
-                    logger.info(f'Terminating replica {replica_id}...')
-                    self._replica_manager.scale_down(replica_id)
-                    serve_state.remove_replica(self._service_name, replica_id)
                     return {
-                        'message': f'Success terminating replica {replica_id}.'
+                        'code': 400,
+                        'message': f'Error: replica {replica_id} '
+                                   f'does not exist.'
                     }
+
+                if purge:
+                    return self._purge_replica(replica_info)
+
+                logger.info(f'Terminating replica {replica_id}...')
+                self._replica_manager.scale_down(replica_id)
+                return {'message': f'Success terminating replica {replica_id}.'}
 
             except Exception as e:  # pylint: disable=broad-except
                 error_message = (f'Error in terminate_replica: '
                                  f'{common_utils.format_exception(e)}')
                 logger.error(error_message)
-                return {'code': 500,
-                        'message': error_message}
+                return {'code': 500, 'message': error_message}
 
         @self._app.on_event('startup')
         def configure_logger():
