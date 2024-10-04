@@ -9,6 +9,7 @@ import sky
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
+from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -89,6 +90,7 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     f'Got multiple ports: {service_port} and '
                     f'{replica_ingress_port} in different resources. '
                     'Please specify the same port instead.')
+
 
 logger = sky_logging.init_logger(__name__)
 
