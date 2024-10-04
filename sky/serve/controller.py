@@ -181,41 +181,34 @@ class SkyServeController:
             try:
                 replica_id = request_data.get('replica_id')
                 if replica_id is None:
-                    return {'message': 'Error: replica ID is not specified.'}
+                    return {'code': 400,
+                        'message': 'Error: replica ID is not specified.'}
                 purge = request_data.get('purge')
                 if purge is None:
-                    return {'message': 'Error: purge is not specified.'}
+                    return {'code': 400,
+                            'message': 'Error: purge is not specified.'}
                 replica_info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 if replica_info is None:
-                    return {'message': f'Error: replica {replica_id} does not exist.'}
+                    return {'code': 400,
+                            'message': f'Error: replica {replica_id} does not exist.'}
                 
-                if replica_info.status in serve_state.ReplicaStatus.failed_statuses():
-                    if purge:
-                        return self._purge_replica(replica_id)
-                    else:
-                        return {
-                            'message': f'Error: replica {replica_id} has failed. '
-                            f'Please use purge to remove the failed replica.'
-                        }
+                if purge:
+                    return self._purge_replica(replica_id)
                 else:
-                    if purge:
-                        logger.info(f'Purging replica {replica_id}...')
-                        self._replica_manager.scale_down(replica_id)
-                        serve_state.remove_replica(self._service_name, replica_id)
-                        return {'message': f'Successfully purged replica {replica_id}.'}
-                    else:
-                        logger.info(f'Terminating replica {replica_id}...')
-                        self._replica_manager.scale_down(replica_id)
-                        return {
-                            'message': f'Success terminating replica {replica_id}.'
-                        }
+                    logger.info(f'Terminating replica {replica_id}...')
+                    self._replica_manager.scale_down(replica_id)
+                    serve_state.remove_replica(self._service_name, replica_id)
+                    return {
+                        'message': f'Success terminating replica {replica_id}.'
+                    }
 
             except Exception as e:  # pylint: disable=broad-except
                 error_message = (f'Error in terminate_replica: '
                                  f'{common_utils.format_exception(e)}')
                 logger.error(error_message)
-                return {'message': error_message}
+                return {'code': 500,
+                        'message': error_message}
 
         @self._app.on_event('startup')
         def configure_logger():
