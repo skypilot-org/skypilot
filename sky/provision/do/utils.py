@@ -181,7 +181,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
         'name': instance_name,
         'region': region,
         'filesystem_type': 'ext4',
-        'tags': ['skypilot', cluster_name_on_cloud]
+        'tags': tags
     }
     volume = _create_volume(volume_request)
 
