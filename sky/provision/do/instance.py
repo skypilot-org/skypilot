@@ -34,7 +34,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     pending_status = ['new']
     newly_started_instances = utils.filter_instances(cluster_name_on_cloud,
                                                      pending_status + ['off'])
-
     while True:
         instances = utils.filter_instances(cluster_name_on_cloud,
                                            pending_status)

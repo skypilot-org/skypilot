@@ -4,6 +4,7 @@ Example usage of `pydo` client library was mostly taken from here:
 https://github.com/digitalocean/pydo/blob/main/examples/poc_droplets_volumes_sshkeys.py
 """
 
+import copy
 import os
 from typing import Any, Dict, List, Optional
 import urllib
@@ -12,6 +13,7 @@ import uuid
 from sky import sky_logging
 from sky.adaptors import do
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.do import constants
 from sky.utils import common_utils
 
@@ -146,6 +148,15 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     Returns:
         Dict[str, Any]: instance metadata
     """
+    # sort tags by key to support deterministic unit test stubbing
+    tags = dict(sorted(copy.deepcopy(config.tags).items()))
+    tags = {
+        'Name': cluster_name_on_cloud,
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
+        provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+        **tags
+    }
+    tags = [f'{key}:{value}' for key, value in tags.items()]
     instance_name = (f'{cluster_name_on_cloud}-'
                      f'{uuid.uuid4().hex[:4]}-{instance_type}')
     instance_request = {
@@ -160,7 +171,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
             ssh_key_id(
                 config.authentication_config['ssh_public_key'])['fingerprint']
         ],
-        'tags': ['skypilot', cluster_name_on_cloud],
+        'tags': tags,
         'user_data': constants.INSTALL_DOCKER,
     }
     instance = _create_droplet(instance_request)
