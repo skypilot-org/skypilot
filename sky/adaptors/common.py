@@ -1,7 +1,7 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
-from typing import Any, Optional, Tuple, Callable
+from typing import Any, Callable, Optional, Tuple
 
 
 class LazyImport:

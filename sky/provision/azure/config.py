@@ -12,10 +12,10 @@ import time
 from typing import Any, Callable
 
 from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import azure
 from sky.provision import common
 from sky.utils import common_utils
-from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
@@ -94,7 +94,7 @@ def bootstrap_instances(
                 time.sleep(1)
                 retry += 1
                 continue
-            raise            
+            raise
         except azure.exceptions().ClientAuthenticationError as e:
             message = (
                 'Failed to authenticate with Azure. Please check your Azure '

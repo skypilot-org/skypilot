@@ -57,9 +57,8 @@ def _bulk_provision(
     #  cause other issues like the cache is not synced
     #  with the cloud configuration.
     config = provision.bootstrap_instances(provider_name, region_name,
-                                            cluster_name.name_on_cloud,
-                                            bootstrap_config)
-
+                                           cluster_name.name_on_cloud,
+                                           bootstrap_config)
 
     provision_record = provision.run_instances(provider_name,
                                                region_name,
