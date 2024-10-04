@@ -3850,11 +3850,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        cluster_status_fetched = False
         if refresh_cluster_status:
-            prev_cluster_status, _ = (
-                backend_utils.refresh_cluster_status_handle(
+            try:
+                prev_cluster_status, _ = (
+                    backend_utils.refresh_cluster_status_handle(
                     handle.cluster_name, acquire_per_cluster_status_lock=False))
-        else:
+                cluster_status_fetched = True
+            except exceptions.ClusterStatusFetchingError:
+                logger.warning(
+                    f'Failed to fetch cluster status for {handle.cluster_name!r}. '
+                    'Assuming the cluster is still up.')
+        if not cluster_status_fetched:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)
             prev_cluster_status = record[
