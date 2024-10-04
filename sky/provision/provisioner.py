@@ -10,8 +10,6 @@ import time
 import traceback
 from typing import Dict, List, Optional, Tuple
 
-import colorama
-
 import sky
 from sky import clouds
 from sky import exceptions
@@ -43,7 +41,6 @@ _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 def _bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
-    zones: Optional[List[clouds.Zone]],
     cluster_name: resources_utils.ClusterName,
     bootstrap_config: provision_common.ProvisionConfig,
 ) -> provision_common.ProvisionRecord:
@@ -138,12 +135,12 @@ def bulk_provision(
             logger.debug(
                 'Provision config:\n'
                 f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
-            return _bulk_provision(cloud, region, zones, cluster_name,
+            return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
-        except exceptions.NoClusterLaunchedError as e:
+        except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.
             raise
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)
