@@ -290,7 +290,7 @@ def create_if_not_exists(request: Request) -> bool:
 @init_db
 def get_request_tasks(
         status: Optional[List[RequestStatus]] = None) -> List[Request]:
-    """Get a REST task."""s
+    """Get a REST task."""
     status_filter = ''
     if status is not None:
         status_filter = (
