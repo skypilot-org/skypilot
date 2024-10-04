@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import colorama
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.provision import common
 from sky.provision.aws import utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -535,12 +537,19 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     if vpc_id in vpc_to_existing_sg:
         return vpc_to_existing_sg[vpc_id]
 
-    # create a new security group
-    ec2.meta.client.create_security_group(
-        Description='Auto-created security group for Ray workers',
-        GroupName=expected_sg_name,
-        VpcId=vpc_id,
-    )
+    try:
+        # create a new security group
+        ec2.meta.client.create_security_group(
+            Description='Auto-created security group for Ray workers',
+            GroupName=expected_sg_name,
+            VpcId=vpc_id,
+        )
+    except ec2.meta.client.exceptions.ClientError as e:
+        message = ('Failed to create security group. Error: '
+                   f'{common_utils.format_exception(e)}')
+        logger.warning(message)
+        raise exceptions.NoClusterLaunchedError(message) from e
+
     security_group = _get_security_groups_from_vpc_ids(ec2, [vpc_id],
                                                        [expected_sg_name])
 

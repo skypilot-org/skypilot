@@ -1740,7 +1740,6 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-        style = colorama.Style
         if isinstance(to_provision_cloud, clouds.Kubernetes):
             logger.info(
                 ux_utils.starting_message(
