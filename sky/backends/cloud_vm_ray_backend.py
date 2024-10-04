@@ -751,15 +751,14 @@ class FailoverCloudErrorHandlerV1:
                         region: 'clouds.Region',
                         zones: Optional[List['clouds.Zone']], stdout: str,
                         stderr: str):
-        del zones  # Unused.
+        del region, zones  # Unused.
         errors = FailoverCloudErrorHandlerV1._handle_errors(
             stdout,
             stderr,
             is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
+        messages = '\n  '.join(errors)
         style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        logger.warning(f'  {style.DIM}{messages}{style.RESET_ALL}')
         _add_to_blocked_resources(blocked_resources,
                                   launchable_resources.copy(zone=None))
 
@@ -1555,6 +1554,7 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
+
             status, stdout, stderr, head_internal_ip, head_external_ip = (
                 self._gang_schedule_ray_up(to_provision.cloud,
                                            cluster_config_file, handle,
@@ -1720,7 +1720,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at='Shared connection to',
-                line_processor=log_utils.RayUpLineProcessor(),
+                line_processor=log_utils.RayUpLineProcessor(log_abs_path),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(
@@ -4021,7 +4021,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
-                            f'{teardown_verb} [green]{cluster_name}')):
+                            f'{teardown_verb}: {cluster_name}', log_path)):
                     # FIXME(zongheng): support retries. This call can fail for
                     # example due to GCP returning list requests per limit
                     # exceeded.

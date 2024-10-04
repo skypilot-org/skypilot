@@ -38,33 +38,34 @@ class RayUpLineProcessor(LineProcessor):
         RUNTIME_SETUP = 1
         PULLING_DOCKER_IMAGES = 2
 
+    def __init__(self, log_path: str):
+        self.log_path = log_path
+
     def __enter__(self) -> None:
         self.state = self.ProvisionStatus.LAUNCH
         self.status_display = rich_utils.safe_status(
-            ux_utils.spinner_message('Launching'))
+            ux_utils.spinner_message('Launching', self.log_path))
         self.status_display.start()
 
     def process_line(self, log_line: str) -> None:
         if ('Success.' in log_line and
                 self.state == self.ProvisionStatus.LAUNCH):
-            logger.info(f'{colorama.Fore.GREEN}Head node is up.'
-                        f'{colorama.Style.RESET_ALL}')
+            logger.info('  Head VM is up.')
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime'))
+                    'Launching - Preparing SkyPilot runtime', self.log_path))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
         if ('Pulling from' in log_line and
                 self.state == self.ProvisionStatus.RUNTIME_SETUP):
             self.status_display.update(
-                ux_utils.spinner_message('Launching - Pulling docker images'))
+                ux_utils.spinner_message(
+                    'Launching - Initializing docker container', self.log_path))
             self.state = self.ProvisionStatus.PULLING_DOCKER_IMAGES
         if ('Status: Downloaded newer image' in log_line and
                 self.state == self.ProvisionStatus.PULLING_DOCKER_IMAGES):
-            logger.info(f'{colorama.Fore.GREEN}Docker image is downloaded.'
-                        f'{colorama.Style.RESET_ALL}')
             self.status_display.update(
                 ux_utils.spinner_message(
-                    'Launching - Preparing SkyPilot runtime'))
+                    'Launching - Preparing SkyPilot runtime', self.log_path))
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
