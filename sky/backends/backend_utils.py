@@ -1183,7 +1183,7 @@ def wait_until_ray_cluster_ready(
             worker_status.update(
                 ux_utils.spinner_message(
                     f'{ready_workers} out of {num_nodes - 1} '
-                    'workers ready'))
+                    'workers ready', log_path=log_path))
 
             # In the local case, ready_head=0 and ready_workers=num_nodes. This
             # is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.

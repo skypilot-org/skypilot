@@ -1850,11 +1850,6 @@ class RetryingVmProvisioner(object):
                     head_internal_ip, head_external_ip)
 
         # All code below is handling num_nodes > 1.
-        provision_str = ('Successfully provisioned or found existing head '
-                         'instance.')
-        logger.info(f'{style.BRIGHT}{provision_str} '
-                    f'Waiting for workers.{style.RESET_ALL}')
-
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
