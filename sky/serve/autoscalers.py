@@ -314,7 +314,19 @@ class RequestRateAutoscaler(Autoscaler):
             self,
             replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
         """Select outdated replicas to scale down."""
+        all_replica_ids_to_scale_down = []
+        for info in replica_infos:
+            if info.version < self.latest_version and info.is_terminal:
+                all_replica_ids_to_scale_down.append(info.replica_id)
+        all_replica_ids_to_scale_down.extend(
+            self._select_outdated_nonterminal_replicas_to_scale_down(
+                replica_infos))
+        return all_replica_ids_to_scale_down
 
+    def _select_outdated_nonterminal_replicas_to_scale_down(
+            self,
+            replica_infos: List['replica_managers.ReplicaInfo']) -> List[int]:
+        """Select outdated nonterminal replicas to scale down."""
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
             latest_ready_replicas = []
             old_nonterminal_replicas = []
