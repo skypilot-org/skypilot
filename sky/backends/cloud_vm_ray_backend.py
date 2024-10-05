@@ -3004,6 +3004,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
+        if handle.vpn_config is not None:
+            # Skip opening any ports if VPN is used.
+            return
         cloud = handle.launched_resources.cloud
         logger.debug(
             f'Opening ports {handle.launched_resources.ports} for {cloud}')

@@ -9,12 +9,18 @@ from sky.provision import common
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
 
 class VPN:
-    """Interface for VPN configuration."""
+    """Basic interface for VPN configuration.
+
+    This class defines the interface for VPN configurations. Each VPN
+    should implement the following methods then it can be integrated
+    into SkyPilot out of the box.
+    """
 
     def get_setup_command(self) -> str:
         """Get the command to setup the VPN on VM instances."""
@@ -75,14 +81,17 @@ class TailscaleVPN(VPN):
         self._api_key = api_key
         self._network_name = network_name
         self._enable_api = enable_api
-        if not enable_api:
-            logger.warning('TAILSCALE_API_KEY or TAILSCALE_NETWORK_NAME is '
-                           'not set. Tailscale API will be disabled. You '
-                           'may need to remove hosts manually.')
-        elif not api_key or not network_name:
-            raise ValueError(
-                'Both TAILSCALE_API_KEY and TAILSCALE_NETWORK_NAME '
-                'must be set to enable the Tailscale API.')
+        # NOTE(yi): if we allow users to provide AUTH_KEY only, we can
+        # uncomment the following code.
+        # if not enable_api:
+        #     logger.warning('TAILSCALE_API_KEY or TAILSCALE_NETWORK_NAME is '
+        #                    'not set. Tailscale API will be disabled. You '
+        #                    'may need to remove hosts manually.')
+        if not api_key or not network_name:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Both TAILSCALE_API_KEY and TAILSCALE_NETWORK_NAME '
+                    'must be set to enable the Tailscale API.')
 
     @staticmethod
     def from_env_vars() -> 'TailscaleVPN':
@@ -90,7 +99,8 @@ class TailscaleVPN(VPN):
         # This is required for all Tailscale operations.
         auth_key = os.environ.get('TAILSCALE_AUTH_KEY')
         if auth_key is None:
-            raise ValueError('TAILSCALE_AUTH_KEY is not set.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('TAILSCALE_AUTH_KEY is not set.')
 
         # Parse Tailscale API key and network name
         api_key = os.environ.get('TAILSCALE_API_KEY')
@@ -138,6 +148,9 @@ class TailscaleVPN(VPN):
             url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
             resp = requests.get(url_to_query, headers=self._get_auth_headers())
             return resp.json().get('addresses', [])[0]
+        # If the API is not enabled, we need to query the IP address locally.
+        # However, since currently self._enable_api is always True, this code
+        # will not be executed.
         query_cmd = f'tailscale ip -4 {hostname}'
         rc, stdout, stderr = subprocess_utils.run_with_retries(
             query_cmd,
@@ -171,9 +184,8 @@ class TailscaleVPN(VPN):
 
     @staticmethod
     def from_backend_config(config: Dict[str, Any]) -> 'TailscaleVPN':
-        if config.get('auth_key') is None:
-            raise ValueError(
-                'Tailscale auth key is required in the configuration.')
+        assert config.get('auth_key') is not None, (
+            'Tailscale auth key is not set in the configuration.')
         return TailscaleVPN(**config)
 
     def to_backend_config(self) -> Dict[str, Any]:
@@ -186,7 +198,14 @@ class TailscaleVPN(VPN):
 
 
 class VPNConfig:
-    """VPN configuration."""
+    """VPN Configuration.
+
+    This class is used to manage multiple VPN configurations. It provides
+    a unified interface to connect different VPN configurations and the
+    core logic of SkyPilot. All VPN configurations will be stored in this
+    class, and the core logic will only interact with this class to get
+    installation commands, private IP addresses, etc.
+    """
 
     def __init__(
         self,
@@ -204,7 +223,8 @@ class VPNConfig:
             if vpn_name == 'tailscale':
                 vpn_configs[vpn_name] = TailscaleVPN.from_env_vars()
             else:
-                raise ValueError(f'Unknown VPN configuration: {vpn_name}')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Unknown VPN configuration: {vpn_name}')
         return VPNConfig(vpn_configs)
 
     @staticmethod
@@ -212,11 +232,11 @@ class VPNConfig:
         """Create a VPN configuration from the backend configuration."""
         vpn_configs = {}
         for vpn_name, vpn_config in config.items():
+            assert vpn_name in ['tailscale'
+                               ], (f'Unknown VPN configuration: {vpn_name}')
             if vpn_name == 'tailscale':
                 vpn_configs[vpn_name] = \
                     TailscaleVPN.from_backend_config(vpn_config)
-            else:
-                raise ValueError(f'Unknown VPN configuration: {vpn_name}')
         return VPNConfig(vpn_configs)
 
     def get_setup_commands(self) -> List[str]:
