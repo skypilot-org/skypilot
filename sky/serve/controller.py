@@ -53,7 +53,7 @@ class SkyServeController:
         self._app = fastapi.FastAPI(lifespan=self.lifespan)
 
     @contextlib.asynccontextmanager
-    async def lifespan(self, _app: fastapi.FastAPI):
+    async def lifespan(self, _: fastapi.FastAPI):
         uvicorn_access_logger = logging.getLogger('uvicorn.access')
         for handler in uvicorn_access_logger.handlers:
             handler.setFormatter(sky_logging.FORMATTER)
