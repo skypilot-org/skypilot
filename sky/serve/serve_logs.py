@@ -16,13 +16,14 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
+
 def sync_down_serve_logs(
-        backend,
-        controller_handle: CloudVmRayResourceHandle,
-        service_name: str,
-        service_component: Optional[serve_lib.ServiceComponent],
-        replica_id: Optional[int],
-    ) -> None:
+    backend,
+    controller_handle: CloudVmRayResourceHandle,
+    service_name: str,
+    service_component: Optional[serve_lib.ServiceComponent],
+    replica_id: Optional[int],
+) -> None:
     """Sync down serve logs. Will sync down logs for controller, load
         balancer, replica, or everything.
 
@@ -54,13 +55,12 @@ def sync_down_serve_logs(
                 service_name, run_timestamp, replica_id))
         backend = backend_utils.get_backend_from_handle(controller_handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
-        assert isinstance(controller_handle,
-                            backends.CloudVmRayResourceHandle)
+        assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
         logger.info('Preparing replica logs for download on controller...')
         prepare_returncode = backend.run_on_head(controller_handle,
-                                                prepare_code,
-                                                require_outputs=False,
-                                                stream_logs=False)
+                                                 prepare_code,
+                                                 require_outputs=False,
+                                                 stream_logs=False)
         try:
             subprocess_utils.handle_returncode(
                 prepare_returncode, prepare_code,
@@ -71,13 +71,12 @@ def sync_down_serve_logs(
             raise RuntimeError(e.error_msg) from e
         remote_service_dir_name = (
             serve_utils.generate_remote_service_dir_name(service_name))
-        dir_for_download = os.path.join(remote_service_dir_name,
-                                        run_timestamp)
+        dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
         logger.info('Downloading the replica logs...')
         runner.rsync(source=dir_for_download,
-                        target=sky_logs_directory,
-                        up=False,
-                        stream_logs=False)
+                     target=sky_logs_directory,
+                     up=False,
+                     stream_logs=False)
         remove_code = (
             serve_utils.ServeCodeGen.remove_replica_logs_for_download(
                 service_name, run_timestamp))
@@ -103,25 +102,24 @@ def sync_down_serve_logs(
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.CONTROLLER):
         controller_log_file_name = (
-            serve_utils.generate_remote_controller_log_file_name(
-                service_name))
+            serve_utils.generate_remote_controller_log_file_name(service_name))
         logger.info('Downloading the controller logs...')
         runner.rsync(source=controller_log_file_name,
-                        target=os.path.join(
-                            target_directory,
-                            serve_constants.CONTROLLER_LOG_FILE_NAME),
-                        up=False,
-                        stream_logs=False)
-    if (sync_down_all_components or service_component
-            == serve_utils.ServiceComponent.LOAD_BALANCER):
+                     target=os.path.join(
+                         target_directory,
+                         serve_constants.CONTROLLER_LOG_FILE_NAME),
+                     up=False,
+                     stream_logs=False)
+    if (sync_down_all_components or
+            service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
         load_balancer_log_file_name = (
             serve_utils.generate_remote_load_balancer_log_file_name(
                 service_name))
         logger.info('Downloading the load balancer logs...')
         runner.rsync(source=load_balancer_log_file_name,
-                        target=os.path.join(
-                            target_directory,
-                            serve_constants.LOAD_BALANCER_LOG_FILE_NAME),
-                        up=False,
-                        stream_logs=False)
+                     target=os.path.join(
+                         target_directory,
+                         serve_constants.LOAD_BALANCER_LOG_FILE_NAME),
+                     up=False,
+                     stream_logs=False)
     logger.info(f'Synced down logs can be found at: {target_directory}')
