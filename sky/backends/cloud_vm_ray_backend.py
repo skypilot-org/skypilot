@@ -2290,13 +2290,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
             use_internal_ips = self._use_internal_ips()
 
-            # Currently VPN is not supported.
-            # TODO(yi): move this warning earlier, or consider to move
-            # VPN into the features.
-            if vpn_config is not None:
-                logger.warning('VPN is not supported for clouds that do not '
-                               'support the new provisioner API. Ignoring the '
-                               'provided VPN configuration.')
+            assert self.vpn_config is None, (
+                'Clouds that do not support the new provisioner should not '
+                'have VPN configurations.')
 
             # cluster_feasible_ips is the list of IPs of the nodes in the
             # cluster which can be used to connect to the cluster. It is a list
