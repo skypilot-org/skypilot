@@ -59,6 +59,8 @@ class OCI(clouds.Cloud):
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.VPN:
+                (f'VPN is currently not supported on {cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (

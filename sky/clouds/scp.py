@@ -58,6 +58,8 @@ class SCP(clouds.Cloud):
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.VPN:
+            (f'VPN is currently not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '

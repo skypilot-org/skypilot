@@ -1194,6 +1194,9 @@ class Task:
         if self.num_nodes > 1:
             required_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
+        if self.vpn_config is not None:
+            required_features.add(clouds.CloudImplementationFeatures.VPN)
+
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
             if storage_mount.mode == storage_lib.StorageMode.MOUNT:
