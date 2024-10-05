@@ -1503,6 +1503,11 @@ def _get_services(service_names: Optional[List[str]],
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
+@click.option('--kubernetes',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='[Experimental] Show SkyPilot clusters from all users on Kubernetes.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1512,7 +1517,7 @@ def _get_services(service_names: Optional[List[str]],
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, clusters: List[str]):
+           show_services: bool, kubernetes: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1571,6 +1576,20 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    if kubernetes:
+        click.echo(
+        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}SkyPilot Clusters on Kubernetes'
+        f'{colorama.Style.RESET_ALL}')
+
+        try:
+            pods = kubernetes_utils.get_skypilot_pods()
+        except Exception as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to get SkyPilot pods from Kubernetes: {str(e)}')
+
+        status_utils.show_kubernetes_status_table(pods, all)
+        return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
