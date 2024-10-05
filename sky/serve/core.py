@@ -9,7 +9,6 @@ import sky
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
