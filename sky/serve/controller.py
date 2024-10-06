@@ -101,8 +101,8 @@ class SkyServeController:
                 request: fastapi.Request) -> fastapi.Response:
             request_data = await request.json()
             # TODO(MaoZiming): Check aggregator type.
-            request_aggregator: Dict[str, Any] = request_data.get(
-                'request_aggregator', {})
+            request_aggregator = request_data.get('request_aggregator', {})
+            assert isinstance(request_aggregator, dict), "Invalid input: request_aggregator should be a dictionary"
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
@@ -115,47 +115,38 @@ class SkyServeController:
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:
             request_data = await request.json()
-            try:
-                version = request_data.get('version', None)
-                if version is None:
-                    return responses.JSONResponse(
-                        content={'message': 'Error: version is not specified.'},
-                        status_code=400)
-                update_mode_str = request_data.get(
-                    'mode', serve_utils.DEFAULT_UPDATE_MODE.value)
-                update_mode = serve_utils.UpdateMode(update_mode_str)
-                logger.info(f'Update to new version {version} with '
-                            f'update_mode {update_mode}.')
-                # The yaml with the name latest_task_yaml will be synced
-                # See sky/serve/core.py::update
-                latest_task_yaml = serve_utils.generate_task_yaml_file_name(
-                    self._service_name, version)
-                service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
-                logger.info(
-                    f'Update to new version version {version}: {service}')
+            version = request_data.get('version', None)
+            assert version is not None, "Error: version is not specified."
+            update_mode_str = request_data.get(
+                'mode', serve_utils.DEFAULT_UPDATE_MODE.value)
+            update_mode = serve_utils.UpdateMode(update_mode_str)
+            logger.info(f'Update to new version {version} with '
+                        f'update_mode {update_mode}.')
+            # The yaml with the name latest_task_yaml will be synced
+            # See sky/serve/core.py::update
+            latest_task_yaml = serve_utils.generate_task_yaml_file_name(
+                self._service_name, version)
+            service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
+            logger.info(
+                f'Update to new version version {version}: {service}')
 
-                self._replica_manager.update_version(version,
-                                                     service,
-                                                     update_mode=update_mode)
-                new_autoscaler = autoscalers.Autoscaler.from_spec(
-                    self._service_name, service)
-                if not isinstance(self._autoscaler, type(new_autoscaler)):
-                    logger.info('Autoscaler type changed to '
-                                f'{type(new_autoscaler)}, updating autoscaler.')
-                    old_autoscaler = self._autoscaler
-                    self._autoscaler = new_autoscaler
-                    self._autoscaler.load_dynamic_states(
-                        old_autoscaler.dump_dynamic_states())
-                self._autoscaler.update_version(version,
-                                                service,
-                                                update_mode=update_mode)
-                return responses.JSONResponse(content={'message': 'Success'},
-                                              status_code=200)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in update_service: '
-                             f'{common_utils.format_exception(e)}')
-                return responses.JSONResponse(content={'message': 'Error'},
-                                              status_code=500)
+            self._replica_manager.update_version(version,
+                                                    service,
+                                                    update_mode=update_mode)
+            new_autoscaler = autoscalers.Autoscaler.from_spec(
+                self._service_name, service)
+            if not isinstance(self._autoscaler, type(new_autoscaler)):
+                logger.info('Autoscaler type changed to '
+                            f'{type(new_autoscaler)}, updating autoscaler.')
+                old_autoscaler = self._autoscaler
+                self._autoscaler = new_autoscaler
+                self._autoscaler.load_dynamic_states(
+                    old_autoscaler.dump_dynamic_states())
+            self._autoscaler.update_version(version,
+                                            service,
+                                            update_mode=update_mode)
+            return responses.JSONResponse(content={'message': 'Success'},
+                                            status_code=200)
 
         threading.Thread(target=self._run_autoscaler).start()
 
