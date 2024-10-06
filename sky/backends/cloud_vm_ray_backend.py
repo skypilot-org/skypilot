@@ -2482,8 +2482,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             runner, instance_id = runner_instance_id
             command = vpn_config.get_setup_commands(instance_id)
             returncode, _, stderr = runner.run(command,
-                                                    require_outputs=True,
-                                                    stream_logs=False)
+                                               require_outputs=True,
+                                               stream_logs=False)
             subprocess_utils.handle_returncode(
                 returncode, command,
                 f'Failed to setup VPN on the cluster. Stderr: {stderr}')
