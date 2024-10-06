@@ -4332,7 +4332,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               required=False,
               help='Skip confirmation prompt.')
 @click.option('--replica-id',
-              '-r',
+              '-rid',
               default=None,
               type=int,
               help='Tear down a given replica')
@@ -4379,11 +4379,15 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         raise click.UsageError(
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
+
     replica_id_is_defined = replica_id is not None
-    if replica_id_is_defined and len(service_names) != 1:
-        raise click.UsageError(
-            'Must specify one and only one service when replica ID is '
-            'specified.')
+    if replica_id_is_defined:
+        if len(service_names) != 1:
+            raise click.UsageError('The --replica-id option can only be used '
+                                   'with a single service name.')
+        if all:
+            raise click.UsageError('The --replica-id option cannot be used '
+                                   'with the --all option.')
 
     backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,

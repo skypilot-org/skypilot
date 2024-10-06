@@ -328,7 +328,8 @@ def update(
         'Service controller is stopped. There is no service to update. '
         f'To spin up a new service, use {backend_utils.BOLD}'
         f'sky serve up{backend_utils.RESET_BOLD}',
-        non_existent_message='To spin up a new service, '
+        non_existent_message='Service does not exist. '
+        'To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
 
@@ -521,8 +522,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'No service is running now. Please spin up a service first.',
-        non_existent_message='To spin up a new service, '
-        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
+        non_existent_message='No service is running now. '
+        'Please spin up a service first.',
     )
 
     backend = backend_utils.get_backend_from_handle(handle)

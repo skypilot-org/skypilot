@@ -313,8 +313,12 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
-    controller_port = service_status['controller_port']
+    replica_info = serve_state.get_replica_info_from_id(service_name,
+                                                        replica_id)
+    if replica_info is None:
+        raise ValueError(f'Replica {replica_id} does not exist.')
 
+    controller_port = service_status['controller_port']
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/terminate_replica',
