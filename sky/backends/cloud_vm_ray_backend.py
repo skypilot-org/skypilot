@@ -49,6 +49,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import utils as kubernetes_utils
+import sky.serve.serve_logs
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -3685,8 +3686,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return dict(zip(job_ids, local_log_dirs))
 
     def sync_down_serve_logs(self, *args, **kwargs):
-        from sky.serve.serve_logs import sync_down_serve_logs
-        return sync_down_serve_logs(self, *args, **kwargs)
+        return sky.serve.serve_logs.sync_down_serve_logs(self, *args, **kwargs)
 
     def tail_logs(self,
                   handle: CloudVmRayResourceHandle,
