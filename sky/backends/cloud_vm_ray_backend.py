@@ -3686,7 +3686,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def sync_down_serve_logs(self, *args, **kwargs):
         # yapf: disable
+        # pylint: disable=import-outside-toplevel
         from sky.serve.serve_logs import sync_down_serve_logs
+
+        # pylint: enable=import-outside-toplevel
         # yapf: enable
         return sync_down_serve_logs(self, *args, **kwargs)
 
