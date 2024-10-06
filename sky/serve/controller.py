@@ -14,7 +14,6 @@ import fastapi
 from fastapi import responses
 import uvicorn
 
-from sky import global_user_state
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
@@ -172,54 +171,52 @@ class SkyServeController:
                 self._service_name, replica_id)
             assert replica_info is not None, f'Error: replica ' \
                                                 f'{replica_id} does not exist.'
+            replica_status = replica_info.status
 
-            if purge:
-                logger.info(f'Purging replica {replica_id}...')
-
-                if replica_info.status not in (
-                        serve_state.ReplicaStatus.failed_statuses()):
-                    return fastapi.Response(
-                        status_code=200,
-                        content={
-                            'message': f'No purging for replica {replica_id} '
-                                       f'since the replica does not have a '
-                                       f'failed status.'
-                        })
-
-                replica_cluster_is_remaining = (
-                    global_user_state.get_cluster_from_name(
-                        replica_info.cluster_name) is not None)
-
-                self._replica_manager.scale_down(replica_id, purge=True)
-                if replica_cluster_is_remaining:
-                    return fastapi.Response(
-                        status_code=200,
-                        content={
-                            'message': f'{colorama.Fore.YELLOW}Purged replica '
-                                       f'{replica_id} with failed status '
-                                       f'({replica_info.status}). '
-                                       f'This may indicate a resource leak. '
-                                       f'Please check the following SkyPilot '
-                                       f'cluster on the controller: '
-                                       f'{replica_info.cluster_name}'
-                                       f'{colorama.Style.RESET_ALL}'
-                        })
-
+            if replica_status == serve_state.ReplicaStatus.SHUTTING_DOWN:
                 return fastapi.Response(
                     status_code=200,
                     content={
-                        'message': f'Successfully purged replica '
-                                   f'{replica_id}'
+                        'message': f'Already scheduled to terminate '
+                                   f'replica {replica_id} of service '
+                                   f'{self._service_name!r}.'
                     })
 
+            if replica_status in (serve_state.ReplicaStatus.failed_statuses()):
+                if purge:
+                    self._replica_manager.scale_down(replica_id, purge=True)
+
+                    return fastapi.Response(
+                        status_code=200,
+                        content={
+                            'message': f'Successfully purged replica '
+                                       f'{replica_id} of service '
+                                       f'{self._service_name!r}.'
+                        })
+                else:
+                    return fastapi.Response(
+                        status_code=200,
+                        content={
+                            'message': f'{colorama.Fore.YELLOW}Replica '
+                                       f'{replica_id} of service '
+                                       f'{self._service_name!r} is in failed '
+                                       f'status ({replica_info.status}). '
+                                       f'Skipping its termination as it could '
+                                       f'lead to a resource leak. '
+                                       f'(Use `sky serve down '
+                                       f'{self._service_name!r} --replica-id '
+                                       f'{replica_id} --purge` to '
+                                       'forcefully terminate the replica.)'
+                                       f'{colorama.Style.RESET_ALL}'
+                        })
             else:
-                logger.info(f'Terminating replica {replica_id}...')
                 self._replica_manager.scale_down(replica_id)
                 return fastapi.Response(
                     status_code=200,
                     content={
                         'message': f'Success terminating replica '
-                                   f'{replica_id}.'
+                                   f'{replica_id} of service '
+                                   f'{self._service_name!r}.'
                     })
 
         threading.Thread(target=self._run_autoscaler).start()
