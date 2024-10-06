@@ -89,7 +89,8 @@ class SkyServeController:
     def run(self) -> None:
 
         @self._app.post('/controller/load_balancer_sync')
-        async def load_balancer_sync(request: fastapi.Request):
+        async def load_balancer_sync(
+                request: fastapi.Request) -> fastapi.Response:
             request_data = await request.json()
             # TODO(MaoZiming): Check aggregator type.
             request_aggregator: Dict[str, Any] = request_data.get(
@@ -97,13 +98,14 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-            return {
+            return responses.JSONResponse(content={
                 'ready_replica_urls':
                     self._replica_manager.get_active_replica_urls()
-            }
+            },
+                                          status_code=200)
 
         @self._app.post('/controller/update_service')
-        async def update_service(request: fastapi.Request):
+        async def update_service(request: fastapi.Request) -> fastapi.Response:
             request_data = await request.json()
             try:
                 version = request_data.get('version', None)
