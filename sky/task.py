@@ -1111,13 +1111,6 @@ class Task:
         self._vpn_config = vpn_config
         return self
 
-    def get_custom_setup_commands(self) -> List[str]:
-        """Returns the custom setup commands for this task."""
-        setup_commands = []
-        if self.vpn_config is not None:
-            setup_commands.extend(self.vpn_config.get_setup_commands())
-        return setup_commands
-
     def to_yaml_config(self) -> Dict[str, Any]:
         """Returns a yaml-style dict representation of the task.
 

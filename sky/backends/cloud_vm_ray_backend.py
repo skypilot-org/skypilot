@@ -2270,8 +2270,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
             # Update cluster config by private IPs (if available).
-            # TODO(yi): add support for multiple nodes.
             if vpn_config is not None:
+                self.setup_vpn(vpn_config)
                 vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
                                                       vpn_config)
                 self.vpn_config = vpn_config.to_backend_config()
@@ -2471,6 +2471,25 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         docker_user = backend_utils.get_docker_user(ip_list[0],
                                                     cluster_config_file)
         self.docker_user = docker_user
+
+    def setup_vpn(self, vpn_config: vpn_utils.VPNConfig) -> None:
+        assert self.cached_cluster_info is not None, (
+            'cluster_info should be set before setting up VPN.')
+        instance_ids = self.cached_cluster_info.instance_ids()
+        runners = self.get_command_runners()
+
+        def _run_setup_commands(runner_instance_id):
+            runner, instance_id = runner_instance_id
+            command = vpn_config.get_setup_commands(instance_id)
+            returncode, _, stderr = runner.run(command,
+                                                    require_outputs=True,
+                                                    stream_logs=False)
+            subprocess_utils.handle_returncode(
+                returncode, command,
+                f'Failed to setup VPN on the cluster. Stderr: {stderr}')
+
+        subprocess_utils.run_in_parallel(_run_setup_commands,
+                                         zip(runners, instance_ids))
 
     @property
     def cluster_yaml(self):
@@ -2883,11 +2902,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 provision_record = config_dict['provision_record']
                 resources_vars = config_dict['resources_vars']
 
-                # Prepare setup commands
-                # Some setup commands need to be run before the cluster finishes
-                # provisioning, e.g., setting up the VPN connection.
-                custom_setup_commands = task.get_custom_setup_commands()
-
                 # Setup SkyPilot runtime after the cluster is provisioned
                 # 1. Wait for SSH to be ready.
                 # 2. Mount the cloud credentials, skypilot wheel,
@@ -2901,8 +2915,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle.cluster_yaml,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
-                    log_dir=self.log_dir,
-                    custom_setup_commands=custom_setup_commands)
+                    log_dir=self.log_dir)
 
                 # We use the IPs from the cluster_info to update_cluster_ips,
                 # when the provisioning is done, to make sure the cluster IPs
@@ -4185,7 +4198,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             vpn_config = vpn_utils.VPNConfig.from_backend_config(
                 handle.vpn_config)
             if handle.cached_cluster_info is not None:
-                for instance_id in handle.cached_cluster_info.instances.keys():
+                for instance_id in handle.cached_cluster_info.instance_ids():
                     vpn_config.remove_host(instance_id)
 
         # The cluster file must exist because the cluster_yaml will only

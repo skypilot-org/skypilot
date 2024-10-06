@@ -409,7 +409,6 @@ def _post_provision_setup(
     cluster_yaml: str,
     provision_record: provision_common.ProvisionRecord,
     custom_resource: Optional[str],
-    custom_setup_commands: Optional[List[str]] = None
 ) -> provision_common.ClusterInfo:
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
@@ -497,8 +496,7 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=2, step_name='dependencies'))
         instance_setup.setup_runtime_on_cluster(
-            cluster_name.name_on_cloud,
-            config_from_yaml['setup_commands'] + (custom_setup_commands or []),
+            cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_info, ssh_credentials)
 
         runners = provision.get_command_runners(cloud_name, cluster_info,
@@ -568,7 +566,6 @@ def post_provision_runtime_setup(
     provision_record: provision_common.ProvisionRecord,
     custom_resource: Optional[str],
     log_dir: str,
-    custom_setup_commands: Optional[List[str]] = None
 ) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.
 
@@ -585,13 +582,11 @@ def post_provision_runtime_setup(
     with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
-            return _post_provision_setup(
-                cloud_name,
-                cluster_name,
-                cluster_yaml=cluster_yaml,
-                provision_record=provision_record,
-                custom_resource=custom_resource,
-                custom_setup_commands=custom_setup_commands)
+            return _post_provision_setup(cloud_name,
+                                         cluster_name,
+                                         cluster_yaml=cluster_yaml,
+                                         provision_record=provision_record,
+                                         custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
             logger.error('*** Failed setting up cluster. ***')
             logger.debug(f'Stacktrace:\n{traceback.format_exc()}')

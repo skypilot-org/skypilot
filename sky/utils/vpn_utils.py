@@ -22,7 +22,7 @@ class VPN:
     into SkyPilot out of the box.
     """
 
-    def get_setup_command(self) -> str:
+    def get_setup_command(self, hostname: str) -> str:
         """Get the command to setup the VPN on VM instances."""
         raise NotImplementedError
 
@@ -68,7 +68,8 @@ class TailscaleVPN(VPN):
         'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null; '
         'sudo apt-get update > /dev/null 2>&1; '
         'sudo apt-get install tailscale -y > /dev/null 2>&1; '
-        'sudo tailscale login --auth-key {tailscale_auth_key}')
+        'sudo tailscale login --auth-key {tailscale_auth_key} --hostname {hostname}'
+    )
 
     def __init__(
         self,
@@ -111,8 +112,9 @@ class TailscaleVPN(VPN):
 
         return TailscaleVPN(auth_key, api_key, network_name, enable_api)
 
-    def get_setup_command(self) -> str:
-        return self._SETUP_COMMAND.format(tailscale_auth_key=self._auth_key)
+    def get_setup_command(self, hostname: str) -> str:
+        return self._SETUP_COMMAND.format(tailscale_auth_key=self._auth_key,
+                                          hostname=hostname)
 
     def get_setup_env_vars(self) -> Dict[str, str]:
         env_config = {
@@ -239,10 +241,10 @@ class VPNConfig:
                     TailscaleVPN.from_backend_config(vpn_config)
         return VPNConfig(vpn_configs)
 
-    def get_setup_commands(self) -> List[str]:
+    def get_setup_commands(self, hostname: str) -> List[str]:
         """Get the command to setup the VPN on VM instances."""
         return [
-            vpn_config.get_setup_command()
+            vpn_config.get_setup_command(hostname)
             for vpn_config in self._vpn_configs.values()
         ]
 
@@ -300,12 +302,8 @@ def rewrite_cluster_info_by_vpn(
     vpn_config: VPNConfig,
 ) -> common.ClusterInfo:
     for (instance_id, instance_list) in cluster_info.instances.items():
-        if len(instance_list) > 1:
-            # TODO(yi): test if this works on TPU VM.
-            for (i, instance) in enumerate(instance_list):
-                instance.external_ip = vpn_config.get_private_ip_vpn(
-                    f'{instance_id}-{i}', 'tailscale')
-        instance = instance_list[0]
-        instance.external_ip = vpn_config.get_private_ip_vpn(
-            instance_id, 'tailscale')
+        # TODO(yi): test if this works on TPU VM.
+        for (i, instance) in enumerate(instance_list):
+            instance.external_ip = vpn_config.get_private_ip_vpn(
+                f'{instance_id}-{i}', 'tailscale')
     return cluster_info
