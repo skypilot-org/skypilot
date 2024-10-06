@@ -404,12 +404,9 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
 
 def _post_provision_setup(
-    cloud_name: str,
-    cluster_name: resources_utils.ClusterName,
-    cluster_yaml: str,
-    provision_record: provision_common.ProvisionRecord,
-    custom_resource: Optional[str],
-) -> provision_common.ClusterInfo:
+        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
+        custom_resource: Optional[str]) -> provision_common.ClusterInfo:
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     provider_config = config_from_yaml.get('provider')
     cluster_info = provision.get_cluster_info(cloud_name,
@@ -560,13 +557,10 @@ def _post_provision_setup(
 
 
 def post_provision_runtime_setup(
-    cloud_name: str,
-    cluster_name: resources_utils.ClusterName,
-    cluster_yaml: str,
-    provision_record: provision_common.ProvisionRecord,
-    custom_resource: Optional[str],
-    log_dir: str,
-) -> provision_common.ClusterInfo:
+        cloud_name: str, cluster_name: resources_utils.ClusterName,
+        cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
+        custom_resource: Optional[str],
+        log_dir: str) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.
 
     Here are the steps:

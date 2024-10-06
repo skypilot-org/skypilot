@@ -169,13 +169,6 @@ def _with_docker_login_config(
     return type(resources)(new_resources)
 
 
-def _append_setup_command(setup: Optional[str], command: str) -> str:
-    """Appends a command to a setup command."""
-    if setup is None:
-        return command
-    return f'{setup}; {command}'
-
-
 class Task:
     """Task: a computation to be run on the cloud."""
 
