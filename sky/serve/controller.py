@@ -169,8 +169,8 @@ class SkyServeController:
             assert isinstance(purge, bool), 'Error: purge must be a boolean.'
             replica_info = serve_state.get_replica_info_from_id(
                 self._service_name, replica_id)
-            assert replica_info is not None, f'Error: replica ' \
-                                                f'{replica_id} does not exist.'
+            assert replica_info is not None, (f'Error: replica '
+                                                f'{replica_id} does not exist.')
             replica_status = replica_info.status
 
             if replica_status == serve_state.ReplicaStatus.SHUTTING_DOWN:
