@@ -10,6 +10,8 @@ import time
 import traceback
 from typing import Dict, List, Optional, Tuple
 
+import colorama
+
 import sky
 from sky import clouds
 from sky import exceptions
@@ -426,10 +428,11 @@ def _post_provision_setup(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
         logger.debug(f'SSH Connection ready for {cluster_name!r}')
-        vm_str = 'VM' if cloud_name.lower() != 'kubernetes' else 'Pod'
+        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
-        logger.info(f'  {vm_str}{plural} {verb} up.')
+        logger.info(f'  {colorama.Style.DIM}{vm_str}{plural} {verb} up.'
+                    f'{colorama.Style.RESET_ALL}')
 
         docker_config = config_from_yaml.get('docker', {})
         if docker_config:

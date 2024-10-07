@@ -123,22 +123,24 @@ class Optimizer:
                 for a task.
             exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
-        _check_specified_clouds(dag)
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Generating execution plan')):
+            _check_specified_clouds(dag)
 
-        # This function is effectful: mutates every node in 'dag' by setting
-        # node.best_resources if it is None.
-        Optimizer._add_dummy_source_sink_nodes(dag)
-        try:
-            unused_best_plan = Optimizer._optimize_dag(
-                dag=dag,
-                minimize_cost=minimize == OptimizeTarget.COST,
-                blocked_resources=blocked_resources,
-                quiet=quiet)
-        finally:
-            # Make sure to remove the dummy source/sink nodes, even if the
-            # optimization fails.
-            Optimizer._remove_dummy_source_sink_nodes(dag)
-        return dag
+            # This function is effectful: mutates every node in 'dag' by setting
+            # node.best_resources if it is None.
+            Optimizer._add_dummy_source_sink_nodes(dag)
+            try:
+                unused_best_plan = Optimizer._optimize_dag(
+                    dag=dag,
+                    minimize_cost=minimize == OptimizeTarget.COST,
+                    blocked_resources=blocked_resources,
+                    quiet=quiet)
+            finally:
+                # Make sure to remove the dummy source/sink nodes, even if the
+                # optimization fails.
+                Optimizer._remove_dummy_source_sink_nodes(dag)
+            return dag
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
@@ -847,7 +849,7 @@ class Optimizer:
             best_plan_table = _create_table(['TASK', '#NODES'] +
                                             resource_fields)
             best_plan_table.add_rows(best_plan_rows)
-            logger.info(f'{best_plan_table}\n')
+            logger.info(f'{best_plan_table}')
 
         # Print the egress plan if any data egress is scheduled.
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
@@ -866,6 +868,9 @@ class Optimizer:
             }
             task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
+            if num_tasks > 1:
+                # Add a new line for better readability, when there are multiple tasks.
+                logger.info('')
             logger.info(
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'
                 f'({task.num_nodes} node{plural}):'

@@ -204,6 +204,7 @@ def _get_cloud_dependencies_installation_commands(
         # other clouds will install boto3 but not awscli.
         'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
         'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
+    setup_clouds: List[clouds.Cloud] = []
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
         if isinstance(
                 clouds,
@@ -214,6 +215,7 @@ def _get_cloud_dependencies_installation_commands(
         if isinstance(cloud, clouds.AWS):
             commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Azure):
             commands.append(
                 f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
@@ -226,6 +228,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 'pip list | grep azure-storage-blob > /dev/null 2>&1 || '
                 'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.GCP):
             commands.append(
                 f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
@@ -239,6 +242,7 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
                 'pip install google-cloud-storage > /dev/null 2>&1')
             commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Kubernetes):
             commands.append(
                 f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
@@ -259,6 +263,7 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Cudo):
             commands.append(
                 f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
@@ -266,10 +271,12 @@ def _get_cloud_dependencies_installation_commands(
                 'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.RunPod):
             commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
                             'pip list | grep runpod > /dev/null 2>&1 || '
                             'pip install "runpod>=1.5.1" > /dev/null 2>&1')
+            setup_clouds.append(cloud)
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -277,17 +284,24 @@ def _get_cloud_dependencies_installation_commands(
                     '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
                     'pip install ibm-cloud-sdk-core ibm-vpc '
                     'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
+                setup_clouds.append(str(cloud))
             elif isinstance(cloud, clouds.OCI):
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
+                setup_clouds.append(str(cloud))
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
-                        aws_dependencies_installation)
+        commands.append(
+            f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
+            aws_dependencies_installation)
+        setup_clouds.append(cloudflare.NAME)
+    finished_clouds_str = '\\n  '.join(
+        common_utils.remove_color(ux_utils.finishing_message(str(cloud)))
+        for cloud in setup_clouds)
     commands.append(
-        f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for {len(commands)} '
-        'clouds."')
+        f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for {len(setup_clouds)} '
+        f'clouds.\\n{finished_clouds_str}"')
     return commands
 
 
@@ -728,9 +742,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # whenever task.storage_mounts is non-empty.
         rich_utils.force_update_status(
             ux_utils.spinner_message(
-                '  Uploading storage local sources '
-                f'{colorama.Style.DIM}View storages: sky storage ls'
-                f'{colorama.Style.RESET_ALL}'))
+                'Uploading storage local sources[/]  '
+                '[dim]View storages: sky storage ls'))
     try:
         task.sync_storage_mounts()
     except ValueError as e:

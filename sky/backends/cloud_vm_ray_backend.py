@@ -403,8 +403,9 @@ class RayCodeGen:
                 })
 
         streaming_message = (
-            f'  Job started. Streaming logs... {colorama.Style.DIM}(Ctrl-C to '
-            f'exit log streaming, not kill the job){colorama.Style.RESET_ALL}')
+            f'└── Job started. Streaming logs... {colorama.Style.DIM}(Ctrl-C to '
+            'exit log streaming; job will not be killed)'
+            f'{colorama.Style.RESET_ALL}')
         self._code += [
             textwrap.dedent(f"""\
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
@@ -418,10 +419,10 @@ class RayCodeGen:
                 # start_streaming_at for the `Waiting for task resources on`
                 # message.
                 # TODO: Remove this message in v0.9.0.
-                message = (f'  {colorama.Style.DIM}INFO: Tip: use Ctrl-C to '
+                message = (f'├── {colorama.Style.DIM}INFO: Tip: use Ctrl-C to '
                            'exit log streaming, not kill the job.'
                            f'{colorama.Style.RESET_ALL}\\n')
-                message += (f'  {colorama.Style.DIM}Waiting for task resources on '
+                message += (f'├── {colorama.Style.DIM}Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -3372,10 +3373,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         controller = controller_utils.Controllers.from_name(handle.cluster_name)
         if controller == controller_utils.Controllers.SKY_SERVE_CONTROLLER:
-            logger.info(ux_utils.starting_message('Service submitted.'))
+            logger.info(ux_utils.starting_message('Service registered.'))
         else:
             logger.info(
-                ux_utils.starting_message(f'Job submitted with ID: {job_id}.'))
+                ux_utils.starting_message(f'Job submitted, ID: {job_id}.'))
         rich_utils.stop_safe_status()
         try:
             if not detach_run:
