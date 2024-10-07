@@ -31,3 +31,6 @@ if [ ! -z "$AVAILABLE_CONTEXT" ]; then
     echo "Switching to context $AVAILABLE_CONTEXT"
     kubectl config use-context $AVAILABLE_CONTEXT
 fi
+
+# Remove the config yaml.
+rm /tmp/skypilot-kind.yaml
