@@ -403,9 +403,9 @@ class RayCodeGen:
                 })
 
         streaming_message = (
-            f'└── Job started. Streaming logs... {colorama.Style.DIM}(Ctrl-C to '
-            'exit log streaming; job will not be killed)'
-            f'{colorama.Style.RESET_ALL}')
+            '└── Job started. Streaming logs... '
+            f'{colorama.Style.DIM}(Ctrl-C to exit log streaming; job will not '
+            f'be killed){colorama.Style.RESET_ALL}')
         self._code += [
             textwrap.dedent(f"""\
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')

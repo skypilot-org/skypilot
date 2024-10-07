@@ -297,8 +297,8 @@ def _get_cloud_dependencies_installation_commands(
         setup_clouds.append(cloudflare.NAME)
     finished_clouds_str = ', '.join(setup_clouds)
     commands.append(
-        f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for {len(setup_clouds)} '
-        f'clouds - {finished_clouds_str}"')
+        f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for '
+        f'{len(setup_clouds)} clouds - {finished_clouds_str}"')
     return commands
 
 
