@@ -282,34 +282,48 @@ def test_example_app():
 
 _VALIDATE_LAUNCH_OUTPUT = (
     # Validate the output of the job submission:
-    # I 05-23 07:52:47 cloud_vm_ray_backend.py:3217] Running setup on 1 node.
+    # ⚙️ Launching on Kubernetes.
+    #   Pod is up.
+    # ✓ Cluster launched: test. View logs at: ~/sky_logs/sky-2024-10-07-19-44-18-177288/provision.log
+    # ⚙️ Running setup on 1 pod.
     # running setup
-    # I 05-23 07:52:49 cloud_vm_ray_backend.py:3230] Setup completed.
-    # I 05-23 07:52:55 cloud_vm_ray_backend.py:3319] Job submitted with Job ID: 1
-    # I 05-23 07:52:58 log_lib.py:408] Start streaming logs for job 1.
-    # INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).
-    # INFO: Waiting for task resources on 1 node. This will block if the cluster is full.
-    # INFO: All task resources reserved.
-    # INFO: Reserved IPs: ['10.128.0.127']
-    # (min, pid=4164) # conda environments:
-    # (min, pid=4164) #
-    # (min, pid=4164) base                  *  /opt/conda
-    # (min, pid=4164)
-    # (min, pid=4164) task run finish
-    # INFO: Job finished (status: SUCCEEDED).
+    # ✓ Setup completed.
+    # ⚙️ Job submitted, ID: 1.
+    # ├── Waiting for task resources on 1 node.
+    # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
+    # (min, pid=1277) # conda environments:
+    # (min, pid=1277) #
+    # (min, pid=1277) base                  *  /opt/conda
+    # (min, pid=1277)
+    # (min, pid=1277) task run finish
+    # ✓ Job finished (status: SUCCEEDED).
+
+    # 📋 Useful Commands
+    # Job ID: 1
+    # ├── To cancel the job:          sky cancel test 1
+    # ├── To stream job logs:         sky logs test 1
+    # └── To view job queue:          sky queue test
+
+    # Cluster name: test
+    # ├── To log into the head VM:    ssh test
+    # ├── To submit a job:            sky exec test yaml_file
+    # ├── To stop the cluster:        sky stop test
+    # └── To teardown the cluster:    sky down test
+    'echo "$s" && echo "==Validating launching==" && '
+    'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '
-    'grep "Start streaming logs for job" && '
+    'grep "Waiting for task resources on " && '
     'echo "==Validating task output starting==" && echo "$s" | '
-    'grep -A 1 "INFO: Reserved IPs" | grep "(min, pid=" && '
+    'grep -A 1 "Job started. Streaming logs..." | grep "(min, pid=" && '
     'echo "==Validating task output ending==" && '
     'echo "$s" | grep -A 1 "task run finish" | '
-    'grep "INFO: Job finished (status: SUCCEEDED)" && '
+    'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
-    'echo "$s" | grep -A 1 "INFO: Job finished (status: SUCCEEDED)" | '
-    'grep "Job ID:"')
+    'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
+    'grep "Useful commands"')
 
 
 # ---------- A minimal task ----------
