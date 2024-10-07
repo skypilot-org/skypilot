@@ -323,7 +323,8 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
-    'grep "Useful commands"')
+    'grep "Useful Commands" && '
+    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
 
 
 # ---------- A minimal task ----------
