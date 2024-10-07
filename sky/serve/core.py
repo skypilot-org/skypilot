@@ -544,7 +544,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    logger.info(stdout)
+    sky_logging.print(stdout)
 
     logger.info(
         f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '
