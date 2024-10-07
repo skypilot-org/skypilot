@@ -300,7 +300,7 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" && echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
-    'grep -A 1 "Job submitted with Job ID:" | '
+    'grep -A 1 "Job submitted, ID:" | '
     'grep "Start streaming logs for job" && '
     'echo "==Validating task output starting==" && echo "$s" | '
     'grep -A 1 "INFO: Reserved IPs" | grep "(min, pid=" && '

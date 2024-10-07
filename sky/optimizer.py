@@ -869,7 +869,8 @@ class Optimizer:
             task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
             if num_tasks > 1:
-                # Add a new line for better readability, when there are multiple tasks.
+                # Add a new line for better readability, when there are multiple
+                # tasks.
                 logger.info('')
             logger.info(
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'

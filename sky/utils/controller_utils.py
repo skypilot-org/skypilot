@@ -204,7 +204,7 @@ def _get_cloud_dependencies_installation_commands(
         # other clouds will install boto3 but not awscli.
         'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
         'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
-    setup_clouds: List[clouds.Cloud] = []
+    setup_clouds: List[str] = []
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
         if isinstance(
                 clouds,
@@ -276,7 +276,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
                             'pip list | grep runpod > /dev/null 2>&1 || '
                             'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-            setup_clouds.append(cloud)
+            setup_clouds.append(str(cloud))
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -292,16 +292,13 @@ def _get_cloud_dependencies_installation_commands(
                 setup_clouds.append(str(cloud))
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        commands.append(
-            f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
-            aws_dependencies_installation)
+        commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
+                        aws_dependencies_installation)
         setup_clouds.append(cloudflare.NAME)
-    finished_clouds_str = '\\n  '.join(
-        common_utils.remove_color(ux_utils.finishing_message(str(cloud)))
-        for cloud in setup_clouds)
+    finished_clouds_str = ', '.join(setup_clouds)
     commands.append(
         f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for {len(setup_clouds)} '
-        f'clouds.\\n{finished_clouds_str}"')
+        f'clouds - {finished_clouds_str}"')
     return commands
 
 
@@ -741,9 +738,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.
         rich_utils.force_update_status(
-            ux_utils.spinner_message(
-                'Uploading storage local sources[/]  '
-                '[dim]View storages: sky storage ls'))
+            ux_utils.spinner_message('Uploading storage local sources[/]  '
+                                     '[dim]View storages: sky storage ls'))
     try:
         task.sync_storage_mounts()
     except ValueError as e:
