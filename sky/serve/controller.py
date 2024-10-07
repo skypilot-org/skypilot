@@ -114,8 +114,7 @@ class SkyServeController:
         async def update_service(
                 request: schemas.UpdateServiceRequest) -> fastapi.Response:
             version = request.version
-            update_mode_str = request.mode
-            update_mode = serve_utils.UpdateMode(update_mode_str)
+            update_mode = request.mode
             logger.info(f'Update to new version {version} '
                         f'with update_mode {update_mode}.')
 
