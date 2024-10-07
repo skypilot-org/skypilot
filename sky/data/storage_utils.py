@@ -67,8 +67,8 @@ def format_storage_table(storages: List[Dict[str, Any]],
 
 
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
-    # TODO: process all .skyignore files in all subdirectories
-    """List files and patterns ignored by .skyignore in the source directory.
+    """List files and patterns ignored by the .skyignore file
+    in the given source directory.
     """
     excluded_list: List[str] = []
     expand_src_dir_path = os.path.expanduser(src_dir_path)

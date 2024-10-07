@@ -11,7 +11,6 @@ def test_get_excluded_files_from_skyignore_no_file():
 
 
 def test_get_excluded_files_from_skyignore():
-    #TODO(yika): process all .skyignore files in the current directory and subdirectories
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create workdir
         dirs = ['remove_dir', 'dir']
