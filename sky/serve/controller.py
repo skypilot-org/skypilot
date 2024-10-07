@@ -182,7 +182,7 @@ class SkyServeController:
                                    f'{self._service_name!r}.'
                     })
 
-            if replica_status in (serve_state.ReplicaStatus.failed_statuses()):
+            if replica_status in serve_state.ReplicaStatus.failed_statuses():
                 if purge:
                     self._replica_manager.scale_down(replica_id, purge=True)
 
