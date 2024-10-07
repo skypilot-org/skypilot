@@ -182,42 +182,35 @@ class SkyServeController:
                                    f'{self._service_name!r}.'
                     })
 
-            if replica_status in serve_state.ReplicaStatus.failed_statuses():
-                if purge:
-                    self._replica_manager.scale_down(replica_id, purge=True)
-
-                    return fastapi.Response(
-                        status_code=200,
-                        content={
-                            'message': f'Replica {replica_id} of service '
-                                       f'{self._service_name!r} is scheduled '
-                                       f'to be purged.'
-                        })
-                else:
-                    return fastapi.Response(
-                        status_code=409,
-                        content={
-                            'message': f'{colorama.Fore.YELLOW}Replica '
-                                       f'{replica_id} of service '
-                                       f'{self._service_name!r} is in failed '
-                                       f'status ({replica_info.status}). '
-                                       f'Skipping its termination as it could '
-                                       f'lead to a resource leak. '
-                                       f'(Use `sky serve down '
-                                       f'{self._service_name!r} --replica-id '
-                                       f'{replica_id} --purge` to '
-                                       'forcefully terminate the replica.)'
-                                       f'{colorama.Style.RESET_ALL}'
-                        })
-            else:
-                self._replica_manager.scale_down(replica_id)
+            if (replica_status in serve_state.ReplicaStatus.failed_statuses()
+                    and not purge):
                 return fastapi.Response(
-                    status_code=200,
+                    status_code=409,
                     content={
-                        'message': f'Replica {replica_id} of service '
-                                   f'{self._service_name!r} is scheduled to '
-                                   f'be terminated.'
+                        'message': f'{colorama.Fore.YELLOW}Replica '
+                                   f'{replica_id} of service '
+                                   f'{self._service_name!r} is in failed '
+                                   f'status ({replica_info.status}). '
+                                   f'Skipping its termination as it could '
+                                   f'lead to a resource leak. '
+                                   f'(Use `sky serve down '
+                                   f'{self._service_name!r} --replica-id '
+                                   f'{replica_id} --purge` to '
+                                   'forcefully terminate the replica.)'
+                                   f'{colorama.Style.RESET_ALL}'
                     })
+
+            self._replica_manager.scale_down(replica_id, purge=purge)
+
+            message = (f'Replica {replica_id} of service '
+                       f'{self._service_name!r} is scheduled '
+                       f'to be ')
+            return fastapi.Response(
+                status_code=200,
+                content={
+                    'message': message +
+                               'terminated.' if not purge else 'purged.'
+                })
 
         threading.Thread(target=self._run_autoscaler).start()
 
