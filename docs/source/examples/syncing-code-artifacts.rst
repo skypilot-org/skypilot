@@ -45,12 +45,21 @@ These commands sync the working directory to :code:`~/sky_workdir` on the remote
 VMs.  The task is invoked under that working directory (so that it can call
 scripts, access checkpoints, etc.).
 
-.. note::
+*Exclude files from syncing*
+For large, multi-gigabyte workdirs, uploading may be slow because they
+are synced to the remote VM(s). To exclude large files in
+your workdir from being uploaded, add them to a :code:`.skyignore` file 
+under your workdir. Example :code:`.skyignore` file:
 
-    For large, multi-gigabyte workdirs, uploading may be slow because they
-    are synced to the remote VM(s) with :code:`rsync`. To exclude large files in
-    your workdir from being uploaded, add them to a :code:`.skyignore` file 
-    under your workdir.
+.. code-block::
+    
+    hello.py
+    # individual directory
+    hello/
+    # Files that match pattern under ALL directories
+    **/*.txt
+    # Files that match pattern under ONLY CURRENT directory
+    /*.txt
 
 .. note::
 
@@ -101,9 +110,8 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
 
 .. note::
 
-    Items listed in a :code:`.gitignore` file (or a ``.git/info/exclude`` file)
-    under a local file_mount source are also ignored (the same behavior as
-    handling ``workdir``).
+    Items listed in a :code:`.skyignore` file under the local file_mount source 
+    are also ignored (the same behavior as handling ``workdir``).
 
 .. note::
 

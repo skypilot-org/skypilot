@@ -22,8 +22,7 @@ Available fields:
     # If a relative path is used, it's evaluated relative to the location from 
     # which `sky` is called.
     #
-    # If a .gitignore file (or a .git/info/exclude file) exists in the working
-    # directory, files and directories listed in it will be excluded from syncing.
+    # To exclude files from syncing, add them to a .skyignore file under your working directory.
     workdir: ~/my-task-code
 
     # Number of nodes (optional; defaults to 1) to launch including the head node.
