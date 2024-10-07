@@ -28,6 +28,7 @@ from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -192,7 +193,7 @@ def _get_cloud_dependencies_installation_commands(
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
-    prefix_str = 'Check & install cloud dependencies on controller: '
+    prefix_str = '⠇ Check & install cloud dependencies on controller: '
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
     empty_str = ' ' * 10
@@ -203,6 +204,7 @@ def _get_cloud_dependencies_installation_commands(
         # other clouds will install boto3 but not awscli.
         'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
         'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
+    setup_clouds: List[str] = []
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
         if isinstance(
                 clouds,
@@ -213,6 +215,7 @@ def _get_cloud_dependencies_installation_commands(
         if isinstance(cloud, clouds.AWS):
             commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Azure):
             commands.append(
                 f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
@@ -225,6 +228,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 'pip list | grep azure-storage-blob > /dev/null 2>&1 || '
                 'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.GCP):
             commands.append(
                 f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
@@ -238,6 +242,7 @@ def _get_cloud_dependencies_installation_commands(
                 'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
                 'pip install google-cloud-storage > /dev/null 2>&1')
             commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Kubernetes):
             commands.append(
                 f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
@@ -248,8 +253,8 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y '
-                '&> /dev/null; '
+                'then apt update &> /dev/null && '
+                'apt install curl socat netcat -y &> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 '(command -v kubectl &>/dev/null || '
@@ -258,6 +263,7 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Cudo):
             commands.append(
                 f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
@@ -265,10 +271,12 @@ def _get_cloud_dependencies_installation_commands(
                 'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.RunPod):
             commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
                             'pip list | grep runpod > /dev/null 2>&1 || '
                             'pip install "runpod>=1.5.1" > /dev/null 2>&1')
+            setup_clouds.append(str(cloud))
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 commands.append(
@@ -276,16 +284,20 @@ def _get_cloud_dependencies_installation_commands(
                     '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
                     'pip install ibm-cloud-sdk-core ibm-vpc '
                     'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
+                setup_clouds.append(str(cloud))
             elif isinstance(cloud, clouds.OCI):
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
+                setup_clouds.append(str(cloud))
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
         commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
                         aws_dependencies_installation)
-    commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
-                    'clouds."')
+        setup_clouds.append(cloudflare.NAME)
+    finished_clouds_str = ', '.join(setup_clouds)
+    commands.append(f'echo -e "\\r{prefix_str.replace("⠇", " ")}Done for '
+                    f'{len(setup_clouds)} clouds - {finished_clouds_str}"')
     return commands
 
 
@@ -388,7 +400,7 @@ def shared_controller_vars_to_fill(
         'local_user_config_path': local_user_config_path,
     }
     env_vars: Dict[str, str] = {
-        env.value: '1' for env in env_options.Options if env.get()
+        env.key: str(int(env.get())) for env in env_options.Options
     }
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
@@ -396,7 +408,9 @@ def shared_controller_vars_to_fill(
         constants.USER_ENV_VAR: getpass.getuser(),
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
-        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.key: '1',
+        # Disable minimize logging to get more details on the controller.
+        env_options.Options.MINIMIZE_LOGGING.key: '0',
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
@@ -599,6 +613,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
+
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -618,8 +633,12 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     elif has_local_source_paths_workdir:
         msg = 'workdir'
     if msg:
-        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
-                    f'Storage...{colorama.Style.RESET_ALL}')
+        logger.info(
+            ux_utils.starting_message(f'Translating {msg} to '
+                                      'SkyPilot Storage...'))
+        rich_utils.force_update_status(
+            ux_utils.spinner_message(
+                f'Translating {msg} to SkyPilot Storage...'))
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -643,8 +662,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
-        logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
-                    f'{bucket_name!r}.')
+        logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
@@ -668,9 +687,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             'persistent': False,
             'mode': 'COPY',
         })
-        logger.info(
-            f'Folder in local file mount {src!r} will be synced to SkyPilot '
-            f'storage {bucket_name}.')
+        logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
@@ -703,10 +721,12 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     f'destination {file_mount_remote_tmp_dir} '
                     'being taken.')
         sources = list(src_to_file_id.keys())
-        sources_str = '\n\t'.join(sources)
-        logger.info('Source files in file_mounts will be synced to '
-                    f'cloud storage {file_bucket_name}:'
-                    f'\n\t{sources_str}')
+        sources_str = '\n    '.join(sources)
+        logger.info(f'  {colorama.Style.DIM}Files (listed below) '
+                    f' -> storage: {file_bucket_name}:'
+                    f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Uploading translated local files/folders'))
     task.update_storage_mounts(new_storage_mounts)
 
     # Step 4: Upload storage from sources
@@ -716,8 +736,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     if task.storage_mounts:
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.
-        logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                    f'{colorama.Style.RESET_ALL} See: sky storage ls')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Uploading storage local sources[/]  '
+                                     '[dim]View storages: sky storage ls'))
     try:
         task.sync_storage_mounts()
     except ValueError as e:
@@ -800,3 +821,5 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
+    if msg:
+        logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))

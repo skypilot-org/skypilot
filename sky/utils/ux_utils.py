@@ -1,15 +1,21 @@
 """Utility functions for UX."""
 import contextlib
+import os
 import sys
 import traceback
-from typing import Callable
+import typing
+from typing import Callable, Optional, Union
 
+import colorama
 import rich.console as rich_console
 
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import pathlib
 
 console = rich_console.Console()
 
@@ -102,3 +108,43 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+def starting_message(message: str) -> str:
+    """Gets the starting message for the given message."""
+    return f'⚙️ {message}'
+
+
+def finishing_message(message: str) -> str:
+    """Gets the finishing message for the given message."""
+    return f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'
+
+
+def retry_message(message: str) -> str:
+    """Gets the retry message for the given message."""
+    return f'{colorama.Fore.YELLOW}↺{colorama.Style.RESET_ALL} {message}'
+
+
+# Log path hint in the spinner during launching
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
+                  f'{colorama.Style.RESET_ALL}')
+
+
+def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
+    """Gets the log path hint for the given log path."""
+    log_path = str(log_path)
+    expanded_home = os.path.expanduser('~')
+    if log_path.startswith(expanded_home):
+        log_path = '~' + log_path[len(expanded_home):]
+    return _LOG_PATH_HINT.format(log_path=log_path)
+
+
+def spinner_message(
+        message: str,
+        log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+    """Gets the spinner message for the given message and log path."""
+    colored_spinner = f'[bold cyan]{message}[/]'
+    if log_path is None:
+        return colored_spinner
+    path_hint = log_path_hint(log_path)
+    return f'{colored_spinner}  {path_hint}'

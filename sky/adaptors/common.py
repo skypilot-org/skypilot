@@ -1,7 +1,7 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 
 class LazyImport:
@@ -18,15 +18,19 @@ class LazyImport:
 
     def __init__(self,
                  module_name: str,
-                 import_error_message: Optional[str] = None):
+                 import_error_message: Optional[str] = None,
+                 set_loggers: Optional[Callable] = None):
         self._module_name = module_name
         self._module = None
         self._import_error_message = import_error_message
+        self._set_loggers = set_loggers
 
     def load_module(self):
         if self._module is None:
             try:
                 self._module = importlib.import_module(self._module_name)
+                if self._set_loggers is not None:
+                    self._set_loggers()
             except ImportError as e:
                 if self._import_error_message is not None:
                     raise ImportError(self._import_error_message) from e

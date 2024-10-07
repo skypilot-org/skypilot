@@ -4,7 +4,9 @@ from typing import Dict, Generic, Optional
 
 import sky
 from sky.usage import usage_lib
+from sky.utils import rich_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -54,8 +56,9 @@ class Backend(Generic[_ResourceHandleType]):
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
-        return self._provision(task, to_provision, dryrun, stream_logs,
-                               cluster_name, retry_until_up)
+        with rich_utils.safe_status(ux_utils.spinner_message('Launching')):
+            return self._provision(task, to_provision, dryrun, stream_logs,
+                                   cluster_name, retry_until_up)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
@@ -76,7 +79,8 @@ class Backend(Generic[_ResourceHandleType]):
     @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
               detach_setup: bool) -> None:
-        return self._setup(handle, task, detach_setup)
+        with rich_utils.safe_status(ux_utils.spinner_message('Running setup')):
+            return self._setup(handle, task, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
@@ -96,7 +100,8 @@ class Backend(Generic[_ResourceHandleType]):
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run, dryrun)
+        with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
+            return self._execute(handle, task, detach_run, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
