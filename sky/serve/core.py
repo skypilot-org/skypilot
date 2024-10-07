@@ -512,7 +512,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         service_name: Name of the service.
         replica_id: ID of replica to terminate.
         purge: Whether to terminate replicas in a failed status. These replicas
-          may lead to resource leaks.
+          may lead to resource leaks, so we require the user to explicitly specify this flag to make sure they are aware of this potential resource leak.
 
     Raises:
         sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
