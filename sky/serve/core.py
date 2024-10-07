@@ -91,9 +91,6 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     'Please specify the same port instead.')
 
 
-logger = sky_logging.init_logger(__name__)
-
-
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -512,7 +509,9 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
         service_name: Name of the service.
         replica_id: ID of replica to terminate.
         purge: Whether to terminate replicas in a failed status. These replicas
-          may lead to resource leaks, so we require the user to explicitly specify this flag to make sure they are aware of this potential resource leak.
+          may lead to resource leaks, so we require the user to explicitly
+          specify this flag to make sure they are aware of this potential
+          resource leak.
 
     Raises:
         sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
@@ -531,11 +530,11 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 
     code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id,
                                                       purge)
-    returncode, _, stderr = backend.run_on_head(handle,
-                                                code,
-                                                require_outputs=False,
-                                                stream_logs=False,
-                                                separate_stderr=True)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
+                                                     separate_stderr=True)
     try:
         subprocess_utils.handle_returncode(returncode,
                                            code,
@@ -544,6 +543,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
                                            stream_logs=True)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
+
+    logger.info(stdout)
 
     logger.info(
         f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '

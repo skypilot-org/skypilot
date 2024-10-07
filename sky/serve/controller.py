@@ -170,7 +170,7 @@ class SkyServeController:
             replica_info = serve_state.get_replica_info_from_id(
                 self._service_name, replica_id)
             assert replica_info is not None, (f'Error: replica '
-                                                f'{replica_id} does not exist.')
+                                              f'{replica_id} does not exist.')
             replica_status = replica_info.status
 
             if replica_status == serve_state.ReplicaStatus.SHUTTING_DOWN:
@@ -189,9 +189,9 @@ class SkyServeController:
                     return fastapi.Response(
                         status_code=200,
                         content={
-                            'message': f'Successfully purged replica '
-                                       f'{replica_id} of service '
-                                       f'{self._service_name!r}.'
+                            'message': f'Replica {replica_id} of service '
+                                       f'{self._service_name!r} is scheduled '
+                                       f'to be purged.'
                         })
                 else:
                     return fastapi.Response(
@@ -214,9 +214,9 @@ class SkyServeController:
                 return fastapi.Response(
                     status_code=200,
                     content={
-                        'message': f'Success terminating replica '
-                                   f'{replica_id} of service '
-                                   f'{self._service_name!r}.'
+                        'message': f'Replica {replica_id} of service '
+                                   f'{self._service_name!r} is scheduled to '
+                                   f'be terminated.'
                     })
 
         threading.Thread(target=self._run_autoscaler).start()

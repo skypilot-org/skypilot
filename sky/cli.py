@@ -4419,6 +4419,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
     else:
         serve_lib.down(service_names=service_names, all=all, purge=purge)
 
+
 @serve.command('logs', cls=_DocumentedCodeCommand)
 @click.option(
     '--follow/--no-follow',
