@@ -45,21 +45,30 @@ These commands sync the working directory to :code:`~/sky_workdir` on the remote
 VMs.  The task is invoked under that working directory (so that it can call
 scripts, access checkpoints, etc.).
 
-*Exclude files from syncing*
-For large, multi-gigabyte workdirs, uploading may be slow because they
-are synced to the remote VM(s). To exclude large files in
-your workdir from being uploaded, add them to a :code:`.skyignore` file 
-under your workdir. Example :code:`.skyignore` file:
+.. note::
 
-.. code-block::
+    **Exclude files from syncing**
+
+    For large, multi-gigabyte workdirs, uploading may be slow because they
+    are synced to the remote VM(s). To exclude large files in
+    your workdir from being uploaded, add them to a :code:`.skyignore` file 
+    under your workdir. Example :code:`.skyignore` file:
+
+    .. code-block::
+        
+        # individual file
+        hello.py
+        # individual directory
+        hello/
+        # Files that match pattern under ALL directories
+        **/*.txt
+        # Files that match pattern under ONLY CURRENT directory
+        /*.txt
+        # Files that match pattern under a directory ./dir/
+        /dir/*.txt
     
-    hello.py
-    # individual directory
-    hello/
-    # Files that match pattern under ALL directories
-    **/*.txt
-    # Files that match pattern under ONLY CURRENT directory
-    /*.txt
+    Do NOT use patterns like ``*.txt`` or ``./*.txt`` because these expressions
+    behave inconsistently across the APIs.
 
 .. note::
 

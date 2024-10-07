@@ -281,9 +281,9 @@ def path_size_megabytes(path: str) -> int:
         -1.
     """
     resolved_path = pathlib.Path(path).expanduser().resolve()
-    git_exclude_filter = ''
     if (resolved_path / constants.SKY_IGNORE_FILE).exists():
         rsync_filter = command_runner.RSYNC_FILTER_SKYIGNORE
+        git_exclude_filter = ''
     else:
         rsync_filter = command_runner.RSYNC_FILTER_GITIGNORE
         if (resolved_path / command_runner.GIT_EXCLUDE).exists():

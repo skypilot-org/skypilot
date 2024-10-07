@@ -82,9 +82,7 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                 if line and not line.startswith('#'):
                     if '*' in line:
                         # Make parsing consistent with rsync.
-                        if line.startswith('*.'):
-                            line = '**/' + line
-                        elif line.startswith('/*'):
+                        if line.startswith('/*'):
                             line = '.' + line
                         matching_files = glob.glob(os.path.join(
                             expand_src_dir_path, line),
@@ -208,8 +206,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 def get_excluded_files(src_dir_path: str) -> List[str]:
     # TODO: this could return a huge list of files,
     # should think of ways to optimize.
-    """ List files and directories to be excluded.
-    """
+    """ List files and directories to be excluded."""
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
