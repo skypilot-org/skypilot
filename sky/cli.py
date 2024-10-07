@@ -4332,7 +4332,6 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               required=False,
               help='Skip confirmation prompt.')
 @click.option('--replica-id',
-              '-rid',
               default=None,
               type=int,
               help='Tear down a given replica')
