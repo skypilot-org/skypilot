@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
+from sky.serve import schemas
 from sky.serve import serve_state
 from sky.serve import serve_utils
 
@@ -97,7 +98,7 @@ class Autoscaler:
         self.update_mode = update_mode
 
     def collect_request_information(
-            self, request_aggregator_info: Dict[str, Any]) -> None:
+            self, request_aggregator_info: schemas.RequestAggregator) -> None:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
@@ -222,17 +223,9 @@ class RequestRateAutoscaler(Autoscaler):
         self.downscale_counter = 0
 
     def collect_request_information(
-            self, request_aggregator_info: Dict[str, Any]) -> None:
-        """Collect request information from aggregator for autoscaling.
-
-        request_aggregator_info should be a dict with the following format:
-
-        {
-            'timestamps': [timestamp1 (float), timestamp2 (float), ...]
-        }
-        """
-        self.request_timestamps.extend(
-            request_aggregator_info.get('timestamps', []))
+            self, request_aggregator_info: schemas.RequestAggregator) -> None:
+        """Collect request information from aggregator for autoscaling."""
+        self.request_timestamps.extend(request_aggregator_info.timestamps)
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.qps_window_size)
