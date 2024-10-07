@@ -12,13 +12,13 @@ IMAGE_GPU="us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:l
 PORT_RANGE_START=30000
 PORT_RANGE_END=30100
 
+USER_HASH=$1
+
 # Check for GPU flag
 ENABLE_GPUS=false
-if [[ "$1" == "--gpus" ]]; then
+if [[ "$2" == "--gpus" ]]; then
     ENABLE_GPUS=true
 fi
-
-USER_HASH=$2
 
 # ====== Dependency checks =======
 # Initialize error message string
