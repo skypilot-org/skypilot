@@ -34,7 +34,6 @@ from sky import jobs as managed_jobs
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
@@ -3745,43 +3744,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
-        self.run_on_head(
-            handle,
-            code,
-            stream_logs=True,
-            process_stream=False,
-            ssh_mode=command_runner.SshMode.INTERACTIVE,
-            stdin=subprocess.DEVNULL,
-        )
-
-    def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
-                        service_name: str, target: serve_lib.ServiceComponent,
-                        replica_id: Optional[int], follow: bool) -> None:
-        """Tail the logs of a service.
-
-        Args:
-            handle: The handle to the sky serve controller.
-            service_name: The name of the service.
-            target: The component to tail the logs of. Could be controller,
-                load balancer, or replica.
-            replica_id: The replica ID to tail the logs of. Only used when
-                target is replica.
-            follow: Whether to follow the logs.
-        """
-        if target != serve_lib.ServiceComponent.REPLICA:
-            code = serve_lib.ServeCodeGen.stream_serve_process_logs(
-                service_name,
-                stream_controller=(
-                    target == serve_lib.ServiceComponent.CONTROLLER),
-                follow=follow)
-        else:
-            assert replica_id is not None, service_name
-            code = serve_lib.ServeCodeGen.stream_replica_logs(
-                service_name, replica_id, follow)
-
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
-
         self.run_on_head(
             handle,
             code,
