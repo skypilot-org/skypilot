@@ -16,8 +16,9 @@ def test_get_excluded_files_from_skyignore():
         # Create workdir
         dirs = ['remove_dir', 'dir']
         files = [
-            'remove.py', 'remove.txt', 'remove.sh', 'keep.py', 'dir/keep.txt',
-            'dir/remove.sh'
+            'remove.py', 'remove.txt', 'remove.sh', 'remove.b', 'keep.py',
+            'remove.a', 'dir/keep.txt', 'dir/remove.sh', 'dir/remove.b',
+            'dir/keep.a'
         ]
         for dir_name in dirs:
             os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
@@ -34,8 +35,10 @@ def test_get_excluded_files_from_skyignore():
         remove_dir/
         # Pattern match for current directory
         ./*.txt
+        /*.a
         # Pattern match for all subdirectories
         **/*.sh
+        *.b
         """
         skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
         with open(skyignore_path, 'w') as f:
@@ -47,8 +50,8 @@ def test_get_excluded_files_from_skyignore():
 
         # Validate results
         expected_excluded_files = [
-            'remove.py', 'remove_dir/', 'remove.txt', 'remove.sh',
-            'dir/remove.sh'
+            'remove.py', 'remove_dir/', 'remove.txt', 'remove.sh', 'remove.a',
+            'remove.b', 'dir/remove.sh', 'dir/remove.b'
         ]
         for file_path in expected_excluded_files:
             assert file_path in excluded_files
