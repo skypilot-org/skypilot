@@ -67,7 +67,7 @@ def format_storage_table(storages: List[Dict[str, Any]],
 
 
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
-    # TODO: process all .skyignore files in the current directory and subdirectories
+    # TODO: process all .skyignore files in all subdirectories
     """List files and patterns ignored by .skyignore in the source directory.
     """
     excluded_list: List[str] = []
@@ -92,9 +92,8 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                     else:
                         excluded_list.append(line)
     except IOError as e:
-        logger.warning(
-            f'Error reading {skyignore_path}: {common_utils.format_exception(e, use_bracket=True)}'
-        )
+        logger.warning(f'Error reading {skyignore_path}: '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
 
     return excluded_list
 
@@ -202,18 +201,17 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 
 
 def get_excluded_files(src_dir_path: str) -> List[str]:
-    # TODO: this could return a huge list of files, should think of ways to optimize.
+    # TODO: this could return a huge list of files,
+    # should think of ways to optimize.
     """ List files and directories to be excluded.
     """
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
     if os.path.exists(skyignore_path):
-        logger.info(
-            f'Exclude files to sync to cluster based on {constants.SKY_IGNORE_FILE}.'
-        )
+        logger.info(f'Exclude files to sync to cluster based on '
+                    f'{constants.SKY_IGNORE_FILE}.')
         return get_excluded_files_from_skyignore(src_dir_path)
-    logger.info(
-        f'Exclude files to sync to cluster based on {constants.GIT_IGNORE_FILE}.'
-    )
+    logger.info(f'Exclude files to sync to cluster based on '
+                f'{constants.GIT_IGNORE_FILE}.')
     return get_excluded_files_from_gitignore(src_dir_path)
