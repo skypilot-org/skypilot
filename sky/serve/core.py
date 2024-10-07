@@ -506,7 +506,7 @@ def down(
 
 @usage_lib.entrypoint
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
-    """Tear down a specific replica
+    """Tear down a specific replica for the given service.
 
     Args:
         service_name: Name of the service.
