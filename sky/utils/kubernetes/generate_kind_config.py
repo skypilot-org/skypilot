@@ -71,7 +71,6 @@ if __name__ == '__main__':
                                      ' from host to container')
     parser.add_argument('--path',
                         type=str,
-                        default='/tmp/skypilot-kind.yaml',
                         help='Path to generate the config file at')
     parser.add_argument('--port-start',
                         type=int,

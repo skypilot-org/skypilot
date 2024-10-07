@@ -18,6 +18,8 @@ if [[ "$1" == "--gpus" ]]; then
     ENABLE_GPUS=true
 fi
 
+USER_HASH=$2
+
 # ====== Dependency checks =======
 # Initialize error message string
 error_msg=""
@@ -88,16 +90,17 @@ if kind get clusters | grep -q skypilot; then
 fi
 
 # Generate cluster YAML
-echo "Generating /tmp/skypilot-kind.yaml"
+YAML_PATH="/tmp/skypilot-kind-$USER_HASH.yaml"
+echo "Generating $YAML_PATH"
 
 # Add GPUs flag to the generate_kind_config.py command if GPUs are enabled
 if $ENABLE_GPUS; then
-    python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END} --gpus
+    python -m sky.utils.kubernetes.generate_kind_config --path $YAML_PATH --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END} --gpus
 else
-  python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END}
+  python -m sky.utils.kubernetes.generate_kind_config --path $YAML_PATH --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END}
 fi
 
-kind create cluster --config /tmp/skypilot-kind.yaml --name skypilot
+kind create cluster --config $YAML_PATH --name skypilot
 
 echo "Kind cluster created."
 
