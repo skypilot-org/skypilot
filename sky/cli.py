@@ -4382,8 +4382,10 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
     replica_id_is_defined = replica_id is not None
     if replica_id_is_defined:
         if len(service_names) != 1:
-            raise click.UsageError('The --replica-id option can only be used '
-                                   'with a single service name.')
+            service_names_str = ', '.join(service_names)
+            raise click.UsageError(f'The --replica-id option can only be used '
+                                   f'with a single service name. Got: '
+                                   f'{service_names_str}.')
         if all:
             raise click.UsageError('The --replica-id option cannot be used '
                                    'with the --all option.')
