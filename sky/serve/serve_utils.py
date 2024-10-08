@@ -683,18 +683,19 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
-def _extract_replica_id_from_launch_log_file_name(file_name: str) -> int:
-    match = re.search(serve_constants.REPLICA_ID_PATTERN, file_name)
-    if match:
-        return int(match.group(1))
-    raise ValueError(f'Failed to get replica id from file name: {file_name}')
-
-
 def has_valid_replica_id(file_name: str,
                          target_replica_id: Optional[int]) -> bool:
     if target_replica_id is None:
         return True
-    replica_id = _extract_replica_id_from_launch_log_file_name(file_name)
+
+    match = re.search(serve_constants.REPLICA_ID_PATTERN, file_name)
+
+    if match is not None:
+        replica_id = int(match.group(1))
+    else:
+        raise ValueError(
+            f'Failed to get replica id from file name: {file_name}')
+
     return replica_id == target_replica_id
 
 
@@ -722,8 +723,13 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         has_valid_replica_id(file, target_replica_id)
     ]
     for launch_log_file in launch_log_files:
-        replica_id = _extract_replica_id_from_launch_log_file_name(
-            launch_log_file)
+        match = re.search(serve_constants.REPLICA_ID_PATTERN, launch_log_file)
+        if match is not None:
+            replica_id = int(match.group(1))
+        else:
+            raise ValueError(
+                f'Failed to get replica id from file name: {launch_log_file}')
+
         replica_info = serve_state.get_replica_info_from_id(
             service_name, replica_id)
         if replica_info is None:
