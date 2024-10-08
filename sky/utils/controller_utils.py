@@ -473,12 +473,12 @@ def get_controller_resources(
     # the clouds of the resources if the controller does not exist.
     # TODO(tian): Consider respecting the regions/zones specified for the
     # resources as well.
-    requested_clouds: Set['clouds.Cloud'] = set()
+    requested_clouds_with_regions: Dict['clouds.Cloud', Set[str]] = {}
     for resource in task_resources:
         # cloud is an object and will not be able to be distinguished by set.
         # Here we manually check if the cloud is in the set.
         if resource.cloud is not None:
-            if not clouds.cloud_in_iterable(resource.cloud, requested_clouds):
+            if not clouds.cloud_in_iterable(resource.cloud, requested_clouds_with_regions.keys()):
                 try:
                     resource.cloud.check_features_are_supported(
                         resources.Resources(),
@@ -486,7 +486,9 @@ def get_controller_resources(
                 except exceptions.NotSupportedError:
                     # Skip the cloud if it does not support hosting controllers.
                     continue
-                requested_clouds.add(resource.cloud)
+                requested_clouds_with_regions[resource.cloud] = set()
+            else:
+                requested_clouds_with_regions[resource.cloud].add(resource.region)
         else:
             # if one of the resource.cloud is None, this could represent user
             # does not know which cloud is best for the specified resources.
@@ -496,13 +498,14 @@ def get_controller_resources(
             #     - cloud: runpod
             #       accelerators: A40
             # In this case, we allow the controller to be launched on any cloud.
-            requested_clouds.clear()
+            requested_clouds_with_regions.clear()
             break
-    if not requested_clouds:
+    if not requested_clouds_with_regions:
         return {controller_resources_to_use}
     return {
-        controller_resources_to_use.copy(cloud=controller_cloud)
-        for controller_cloud in requested_clouds
+        controller_resources_to_use.copy(cloud=controller_cloud, region=controller_region)
+        for controller_cloud, controller_regions in requested_clouds_with_regions.items()
+        for controller_region in (controller_regions if controller_regions else [None])
     }
 
 
