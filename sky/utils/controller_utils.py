@@ -712,7 +712,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     f'{colorama.Style.RESET_ALL} See: sky storage ls')
     try:
         # Optimize filemount translation
-        task.compress_local_sync_storage_mounts()
+        task.sync_storage_mounts()
     except ValueError as e:
         if 'No enabled cloud for storage' in str(e):
             data_src = None

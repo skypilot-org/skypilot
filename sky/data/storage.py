@@ -5,11 +5,12 @@ import os
 import re
 import shlex
 import subprocess
+import tempfile
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
-import zipfile
+import uuid
 
 import colorama
 
@@ -860,6 +861,8 @@ class Storage(object):
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
           region: str; Region to place the bucket in. Caller must ensure that
             the region is valid for the chosen store_type.
+          compress_local: boolean; Decides whether we want to compress the
+            filemount before uploaidng to the bucket.
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -925,7 +928,7 @@ class Storage(object):
 
         # Upload source to store
         if compress_local:
-            self._compress_sync_store(store)
+            self._maybe_compress_sync_store(store)
         else:
             self._sync_store(store)
 
@@ -991,61 +994,62 @@ class Storage(object):
         for _, store in self.stores.items():
             self._sync_store(store)
 
-    def _compress_sync_store(self, store: AbstractStore):
+    def _maybe_compress_sync_store(self, store: AbstractStore):
         """Same as sync_store, but compresses before uploading"""
-        if self.source is None:
+        # Only supports workdir, self.source should be type str
+        if self.source is None or not isinstance(self.source, str):
             self._sync_store(store)
             return
-        zip_filepath = os.path.join(os.getcwd(), f'{store.name}-compressed')
-        zip_filename = os.path.join(zip_filepath, 'skypilot-filemounts.zip')
-        filepaths = self.source
-        if isinstance(self.source, str):
-            filepaths = [self.source]
+
+        def num_files(source, excluded_list):
+            count = 0
+            find_cmd = [
+                'find', source, '-type', 'd', '-name', '.git', '-prune', '-o',
+                '-print'
+            ]
+            grep_cmd = ['cat']
+            if len(excluded_list) > 0:
+                grep_cmd = ['grep', '-vE', f'"({"|".join(excluded_list)})"']
+            all_files = subprocess.Popen(find_cmd, stdout=subprocess.PIPE)
+            relevant_files = subprocess.Popen(grep_cmd,
+                                              stdin=all_files.stdout,
+                                              stdout=subprocess.PIPE)
+            all_files.stdout.close()
+            num_files = subprocess.Popen(['wc', '-l'],
+                                         stdin=relevant_files.stdout,
+                                         stdout=subprocess.PIPE)
+            relevant_files.stdout.close()
+            count += int(num_files.communicate()[0])
+            num_files.stdout.close()
+            return count
+
+        excluded_list = storage_utils.\
+            get_excluded_files_from_gitignore(self.source)
+        excluded_list.append('.git')
+
+        if num_files(self.source, excluded_list) <= 10:
+            self._sync_store(store)
+            return
+
         try:
-            if not os.path.exists(zip_filepath):
-                os.mkdir(zip_filepath)
-            with zipfile.ZipFile(os.path.join(zip_filepath, zip_filename), 'w',
-                                 zipfile.ZIP_DEFLATED) as zipf:
-                for filepath in filepaths:
-                    if os.path.isdir(os.path.expanduser(filepath)):
-                        for root, _, files in os.walk(filepath):
-                            for file in files:
-                                if file == 'skypilot-filemounts.zip':
-                                    continue
-                                zipf.write(
-                                    os.path.join(root, file),
-                                    os.path.join(root.replace(filepath, '', 1),
-                                                 file) + '/')
-                    else:
-                        logger.info(f'Filepath Zipping {filepath}')
-                        zipf.write(filepath, filepath.replace(os.path.sep, '/'))
-        except:
-            if os.path.exists(zip_filename):
-                os.remove(zip_filename)
-                os.rmdir(zip_filepath)
-            raise
-        try:
-            # overwrite source with zip
-            store.source = zip_filepath
-            store.upload()
-            store.source = filepaths
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                # uuid used to avoid collisions if compressing multiple sources
+                file_name = f'skypilot-filemounts-{uuid.uuid1()}.zip'
+                tmp_path = os.path.join(tmpdirname, file_name)
+                command = ['tar', '-czf', tmp_path]
+                for ignored_file in excluded_list:
+                    command.append(f'--exclude=./{ignored_file}')
+                # TODO(warrickhe): Possibly extend compression to all filemounts
+                # Currently only supports workdirs
+                command.extend(['-C', self.source, '.'])
+                subprocess.Popen(command)
+                original_source = store.source
+                store.source = tmpdirname
+                self._sync_store(store)
+                store.source = original_source
         except exceptions.StorageUploadError:
-            if os.path.exists(zip_filename):
-                os.remove(zip_filename)
-                os.rmdir(zip_filepath)
-            self.source = filepaths
-            logger.error(f'Could not upload {self.source!r} to store '
-                         f'name {store.name!r}.')
-            if store.is_sky_managed:
-                global_user_state.set_storage_status(
-                    self.name, StorageStatus.UPLOAD_FAILED)
+            logger.error('Problem when trying to upload compressed file')
             raise
-        if os.path.exists(zip_filename):
-            os.remove(zip_filename)
-            os.rmdir(zip_filepath)
-        # Upload succeeded - update state
-        if store.is_sky_managed:
-            global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
