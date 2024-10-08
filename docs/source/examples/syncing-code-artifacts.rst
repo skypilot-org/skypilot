@@ -58,19 +58,19 @@ scripts, access checkpoints, etc.).
 
     .. code-block::
         
-        # individual file
-        hello.py
-        # individual directory
-        hello/
-        # Files that match pattern under ALL directories
-        **/*.txt
-        # Files that match pattern under CURRENT directory
-        /*.txt
-        # Files that match pattern under a directory dir/
-        /dir/*.txt
+      # Files that match pattern under ONLY CURRENT directory
+      /hello.py
+      /*.txt
+      /dir
+
+      # Files that match pattern under ALL directories
+      *.txt
+      hello.py
+
+      # Files that match pattern under a directory ./dir/
+      /dir/*.txt
     
-    Do NOT use patterns like ``*.txt`` or ``./*.txt`` because these expressions
-    behave inconsistently across the APIs.
+    Do NOT use ``.`` to indicate local directory (e.g. ``./hello.py``).
 
 .. note::
 
