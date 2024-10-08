@@ -1487,7 +1487,7 @@ def _get_services(service_names: Optional[List[str]],
               is_flag=True,
               required=False,
               help='Show all clusters, including those not owned by the '
-                   'current user.')
+              'current user.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,

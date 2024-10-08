@@ -143,8 +143,13 @@ def create_table(cursor, conn):
                                  'transaction_id',
                                  'INTEGER DEFAULT 0',
                                  value_to_replace_existing_entries=0)
-    db_utils.add_column_to_table(cursor, conn, 'clusters', 'user_hash',
-                                 'TEXT DEFAULT null')
+    db_utils.add_column_to_table(
+        cursor,
+        conn,
+        'clusters',
+        'user_hash',
+        'TEXT DEFAULT null',
+        value_to_replace_existing_entries=common_utils.get_user_hash())
     db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'user_hash',
                                  'TEXT DEFAULT null')
     conn.commit()
