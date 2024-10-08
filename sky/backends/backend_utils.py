@@ -280,18 +280,22 @@ def path_size_megabytes(path: str) -> int:
         If successful: the size of 'path' in megabytes, rounded down. Otherwise,
         -1.
     """
-    resolved_path = pathlib.Path(path).expanduser().resolve()
     git_exclude_filter = ''
-    if (resolved_path / command_runner.GIT_EXCLUDE).exists():
-        # Ensure file exists; otherwise, rsync will error out.
-        #
-        # We shlex.quote() because the path may contain spaces:
-        #   'my dir/.git/info/exclude'
-        # Without quoting rsync fails.
-        git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
+    resolved_path = pathlib.Path(path).expanduser().resolve()
+    if (resolved_path / constants.SKY_IGNORE_FILE).exists():
+        rsync_filter = command_runner.RSYNC_FILTER_SKYIGNORE
+    else:
+        rsync_filter = command_runner.RSYNC_FILTER_GITIGNORE
+        if (resolved_path / command_runner.GIT_EXCLUDE).exists():
+            # Ensure file exists; otherwise, rsync will error out.
+            #
+            # We shlex.quote() because the path may contain spaces:
+            #   'my dir/.git/info/exclude'
+            # Without quoting rsync fails.
+            git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
+                shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
-                     f'{command_runner.RSYNC_FILTER_OPTION} '
+                     f'{rsync_filter} '
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:

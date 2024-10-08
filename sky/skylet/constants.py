@@ -7,6 +7,8 @@ import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_IGNORE_FILE = '.skyignore'
+GIT_IGNORE_FILE = '.gitignore'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
 # Default Ray tempdir is /tmp/ray.
