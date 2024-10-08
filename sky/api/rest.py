@@ -596,6 +596,7 @@ if __name__ == '__main__':
             num_queue_workers=num_queue_workers)
 
         logger.info('Starting API server')
+        # TODO(zhwu): --deploy is broken right now. Need to fix it.
         uvicorn.run('sky.api.rest:app',
                     host=cmd_args.host,
                     port=cmd_args.port,
