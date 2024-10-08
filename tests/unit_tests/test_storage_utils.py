@@ -13,11 +13,11 @@ def test_get_excluded_files_from_skyignore_no_file():
 def test_get_excluded_files_from_skyignore():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create workdir
-        dirs = ['remove_dir', 'dir', 'dir/subdir']
+        dirs = ['remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir']
         files = [
             'remove.py', 'remove.txt', 'remove.sh', 'keep.py', 'remove.a',
             'dir/keep.txt', 'dir/remove.sh', 'dir/keep.a', 'dir/remove.b',
-            'dir/subdir/keep.b'
+            'dir/subdir/keep.b', 'dir/subdir/remove.py'
         ]
         for dir_name in dirs:
             os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
@@ -29,9 +29,9 @@ def test_get_excluded_files_from_skyignore():
         # Create skyignore file
         skyignore_content = """
         # File
-        remove.py
+        /remove.py
         # Directory
-        remove_dir/
+        /remove_dir
         # Pattern match for current directory
         ./*.txt
         /*.a
@@ -49,7 +49,7 @@ def test_get_excluded_files_from_skyignore():
 
         # Validate results
         expected_excluded_files = [
-            'remove.py', 'remove_dir/', 'remove.txt', 'remove.sh', 'remove.a',
+            'remove.py', 'remove_dir', 'remove.txt', 'remove.sh', 'remove.a',
             'dir/remove.sh', 'dir/remove.b'
         ]
         for file_path in expected_excluded_files:

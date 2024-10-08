@@ -80,19 +80,24 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):
+                    # Make parsing consistent with rsync. 
+                    # Rsync uses '/' as current directory.
+                    if line.startswith('/'):
+                        line = '.' + line
                     if '*' in line:
                         # Make parsing consistent with rsync.
-                        if line.startswith('/'):
-                            line = '.' + line
                         matching_files = glob.glob(os.path.join(
                             expand_src_dir_path, line),
                                                    recursive=True)
-                        matching_files = [
-                            os.path.relpath(f, expand_src_dir_path)
-                            for f in matching_files
-                        ]
+                        # Process filenames to comply with cloud rsync format.
+                        for i in range(len(matching_files)):
+                            file = os.path.relpath(matching_files[i], expand_src_dir_path)
+                            if (file.startswith('/')):
+                                file = file.lstrip('/')
+                            matching_files[i] = file
                         excluded_list.extend(matching_files)
                     else:
+                        line = line.lstrip('./')
                         excluded_list.append(line)
     except IOError as e:
         logger.warning(f'Error reading {skyignore_path}: '

@@ -52,7 +52,9 @@ scripts, access checkpoints, etc.).
     For large, multi-gigabyte workdirs, uploading may be slow because they
     are synced to the remote VM(s). To exclude large files in
     your workdir from being uploaded, add them to a :code:`.skyignore` file 
-    under your workdir. Example :code:`.skyignore` file:
+    under your workdir. :code:`.skyignore` follows RSYNC filter rules. 
+    
+    Example :code:`.skyignore` file:
 
     .. code-block::
         
