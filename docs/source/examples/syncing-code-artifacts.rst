@@ -65,7 +65,7 @@ scripts, access checkpoints, etc.).
         # Files that match pattern under ONLY CURRENT directory
         /*.txt
         # Files that match pattern under a directory ./dir/
-        /dir/*.txt
+        dir/*.txt
     
     Do NOT use patterns like ``*.txt`` or ``./*.txt`` because these expressions
     behave inconsistently across the APIs.
