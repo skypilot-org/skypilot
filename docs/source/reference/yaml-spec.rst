@@ -23,6 +23,7 @@ Available fields:
     # which `sky` is called.
     #
     # To exclude files from syncing, add them to a .skyignore file under your working directory.
+    # Details: https://skypilot.readthedocs.io/en/latest/examples/syncing-code-artifacts.html#uploading-code-and-project-files
     workdir: ~/my-task-code
 
     # Number of nodes (optional; defaults to 1) to launch including the head node.
