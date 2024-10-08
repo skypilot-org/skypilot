@@ -319,66 +319,11 @@ def _get_estimated_cost_for_cost_report(
 
     return f'$ {cost:.2f}'
 
-def process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
-    """Process SkyPilot pods and group them by cluster."""
-    # pylint: disable=import-outside-toplevel
-    from sky import resources as resources_lib
-    clusters = {}
-    for pod in pods:
-        cluster_name = pod.metadata.labels.get('skypilot-cluster')
-        if cluster_name not in clusters:
-            # Parse the earliest start time for the cluster
-            start_time = pod.status.start_time
-            if start_time:
-                # Parse to unix timestamp and convert to int
-                start_time = start_time.timestamp()
-
-            # Parse resources
-            cpu_request = kubernetes_utils.parse_cpu_or_gpu_resource(pod.spec.containers[0].resources.requests.get('cpu', '0'))
-            memory_request = kubernetes_utils.parse_memory_resource(pod.spec.containers[0].resources.requests.get('memory', '0')) / 1073741824  # Convert to GiB
-            gpu_count = kubernetes_utils.parse_cpu_or_gpu_resource(pod.spec.containers[0].resources.requests.get('nvidia.com/gpu', '0'))
-            if gpu_count > 0:
-                # TODO: We should pass context here
-                context = None
-                label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(context)
-                gpu_label = label_formatter.get_label_key()
-                # Get GPU name from pod node selector
-                if pod.spec.node_selector is not None:
-                    gpu_name = label_formatter.get_accelerator_from_label_value(
-                        pod.spec.node_selector.get(gpu_label))
-            
-            resources = resources_lib.Resources(
-                cloud=clouds.Kubernetes(),
-                cpus=float(cpu_request),
-                memory=memory_request,
-                accelerators=(f'{gpu_name}:{gpu_count}' if gpu_count > 0 else None)
-            )
-
-            clusters[cluster_name] = {
-                'name': cluster_name,
-                'user': pod.metadata.labels.get('skypilot-user'),
-                'status': status_lib.ClusterStatus.UP,  # Assuming UP if pod exists
-                'pods': [],
-                'launched_at': start_time,
-                'resources': resources,
-                'resources_str': f'{len(pods)}x {resources}',
-            }
-        else:
-            # Update start_time if this pod started earlier
-            pod_start_time = pod.status.start_time
-            if pod_start_time:
-                pod_start_time = pod_start_time.replace(tzinfo=None)
-                if pod_start_time < clusters[cluster_name]['launched_at']:
-                    clusters[cluster_name]['launched_at'] = pod_start_time
-
-        clusters[cluster_name]['pods'].append(pod)
-    return list(clusters.values())
-
-def show_kubernetes_status_table(pods: List[Any], show_all: bool) -> None:
+def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
-        StatusColumn('NAME', lambda c: c['name']),
         StatusColumn('USER', lambda c: c['user']),
+        StatusColumn('NAME', lambda c: c['name']),
         StatusColumn('LAUNCHED', lambda c: log_utils.readable_time_duration(c['launched_at'])),
         StatusColumn('RESOURCES', lambda c: c['resources_str'], trunc_length=70 if not show_all else 0),
         # StatusColumn('PODS', lambda c: len(c['pods'])),
@@ -386,7 +331,6 @@ def show_kubernetes_status_table(pods: List[Any], show_all: bool) -> None:
         # Add more columns as needed
     ]
 
-    clusters = process_skypilot_pods(pods)
     columns = [col.name for col in status_columns if col.show_by_default or show_all]
     cluster_table = log_utils.create_table(columns)
 

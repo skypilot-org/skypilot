@@ -138,6 +138,55 @@ def launch(
                    _disable_controller_check=True)
 
 
+def queue_kubernetes(pod_name: str, refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
+    """Gets the jobs queue from the kubernetes cluster by reconstructing a cluster handle and running the appropriate code on the head node.
+
+    Args:
+        pod_name:
+        refresh:
+        skip_finished:
+
+    Returns:
+
+    """
+    from sky.provision import common
+    from sky import provision as provision_lib
+    cluster_name = pod_name.strip('-head').rsplit('-', 1)[0]
+
+    provider_config = {} # TODO: Specify context and namespace here.
+    instances = {pod_name: None}
+    cluster_info = common.ClusterInfo(provider_name='kubernetes', head_instance_id=pod_name, provider_config=provider_config, instances=instances)
+    managed_jobs_runner = provision_lib.get_command_runners('kubernetes',
+                                                            cluster_info)[0]
+
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    returncode, job_table_payload, stderr = managed_jobs_runner.run(
+        code,
+        require_outputs=True,
+        separate_stderr=True,
+        stream_logs=False,
+    )
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch managed jobs',
+                                           job_table_payload + stderr,
+                                           stream_logs=False)
+    except exceptions.CommandError as e:
+        raise RuntimeError(str(e)) from e
+
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    if skip_finished:
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+    return jobs
+
+
 @usage_lib.entrypoint
 def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.

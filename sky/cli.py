@@ -1458,6 +1458,94 @@ def _get_services(service_names: Optional[List[str]],
     return num_services, msg
 
 
+def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
+    """Process SkyPilot pods and group them by cluster."""
+    # pylint: disable=import-outside-toplevel
+    from sky import resources as resources_lib
+    from sky import clouds
+    clusters: Dict[str, Dict] = {}
+    jobs_controllers: Dict[str, Dict] = {}
+    serve_controllers: Dict[str, Dict] = {}
+
+    for pod in pods:
+        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+
+        # Check if name is name of a controller
+        # Can't use controller_utils.Controllers.from_name(cluster_name)
+        # because hash is different across users
+        if 'controller' in cluster_name_on_cloud:
+            start_time = pod.status.start_time.timestamp()
+            controller_info = {
+                'name': cluster_name_on_cloud,
+                'user': pod.metadata.labels.get('skypilot-user'),
+                'status': status_lib.ClusterStatus.UP,
+                # Assuming UP if pod exists
+                'pods': [pod],
+                'launched_at': start_time
+            }
+            if 'sky-jobs-controller' in cluster_name_on_cloud:
+                jobs_controllers[cluster_name_on_cloud] = controller_info
+            elif 'sky-serve-controller' in cluster_name_on_cloud:
+                serve_controllers[cluster_name_on_cloud] = controller_info
+
+        if cluster_name_on_cloud not in clusters:
+            # Parse the earliest start time for the cluster
+            if pod.status.start_time is None:
+                start_time = 0
+            else:
+                start_time = pod.status.start_time.timestamp()
+
+            # Parse resources
+            cpu_request = kubernetes_utils.parse_cpu_or_gpu_resource(
+                pod.spec.containers[0].resources.requests.get('cpu', '0'))
+            memory_request = kubernetes_utils.parse_memory_resource(
+                pod.spec.containers[0].resources.requests.get('memory',
+                                                              '0')) / 1073741824  # Convert to GiB
+            gpu_count = kubernetes_utils.parse_cpu_or_gpu_resource(
+                pod.spec.containers[0].resources.requests.get('nvidia.com/gpu',
+                                                              '0'))
+            if gpu_count > 0:
+                # TODO: We should pass context here
+                context = None
+                label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(
+                    context)
+                gpu_label = label_formatter.get_label_key()
+                # Get GPU name from pod node selector
+                if pod.spec.node_selector is not None:
+                    gpu_name = label_formatter.get_accelerator_from_label_value(
+                        pod.spec.node_selector.get(gpu_label))
+
+            resources = resources_lib.Resources(
+                cloud=clouds.Kubernetes(),
+                cpus=float(cpu_request),
+                memory=memory_request,
+                accelerators=(
+                    f'{gpu_name}:{gpu_count}' if gpu_count > 0 else None)
+            )
+            if pod.status.phase == 'Pending':
+                # If pod is pending, do not show it in the status
+                continue
+
+            clusters[cluster_name_on_cloud] = {
+                'name': cluster_name_on_cloud,
+                'user': pod.metadata.labels.get('skypilot-user'),
+                'status': status_lib.ClusterStatus.UP,
+                'pods': [],
+                'launched_at': start_time,
+                'resources': resources,
+                'resources_str': f'{len(pods)}x {resources}', # TODO: Fixme number of pods.
+            }
+        else:
+            # Update start_time if this pod started earlier
+            pod_start_time = pod.status.start_time
+            if pod_start_time:
+                pod_start_time = pod_start_time.replace(tzinfo=None)
+                if pod_start_time < clusters[cluster_name_on_cloud]['launched_at']:
+                    clusters[cluster_name_on_cloud]['launched_at'] = pod_start_time
+
+        clusters[cluster_name_on_cloud]['pods'].append(pod)
+    return list(clusters.values()), jobs_controllers, serve_controllers
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -1588,7 +1676,28 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 raise ValueError(
                     f'Failed to get SkyPilot pods from Kubernetes: {str(e)}')
 
-        status_utils.show_kubernetes_status_table(pods, all)
+        clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(pods)
+        status_utils.show_kubernetes_status_table(clusters, all)
+
+        all_jobs = []
+
+        for job_controller_name, job_controller_info in jobs_controllers.items():
+            user = job_controller_info['user']
+            pod = job_controller_info['pods'][0]
+            with rich_utils.safe_status(f'[bold cyan]Checking for in-progress managed jobs for {user}[/]'):
+                jobs = managed_jobs.queue_kubernetes(pod.metadata.name, refresh=False)
+            # Add user field to jobs
+            for job in jobs:
+                job['user'] = user
+            all_jobs.extend(jobs)
+        if all_jobs:
+            click.echo(
+            f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+            f'Managed jobs from {len(jobs_controllers)} users on Kubernetes'
+            f'{colorama.Style.RESET_ALL}')
+            msg = managed_jobs.format_job_table(all_jobs,
+                                                show_all=all)
+            click.echo(msg)
         return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
