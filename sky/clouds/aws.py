@@ -303,8 +303,8 @@ class AWS(clouds.Cloud):
             '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
             'curl -H "X-aws-ec2-metadata-token: $TOKEN" -s '
             'http://169.254.169.254/latest/dynamic/instance-identity/document'
-	     f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
-	     'print(json.load(sys.stdin)[\'availabilityZone\'])"')
+            f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
+            'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str
 
     #### Normal methods ####
