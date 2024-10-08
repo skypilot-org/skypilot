@@ -1469,6 +1469,7 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
 
     for pod in pods:
         cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+        cluster_name = cluster_name_on_cloud.rsplit('-', 1)[0] # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
 
         # Check if name is name of a controller
         # Can't use controller_utils.Controllers.from_name(cluster_name)
@@ -1476,7 +1477,8 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
         if 'controller' in cluster_name_on_cloud:
             start_time = pod.status.start_time.timestamp()
             controller_info = {
-                'name': cluster_name_on_cloud,
+                'cluster_name_on_cloud': cluster_name_on_cloud,
+                'cluster_name': cluster_name,
                 'user': pod.metadata.labels.get('skypilot-user'),
                 'status': status_lib.ClusterStatus.UP,
                 # Assuming UP if pod exists
@@ -1527,23 +1529,28 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
                 continue
 
             clusters[cluster_name_on_cloud] = {
-                'name': cluster_name_on_cloud,
+                'cluster_name_on_cloud': cluster_name_on_cloud,
+                'cluster_name': cluster_name,
                 'user': pod.metadata.labels.get('skypilot-user'),
                 'status': status_lib.ClusterStatus.UP,
                 'pods': [],
                 'launched_at': start_time,
                 'resources': resources,
-                'resources_str': f'{len(pods)}x {resources}', # TODO: Fixme number of pods.
             }
         else:
             # Update start_time if this pod started earlier
             pod_start_time = pod.status.start_time
             if pod_start_time:
-                pod_start_time = pod_start_time.replace(tzinfo=None)
+                pod_start_time = pod_start_time.timestamp()
                 if pod_start_time < clusters[cluster_name_on_cloud]['launched_at']:
                     clusters[cluster_name_on_cloud]['launched_at'] = pod_start_time
-
         clusters[cluster_name_on_cloud]['pods'].append(pod)
+    # Update resources_str in clusters:
+    for cluster_name, cluster in clusters.items():
+        resources = cluster['resources']
+        num_pods = len(cluster['pods'])
+        resources_str = f'{num_pods}x {resources}'
+        cluster['resources_str'] = resources_str
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 @cli.command()
@@ -1665,9 +1672,6 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       cluster statuses from the cloud providers.
     """
     if kubernetes:
-        click.echo(
-        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}SkyPilot Clusters on Kubernetes'
-        f'{colorama.Style.RESET_ALL}')
 
         try:
             pods = kubernetes_utils.get_skypilot_pods()
@@ -1677,7 +1681,6 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     f'Failed to get SkyPilot pods from Kubernetes: {str(e)}')
 
         clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(pods)
-        status_utils.show_kubernetes_status_table(clusters, all)
 
         all_jobs = []
 
@@ -1690,6 +1693,27 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             for job in jobs:
                 job['user'] = user
             all_jobs.extend(jobs)
+
+        # Reconcile cluster state between managed jobs and clusters
+        # We don't want to show SkyPilot clusters that are part of a managed job
+        # in the main cluster list.
+        # Since we do not have any identifiers for which clusters are part of a
+        # managed job or service, we construct a list of managed job cluster
+        # names from the list of managed jobs and use that to exclude clusters.
+        managed_job_cluster_names = set()
+        for job in all_jobs:
+            # Managed job cluster name is <job_name>-<job_id>
+            managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+            managed_job_cluster_names.add(managed_cluster_name)
+
+        unmanaged_clusters = [c for c in clusters if c['cluster_name'] not in managed_job_cluster_names]
+
+        # Display clusters and jobs.
+        click.echo(
+        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}SkyPilot Clusters on Kubernetes'
+        f'{colorama.Style.RESET_ALL}')
+        status_utils.show_kubernetes_status_table(unmanaged_clusters, all)
+
         if all_jobs:
             click.echo(
             f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'

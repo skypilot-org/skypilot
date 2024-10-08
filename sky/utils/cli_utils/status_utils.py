@@ -323,7 +323,7 @@ def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
         StatusColumn('USER', lambda c: c['user']),
-        StatusColumn('NAME', lambda c: c['name']),
+        StatusColumn('NAME', lambda c: c['cluster_name']),
         StatusColumn('LAUNCHED', lambda c: log_utils.readable_time_duration(c['launched_at'])),
         StatusColumn('RESOURCES', lambda c: c['resources_str'], trunc_length=70 if not show_all else 0),
         # StatusColumn('PODS', lambda c: len(c['pods'])),
