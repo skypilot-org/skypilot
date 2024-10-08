@@ -1,10 +1,13 @@
 resources:
   cloud: gcp
   accelerators: L4:1
-  use_spot: True
   disk_size: 50
+  # This is the base image, need to keep it up to date.
   image_id: projects/deeplearning-platform-release/global/images/common-cu121-v20231105-debian-11-py310
 
 setup: |
-  sudo rm -rf /home/gcpuser/.config/gcloud/
-  sudo rm /home/gcpuser/.sky/user_hash
+  sudo rm -rf /home/gcpuser/.config/gcloud
+  sudo rm -rf /home/gcpuser/.sky
+  sudo rm -rf /home/gcpuser/.aws
+  sudo rm -rf /home/gcpuser/.azure
+  sudo rm -rf /home/gcpuser/.ssh
