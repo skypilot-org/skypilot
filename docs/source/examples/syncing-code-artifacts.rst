@@ -62,10 +62,10 @@ scripts, access checkpoints, etc.).
         hello/
         # Files that match pattern under ALL directories
         **/*.txt
-        # Files that match pattern under ONLY CURRENT directory
+        # Files that match pattern under CURRENT directory
         /*.txt
-        # Files that match pattern under a directory ./dir/
-        dir/*.txt
+        # Files that match pattern under a directory dir/
+        /dir/*.txt
     
     Do NOT use patterns like ``*.txt`` or ``./*.txt`` because these expressions
     behave inconsistently across the APIs.

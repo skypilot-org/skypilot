@@ -82,7 +82,7 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                 if line and not line.startswith('#'):
                     if '*' in line:
                         # Make parsing consistent with rsync.
-                        if line.startswith('/*'):
+                        if line.startswith('/'):
                             line = '.' + line
                         matching_files = glob.glob(os.path.join(
                             expand_src_dir_path, line),

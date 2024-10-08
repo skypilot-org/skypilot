@@ -35,7 +35,7 @@ def test_get_excluded_files_from_skyignore():
         # Pattern match for current directory
         ./*.txt
         /*.a
-        dir/*.b
+        /dir/*.b
         # Pattern match for all subdirectories
         **/*.sh
         """
