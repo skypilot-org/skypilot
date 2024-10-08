@@ -1,4 +1,9 @@
-"""Sync down logs"""
+"""
+This module provides functionality to sync down logs for SkyPilot services.
+It includes methods to handle logs for different service components such as
+controller, load balancer, and replicas.
+It need to be migrated to serve core. Reference #4046 (to be done this weekend)
+"""
 import os
 from typing import Optional
 
@@ -99,6 +104,8 @@ def sync_down_serve_logs(
     # and then the replica logs download would overwrite it.
     target_directory = os.path.join(sky_logs_directory, run_timestamp)
     os.makedirs(target_directory, exist_ok=True)
+    single_file_synced = False
+
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.CONTROLLER):
         controller_log_file_name = (
@@ -110,6 +117,11 @@ def sync_down_serve_logs(
                          serve_constants.CONTROLLER_LOG_FILE_NAME),
                      up=False,
                      stream_logs=False)
+        if not sync_down_all_components:
+            single_file_synced = True
+            target_directory = os.path.join(
+                target_directory, serve_constants.CONTROLLER_LOG_FILE_NAME)
+
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
         load_balancer_log_file_name = (
@@ -122,4 +134,11 @@ def sync_down_serve_logs(
                          serve_constants.LOAD_BALANCER_LOG_FILE_NAME),
                      up=False,
                      stream_logs=False)
-    logger.info(f'Synced down logs can be found at: {target_directory}')
+        if not sync_down_all_components:
+            single_file_synced = True
+            target_directory = os.path.join(
+                target_directory, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
+
+    log_message = (f'Synced down log{"s" if not single_file_synced else ""} '
+                   f'can be found at: {target_directory}')
+    logger.info(log_message)
