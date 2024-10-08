@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from sky.serve import constants
+from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -24,6 +25,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        tls_credential: Optional[serve_utils.TLSCredential] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
@@ -84,6 +86,8 @@ class SkyServiceSpec:
         self._max_replicas: Optional[int] = max_replicas
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
+        self._tls_credential: Optional[serve_utils.TLSCredential] = (
+            tls_credential)
         self._readiness_headers: Optional[Dict[str, str]] = readiness_headers
         self._dynamic_ondemand_fallback: Optional[
             bool] = dynamic_ondemand_fallback
@@ -178,6 +182,13 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
+        tls_section = config.get('tls', None)
+        if tls_section is not None:
+            service_config['tls_credential'] = serve_utils.TLSCredential(
+                keyfile=tls_section.get('keyfile', None),
+                certfile=tls_section.get('certfile', None),
+            )
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -233,6 +244,9 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        if self.tls_credential is not None:
+            add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
+            add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
         return config
 
     def probe_str(self):
@@ -277,12 +291,19 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
+    def tls_str(self):
+        if self.tls_credential is None:
+            return 'No TLS Enabled'
+        return (f'Keyfile: {self.tls_credential.keyfile}, '
+                f'Certfile: {self.tls_credential.certfile}')
+
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
+            TLS Certificates:                 {self.tls_str()}
             Spot Policy:                      {self.spot_policy_str()}
         """)
 
@@ -314,6 +335,15 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+
+    @property
+    def tls_credential(self) -> Optional[serve_utils.TLSCredential]:
+        return self._tls_credential
+
+    @tls_credential.setter
+    def tls_credential(self,
+                       value: Optional[serve_utils.TLSCredential]) -> None:
+        self._tls_credential = value
 
     @property
     def readiness_headers(self) -> Optional[Dict[str, str]]:
