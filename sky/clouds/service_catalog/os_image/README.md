@@ -2,7 +2,7 @@
 
 ## GCP
 The following is an example of generating a custom skypilot image for GPU instance running Debian 11 OS.
-1. Use SkyPilot to launch a VM \
+1. Use SkyPilot to launch a VM
 <!-- `sky launch sky/clouds/service_catalog/os_image/skypilot-gcp-gpu-debian-11.yaml` -->
 ```bash
 CLUSTER_NAME="image-creation"
@@ -10,7 +10,7 @@ ZONE="us-west1-a"
 sky launch -c $CLUSTER_NAME --zone $ZONE sky/clouds/service_catalog/os_image/skypilot-gcp-gpu-debian-11.yaml
 ```
 
-2. Stop the VM, create a custom image and make it public \
+2. Stop the VM, create a custom image and make it public
 ```
 sky stop $CLUSTER_NAME -y
 IMAGE_NAME="skypilot-gcp-gpu-debian-11-v$(date +'%y%m%d')"
@@ -24,12 +24,15 @@ gcloud compute images add-iam-policy-binding ${IMAGE_NAME} --member='allAuthenti
 echo "Image ID projects/sky-dev-465/global/images/${IMAGE_NAME} is created and public."
 ```
 
-3. [Optional] Test the image: change default image ID in `sky/clouds/gcp.py` to the new image ID and run \
+3. [Optional] Test the image: change default image ID in `sky/clouds/gcp.py` to the new image ID and run
 ```bash
 pytest tests/test_smoke.py::test_huggingface --gcp
 ```
 
-4. Clean up: delete deprecated images and stop sky cluster \
-`sky down -y ${CLUSTER_NAME}`
+4. Clean up: delete deprecated images and stop sky cluster
+```bash
+sky down -y ${CLUSTER_NAME}
+```
 
 5. Create a PR to update SkyPilot Catalog's latest version of [`images.csv`](https://github.com/skypilot-org/skypilot-catalog/blob/master/catalogs/v5/gcp/images.csv): update row for tag `skypilot:custom-gpu-debian-11`.
+
