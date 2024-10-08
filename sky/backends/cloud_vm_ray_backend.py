@@ -2480,8 +2480,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         def _run_setup_commands(runner_instance_id):
             runner, instance_id = runner_instance_id
-            command = vpn_config.get_setup_commands(instance_id)
-            returncode, _, stderr = runner.run(command,
+            command = vpn_config.get_setup_command('skypilot-' + instance_id)
+            returncode, _, stderr = runner.run([command],
                                                require_outputs=True,
                                                stream_logs=False)
             subprocess_utils.handle_returncode(
@@ -4199,7 +4199,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.vpn_config)
             if handle.cached_cluster_info is not None:
                 for instance_id in handle.cached_cluster_info.instance_ids():
-                    vpn_config.remove_host(instance_id)
+                    vpn_config.remove_host('skypilot-' + instance_id)
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

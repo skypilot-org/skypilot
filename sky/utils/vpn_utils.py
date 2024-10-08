@@ -1,26 +1,37 @@
 """Utils for VPN setup on instances."""
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
 from sky import sky_logging
 from sky.provision import common
-from sky.utils import common_utils
-from sky.utils import schemas
-from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
 
-class VPN:
+class VPNConfig:
     """Basic interface for VPN configuration.
 
     This class defines the interface for VPN configurations. Each VPN
     should implement the following methods then it can be integrated
     into SkyPilot out of the box.
     """
+
+    @staticmethod
+    def from_yaml_config(config: Dict[str, Any]) -> 'VPNConfig':
+        """Create a VPN configuration from a YAML configuration."""
+        if len(config) > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('We only support one VPN configuration '
+                                 'in a cluster. Please check the YAML '
+                                 'configuration.')
+        if config.get('tailscale') is not None:
+            return TailscaleConfig.from_env_vars()
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Unsupported VPN configuration. Please check '
+                             'the YAML configuration.')
 
     def get_setup_command(self, hostname: str) -> str:
         """Get the command to setup the VPN on VM instances."""
@@ -48,17 +59,23 @@ class VPN:
         return {}
 
     @staticmethod
-    def from_backend_config(config: Dict[str, Any]) -> 'VPN':
+    def from_backend_config(config: Dict[str, Any]) -> 'VPNConfig':
         """Create a VPN configuration from the backend configuration."""
-        raise NotImplementedError
+        vpn_type = config.pop('type')
+        if vpn_type == 'tailscale':
+            return TailscaleConfig.from_backend_config(config)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Unsupported VPN type. Please check the backend '
+                             'configuration.')
 
     def to_backend_config(self) -> Dict[str, Any]:
         """Get the VPN configuration for the backend."""
         return {}
 
 
-class TailscaleVPN(VPN):
+class TailscaleConfig(VPNConfig):
     """Tailscale VPN configuration."""
+    _TYPE = 'tailscale'
 
     # pylint: disable=line-too-long
     _SETUP_COMMAND = (
@@ -74,57 +91,55 @@ class TailscaleVPN(VPN):
     def __init__(
         self,
         auth_key: str,
-        api_key: Optional[str] = None,
-        network_name: Optional[str] = None,
-        enable_api: bool = False,
+        api_key: str,
+        tailnet: str,
     ) -> None:
         self._auth_key = auth_key
         self._api_key = api_key
-        self._network_name = network_name
-        self._enable_api = enable_api
-        # NOTE(yi): if we allow users to provide AUTH_KEY only, we can
-        # uncomment the following code.
-        # if not enable_api:
-        #     logger.warning('TAILSCALE_API_KEY or TAILSCALE_NETWORK_NAME is '
-        #                    'not set. Tailscale API will be disabled. You '
-        #                    'may need to remove hosts manually.')
-        if not api_key or not network_name:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Both TAILSCALE_API_KEY and TAILSCALE_NETWORK_NAME '
-                    'must be set to enable the Tailscale API.')
+        self._tailnet = tailnet
 
     @staticmethod
-    def from_env_vars() -> 'TailscaleVPN':
+    def from_env_vars() -> 'TailscaleConfig':
         # Parse Tailscale auth key from environment variable.
         # This is required for all Tailscale operations.
-        auth_key = os.environ.get('TAILSCALE_AUTH_KEY')
+        auth_key = os.environ.get('TS_AUTHKEY')
+        api_key = os.environ.get('TS_API_KEY')
+        tailnet = os.environ.get('TS_TAILNET')
+
+        missing_env_vars = []
         if auth_key is None:
+            missing_env_vars.append('TS_AUTHKEY')
+        if api_key is None:
+            missing_env_vars.append('TS_API_KEY')
+        if tailnet is None:
+            missing_env_vars.append('TS_TAILNET')
+
+        if len(missing_env_vars) > 0:
+            if len(missing_env_vars) == 1:
+                missing_env_vars_str = missing_env_vars[0]
+            else:
+                missing_env_vars_str = ', '.join(
+                    missing_env_vars[:-1]) + ' and ' + missing_env_vars[-1]
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('TAILSCALE_AUTH_KEY is not set.')
+                raise ValueError(f'You should set {missing_env_vars_str} to '
+                                 'enable Tailscale VPN. Please go to the '
+                                 'Tailscale console, retrieve the required '
+                                 'access keys and set them in the environment '
+                                 'variables.')
 
-        # Parse Tailscale API key and network name
-        api_key = os.environ.get('TAILSCALE_API_KEY')
-        network_name = os.environ.get('TAILSCALE_NETWORK_NAME')
-        enable_api = True
-        if not api_key or not network_name:
-            enable_api = False
-
-        return TailscaleVPN(auth_key, api_key, network_name, enable_api)
+        assert auth_key is not None and api_key is not None and tailnet is not None
+        return TailscaleConfig(auth_key, api_key, tailnet)
 
     def get_setup_command(self, hostname: str) -> str:
         return self._SETUP_COMMAND.format(tailscale_auth_key=self._auth_key,
                                           hostname=hostname)
 
     def get_setup_env_vars(self) -> Dict[str, str]:
-        env_config = {
-            'TAILSCALE_AUTH_KEY': self._auth_key,
+        return {
+            'TS_AUTHKEY': self._auth_key,
+            'TS_API_KEY': self._api_key,
+            'TS_TAILNET': self._tailnet,
         }
-        if self._enable_api:
-            assert self._api_key and self._network_name
-            env_config['TAILSCALE_API_KEY'] = self._api_key
-            env_config['TAILSCALE_NETWORK_NAME'] = self._network_name
-        return env_config
 
     def _get_auth_headers(self) -> Dict[str, str]:
         """Get the authentication headers for the Tailscale API."""
@@ -135,7 +150,7 @@ class TailscaleVPN(VPN):
     def _get_device_id_from_hostname(self, hostname: str) -> Optional[str]:
         """Get the node ID from the hostname."""
         url_to_query = ('https://api.tailscale.com/api/v2/tailnet/'
-                        f'{self._network_name}/devices')
+                        f'{self._tailnet}/devices')
         resp = requests.get(url_to_query, headers=self._get_auth_headers())
         all_devices_in_network = resp.json().get('devices', [])
         for device_info in all_devices_in_network:
@@ -145,33 +160,13 @@ class TailscaleVPN(VPN):
 
     def get_private_ip(self, hostname: str) -> str:
         """Get the private IP address from the hostname."""
-        if self._enable_api:
-            device_id = self._get_device_id_from_hostname(hostname)
-            url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
-            resp = requests.get(url_to_query, headers=self._get_auth_headers())
-            return resp.json().get('addresses', [])[0]
-        # If the API is not enabled, we need to query the IP address locally.
-        # However, since currently self._enable_api is always True, this code
-        # will not be executed.
-        query_cmd = f'tailscale ip -4 {hostname}'
-        rc, stdout, stderr = subprocess_utils.run_with_retries(
-            query_cmd,
-            max_retry=1000,
-            retry_stderrs=['no such host', 'server misbehaving'])
-        subprocess_utils.handle_returncode(
-            rc,
-            query_cmd,
-            error_msg=('Failed to query private IP address'
-                       f' of hostname {hostname}.'),
-            stderr=stdout + stderr)
-        return stdout.strip()
+        device_id = self._get_device_id_from_hostname(hostname)
+        url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
+        resp = requests.get(url_to_query, headers=self._get_auth_headers())
+        return resp.json().get('addresses', [])[0]
 
     def remove_host(self, hostname: str) -> None:
         """Remove a host from the VPN."""
-        if not self._enable_api:
-            logger.warning('API is not enabled. Skipping host removal.')
-            return
-
         device_id = self._get_device_id_from_hostname(hostname)
         if not device_id:
             logger.warning(f'Could not find node ID for hostname {hostname}.'
@@ -184,117 +179,26 @@ class TailscaleVPN(VPN):
                            f' Status code: {resp.status_code}.'
                            f' Response: {resp.text}')
 
+    def to_yaml_config(self) -> Dict[str, Any]:
+        """Get the VPN configuration in YAML format."""
+        return {'tailscale': True}
+
     @staticmethod
-    def from_backend_config(config: Dict[str, Any]) -> 'TailscaleVPN':
-        assert config.get('auth_key') is not None, (
-            'Tailscale auth key is not set in the configuration.')
-        return TailscaleVPN(**config)
+    def from_backend_config(config: Dict[str, Any]) -> 'TailscaleConfig':
+        assert config.get('auth_key') is not None and config.get(
+            'api_key') is not None and config.get('tailnet') is not None, (
+                'Tailscale VPN configuration is missing required '
+                'fields. Please check the backend configuration.')
+
+        return TailscaleConfig(**config)
 
     def to_backend_config(self) -> Dict[str, Any]:
         return {
+            'type': self._TYPE,
             'auth_key': self._auth_key,
             'api_key': self._api_key,
-            'network_name': self._network_name,
-            'enable_api': self._enable_api,
+            'tailnet': self._tailnet,
         }
-
-
-class VPNConfig:
-    """VPN Configuration.
-
-    This class is used to manage multiple VPN configurations. It provides
-    a unified interface to connect different VPN configurations and the
-    core logic of SkyPilot. All VPN configurations will be stored in this
-    class, and the core logic will only interact with this class to get
-    installation commands, private IP addresses, etc.
-    """
-
-    def __init__(
-        self,
-        vpn_configs: Dict[str, Any],
-    ) -> None:
-        self._vpn_configs = vpn_configs
-
-    @staticmethod
-    def from_yaml_config(config: Dict[str, Any]) -> 'VPNConfig':
-        """Create a VPN specification from a YAML configuration."""
-        common_utils.validate_schema(config, schemas.get_vpn_schema(),
-                                     'Invalid task YAML: ')
-        vpn_configs = {}
-        for vpn_name, vpn_config in config.items():  # pylint: disable=unused-variable
-            if vpn_name == 'tailscale':
-                vpn_configs[vpn_name] = TailscaleVPN.from_env_vars()
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unknown VPN configuration: {vpn_name}')
-        return VPNConfig(vpn_configs)
-
-    @staticmethod
-    def from_backend_config(config: Dict[str, Any]) -> 'VPNConfig':
-        """Create a VPN configuration from the backend configuration."""
-        vpn_configs = {}
-        for vpn_name, vpn_config in config.items():
-            assert vpn_name in ['tailscale'
-                               ], (f'Unknown VPN configuration: {vpn_name}')
-            if vpn_name == 'tailscale':
-                vpn_configs[vpn_name] = \
-                    TailscaleVPN.from_backend_config(vpn_config)
-        return VPNConfig(vpn_configs)
-
-    def get_setup_commands(self, hostname: str) -> List[str]:
-        """Get the command to setup the VPN on VM instances."""
-        return [
-            vpn_config.get_setup_command(hostname)
-            for vpn_config in self._vpn_configs.values()
-        ]
-
-    def get_setup_env_vars(self) -> Dict[str, str]:
-        """Get the environment variables to setup instances with the VPN."""
-        env_vars = {}
-        for vpn_config in self._vpn_configs.values():
-            env_vars.update(vpn_config.get_setup_env_vars())
-        return env_vars
-
-    def get_private_ip(self, hostname: str) -> Dict[str, str]:
-        """Get the private IP address from the hostname."""
-        private_ips = {}
-        for vpn_name, vpn_config in self._vpn_configs.items():
-            private_ip = vpn_config.get_private_ip(hostname)
-            private_ips[vpn_name] = private_ip
-        return private_ips
-
-    def get_private_ip_vpn(self, hostname: str, vpn_name: str) -> str:
-        """Get the private IP address from the hostname for a specific VPN."""
-        return self._vpn_configs[vpn_name].get_private_ip(hostname)
-
-    def remove_host(self, hostname: str) -> None:
-        """Remove a host from the VPN."""
-        for vpn_config in self._vpn_configs.values():
-            vpn_config.remove_host(hostname)
-
-    def to_yaml_config(self) -> Dict[str, Any]:
-        """Get the VPN configuration in YAML format."""
-        vpn_config_dict = {}
-        for vpn_name, vpn_config in self._vpn_configs.items():
-            vpn_yaml = vpn_config.to_yaml_config()
-            if vpn_yaml:
-                vpn_config_dict[vpn_name] = vpn_yaml
-            else:
-                vpn_config_dict[vpn_name] = True
-        return vpn_config_dict
-
-    def to_backend_config(self) -> Dict[str, Any]:
-        """Generate the VPN configuration for the backend."""
-        vpn_config_dict = {}
-        for vpn_name, vpn_config in self._vpn_configs.items():
-            vpn_config_dict[vpn_name] = vpn_config.to_backend_config()
-        return vpn_config_dict
-
-    def __getitem__(self, key: str) -> VPN:
-        return self._vpn_configs[key]
-
-    def __setitem__(self, key: str, value: VPN) -> None:
-        self._vpn_configs[key] = value
 
 
 def rewrite_cluster_info_by_vpn(
@@ -304,6 +208,6 @@ def rewrite_cluster_info_by_vpn(
     for (instance_id, instance_list) in cluster_info.instances.items():
         # TODO(yi): test if this works on TPU VM.
         for (i, instance) in enumerate(instance_list):
-            instance.external_ip = vpn_config.get_private_ip_vpn(
-                f'{instance_id}-{i}', 'tailscale')
+            instance.external_ip = vpn_config.get_private_ip(
+                f'skypilot-{instance_id}-{i}')
     return cluster_info
