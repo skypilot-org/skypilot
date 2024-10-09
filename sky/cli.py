@@ -3181,7 +3181,10 @@ def show_gpus(
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
-                context = region
+                if region:
+                    context = region
+                else:
+                    context = kubernetes_utils.get_current_kube_config_context_name()
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
@@ -3196,7 +3199,7 @@ def show_gpus(
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs (Context: {context})'
+                           f'Kubernetes GPUs (context: {context})'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
