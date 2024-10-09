@@ -613,7 +613,6 @@ def format_job_table(
         # The tasks within the same job_id are already sorted
         # by the task_id.
         jobs[get_hash(task)].append(task)
-    jobs = dict(jobs)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
     for job_tasks in jobs.values():

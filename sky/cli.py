@@ -1688,7 +1688,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 raise ValueError(
                     f'Failed to get SkyPilot pods from Kubernetes: {str(e)}')
 
-        clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(
+        all_clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(
             pods, context)
 
         all_jobs = []
@@ -1720,7 +1720,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             managed_job_cluster_names.add(managed_cluster_name)
 
         unmanaged_clusters = [
-            c for c in clusters
+            c for c in all_clusters
             if c['cluster_name'] not in managed_job_cluster_names
         ]
 
