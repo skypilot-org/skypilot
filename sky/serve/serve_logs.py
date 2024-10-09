@@ -1,5 +1,4 @@
-"""
-This module provides functionality to sync down logs for SkyPilot services.
+"""This module provides functionality to sync down logs for SkyPilot services.
 It includes methods to handle logs for different service components such as
 controller, load balancer, and replicas.
 It need to be migrated to serve core. Reference #4046 (to be done this weekend)

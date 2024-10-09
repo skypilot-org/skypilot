@@ -604,6 +604,34 @@ def status(
 def sync_down_logs(service_name: str,
                    service_component: Optional[serve_utils.ServiceComponent],
                    replica_id: Optional[int]) -> None:
+    """Sync down logs for a given service.
+
+    Args:
+        service_name: name of service.
+        service_component: component to sync down the logs of.
+            - Could be controller, load balancer, replica, or None.
+            - None means to sync down logs for everything.
+        replica_id: The replica ID to tail the logs of.
+            - Only used when target is replica.
+    """
+    if isinstance(service_component, str):
+        service_component = serve_utils.ServiceComponent(service_component)
+    if not isinstance(service_component, serve_utils.ServiceComponent):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'`service_component` must be a string or '
+                f'sky.serve.ServiceComponent, got {type(service_component)}.')
+    if service_component == serve_utils.ServiceComponent.REPLICA:
+        if replica_id is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('`replica_id` must be specified when '
+                                 'using service_component=REPLICA.')
+    else:
+        if replica_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('`replica_id` must be None when using '
+                                 'service_component=CONTROLLER/LOAD_BALANCER.')
+
     logger.info(f'Syncing down logs for {service_name}...')
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
