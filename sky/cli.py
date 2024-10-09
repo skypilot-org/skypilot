@@ -1694,7 +1694,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         for _, job_controller_info in jobs_controllers.items():
             user = job_controller_info['user']
             pod = job_controller_info['pods'][0]
-            with rich_utils.safe_status('[bold cyan]Checking for in-progress '
+            with rich_utils.safe_status('[bold cyan]Checking in-progress '
                                         f'managed jobs for {user}[/]'):
                 job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
             # Add user field to jobs
@@ -1702,12 +1702,16 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 job['user'] = user
             all_jobs.extend(job_list)
 
-        # Reconcile cluster state between managed jobs and clusters
-        # We don't want to show SkyPilot clusters that are part of a managed job
-        # in the main cluster list.
-        # Since we do not have any identifiers for which clusters are part of a
-        # managed job or service, we construct a list of managed job cluster
-        # names from the list of managed jobs and use that to exclude clusters.
+        # Reconcile cluster state between managed jobs and clusters:
+        # To maintain a clear separation between regular SkyPilot clusters
+        # and those from managed jobs, we need to exclude the latter from
+        # the main cluster list.
+        # We do this by reconstructing managed job cluster names from each
+        # job's name and ID. We then use this set to filter out managed
+        # clusters from the main cluster list. This is necessary because there
+        # are no identifiers distinguishing clusters from managed jobs from
+        # regular clusters.
+
         managed_job_cluster_names = set()
         for job in all_jobs:
             # Managed job cluster name is <job_name>-<job_id>
@@ -1722,16 +1726,16 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Kubernetes cluster state (context: {context})'
                    f'{colorama.Style.RESET_ALL}')
-        # Display clusters and jobs.
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'SkyPilot Clusters'
+                   f'SkyPilot clusters'
                    f'{colorama.Style.RESET_ALL}')
-        status_utils.show_kubernetes_status_table(unmanaged_clusters, all)
+        status_utils.show_kubernetes_cluster_status_table(
+            unmanaged_clusters, all)
 
         if all_jobs:
             click.echo(
                 f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                f'Managed jobs from {len(jobs_controllers)} users on Kubernetes'
+                f'Managed jobs from {len(jobs_controllers)} users'
                 f'{colorama.Style.RESET_ALL}')
             msg = managed_jobs.format_job_table(all_jobs, show_all=all)
             click.echo(msg)

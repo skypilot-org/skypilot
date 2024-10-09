@@ -318,7 +318,8 @@ def _get_estimated_cost_for_cost_report(
     return f'$ {cost:.2f}'
 
 
-def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
+def show_kubernetes_cluster_status_table(clusters: List[Any],
+                                         show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
         StatusColumn('USER', lambda c: c['user']),
