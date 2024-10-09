@@ -1463,7 +1463,6 @@ def _process_skypilot_pods(
     pods: List[Any],
     context: Optional[str] = None
 ) -> Tuple[List[Dict[Any, Any]], Dict[str, Any], Dict[str, Any]]:
-    """Process SkyPilot pods and group them by cluster."""
     clusters: Dict[str, Dict] = {}
     jobs_controllers: Dict[str, Dict] = {}
     serve_controllers: Dict[str, Dict] = {}
