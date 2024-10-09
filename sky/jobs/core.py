@@ -168,7 +168,7 @@ def queue_kubernetes(pod_name: str,
         ]
 
     Raises:
-        RuntimeError: If there's an error fetching the managed jobs from the Kubernetes cluster.
+        RuntimeError: If there's an error fetching the managed jobs.
     """
     # Create dummy cluster info to get the command runner.
     provider_config = {'context': context}
