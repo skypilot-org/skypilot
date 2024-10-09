@@ -1459,102 +1459,62 @@ def _get_services(service_names: Optional[List[str]],
     return num_services, msg
 
 
-def _process_skypilot_pods(
-    pods: List[Any],
-    context: Optional[str] = None
-) -> Tuple[List[Dict[Any, Any]], Dict[str, Any], Dict[str, Any]]:
-    clusters: Dict[str, Dict] = {}
-    jobs_controllers: Dict[str, Dict] = {}
-    serve_controllers: Dict[str, Dict] = {}
-
-    for pod in pods:
-        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
-        cluster_name = cluster_name_on_cloud.rsplit(
-            '-', 1
-        )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
-
-        # Check if cluster name is name of a controller
-        # Can't use controller_utils.Controllers.from_name(cluster_name)
-        # because hash is different across users
-        if 'controller' in cluster_name_on_cloud:
-            start_time = pod.status.start_time.timestamp()
-            controller_info = {
-                'cluster_name_on_cloud': cluster_name_on_cloud,
-                'cluster_name': cluster_name,
-                'user': pod.metadata.labels.get('skypilot-user'),
-                'status': status_lib.ClusterStatus.UP,
-                # Assuming UP if pod exists
-                'pods': [pod],
-                'launched_at': start_time
-            }
-            if 'sky-jobs-controller' in cluster_name_on_cloud:
-                jobs_controllers[cluster_name_on_cloud] = controller_info
-            elif 'sky-serve-controller' in cluster_name_on_cloud:
-                serve_controllers[cluster_name_on_cloud] = controller_info
-
-        if cluster_name_on_cloud not in clusters:
-            # Parse the start time for the cluster
-            start_time = pod.status.start_time
-            if start_time is not None:
-                start_time = pod.status.start_time.timestamp()
-
-            # Parse resources
-            cpu_request = kubernetes_utils.parse_cpu_or_gpu_resource(
-                pod.spec.containers[0].resources.requests.get('cpu', '0'))
-            memory_request = kubernetes_utils.parse_memory_resource(
-                pod.spec.containers[0].resources.requests.get('memory', '0'),
-                unit='G')
-            gpu_count = kubernetes_utils.parse_cpu_or_gpu_resource(
-                pod.spec.containers[0].resources.requests.get(
-                    'nvidia.com/gpu', '0'))
-            if gpu_count > 0:
-                label_formatter, _ = (
-                    kubernetes_utils.detect_gpu_label_formatter(context))
-                assert label_formatter is not None, (
-                    'GPU label formatter cannot be None if there are pods '
-                    f'requesting GPUs: {pod.metadata.name}')
-                gpu_label = label_formatter.get_label_key()
-                # Get GPU name from pod node selector
-                if pod.spec.node_selector is not None:
-                    gpu_name = label_formatter.get_accelerator_from_label_value(
-                        pod.spec.node_selector.get(gpu_label))
-
-            resources = resources_lib.Resources(
-                cloud=sky_clouds.Kubernetes(),
-                cpus=int(cpu_request),
-                memory=int(memory_request),
-                accelerators=(f'{gpu_name}:{gpu_count}'
-                              if gpu_count > 0 else None))
-            if pod.status.phase == 'Pending':
-                # If pod is pending, do not show it in the status
-                continue
-
-            clusters[cluster_name_on_cloud] = {
-                'cluster_name_on_cloud': cluster_name_on_cloud,
-                'cluster_name': cluster_name,
-                'user': pod.metadata.labels.get('skypilot-user'),
-                'status': status_lib.ClusterStatus.UP,
-                'pods': [],
-                'launched_at': start_time,
-                'resources': resources,
-            }
-        else:
-            # Update start_time if this pod started earlier
-            pod_start_time = pod.status.start_time
-            if pod_start_time is not None:
-                pod_start_time = pod_start_time.timestamp()
-                if pod_start_time < clusters[cluster_name_on_cloud][
-                        'launched_at']:
-                    clusters[cluster_name_on_cloud][
-                        'launched_at'] = pod_start_time
-        clusters[cluster_name_on_cloud]['pods'].append(pod)
-    # Update resources_str in clusters:
-    for cluster_name, cluster in clusters.items():
-        resources = cluster['resources']
-        num_pods = len(cluster['pods'])
-        resources_str = f'{num_pods}x {resources}'
-        cluster['resources_str'] = resources_str
-    return list(clusters.values()), jobs_controllers, serve_controllers
+def _status_kubernetes(show_all: bool):
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    all_clusters, jobs_controllers, serve_controllers = (
+        status_utils.process_skypilot_pods(pods, context))
+    all_jobs = []
+    for _, job_controller_info in jobs_controllers.items():
+        user = job_controller_info['user']
+        pod = job_controller_info['pods'][0]
+        with rich_utils.safe_status('[bold cyan]Checking in-progress '
+                                    f'managed jobs for {user}[/]'):
+            job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
+        # Add user field to jobs
+        for job in job_list:
+            job['user'] = user
+        all_jobs.extend(job_list)
+    # Reconcile cluster state between managed jobs and clusters:
+    # To maintain a clear separation between regular SkyPilot clusters
+    # and those from managed jobs, we need to exclude the latter from
+    # the main cluster list.
+    # We do this by reconstructing managed job cluster names from each
+    # job's name and ID. We then use this set to filter out managed
+    # clusters from the main cluster list. This is necessary because there
+    # are no identifiers distinguishing clusters from managed jobs from
+    # regular clusters.
+    managed_job_cluster_names = set()
+    for job in all_jobs:
+        # Managed job cluster name is <job_name>-<job_id>
+        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+        managed_job_cluster_names.add(managed_cluster_name)
+    unmanaged_clusters = [
+        c for c in all_clusters
+        if c['cluster_name'] not in managed_job_cluster_names
+    ]
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(
+        unmanaged_clusters, show_all)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs from {len(jobs_controllers)} users'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
+        click.echo(msg)
+    if serve_controllers:
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\nHint: SkyServe controllers detected in the cluster. '
+                   'SkyServe service replicas will be shown as SkyPilot '
+                   'clusters')
 
 
 @cli.command()
@@ -1603,7 +1563,7 @@ def _process_skypilot_pods(
               required=False,
               help='Also show sky serve services, if any.')
 @click.option(
-    '--kubernetes',
+    '--kubernetes', '--k8s',
     default=False,
     is_flag=True,
     required=False,
@@ -1677,66 +1637,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       cluster statuses from the cloud providers.
     """
     if kubernetes:
-        context = kubernetes_utils.get_current_kube_config_context_name()
-        try:
-            pods = kubernetes_utils.get_skypilot_pods(context)
-        except exceptions.ResourcesUnavailableError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Failed to get SkyPilot pods from '
-                                 f'Kubernetes: {str(e)}') from e
-
-        all_clusters, jobs_controllers, _ = (_process_skypilot_pods(
-            pods, context))
-
-        all_jobs = []
-
-        for _, job_controller_info in jobs_controllers.items():
-            user = job_controller_info['user']
-            pod = job_controller_info['pods'][0]
-            with rich_utils.safe_status('[bold cyan]Checking in-progress '
-                                        f'managed jobs for {user}[/]'):
-                job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
-            # Add user field to jobs
-            for job in job_list:
-                job['user'] = user
-            all_jobs.extend(job_list)
-
-        # Reconcile cluster state between managed jobs and clusters:
-        # To maintain a clear separation between regular SkyPilot clusters
-        # and those from managed jobs, we need to exclude the latter from
-        # the main cluster list.
-        # We do this by reconstructing managed job cluster names from each
-        # job's name and ID. We then use this set to filter out managed
-        # clusters from the main cluster list. This is necessary because there
-        # are no identifiers distinguishing clusters from managed jobs from
-        # regular clusters.
-
-        managed_job_cluster_names = set()
-        for job in all_jobs:
-            # Managed job cluster name is <job_name>-<job_id>
-            managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
-            managed_job_cluster_names.add(managed_cluster_name)
-
-        unmanaged_clusters = [
-            c for c in all_clusters
-            if c['cluster_name'] not in managed_job_cluster_names
-        ]
-
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Kubernetes cluster state (context: {context})'
-                   f'{colorama.Style.RESET_ALL}')
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'SkyPilot clusters'
-                   f'{colorama.Style.RESET_ALL}')
-        status_utils.show_kubernetes_cluster_status_table(
-            unmanaged_clusters, all)
-
-        if all_jobs:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed jobs from {len(jobs_controllers)} users'
-                       f'{colorama.Style.RESET_ALL}')
-            msg = managed_jobs.format_job_table(all_jobs, show_all=all)
-            click.echo(msg)
+        _status_kubernetes(all)
         return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult

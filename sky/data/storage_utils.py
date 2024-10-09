@@ -6,10 +6,11 @@ from typing import Any, Dict, List
 
 import colorama
 
+import sky.utils.common_utils
 from sky import exceptions
 from sky import sky_logging
+from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.utils.cli_utils import status_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -43,8 +44,8 @@ def format_storage_table(storages: List[Dict[str, Any]],
         if show_all:
             command = row['last_use']
         else:
-            command = status_utils.truncate_long_string(
-                row['last_use'], status_utils.COMMAND_TRUNC_LENGTH)
+            command = sky.utils.common_utils.truncate_long_string(
+                row['last_use'], common_utils.COMMAND_TRUNC_LENGTH)
         storage_table.add_row([
             # NAME
             row['name'],
