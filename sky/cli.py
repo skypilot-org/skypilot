@@ -1473,7 +1473,7 @@ def _process_skypilot_pods(
             '-', 1
         )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
 
-        # Check if name is name of a controller
+        # Check if cluster name is name of a controller
         # Can't use controller_utils.Controllers.from_name(cluster_name)
         # because hash is different across users
         if 'controller' in cluster_name_on_cloud:
