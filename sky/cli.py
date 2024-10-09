@@ -1513,7 +1513,7 @@ def _status_kubernetes(show_all: bool):
         #  Currently we show a hint that services are shown as clusters.
         click.echo('\nHint: SkyServe controllers detected in the cluster. '
                    'SkyServe service replicas will be shown as SkyPilot '
-                   'clusters')
+                   'clusters.')
 
 
 @cli.command()
