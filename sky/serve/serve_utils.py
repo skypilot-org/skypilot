@@ -2,7 +2,6 @@
 import base64
 import collections
 import enum
-import glob
 import os
 import pathlib
 import pickle
@@ -29,6 +28,7 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
+from sky.serve.replica_managers import append_job_logs_to_replica_log
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
@@ -90,7 +90,7 @@ class UpdateMode(enum.Enum):
     BLUE_GREEN = 'blue_green'
 
 
-DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
+DEFAULT_UPDATE_MODE: UpdateMode = UpdateMode.ROLLING
 
 _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
@@ -713,9 +713,19 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         raise ValueError(f'Service {service_name!r} does not exist.')
 
     # copy over log files of already-terminated replicas in this service
-    terminated_replicas = [info for info in service_record['replica_info'] if info['status'] == serve_state.ReplicaStatus.TERMINATED]
+    terminated_replicas = [
+        info for info in service_record['replica_info']
+        if info['status'] == serve_state.ReplicaStatus.SHUTTING_DOWN or
+        info['status'] == serve_state.ReplicaStatus.PREEMPTED or
+        info['status'] == serve_state.ReplicaStatus.UNKNOWN or
+        info['status'] == serve_state.ReplicaStatus.FAILED or
+        info['status'] == serve_state.ReplicaStatus.FAILED_PROBING or
+        info['status'] == serve_state.ReplicaStatus.FAILED_PROVISION or
+        info['status'] == serve_state.ReplicaStatus.FAILED_CLEANUP or
+        info['status'] == serve_state.ReplicaStatus.FAILED_INITIAL_DELAY
+    ]
     for replica in terminated_replicas:
-        replica_id = replica["replica_id"]
+        replica_id = replica['replica_id']
         log_file_name = f'replica_{replica_id}.log'
         if has_valid_replica_id(log_file_name, target_replica_id):
             log_file_path = os.path.join(dir_name, log_file_name)
@@ -781,19 +791,8 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                  f'{candidate_log_file_name}')
                 job_log_file_name = candidate_log_file_name
 
-        if job_log_file_name is not None:
-            logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
-            with open(new_replica_log_file, 'a',
-                      encoding='utf-8') as replica_log_file, open(
-                          job_log_file_name, 'r', encoding='utf-8') as job_file:
-                replica_log_file.write(job_file.read())
-            os.remove(job_log_file_name)
-        else:
-            with open(new_replica_log_file, 'a',
-                      encoding='utf-8') as replica_log_file:
-                replica_log_file.write(
-                    f'Failed to sync down job logs from replica '
-                    f'{replica_id}.\n')
+        append_job_logs_to_replica_log(new_replica_log_file, job_log_file_name,
+                                       replica_id)
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
