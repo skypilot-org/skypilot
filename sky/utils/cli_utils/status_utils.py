@@ -329,7 +329,6 @@ def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
         StatusColumn('RESOURCES',
                      lambda c: c['resources_str'],
                      trunc_length=70 if not show_all else 0),
-        # StatusColumn('PODS', lambda c: len(c['pods'])),
         StatusColumn('STATUS', lambda c: c['status'].colored_str()),
         # TODO(romilb): We should consider adding POD_NAME field here when --all
         #  is passed to help users fetch pod name programmatically.

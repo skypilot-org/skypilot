@@ -680,9 +680,9 @@ def format_job_table(
             if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
+            job_id = job_hash[1] if tasks_have_user else job_hash
             job_values = [
-                job_hash[1]
-                if tasks_have_user else job_hash,  # TODO: Clean this up
+                job_id,
                 '',
                 job_name,
                 '-',
