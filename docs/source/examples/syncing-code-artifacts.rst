@@ -47,10 +47,30 @@ scripts, access checkpoints, etc.).
 
 .. note::
 
+    **Exclude files from syncing**
+
     For large, multi-gigabyte workdirs, uploading may be slow because they
-    are synced to the remote VM(s) with :code:`rsync`. To exclude large files in
-    your workdir from being uploaded, add them to the :code:`.gitignore` file
-    (or a ``.git/info/exclude`` file) under the workdir.
+    are synced to the remote VM(s). To exclude large files in
+    your workdir from being uploaded, add them to a :code:`.skyignore` file 
+    under your workdir. :code:`.skyignore` follows RSYNC filter rules. 
+    
+    Example :code:`.skyignore` file:
+
+    .. code-block::
+        
+      # Files that match pattern under ONLY CURRENT directory
+      /hello.py
+      /*.txt
+      /dir
+
+      # Files that match pattern under ALL directories
+      *.txt
+      hello.py
+
+      # Files that match pattern under a directory ./dir/
+      /dir/*.txt
+    
+    Do NOT use ``.`` to indicate local directory (e.g. ``./hello.py``).
 
 .. note::
 
@@ -101,9 +121,8 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
 
 .. note::
 
-    Items listed in a :code:`.gitignore` file (or a ``.git/info/exclude`` file)
-    under a local file_mount source are also ignored (the same behavior as
-    handling ``workdir``).
+    Items listed in a :code:`.skyignore` file under the local file_mount source 
+    are also ignored (the same behavior as handling ``workdir``).
 
 .. note::
 
