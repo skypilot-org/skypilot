@@ -1732,10 +1732,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             unmanaged_clusters, all)
 
         if all_jobs:
-            click.echo(
-                f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                f'Managed jobs from {len(jobs_controllers)} users'
-                f'{colorama.Style.RESET_ALL}')
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Managed jobs from {len(jobs_controllers)} users'
+                       f'{colorama.Style.RESET_ALL}')
             msg = managed_jobs.format_job_table(all_jobs, show_all=all)
             click.echo(msg)
         return

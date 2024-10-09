@@ -147,8 +147,9 @@ def queue_kubernetes(pod_name: str,
 
     Args:
         pod_name (str): The name of the controller pod to query for jobs.
-        context (Optional[str]): The Kubernetes context to use. If None, the current context is used.
-        skip_finished (bool): If True, exclude finished jobs from the returned list.
+        context (Optional[str]): The Kubernetes context to use. If None, the
+            current context is used.
+        skip_finished (bool): If True, does not return finished jobs.
 
     Returns:
         [
