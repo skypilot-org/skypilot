@@ -6,6 +6,7 @@ import requests
 
 from sky import sky_logging
 from sky.provision import common
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -76,6 +77,7 @@ class VPNConfig:
 class TailscaleConfig(VPNConfig):
     """Tailscale VPN configuration."""
     _TYPE = 'tailscale'
+    _MAX_HOSTNAME_LENGTH = 63
 
     # pylint: disable=line-too-long
     _SETUP_COMMAND = (
@@ -131,8 +133,10 @@ class TailscaleConfig(VPNConfig):
         return TailscaleConfig(auth_key, api_key, tailnet)
 
     def get_setup_command(self, hostname: str) -> str:
-        return self._SETUP_COMMAND.format(tailscale_auth_key=self._auth_key,
-                                          hostname=hostname)
+        return self._SETUP_COMMAND.format(
+            tailscale_auth_key=self._auth_key,
+            hostname=common_utils.make_cluster_name_on_cloud(
+                hostname, self._MAX_HOSTNAME_LENGTH))
 
     def get_setup_env_vars(self) -> Dict[str, str]:
         return {
@@ -160,14 +164,18 @@ class TailscaleConfig(VPNConfig):
 
     def get_private_ip(self, hostname: str) -> str:
         """Get the private IP address from the hostname."""
-        device_id = self._get_device_id_from_hostname(hostname)
+        device_name = common_utils.make_cluster_name_on_cloud(
+            hostname, self._MAX_HOSTNAME_LENGTH)
+        device_id = self._get_device_id_from_hostname(device_name)
         url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
         resp = requests.get(url_to_query, headers=self._get_auth_headers())
         return resp.json().get('addresses', [])[0]
 
     def remove_host(self, hostname: str) -> None:
         """Remove a host from the VPN."""
-        device_id = self._get_device_id_from_hostname(hostname)
+        device_name = common_utils.make_cluster_name_on_cloud(
+            hostname, self._MAX_HOSTNAME_LENGTH)
+        device_id = self._get_device_id_from_hostname(device_name)
         if not device_id:
             logger.warning(f'Could not find node ID for hostname {hostname}.'
                            ' Skipping host removal.')
@@ -203,11 +211,12 @@ class TailscaleConfig(VPNConfig):
 
 def rewrite_cluster_info_by_vpn(
     cluster_info: common.ClusterInfo,
+    cluster_name: str,
     vpn_config: VPNConfig,
 ) -> common.ClusterInfo:
     for (instance_id, instance_list) in cluster_info.instances.items():
         # TODO(yi): test if this works on TPU VM.
         for (i, instance) in enumerate(instance_list):
             instance.external_ip = vpn_config.get_private_ip(
-                f'skypilot-{instance_id}-{i}')
+                f'{cluster_name}-{instance_id}-{i}')
     return cluster_info

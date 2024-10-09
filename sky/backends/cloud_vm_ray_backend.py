@@ -2230,6 +2230,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cached_cluster_info = cluster_info
             if self.vpn_config is not None:
                 vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
+                                                      self.cluster_name,
                                                       self.vpn_config)
 
     def update_cluster_ips(
@@ -2273,6 +2274,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             if vpn_config is not None:
                 self.setup_vpn(vpn_config)
                 vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
+                                                      self.cluster_name,
                                                       vpn_config)
                 self.vpn_config = vpn_config.to_backend_config()
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
@@ -2480,7 +2482,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         def _run_setup_commands(runner_instance_id):
             runner, instance_id = runner_instance_id
-            command = vpn_config.get_setup_command('skypilot-' + instance_id)
+            command = vpn_config.get_setup_command(
+                f'{self.cluster_name}-{instance_id}')
             returncode, _, stderr = runner.run([command],
                                                require_outputs=True,
                                                stream_logs=False)
