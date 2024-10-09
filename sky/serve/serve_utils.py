@@ -1065,7 +1065,7 @@ class ServeCodeGen:
             # Backward compatibility for older SkyPilot versions
             # If the SkyPilot version on the remote machine
             # is below a certain version,
-            # do not pass the `replica_id` parameter
+            # do not pass the `replica_id` parameter.
             # TODO(bxhu): remove this in future release. (TBD)
             f'replica_id_arg = {replica_id!r} if '
             'getattr(constants, "SERVE_VERSION", 0) >= 1 else None',
