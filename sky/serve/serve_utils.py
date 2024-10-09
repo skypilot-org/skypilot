@@ -707,17 +707,23 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
     dir_for_download = os.path.join(dir_name, timestamp)
     os.makedirs(dir_for_download, exist_ok=True)
 
-    # copy over log files of replicas already terminated
-    log_file_pattern = os.path.join(dir_name, 'replica_*.log')
-    log_files = glob.glob(log_file_pattern)
-    terminated_replica_log_files = [
-        file for file in log_files if not file.endswith('_launch.log') and
-        has_valid_replica_id(file, target_replica_id)
-    ]
-    for file_path in terminated_replica_log_files:
-        shutil.copy(file_path, dir_for_download)
+    # get record from serve state
+    service_record = serve_state.get_service_from_name(service_name)
+    if service_record is None:
+        raise ValueError(f'Service {service_name!r} does not exist.')
+
+    # copy over log files of already-terminated replicas in this service
+    terminated_replicas = [info for info in service_record['replica_info'] if info['status'] == serve_state.ReplicaStatus.TERMINATED]
+    for replica in terminated_replicas:
+        replica_id = replica["replica_id"]
+        log_file_name = f'replica_{replica_id}.log'
+        if has_valid_replica_id(log_file_name, target_replica_id):
+            log_file_path = os.path.join(dir_name, log_file_name)
+            if os.path.exists(log_file_path):
+                shutil.copy(log_file_path, dir_for_download)
 
     # manage log files of replicas with launch log files
+    log_files = os.listdir(dir_name)
     launch_log_files = [
         file for file in log_files if file.endswith('_launch.log') and
         has_valid_replica_id(file, target_replica_id)
