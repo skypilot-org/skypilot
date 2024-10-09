@@ -687,7 +687,8 @@ def format_job_table(
                 status_str += f' (task: {current_task_id})'
 
             job_values = [
-                job_hash[1] if tasks_have_user else job_hash, # TODO: Clean this up
+                job_hash[1]
+                if tasks_have_user else job_hash,  # TODO: Clean this up
                 '',
                 job_name,
                 '-',

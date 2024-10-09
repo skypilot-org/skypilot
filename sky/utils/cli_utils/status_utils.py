@@ -5,12 +5,12 @@ import click
 import colorama
 
 from sky import backends
-from sky import status_lib
 from sky import clouds
+from sky import status_lib
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import resources_utils
-from sky.provision.kubernetes import utils as kubernetes_utils
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
@@ -325,19 +325,26 @@ def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
     status_columns = [
         StatusColumn('USER', lambda c: c['user']),
         StatusColumn('NAME', lambda c: c['cluster_name']),
-        StatusColumn('LAUNCHED', lambda c: log_utils.readable_time_duration(c['launched_at'])),
-        StatusColumn('RESOURCES', lambda c: c['resources_str'], trunc_length=70 if not show_all else 0),
+        StatusColumn(
+            'LAUNCHED',
+            lambda c: log_utils.readable_time_duration(c['launched_at'])),
+        StatusColumn('RESOURCES',
+                     lambda c: c['resources_str'],
+                     trunc_length=70 if not show_all else 0),
         # StatusColumn('PODS', lambda c: len(c['pods'])),
         StatusColumn('STATUS', lambda c: c['status'].colored_str()),
         # TODO(romilb): We should consider adding POD_NAME field here when --all
         #  is passed to help users fetch pod name programmatically.
     ]
 
-    columns = [col.name for col in status_columns if col.show_by_default or show_all]
+    columns = [
+        col.name for col in status_columns if col.show_by_default or show_all
+    ]
     cluster_table = log_utils.create_table(columns)
 
     # Sort table by user, then by cluster name
-    sorted_clusters = sorted(clusters, key=lambda c: (c['user'], c['cluster_name']))
+    sorted_clusters = sorted(clusters,
+                             key=lambda c: (c['user'], c['cluster_name']))
 
     for cluster in sorted_clusters:
         row = []

@@ -1999,6 +1999,7 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
         context = None
     return context
 
+
 def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     """Gets all SkyPilot pods in the Kubernetes cluster.
 
@@ -2019,5 +2020,6 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get SkyPilot pod info from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods --selector=skypilot-cluster --all-namespaces') from None
+            'kubectl get pods --selector=skypilot-cluster --all-namespaces'
+        ) from None
     return pods

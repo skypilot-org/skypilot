@@ -1458,18 +1458,23 @@ def _get_services(service_names: Optional[List[str]],
     return num_services, msg
 
 
-def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
+def _process_skypilot_pods(
+    pods: List[Any],
+    context: Optional[str] = None
+) -> Tuple[List[Dict[Any, Any]], Dict[str, Any], Dict[str, Any]]:
     """Process SkyPilot pods and group them by cluster."""
     # pylint: disable=import-outside-toplevel
-    from sky import resources as resources_lib
     from sky import clouds
+    from sky import resources as resources_lib
     clusters: Dict[str, Dict] = {}
     jobs_controllers: Dict[str, Dict] = {}
     serve_controllers: Dict[str, Dict] = {}
 
     for pod in pods:
         cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
-        cluster_name = cluster_name_on_cloud.rsplit('-', 1)[0] # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
+        cluster_name = cluster_name_on_cloud.rsplit(
+            '-', 1
+        )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
 
         # Check if name is name of a controller
         # Can't use controller_utils.Controllers.from_name(cluster_name)
@@ -1500,16 +1505,17 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
             cpu_request = kubernetes_utils.parse_cpu_or_gpu_resource(
                 pod.spec.containers[0].resources.requests.get('cpu', '0'))
             memory_request = kubernetes_utils.parse_memory_resource(
-                pod.spec.containers[0].resources.requests.get('memory',
-                                                              '0'), unit='G')
+                pod.spec.containers[0].resources.requests.get('memory', '0'),
+                unit='G')
             gpu_count = kubernetes_utils.parse_cpu_or_gpu_resource(
-                pod.spec.containers[0].resources.requests.get('nvidia.com/gpu',
-                                                              '0'))
+                pod.spec.containers[0].resources.requests.get(
+                    'nvidia.com/gpu', '0'))
             if gpu_count > 0:
-                # TODO: We should pass context here
-                context = None
                 label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(
                     context)
+                assert label_formatter is not None, (
+                    'GPU label formatter cannot be None if there are pods '
+                    f'requesting GPUs: {pod.metadata.name}')
                 gpu_label = label_formatter.get_label_key()
                 # Get GPU name from pod node selector
                 if pod.spec.node_selector is not None:
@@ -1520,9 +1526,8 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
                 cloud=clouds.Kubernetes(),
                 cpus=int(cpu_request),
                 memory=int(memory_request),
-                accelerators=(
-                    f'{gpu_name}:{gpu_count}' if gpu_count > 0 else None)
-            )
+                accelerators=(f'{gpu_name}:{gpu_count}'
+                              if gpu_count > 0 else None))
             if pod.status.phase == 'Pending':
                 # If pod is pending, do not show it in the status
                 continue
@@ -1541,8 +1546,10 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
             pod_start_time = pod.status.start_time
             if pod_start_time is not None:
                 pod_start_time = pod_start_time.timestamp()
-                if pod_start_time < clusters[cluster_name_on_cloud]['launched_at']:
-                    clusters[cluster_name_on_cloud]['launched_at'] = pod_start_time
+                if pod_start_time < clusters[cluster_name_on_cloud][
+                        'launched_at']:
+                    clusters[cluster_name_on_cloud][
+                        'launched_at'] = pod_start_time
         clusters[cluster_name_on_cloud]['pods'].append(pod)
     # Update resources_str in clusters:
     for cluster_name, cluster in clusters.items():
@@ -1551,6 +1558,7 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
         resources_str = f'{num_pods}x {resources}'
         cluster['resources_str'] = resources_str
     return list(clusters.values()), jobs_controllers, serve_controllers
+
 
 @cli.command()
 @click.option('--all',
@@ -1597,11 +1605,12 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
-@click.option('--kubernetes',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='[Experimental] Show SkyPilot clusters from all users on Kubernetes.')
+@click.option(
+    '--kubernetes',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='[Experimental] Show SkyPilot clusters from all users on Kubernetes.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1679,15 +1688,20 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 raise ValueError(
                     f'Failed to get SkyPilot pods from Kubernetes: {str(e)}')
 
-        clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(pods)
+        clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(
+            pods, context)
 
         all_jobs = []
 
-        for job_controller_name, job_controller_info in jobs_controllers.items():
+        for job_controller_name, job_controller_info in jobs_controllers.items(
+        ):
             user = job_controller_info['user']
             pod = job_controller_info['pods'][0]
-            with rich_utils.safe_status(f'[bold cyan]Checking for in-progress managed jobs for {user}[/]'):
-                jobs = managed_jobs.queue_kubernetes(pod.metadata.name, refresh=False)
+            with rich_utils.safe_status(
+                    f'[bold cyan]Checking for in-progress managed jobs for {user}[/]'
+            ):
+                jobs = managed_jobs.queue_kubernetes(pod.metadata.name,
+                                                     refresh=False)
             # Add user field to jobs
             for job in jobs:
                 job['user'] = user
@@ -1705,27 +1719,26 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
             managed_job_cluster_names.add(managed_cluster_name)
 
-        unmanaged_clusters = [c for c in clusters if c['cluster_name'] not in managed_job_cluster_names]
+        unmanaged_clusters = [
+            c for c in clusters
+            if c['cluster_name'] not in managed_job_cluster_names
+        ]
 
-
-        click.echo(
-        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-        f'Kubernetes cluster state (context: {context})'
-        f'{colorama.Style.RESET_ALL}')
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Kubernetes cluster state (context: {context})'
+                   f'{colorama.Style.RESET_ALL}')
         # Display clusters and jobs.
-        click.echo(
-        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-        f'SkyPilot Clusters'
-        f'{colorama.Style.RESET_ALL}')
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'SkyPilot Clusters'
+                   f'{colorama.Style.RESET_ALL}')
         status_utils.show_kubernetes_status_table(unmanaged_clusters, all)
 
         if all_jobs:
             click.echo(
-            f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Managed jobs from {len(jobs_controllers)} users on Kubernetes'
-            f'{colorama.Style.RESET_ALL}')
-            msg = managed_jobs.format_job_table(all_jobs,
-                                                show_all=all)
+                f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                f'Managed jobs from {len(jobs_controllers)} users on Kubernetes'
+                f'{colorama.Style.RESET_ALL}')
+            msg = managed_jobs.format_job_table(all_jobs, show_all=all)
             click.echo(msg)
         return
     # Using a pool with 2 worker to run the managed job query and sky serve

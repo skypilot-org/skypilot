@@ -153,15 +153,24 @@ def queue_kubernetes(pod_name: str,
     Returns:
 
     """
-    from sky.provision import common
     from sky import provision as provision_lib
+    from sky.provision import common
     cluster_name = pod_name.strip('-head').rsplit('-', 1)[0]
 
+    # Create dummy cluster info to get the command runner.
     provider_config = {'context': context}
-    instances = {pod_name: None}
-    cluster_info = common.ClusterInfo(provider_name='kubernetes', head_instance_id=pod_name, provider_config=provider_config, instances=instances)
-    managed_jobs_runner = provision_lib.get_command_runners('kubernetes',
-                                                            cluster_info)[0]
+    instances = {
+        pod_name: common.InstanceInfo(instance_id=pod_name,
+                                      internal_ip='',
+                                      external_ip='',
+                                      tags={})
+    }  # Internal IP is not required for Kubernetes
+    cluster_info = common.ClusterInfo(provider_name='kubernetes',
+                                      head_instance_id=pod_name,
+                                      provider_config=provider_config,
+                                      instances=instances)
+    managed_jobs_runner = provision_lib.get_command_runners(
+        'kubernetes', cluster_info)[0]
 
     code = managed_job_utils.ManagedJobCodeGen.get_job_table()
     returncode, job_table_payload, stderr = managed_jobs_runner.run(
