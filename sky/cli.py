@@ -1491,10 +1491,9 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
                 serve_controllers[cluster_name_on_cloud] = controller_info
 
         if cluster_name_on_cloud not in clusters:
-            # Parse the earliest start time for the cluster
-            if pod.status.start_time is None:
-                start_time = 0
-            else:
+            # Parse the start time for the cluster
+            start_time = pod.status.start_time
+            if start_time is not None:
                 start_time = pod.status.start_time.timestamp()
 
             # Parse resources
@@ -1502,7 +1501,7 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
                 pod.spec.containers[0].resources.requests.get('cpu', '0'))
             memory_request = kubernetes_utils.parse_memory_resource(
                 pod.spec.containers[0].resources.requests.get('memory',
-                                                              '0')) / 1073741824  # Convert to GiB
+                                                              '0'), unit='G')
             gpu_count = kubernetes_utils.parse_cpu_or_gpu_resource(
                 pod.spec.containers[0].resources.requests.get('nvidia.com/gpu',
                                                               '0'))
@@ -1519,8 +1518,8 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
 
             resources = resources_lib.Resources(
                 cloud=clouds.Kubernetes(),
-                cpus=float(cpu_request),
-                memory=memory_request,
+                cpus=int(cpu_request),
+                memory=int(memory_request),
                 accelerators=(
                     f'{gpu_name}:{gpu_count}' if gpu_count > 0 else None)
             )
@@ -1540,7 +1539,7 @@ def _process_skypilot_pods(pods: List[Any]) -> List[Dict[str, Any]]:
         else:
             # Update start_time if this pod started earlier
             pod_start_time = pod.status.start_time
-            if pod_start_time:
+            if pod_start_time is not None:
                 pod_start_time = pod_start_time.timestamp()
                 if pod_start_time < clusters[cluster_name_on_cloud]['launched_at']:
                     clusters[cluster_name_on_cloud]['launched_at'] = pod_start_time
@@ -1672,9 +1671,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       cluster statuses from the cloud providers.
     """
     if kubernetes:
-
+        context = kubernetes_utils.get_current_kube_config_context_name()
         try:
-            pods = kubernetes_utils.get_skypilot_pods()
+            pods = kubernetes_utils.get_skypilot_pods(context)
         except Exception as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -1708,9 +1707,15 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
         unmanaged_clusters = [c for c in clusters if c['cluster_name'] not in managed_job_cluster_names]
 
+
+        click.echo(
+        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+        f'Kubernetes cluster state (context: {context})'
+        f'{colorama.Style.RESET_ALL}')
         # Display clusters and jobs.
         click.echo(
-        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}SkyPilot Clusters on Kubernetes'
+        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+        f'SkyPilot Clusters'
         f'{colorama.Style.RESET_ALL}')
         status_utils.show_kubernetes_status_table(unmanaged_clusters, all)
 

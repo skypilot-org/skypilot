@@ -319,6 +319,7 @@ def _get_estimated_cost_for_cost_report(
 
     return f'$ {cost:.2f}'
 
+
 def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
@@ -328,13 +329,17 @@ def show_kubernetes_status_table(clusters: List[Any], show_all: bool) -> None:
         StatusColumn('RESOURCES', lambda c: c['resources_str'], trunc_length=70 if not show_all else 0),
         # StatusColumn('PODS', lambda c: len(c['pods'])),
         StatusColumn('STATUS', lambda c: c['status'].colored_str()),
-        # Add more columns as needed
+        # TODO(romilb): We should consider adding POD_NAME field here when --all
+        #  is passed to help users fetch pod name programmatically.
     ]
 
     columns = [col.name for col in status_columns if col.show_by_default or show_all]
     cluster_table = log_utils.create_table(columns)
 
-    for cluster in clusters:
+    # Sort table by user, then by cluster name
+    sorted_clusters = sorted(clusters, key=lambda c: (c['user'], c['cluster_name']))
+
+    for cluster in sorted_clusters:
         row = []
         for status_column in status_columns:
             if status_column.show_by_default or show_all:

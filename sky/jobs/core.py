@@ -138,12 +138,16 @@ def launch(
                    _disable_controller_check=True)
 
 
-def queue_kubernetes(pod_name: str, refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
+def queue_kubernetes(pod_name: str,
+                     refresh: bool,
+                     context: Optional[str] = None,
+                     skip_finished: bool = False) -> List[Dict[str, Any]]:
     """Gets the jobs queue from the kubernetes cluster by reconstructing a cluster handle and running the appropriate code on the head node.
 
     Args:
         pod_name:
         refresh:
+        context: Kubernetes context to use
         skip_finished:
 
     Returns:
@@ -153,7 +157,7 @@ def queue_kubernetes(pod_name: str, refresh: bool, skip_finished: bool = False) 
     from sky import provision as provision_lib
     cluster_name = pod_name.strip('-head').rsplit('-', 1)[0]
 
-    provider_config = {} # TODO: Specify context and namespace here.
+    provider_config = {'context': context}
     instances = {pod_name: None}
     cluster_info = common.ClusterInfo(provider_name='kubernetes', head_instance_id=pod_name, provider_config=provider_config, instances=instances)
     managed_jobs_runner = provision_lib.get_command_runners('kubernetes',
