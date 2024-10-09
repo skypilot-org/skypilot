@@ -11,7 +11,7 @@ logger = sky_logging.init_logger(__name__)
 
 def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
            memory_gib: int, vcpu_count: int, gpu_count: int,
-           tags: Dict[str, str], disk_size: int):
+           tags: Dict[str, str], disk_size: int, net_name: str) -> str:
     """Launches an instance with the given parameters."""
 
     request = cudo.cudo.CreateVMBody(
@@ -24,6 +24,10 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
         memory_gib=memory_gib,
         vcpus=vcpu_count,
         gpus=gpu_count,
+        nics=[
+            cudo.cudo.CreateVMRequestNIC(network_id=net_name,
+                                         assign_public_ip=True)
+        ],
         boot_disk=cudo.cudo.Disk(storage_class='STORAGE_CLASS_NETWORK',
                                  size_gib=disk_size),
         metadata=tags)
@@ -106,14 +110,11 @@ def list_instances():
         for vm in vms.to_dict()['vms']:
             ex_ip = vm['external_ip_address']
             in_ip = vm['internal_ip_address']
-            if not in_ip:
-                in_ip = ex_ip
             instance = {
                 # active_state, init_state, lcm_state, short_state
                 'status': vm['short_state'],
                 'tags': vm['metadata'],
                 'name': vm['id'],
-                'ip': ex_ip,
                 'external_ip': ex_ip,
                 'internal_ip': in_ip
             }
@@ -123,22 +124,98 @@ def list_instances():
         raise e
 
 
-def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
+def vm_available(to_start_count, gpu_count, gpu_model_id, data_center_id, mem,
                  cpus):
     try:
-        gpu_model = utils.skypilot_gpu_to_cudo_gpu(gpu_model)
+        gpu_model_id = utils.skypilot_gpu_to_cudo_gpu(gpu_model_id)
         api = cudo.cudo.cudo_api.virtual_machines()
-        types = api.list_vm_machine_types(mem,
-                                          cpus,
-                                          gpu=gpu_count,
-                                          gpu_model=gpu_model,
-                                          data_center_id=data_center_id)
+        types = api.list_vm_machine_types2()
         types_dict = types.to_dict()
-        hc = types_dict['host_configs']
-        total_count = sum(item['count_vm_available'] for item in hc)
-        if total_count < to_start_count:
-            raise Exception(
-                'Too many VMs requested, try another gpu type or region')
-        return total_count
+
+        exists = False
+        gpu_count_okay = False
+        mem_size_okay = False
+        cpu_count_okay = False
+
+        for mt in types_dict['machine_types']:
+            if mt['data_center_id'] == data_center_id and mt[
+                    'gpu_model_id'] == gpu_model_id:
+                exists = True
+
+                if (mt['max_gpu_free'] > gpu_count and mt['total_gpu_free'] >
+                    (gpu_count * to_start_count)) or gpu_count == 0:
+                    gpu_count_okay = True
+
+                if mt['max_memory_gib_free'] > mem and mt[
+                        'total_memory_gib_free'] > (mem * to_start_count):
+                    mem_size_okay = True
+
+                if mt['max_vcpu_free'] > cpus and mt['total_vcpu_free'] > (
+                        cpus * to_start_count):
+                    cpu_count_okay = True
+
+        if not exists:
+            raise Exception('GPU model could not be found in data center')
+        if not gpu_count_okay:
+            raise Exception('Number of GPUs requested is too high')
+        if not mem_size_okay:
+            raise Exception('Memory size requested is too high')
+        if not cpu_count_okay:
+            raise Exception('Number of CPUs requested is too high')
+
+        return True
     except cudo.cudo.rest.ApiException as e:
         raise e
+
+
+def setup_network(region, network_id):
+    api = cudo.cudo.cudo_api.networks()
+    project_id = cudo.cudo.cudo_api.project_id_throwable()
+
+    try:
+        network = cudo.cudo.CreateNetworkBody(id=network_id,
+                                              cidr_prefix='10.0.0.0/10',
+                                              data_center_id=region)
+        api.create_network(project_id, create_network_body=network)
+
+    except cudo.cudo.rest.ApiException as e:
+        raise e
+    # Wait for network
+    max_retries = 240
+    retry_interval = 1
+    wait = True
+    retry_count = 0
+    while wait:
+        try:
+            net = api.get_network(project_id, network_id)
+            state = net.to_dict()['network']['short_state']
+        except cudo.cudo.rest.ApiException as e:
+            raise e
+
+        if state == 'runn':
+            wait = False
+        else:
+            time.sleep(retry_interval)
+            retry_count += 1
+            if retry_count > max_retries:
+                net.delete_network(project_id, network_id)
+                raise cudo.cudo.rest.ApiException(
+                    'Network could not be created')
+
+
+def delete_network(network_id):
+    time.sleep(60)
+    max_retries = 24
+    retry_interval = 5
+    retry_count = 0
+    project_id = cudo.cudo.cudo_api.project_id_throwable()
+    while retry_count <= max_retries:
+        try:
+            api = cudo.cudo.cudo_api.networks()
+            api.delete_network(project_id, id=network_id)
+            break
+        except cudo.cudo.rest.ApiException:
+            pass
+
+        retry_count += 1
+        time.sleep(retry_interval)
