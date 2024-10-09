@@ -3184,7 +3184,9 @@ def show_gpus(
                 if region:
                     context = region
                 else:
-                    context = kubernetes_utils.get_current_kube_config_context_name()
+                    # If region is not specified, we use the current context
+                    context = (kubernetes_utils.
+                               get_current_kube_config_context_name())
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
