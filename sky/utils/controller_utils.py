@@ -474,8 +474,7 @@ def get_controller_resources(
     # TODO(tian): Consider respecting the regions/zones specified for the
     # resources as well.
 
-    sky_logging.print("task_resources", task_resources)
-    requested_clouds_with_region_zone: Dict[str, Dict[str, set[str]]] = {}
+    requested_clouds_with_region_zone: Dict[str, Dict[str, Set[str]]] = {}
     for resource in task_resources:
         cloud_name = str(resource.cloud) if resource.cloud is not None else None
         if cloud_name is not None:
@@ -489,14 +488,22 @@ def get_controller_resources(
                     continue
                 requested_clouds_with_region_zone[cloud_name] = {}
             if resource.region is None:
-                requested_clouds_with_region_zone[cloud_name] = {"_allow_any_region": {"_allow_any_zone"}}
-            elif "_allow_any_region" not in requested_clouds_with_region_zone[cloud_name]:
-                if resource.region not in requested_clouds_with_region_zone[cloud_name]:
-                    requested_clouds_with_region_zone[cloud_name][resource.region] = set()
+                requested_clouds_with_region_zone[cloud_name] = {
+                    '_allow_any_region': {'_allow_any_zone'}
+                }
+            elif '_allow_any_region' not in requested_clouds_with_region_zone[
+                    cloud_name]:
+                if resource.region not in requested_clouds_with_region_zone[
+                        cloud_name]:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region] = set()
                 if resource.zone is None:
-                    requested_clouds_with_region_zone[cloud_name][resource.region] = {"_allow_any_zone"}
-                elif "_allow_any_zone" not in requested_clouds_with_region_zone[cloud_name][resource.region]:
-                    requested_clouds_with_region_zone[cloud_name][resource.region].add(resource.zone)
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region] = {'_allow_any_zone'}
+                elif '_allow_any_zone' not in requested_clouds_with_region_zone[
+                        cloud_name][resource.region]:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region].add(resource.zone)
         else:
             # if one of the resource.cloud is None, this could represent user
             # does not know which cloud is best for the specified resources.
@@ -513,12 +520,10 @@ def get_controller_resources(
     return {
         controller_resources_to_use.copy(
             cloud=cloud,
-            region=(None if region == "_allow_any_region" else region),
-            zone=(None if zone == "_allow_any_zone" else zone)
-        )
+            region=(None if region == '_allow_any_region' else region),
+            zone=(None if zone == '_allow_any_zone' else zone))
         for cloud_name, regions in requested_clouds_with_region_zone.items()
-        for region, zones in regions.items()
-        for zone in zones
+        for region, zones in regions.items() for zone in zones
         for cloud in [clouds.CLOUD_REGISTRY.from_str(cloud_name)]
     }
 
