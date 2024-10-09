@@ -1237,6 +1237,7 @@ def test_kubernetes_context_switch():
         # conda env for runtime with python 3.10.
         'docker:continuumio/miniconda3:latest',
     ])
+@pytest.mark.no_do
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
     name = _get_cluster_name()
@@ -1397,12 +1398,40 @@ def test_scp_logs():
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
+@pytest.mark.no_do  # DO does not have T4 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
         'job_queue',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
+            f'sky cancel -y {name} 2',
+            'sleep 5',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
+            f'sky cancel -y {name} 3',
+            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.do
+def test_job_queue(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'job_queue',
+        [
+            f'sky launch -y -c {name} --cloud {generic_cloud} --gpus H100 examples/job_queue/cluster.yaml',
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
@@ -1431,6 +1460,7 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.no_do  # DO doesn't have T4 GPUs
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -1568,6 +1598,7 @@ def test_scp_job_queue():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
+@pytest.mark.no_do  # DO does not have T4 gpus.
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
@@ -1715,6 +1746,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.no_do
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = _get_cluster_name()
@@ -1738,6 +1770,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
+@pytest.mark.no_do  # DO does not have T4 gpus
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1762,6 +1795,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
+@pytest.mark.no_do  # DO has no GPUs in GA
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -2268,6 +2302,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_do  # DO has not GPU images in GA
 @pytest.mark.skip(
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
@@ -2527,6 +2562,7 @@ def test_cancel_azure():
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_do  # DO has no GPUs in GA
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -2582,6 +2618,7 @@ def test_cancel_ibm():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do  # DO does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -2666,6 +2703,7 @@ def test_managed_jobs(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
@@ -2707,6 +2745,7 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
@@ -2732,6 +2771,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
@@ -2927,6 +2967,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
@@ -3149,6 +3190,7 @@ def test_managed_jobs_cancellation_gcp():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
+@pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
@@ -3747,6 +3789,7 @@ def test_skyserve_kubernetes_http():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
+@pytest.mark.no_do  # DO does not support GPU instances in GA for now
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str):
     """Test skyserve with real LLM usecase"""
@@ -3806,6 +3849,7 @@ def test_skyserve_spot_recovery():
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.serve
+@pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
@@ -4204,6 +4248,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
+@pytest.mark.no_do  # Spot instances are not support by DO
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -5501,6 +5546,7 @@ class TestYamlSpecs:
 # ---------- Testing Multiple Accelerators ----------
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
+@pytest.mark.no_do  # DO does not have K80 gpus
 def test_multiple_accelerators_ordered():
     name = _get_cluster_name()
     test = Test(
@@ -5517,6 +5563,7 @@ def test_multiple_accelerators_ordered():
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_do  # DO does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -5533,6 +5580,7 @@ def test_multiple_accelerators_ordered_with_default():
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_do  # DO does not support T4 GPUs
 def test_multiple_accelerators_unordered():
     name = _get_cluster_name()
     test = Test(
@@ -5548,6 +5596,7 @@ def test_multiple_accelerators_unordered():
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_do  # DO does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = _get_cluster_name()
     test = Test(
@@ -5579,6 +5628,7 @@ def test_multiple_resources():
 # ---------- Sky Benchmark ----------
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
+@pytest.mark.no_do  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 @pytest.mark.aws  # SkyBenchmark requires S3 access
 def test_sky_bench(generic_cloud: str):
