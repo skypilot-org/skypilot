@@ -5,13 +5,14 @@ import click
 import colorama
 
 from sky import backends
-from sky import status_lib
+from sky import clouds as sky_clouds
 from sky import resources as resources_lib
+from sky import status_lib
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
-from sky.provision.kubernetes import utils as kubernetes_utils
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
@@ -345,8 +346,8 @@ def show_kubernetes_cluster_status_table(clusters: List[Any],
 
 
 def process_skypilot_pods(
-        pods: List[Any],
-        context: Optional[str] = None
+    pods: List[Any],
+    context: Optional[str] = None
 ) -> Tuple[List[Dict[Any, Any]], Dict[str, Any], Dict[str, Any]]:
     clusters: Dict[str, Dict] = {}
     jobs_controllers: Dict[str, Dict] = {}
@@ -429,7 +430,7 @@ def process_skypilot_pods(
             if pod_start_time is not None:
                 pod_start_time = pod_start_time.timestamp()
                 if pod_start_time < clusters[cluster_name_on_cloud][
-                    'launched_at']:
+                        'launched_at']:
                     clusters[cluster_name_on_cloud][
                         'launched_at'] = pod_start_time
         clusters[cluster_name_on_cloud]['pods'].append(pod)

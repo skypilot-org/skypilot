@@ -53,7 +53,6 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
-from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import status_lib
@@ -1501,8 +1500,8 @@ def _status_kubernetes(show_all: bool):
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
-    status_utils.show_kubernetes_cluster_status_table(
-        unmanaged_clusters, show_all)
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all)
     if all_jobs:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Managed jobs from {len(jobs_controllers)} users'
@@ -1512,7 +1511,7 @@ def _status_kubernetes(show_all: bool):
     if serve_controllers:
         # TODO: Parse serve controllers and show services separately.
         #  Currently we show a hint that services are shown as clusters.
-        click.echo(f'\nHint: SkyServe controllers detected in the cluster. '
+        click.echo('\nHint: SkyServe controllers detected in the cluster. '
                    'SkyServe service replicas will be shown as SkyPilot '
                    'clusters')
 
@@ -1563,7 +1562,8 @@ def _status_kubernetes(show_all: bool):
               required=False,
               help='Also show sky serve services, if any.')
 @click.option(
-    '--kubernetes', '--k8s',
+    '--kubernetes',
+    '--k8s',
     default=False,
     is_flag=True,
     required=False,

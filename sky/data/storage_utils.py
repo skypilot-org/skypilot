@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 
 import colorama
 
-import sky.utils.common_utils
 from sky import exceptions
 from sky import sky_logging
 from sky.utils import common_utils
@@ -19,6 +18,8 @@ _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     'specified in .gitignore will be uploaded '
     'to the cloud storage for {path!r}'
     'due to the following error: {error_msg!r}')
+
+LAST_USE_TRUNC_LENGTH = 25
 
 
 def format_storage_table(storages: List[Dict[str, Any]],
@@ -44,8 +45,8 @@ def format_storage_table(storages: List[Dict[str, Any]],
         if show_all:
             command = row['last_use']
         else:
-            command = sky.utils.common_utils.truncate_long_string(
-                row['last_use'], common_utils.COMMAND_TRUNC_LENGTH)
+            command = common_utils.truncate_long_string(row['last_use'],
+                                                        LAST_USE_TRUNC_LENGTH)
         storage_table.add_row([
             # NAME
             row['name'],
