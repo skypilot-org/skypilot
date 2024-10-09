@@ -143,16 +143,31 @@ def launch(
 def queue_kubernetes(pod_name: str,
                      context: Optional[str] = None,
                      skip_finished: bool = False) -> List[Dict[str, Any]]:
-    """Gets the jobs queue from the kubernetes cluster.
+    """Gets the jobs queue from a specific controller pod.
 
     Args:
-        pod_name:
-        refresh:
-        context: Kubernetes context to use
-        skip_finished:
+        pod_name (str): The name of the controller pod to query for jobs.
+        context (Optional[str]): The Kubernetes context to use. If None, the current context is used.
+        skip_finished (bool): If True, exclude finished jobs from the returned list.
 
     Returns:
+        [
+            {
+                'job_id': int,
+                'job_name': str,
+                'resources': str,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+            }
+        ]
 
+    Raises:
+        RuntimeError: If there's an error fetching the managed jobs from the Kubernetes cluster.
     """
     # Create dummy cluster info to get the command runner.
     provider_config = {'context': context}
