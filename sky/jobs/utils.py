@@ -620,11 +620,6 @@ def format_job_table(
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
 
-    if max_jobs is not None:
-        job_ids = sorted(jobs.keys(), reverse=True)
-        job_ids = job_ids[:max_jobs]
-        jobs = {job_id: jobs[job_id] for job_id in job_ids}
-
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'

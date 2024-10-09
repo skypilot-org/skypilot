@@ -9,6 +9,7 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
+from sky import provision as provision_lib
 from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
@@ -16,6 +17,7 @@ from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
+from sky.provision import common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -139,10 +141,9 @@ def launch(
 
 
 def queue_kubernetes(pod_name: str,
-                     refresh: bool,
                      context: Optional[str] = None,
                      skip_finished: bool = False) -> List[Dict[str, Any]]:
-    """Gets the jobs queue from the kubernetes cluster by reconstructing a cluster handle and running the appropriate code on the head node.
+    """Gets the jobs queue from the kubernetes cluster.
 
     Args:
         pod_name:
@@ -153,10 +154,6 @@ def queue_kubernetes(pod_name: str,
     Returns:
 
     """
-    from sky import provision as provision_lib
-    from sky.provision import common
-    cluster_name = pod_name.strip('-head').rsplit('-', 1)[0]
-
     # Create dummy cluster info to get the command runner.
     provider_config = {'context': context}
     instances = {

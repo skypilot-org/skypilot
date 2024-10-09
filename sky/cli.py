@@ -53,6 +53,7 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
+from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import status_lib
@@ -1463,9 +1464,6 @@ def _process_skypilot_pods(
     context: Optional[str] = None
 ) -> Tuple[List[Dict[Any, Any]], Dict[str, Any], Dict[str, Any]]:
     """Process SkyPilot pods and group them by cluster."""
-    # pylint: disable=import-outside-toplevel
-    from sky import clouds
-    from sky import resources as resources_lib
     clusters: Dict[str, Dict] = {}
     jobs_controllers: Dict[str, Dict] = {}
     serve_controllers: Dict[str, Dict] = {}
@@ -1511,8 +1509,8 @@ def _process_skypilot_pods(
                 pod.spec.containers[0].resources.requests.get(
                     'nvidia.com/gpu', '0'))
             if gpu_count > 0:
-                label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(
-                    context)
+                label_formatter, _ = (
+                    kubernetes_utils.detect_gpu_label_formatter(context))
                 assert label_formatter is not None, (
                     'GPU label formatter cannot be None if there are pods '
                     f'requesting GPUs: {pod.metadata.name}')
@@ -1523,7 +1521,7 @@ def _process_skypilot_pods(
                         pod.spec.node_selector.get(gpu_label))
 
             resources = resources_lib.Resources(
-                cloud=clouds.Kubernetes(),
+                cloud=sky_clouds.Kubernetes(),
                 cpus=int(cpu_request),
                 memory=int(memory_request),
                 accelerators=(f'{gpu_name}:{gpu_count}'
@@ -1683,29 +1681,26 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         context = kubernetes_utils.get_current_kube_config_context_name()
         try:
             pods = kubernetes_utils.get_skypilot_pods(context)
-        except Exception as e:
+        except exceptions.ResourcesUnavailableError as e:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to get SkyPilot pods from Kubernetes: {str(e)}')
+                raise ValueError('Failed to get SkyPilot pods from '
+                                 f'Kubernetes: {str(e)}') from e
 
-        all_clusters, jobs_controllers, serve_controllers = _process_skypilot_pods(
-            pods, context)
+        all_clusters, jobs_controllers, _ = (_process_skypilot_pods(
+            pods, context))
 
         all_jobs = []
 
-        for job_controller_name, job_controller_info in jobs_controllers.items(
-        ):
+        for _, job_controller_info in jobs_controllers.items():
             user = job_controller_info['user']
             pod = job_controller_info['pods'][0]
-            with rich_utils.safe_status(
-                    f'[bold cyan]Checking for in-progress managed jobs for {user}[/]'
-            ):
-                jobs = managed_jobs.queue_kubernetes(pod.metadata.name,
-                                                     refresh=False)
+            with rich_utils.safe_status('[bold cyan]Checking for in-progress '
+                                        f'managed jobs for {user}[/]'):
+                job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
             # Add user field to jobs
-            for job in jobs:
+            for job in job_list:
                 job['user'] = user
-            all_jobs.extend(jobs)
+            all_jobs.extend(job_list)
 
         # Reconcile cluster state between managed jobs and clusters
         # We don't want to show SkyPilot clusters that are part of a managed job

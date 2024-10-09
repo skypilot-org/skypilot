@@ -5,9 +5,7 @@ import click
 import colorama
 
 from sky import backends
-from sky import clouds
 from sky import status_lib
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import resources_utils

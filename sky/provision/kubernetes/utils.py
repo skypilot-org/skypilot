@@ -2004,7 +2004,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     """Gets all SkyPilot pods in the Kubernetes cluster.
 
     Args:
-        context: The Kubernetes context to use. If None, uses the current context.
+        context: Kubernetes context to use. If None, uses the current context.
 
     Returns:
         A list of Kubernetes pod objects.
@@ -2018,7 +2018,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
-            'Timed out when trying to get SkyPilot pod info from Kubernetes cluster. '
+            'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
             'Please check if the cluster is healthy and retry. To debug, run: '
             'kubectl get pods --selector=skypilot-cluster --all-namespaces'
         ) from None
