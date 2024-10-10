@@ -2531,12 +2531,20 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
+@click.option(
+    '--force',
+    '-f',
+    is_flag=True,
+    default=False,
+    required=False,
+    help='Force down the cluster(s). Ignore the risk of leaking resources.')
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
+    force: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
@@ -2564,13 +2572,17 @@ def down(
       \b
       # Tear down all existing clusters.
       sky down -a
+      \b
+      # Force down the cluster(s).
+      sky down -f controller_name
 
     """
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
                            down=True,
                            no_confirm=yes,
-                           purge=purge)
+                           purge=purge,
+                           force=force)
 
 
 def _hint_or_raise_for_down_jobs_controller(controller_name: str):
@@ -2683,7 +2695,8 @@ def _down_or_stop_clusters(
         down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
         purge: bool = False,
-        idle_minutes_to_autostop: Optional[int] = None) -> None:
+        idle_minutes_to_autostop: Optional[int] = None,
+        force: bool = False) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
     Controllers (jobs controller and sky serve controller) can only be
@@ -2753,21 +2766,22 @@ def _down_or_stop_clusters(
                     controller_name)
                 assert controller is not None
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
-                try:
-                    # TODO(zhwu): This hint or raise is not transactional, which
-                    # means even if it passed the check with no in-progress spot
-                    # or service and prompt the confirmation for termination,
-                    # a user could still do a `sky jobs launch` or a
-                    # `sky serve up` before typing the delete, causing a leaked
-                    # managed job or service. We should make this check atomic
-                    # with the termination.
-                    hint_or_raise(controller_name)
-                except (exceptions.ClusterOwnerIdentityMismatchError,
-                        RuntimeError) as e:
-                    if purge:
-                        click.echo(common_utils.format_exception(e))
-                    else:
-                        raise
+                if not force:
+                    try:
+                        # TODO(zhwu): This hint or raise is not transactional, which
+                        # means even if it passed the check with no in-progress spot
+                        # or service and prompt the confirmation for termination,
+                        # a user could still do a `sky jobs launch` or a
+                        # `sky serve up` before typing the delete, causing a leaked
+                        # managed job or service. We should make this check atomic
+                        # with the termination.
+                        hint_or_raise(controller_name)
+                    except (exceptions.ClusterOwnerIdentityMismatchError,
+                            RuntimeError) as e:
+                        if purge:
+                            click.echo(common_utils.format_exception(e))
+                        else:
+                            raise
                 confirm_str = 'delete'
                 input_prefix = ('Since --purge is set, errors will be ignored '
                                 'and controller will be removed from '
