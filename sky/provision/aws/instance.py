@@ -244,10 +244,10 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
                     'InterfaceType': 'efa',
                     'DeleteOnTermination': True,
                 }]
-                for _ in range(efa_interface_count):
+                for card_index in range(1, efa_interface_count):
                     network_interfaces.append({
                         'SubnetId': subnet_id,
-                        'NetworkCardIndex': len(network_interfaces),
+                        'NetworkCardIndex': card_index,
                         'DeviceIndex': 1,
                         'AssociatePublicIpAddress': False,
                         'Groups': security_group_ids,
