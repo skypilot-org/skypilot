@@ -27,7 +27,9 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self, controller_url: str, load_balancer_port: int, load_balancing_policy: lb_policies.LoadBalancingPolicy) -> None:
+    def __init__(
+            self, controller_url: str, load_balancer_port: int,
+            load_balancing_policy: lb_policies.LoadBalancingPolicy) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -223,10 +225,11 @@ class SkyServeLoadBalancer:
         uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
 
 
-def run_load_balancer(controller_addr: str, load_balancer_port: int, policy_name: str):
+def run_load_balancer(controller_addr: str, load_balancer_port: int,
+                      policy_name: str):
     if policy_name == 'round_robin':
         policy = lb_policies.RoundRobinPolicy()
-        raise ValueError(f"Unknown load balancing policy: {policy_name}")
+        raise ValueError(f'Unknown load balancing policy: {policy_name}')
 
     load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
                                          load_balancer_port=load_balancer_port,
@@ -246,9 +249,11 @@ if __name__ == '__main__':
                         required=True,
                         default=8890,
                         help='The port where the load balancer listens to.')
-    parser.add_argument('--load-balancing-policy',
-                        choices=['round_robin'],
-                        default='round_robin',
-                        help='The load balancing policy to use. Available policy: round_robin.')
+    parser.add_argument(
+        '--load-balancing-policy',
+        choices=['round_robin'],
+        default='round_robin',
+        help='The load balancing policy to use. Available policy: round_robin.')
     args = parser.parse_args()
-    run_load_balancer(args.controller_addr, args.load_balancer_port, args.load_balancing_policy)
+    run_load_balancer(args.controller_addr, args.load_balancer_port,
+                      args.load_balancing_policy)
