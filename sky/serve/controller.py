@@ -174,7 +174,7 @@ class SkyServeController:
             replica_status = replica_info.status
 
             if replica_status == serve_state.ReplicaStatus.SHUTTING_DOWN:
-                return fastapi.Response(
+                return responses.JSONResponse(
                     status_code=409,
                     content={
                         'message': f'Already scheduled to terminate '
@@ -184,7 +184,7 @@ class SkyServeController:
 
             if (replica_status in serve_state.ReplicaStatus.failed_statuses()
                     and not purge):
-                return fastapi.Response(
+                return responses.JSONResponse(
                     status_code=409,
                     content={
                         'message': f'{colorama.Fore.YELLOW}Replica '
@@ -204,7 +204,7 @@ class SkyServeController:
 
             message = (f'Replica {replica_id} of service '
                        f'{self._service_name!r} is scheduled to be ')
-            return fastapi.Response(
+            return responses.JSONResponse(
                 status_code=200,
                 content={
                     'message': message +
