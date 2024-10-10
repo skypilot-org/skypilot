@@ -440,15 +440,17 @@ class AWS(clouds.Cloud):
                     f' {security_group!r}. Please make sure the specified security group '
                     'has requested ports setup; or, leave out `aws.security_group_name` '
                     'in `~/.sky/config.yaml`.')
-                
+
         enable_efa = skypilot_config.get_nested(('aws', 'enable_efa'), False)
         efa_interface_count = 0
         if enable_efa:
             # AWS allows 32 EFA interfaces for P5/P5e, and 4 for G6e instances.
-            if r.instance_type.startswith('p5.') or r.instance_type.startswith('p5e.'):
+            if (r.instance_type.startswith('p5.') or
+                    r.instance_type.startswith('p5e.')):
                 efa_interface_count = 32
             elif r.instance_type.startswith('g6e'):
-                efa_interface_count = 4
+                logger.warning('EFA support for G6e instances is not yet '
+                               'implemented. Ignoring the setting.')
 
         return {
             'instance_type': r.instance_type,
