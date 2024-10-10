@@ -154,9 +154,8 @@ CONDA_INSTALLATION_COMMANDS = (
     # Create a separate conda environment for SkyPilot dependencies.
     # We use --system-site-packages to reuse the system site packages to avoid
     # the overhead of installing the same packages in the new environment.
-    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
+    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages;'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
 _sky_version = str(version.parse(sky.__version__))
