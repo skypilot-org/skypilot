@@ -92,4 +92,4 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # change for the serve_utils.ServeCodeGen, we need to bump this version, so that
 # the user can be notified to update their SkyPilot serve version on the remote
 # cluster.
-SERVE_VERSION = 1
+SERVE_VERSION = 2
