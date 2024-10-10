@@ -80,7 +80,7 @@ class UserSignal(enum.Enum):
         return _SIGNAL_TO_ERROR[self]
 
 
-class UpdateMode(enum.Enum):
+class UpdateMode(str, enum.Enum):
     """Update mode for updating a service."""
     ROLLING = 'rolling'
     BLUE_GREEN = 'blue_green'
@@ -291,12 +291,21 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     if service_status is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
+
+    try:
+        update_mode = UpdateMode(mode)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            # pylint: disable=raise-missing-from
+            raise ValueError(f'Invalid update mode: {mode}. '
+                             f'Please specify one of {UpdateMode}.')
+
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/update_service',
         json={
             'version': version,
-            'mode': mode,
+            'mode': update_mode.value,
         })
     if resp.status_code == 404:
         raise ValueError('The service is up-ed in an old version and does not '
