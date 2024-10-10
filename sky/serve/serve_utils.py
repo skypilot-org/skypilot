@@ -313,6 +313,32 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     return common_utils.encode_payload(service_msg)
 
 
+def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
+    service_status = _get_service_status(service_name)
+    if service_status is None:
+        raise ValueError(f'Service {service_name!r} does not exist.')
+    replica_info = serve_state.get_replica_info_from_id(service_name,
+                                                        replica_id)
+    if replica_info is None:
+        raise ValueError(f'Replica {replica_id} does not exist.')
+
+    controller_port = service_status['controller_port']
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/terminate_replica',
+        json={
+            'replica_id': replica_id,
+            'purge': purge,
+        })
+
+    message: str = resp.json()['message']
+    if resp.status_code != 200:
+        raise ValueError(f'Failed to terminate replica {replica_id} '
+                         f'in {service_name}. '
+                         f'Reason:\n{message}')
+    return common_utils.encode_payload(message)
+
+
 def _get_service_status(
         service_name: str,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
@@ -735,7 +761,7 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
-    # Don't use backend_utils.is_controller_up since it is too slow.
+    # Don't use backend_utils.is_controller_accessible since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -916,6 +942,15 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
+    def terminate_replica(cls, service_name: str, replica_id: int,
+                          purge: bool) -> str:
+        code = [
+            f'msg = serve_utils.terminate_replica({service_name!r}, '
+            f'{replica_id}, {purge})', 'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
     def wait_service_registration(cls, service_name: str, job_id: int) -> str:
         code = [
             'msg = serve_utils.wait_service_registration('
@@ -958,7 +993,7 @@ class ServeCodeGen:
             # passing the `mode` argument to the job_lib functions.
             # TODO(zhwu): Remove this in 0.7.0 release.
             f'mode_kwargs = {{"mode": {mode!r}}} '
-            'if getattr(constants, "SERVE_VERSION", 0) >= 1 else {}',
+            'if getattr(constants, "SERVE_VERSION", 0) >= 2 else {}',
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
             f'{version}, **mode_kwargs)',
             'print(msg, end="", flush=True)',
