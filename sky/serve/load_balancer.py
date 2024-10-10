@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Union
+from typing import Dict, Set, Union
 
 import aiohttp
 import fastapi
@@ -160,11 +160,26 @@ class SkyServeLoadBalancer:
         # SkyServe supports serving on Spot Instances. To avoid preemptions
         # during request handling, we add a retry here.
         retry_cnt = 0
+        # We keep track of the failed replicas for the current request, because
+        # we have a global round-robin policy, and if there is a large load,
+        # all retries for the same request can go to the same replica by chance.
+        # If the same replica is in `NOT_READY` state but the new state has not
+        # been synced from the controller, the current request will fail.
+        #
+        # We maintain a per-request failed replica set instead of the global
+        # one to allow multiple requests to still try failed replicas for one
+        # time, in case that replica is failed by transient network issue.
+        failed_replica_urls: Set[str] = set()
         while True:
             retry_cnt += 1
             with self._client_pool_lock:
+                # If all replicas are failed, clear the record and retry them
+                # again as some of them might be transient networking issues.
+                if (len(failed_replica_urls) ==
+                        self._load_balancing_policy.num_ready_replicas()):
+                    failed_replica_urls.clear()
                 ready_replica_url = self._load_balancing_policy.select_replica(
-                    request)
+                    request, failed_replica_urls)
             if ready_replica_url is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
@@ -184,6 +199,8 @@ class SkyServeLoadBalancer:
                 # 499 means a client terminates the connection
                 # before the server is able to respond.
                 return fastapi.responses.Response(status_code=499)
+            assert ready_replica_url is not None
+            failed_replica_urls.add(ready_replica_url)
             # TODO(tian): Fail fast for errors like 404 not found.
             if retry_cnt == constants.LB_MAX_RETRY:
                 if isinstance(response_or_exception, fastapi.HTTPException):
