@@ -3,26 +3,28 @@ import pytest
 from sky.serve import serve_utils
 
 
-class TestExtractReplicaIdFromLaunchLogFileName:
+class TestHasValidReplicaId:
 
-    def test_extract_when_launch_log_file(self):
-        assert 1 == serve_utils._extract_replica_id_from_launch_log_file_name(
-            'replica_1_launch.log')
+    def test_has_valid_replica_id_valid(self):
+        assert serve_utils.has_valid_replica_id('replica_1.log', 1) is True
 
-    def test_extract_when_log_file(self):
-        assert 1 == serve_utils._extract_replica_id_from_launch_log_file_name(
-            'replica_1.log')
+    def test_has_valid_replica_id_invalid(self):
+        assert serve_utils.has_valid_replica_id('replica_2.log', 1) is False
 
-    def test_when_path_expanded(self):
-        assert 1 == serve_utils._extract_replica_id_from_launch_log_file_name(
-            '/Users/firstlast/.sky/serve/vicuna/replica_1_launch.log')
+    def test_has_valid_replica_id_none(self):
+        assert serve_utils.has_valid_replica_id('replica_1.log', None) is True
 
-    def test_extract_when_no_match_because_invalid_prefix(self):
-        with pytest.raises(ValueError):
-            serve_utils._extract_replica_id_from_launch_log_file_name(
-                '/Users/firstlast/.sky/serve/vicuna/bad_prefix_1_launch.log')
+    def test_has_valid_replica_id_no_match(self):
+        with pytest.raises(
+                ValueError,
+                match=
+                'Failed to get replica id from file name: invalid_prefix.log'):
+            serve_utils.has_valid_replica_id('invalid_prefix.log', 1)
 
-    def test_extract_when_no_match_because_invalid_suffix(self):
-        with pytest.raises(ValueError):
-            serve_utils._extract_replica_id_from_launch_log_file_name(
-                '/Users/firstlast/.sky/serve/vicuna/replica_1_invalid.log')
+    def test_has_valid_replica_id_invalid_suffix(self):
+        with pytest.raises(
+                ValueError,
+                match=
+                'Failed to get replica id from file name: replica_1.invalid_suffix'
+        ):
+            serve_utils.has_valid_replica_id('replica_1.invalid_suffix', 1)
