@@ -403,7 +403,7 @@ class RayCodeGen:
                 })
 
         streaming_message = (
-            '└── Job started. Streaming logs... '
+            f'{ux_utils.INDENT_LAST_SYMBOL}Job started. Streaming logs... '
             f'{colorama.Style.DIM}(Ctrl-C to exit log streaming; job will not '
             f'be killed){colorama.Style.RESET_ALL}')
         self._code += [
@@ -419,10 +419,11 @@ class RayCodeGen:
                 # start_streaming_at for the `Waiting for task resources on`
                 # message.
                 # TODO: Remove this message in v0.9.0.
-                message = (f'├── {colorama.Style.DIM}INFO: Tip: use Ctrl-C to '
-                           'exit log streaming, not kill the job.'
-                           f'{colorama.Style.RESET_ALL}\\n')
-                message += (f'├── {colorama.Style.DIM}Waiting for task resources on '
+                message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}INFO: '
+                           'Tip: use Ctrl-C to exit log streaming, not kill '
+                           'the job.{colorama.Style.RESET_ALL}\\n')
+                message += ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
+                            'Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -3394,31 +3395,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'\n📋 Useful Commands'
                     f'\nManaged Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                    '\n├── To cancel the job:\t\t\t'
+                    f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
                     f'{constants.BOLD}sky jobs cancel {job_id}'
                     f'{constants.RESET_BOLD}'
-                    '\n├── To stream job logs:\t\t\t'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
                     f'{constants.BOLD}sky jobs logs {job_id}'
                     f'{constants.RESET_BOLD}'
-                    '\n├── To stream controller logs:\t\t'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
                     f'{constants.BOLD}sky jobs logs --controller {job_id}'
                     f'{constants.RESET_BOLD}'
-                    '\n├── To view all managed jobs:\t\t'
+                    f'\n{ux_utils.INDENT_SYMBOL}To view all managed jobs:\t\t'
                     f'{constants.BOLD}sky jobs queue'
                     f'{constants.RESET_BOLD}'
-                    '\n└── To view managed job dashboard:\t'
-                    f'{constants.BOLD}sky jobs dashboard'
+                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To view managed job '
+                    f'dashboard:\t{constants.BOLD}sky jobs dashboard'
                     f'{constants.RESET_BOLD}')
             elif controller is None:
                 logger.info(f'\n📋 Useful Commands'
                             f'\nJob ID: {job_id}'
-                            '\n├── To cancel the job:\t\t'
+                            f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
                             f'{constants.BOLD}sky cancel {name} {job_id}'
                             f'{constants.RESET_BOLD}'
-                            '\n├── To stream job logs:\t\t'
+                            f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t'
                             f'{constants.BOLD}sky logs {name} {job_id}'
                             f'{constants.RESET_BOLD}'
-                            '\n└── To view job queue:\t\t'
+                            f'\n{ux_utils.INDENT_LAST_SYMBOL}To view job '
+                            'queue:\t\t'
                             f'{constants.BOLD}sky queue {name}'
                             f'{constants.RESET_BOLD}')
 
@@ -3502,16 +3504,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if controller is not None:
             return
         logger.info(f'\nCluster name: {name}'
-                    '\n├── To log into the head VM:\t'
+                    f'\n{ux_utils.INDENT_SYMBOL}To log into the head VM:\t'
                     f'{constants.BOLD}ssh {name}'
                     f'{constants.RESET_BOLD}'
-                    '\n├── To submit a job:'
+                    f'\n{ux_utils.INDENT_SYMBOL}To submit a job:'
                     f'\t\t{constants.BOLD}sky exec {name} yaml_file'
                     f'{constants.RESET_BOLD}'
-                    f'\n├── To stop the cluster:'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stop the cluster:'
                     f'\t{constants.BOLD}sky stop {name}'
                     f'{constants.RESET_BOLD}'
-                    '\n└── To teardown the cluster:'
+                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To teardown the cluster:'
                     f'\t{constants.BOLD}sky down {name}'
                     f'{constants.RESET_BOLD}')
         if (gcp_utils.is_tpu(handle.launched_resources) and

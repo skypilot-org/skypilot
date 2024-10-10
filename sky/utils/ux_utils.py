@@ -19,6 +19,9 @@ if typing.TYPE_CHECKING:
 
 console = rich_console.Console()
 
+INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
+INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
+
 
 def console_newline():
     """Print a newline to the console using rich.
@@ -133,8 +136,8 @@ def finishing_message(
         message: str,
         log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
     """Gets the finishing message for the given message."""
-    success_prefix = (f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} '
-                      f'{message}')
+    success_prefix = (f'{colorama.Fore.GREEN}✓ {message}'
+                      f'{colorama.Style.RESET_ALL}')
     if log_path is None:
         return success_prefix
     path_hint = log_path_hint(log_path)
