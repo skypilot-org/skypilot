@@ -1469,16 +1469,21 @@ def _status_kubernetes(show_all: bool):
     all_clusters, jobs_controllers, serve_controllers = (
         status_utils.process_skypilot_pods(pods, context))
     all_jobs = []
-    for _, job_controller_info in jobs_controllers.items():
-        user = job_controller_info['user']
-        pod = job_controller_info['pods'][0]
-        with rich_utils.safe_status('[bold cyan]Checking in-progress '
-                                    f'managed jobs for {user}[/]'):
+    with rich_utils.safe_status(
+            '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
+        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
+            user = job_controller_info['user']
+            pod = job_controller_info['pods'][0]
+            status_message = ('[bold cyan]Checking in-progress '
+                              f'managed jobs for {user}')
+            if len(jobs_controllers) > 1:
+                status_message += f' ({i+1}/{len(jobs_controllers)})'
+            spinner.update(f'{status_message}[/]')
             job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
-        # Add user field to jobs
-        for job in job_list:
-            job['user'] = user
-        all_jobs.extend(job_list)
+            # Add user field to jobs
+            for job in job_list:
+                job['user'] = user
+            all_jobs.extend(job_list)
     # Reconcile cluster state between managed jobs and clusters:
     # To maintain a clear separation between regular SkyPilot clusters
     # and those from managed jobs, we need to exclude the latter from
@@ -1504,16 +1509,16 @@ def _status_kubernetes(show_all: bool):
                                                       show_all)
     if all_jobs:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'Managed jobs from {len(jobs_controllers)} users'
+                   f'Managed jobs'
                    f'{colorama.Style.RESET_ALL}')
         msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
         click.echo(msg)
     if serve_controllers:
         # TODO: Parse serve controllers and show services separately.
         #  Currently we show a hint that services are shown as clusters.
-        click.echo('\nHint: SkyServe controllers detected in the cluster. '
-                   'SkyServe service replicas will be shown as SkyPilot '
-                   'clusters.')
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
 
 
 @cli.command()
@@ -1567,7 +1572,8 @@ def _status_kubernetes(show_all: bool):
     default=False,
     is_flag=True,
     required=False,
-    help='[Experimental] Show SkyPilot clusters from all users on Kubernetes.')
+    help='[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context.')
 @click.argument('clusters',
                 required=False,
                 type=str,
