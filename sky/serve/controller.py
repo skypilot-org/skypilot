@@ -203,14 +203,27 @@ class SkyServeController:
             self._replica_manager.scale_down(replica_id, purge=purge)
 
             message = (f'Replica {replica_id} of service '
-                       f'{self._service_name!r} is scheduled '
-                       f'to be ')
+                       f'{self._service_name!r} is scheduled to be ')
             return fastapi.Response(
                 status_code=200,
                 content={
                     'message': message +
                                'terminated.' if not purge else 'purged.'
                 })
+
+        @self._app.exception_handler(Exception)
+        async def validation_exception_handler(
+                request: fastapi.Request, exc: Exception) -> fastapi.Response:
+            with ux_utils.enable_traceback():
+                logger.error(f'Error in controller: {exc!r}')
+            return responses.JSONResponse(
+                status_code=500,
+                content={
+                    'message':
+                        (f'Failed method {request.method} at URL {request.url}.'
+                         f' Exception message is {exc!r}.')
+                },
+            )
 
         threading.Thread(target=self._run_autoscaler).start()
 
