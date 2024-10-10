@@ -535,10 +535,9 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
-    log_path_hint = ux_utils.log_path_hint(provision_logging.config.log_path)
     logger.info(
-        ux_utils.finishing_message(
-            f'Cluster launched: {cluster_name}. {log_path_hint}'))
+        ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
+                                   provision_logging.config.log_path))
     return cluster_info
 
 

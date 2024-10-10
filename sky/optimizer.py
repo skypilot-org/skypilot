@@ -123,8 +123,7 @@ class Optimizer:
                 for a task.
             exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Generating execution plan')):
+        with rich_utils.safe_status(ux_utils.spinner_message('Optimizing')):
             _check_specified_clouds(dag)
 
             # This function is effectful: mutates every node in 'dag' by setting
@@ -261,6 +260,9 @@ class Optimizer:
             launchable_resources: Dict[resources_lib.Resources,
                                        List[resources_lib.Resources]]
         ) -> Dict[resources_lib.Resources, int]:
+            if not resources_utils.need_to_query_reservations():
+                return {}
+
             num_available_reserved_nodes_per_resource = {}
 
             def get_reservations_available_resources(
@@ -339,8 +341,8 @@ class Optimizer:
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = (
-                            num_available_reserved_nodes_per_resource[resources]
-                        )
+                            num_available_reserved_nodes_per_resource.get(
+                                resources, 0))
 
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for

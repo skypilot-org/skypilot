@@ -1594,10 +1594,9 @@ class RetryingVmProvisioner(object):
                     self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 config_dict['handle'] = handle
-                log_path_hint = ux_utils.log_path_hint(log_path)
                 logger.info(
                     ux_utils.finishing_message(
-                        f'Cluster {cluster_name!r} launched. {log_path_hint}'))
+                        f'Cluster {cluster_name!r} launched.', log_path))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
@@ -3095,7 +3094,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
-        log_path_hint = ux_utils.log_path_hint(log_path)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = handle.get_command_runners()
@@ -3119,8 +3117,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Syncing workdir', log_path)):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
-        logger.info(
-            ux_utils.finishing_message(f'Workdir synced. {log_path_hint}'))
+        logger.info(ux_utils.finishing_message('Workdir synced.', log_path))
 
     def _sync_file_mounts(
         self,
@@ -3270,7 +3267,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
-        logger.info(ux_utils.finishing_message('Setup completed.'))
+        setup_log_path = os.path.join(self.log_dir, 'setup-*.log')
+        logger.info(
+            ux_utils.finishing_message('Setup completed.', setup_log_path))
 
     def _exec_code_on_head(
         self,
@@ -3376,7 +3375,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(ux_utils.starting_message('Service registered.'))
         else:
             logger.info(
-                ux_utils.starting_message(f'Job submitted, ID: {job_id}.'))
+                ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
         try:
             if not detach_run:
@@ -3500,7 +3499,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                       down: bool) -> None:
         name = handle.cluster_name
         controller = controller_utils.Controllers.from_name(name)
-        if controller is not None or down:
+        if controller is not None:
             return
         logger.info(f'\nCluster name: {name}'
                     '\n├── To log into the head VM:\t'
@@ -4525,7 +4524,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
 
-        log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(
             ux_utils.spinner_message('Syncing file mounts', log_path))
 
@@ -4622,8 +4620,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.run_in_parallel(_symlink_node, runners)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
-        logger.info(
-            ux_utils.finishing_message(f'Files synced. {log_path_hint}'))
+        logger.info(ux_utils.finishing_message('Files synced.', log_path))
 
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
@@ -4652,7 +4649,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         plural = 's' if len(storage_mounts) > 1 else ''
-        log_path_hint = ux_utils.log_path_hint(log_path)
         rich_utils.force_update_status(
             ux_utils.spinner_message(
                 f'Mounting {len(storage_mounts)} storage{plural}', log_path))
@@ -4710,8 +4706,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
-        logger.info(
-            ux_utils.finishing_message(f'Storage mounted. {log_path_hint}'))
+        logger.info(ux_utils.finishing_message('Storage mounted.', log_path))
 
     def _set_storage_mounts_metadata(
             self, cluster_name: str,

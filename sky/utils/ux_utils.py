@@ -115,16 +115,6 @@ def starting_message(message: str) -> str:
     return f'⚙️ {message}'
 
 
-def finishing_message(message: str) -> str:
-    """Gets the finishing message for the given message."""
-    return f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} {message}'
-
-
-def retry_message(message: str) -> str:
-    """Gets the retry message for the given message."""
-    return f'{colorama.Fore.YELLOW}↺{colorama.Style.RESET_ALL} {message}'
-
-
 # Log path hint in the spinner during launching
 _LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
                   f'{colorama.Style.RESET_ALL}')
@@ -137,6 +127,23 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
     if log_path.startswith(expanded_home):
         log_path = '~' + log_path[len(expanded_home):]
     return _LOG_PATH_HINT.format(log_path=log_path)
+
+
+def finishing_message(
+        message: str,
+        log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+    """Gets the finishing message for the given message."""
+    success_prefix = (f'{colorama.Fore.GREEN}✓{colorama.Style.RESET_ALL} '
+                      f'{message}')
+    if log_path is None:
+        return success_prefix
+    path_hint = log_path_hint(log_path)
+    return f'{success_prefix}  {path_hint}'
+
+
+def retry_message(message: str) -> str:
+    """Gets the retry message for the given message."""
+    return f'{colorama.Fore.YELLOW}↺{colorama.Style.RESET_ALL} {message}'
 
 
 def spinner_message(
