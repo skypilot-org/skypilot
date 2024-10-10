@@ -28,7 +28,6 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
-from sky.serve.replica_managers import append_job_logs_to_replica_log
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
@@ -701,6 +700,9 @@ def has_valid_replica_id(file_name: str,
 
 def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                       target_replica_id: Optional[int]) -> None:
+    # pylint: disable=import-outside-toplevel
+    from sky.serve.replica_managers import append_job_logs_to_replica_log
+
     logger.info('Preparing replica logs for download...')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
