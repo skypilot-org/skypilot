@@ -136,8 +136,8 @@ _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 # We don't do import then __file__ because that script needs to be filled in
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
-    pathlib.Path(sky.__file__).resolve().parent / 'backends' /
-    'monkey_patches' / 'monkey_patch_ray_up.py')
+    pathlib.Path(sky.__file__).resolve().parent / 'serve' / 'monkey_patches' /
+    'monkey_patch_ray_up.py')
 
 # The maximum size of a command line arguments is 128 KB, i.e. the command
 # executed with /bin/sh should be less than 128KB.
@@ -3683,6 +3683,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          for runner in runners]
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         return dict(zip(job_ids, local_log_dirs))
+
+    def sync_down_serve_logs(self, *args, **kwargs):
+        # yapf: disable
+        # pylint: disable=import-outside-toplevel
+        from sky.serve.serve_logs import sync_down_serve_logs
+
+        # pylint: enable=import-outside-toplevel
+        # yapf: enable
+        return sync_down_serve_logs(self, *args, **kwargs)
 
     def tail_logs(self,
                   handle: CloudVmRayResourceHandle,

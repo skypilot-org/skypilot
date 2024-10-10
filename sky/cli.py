@@ -4403,6 +4403,13 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
               default=False,
               required=False,
               help='Show the load balancer logs of this service.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down the logs of sky serve, including a separate '
+              'log file for the controller, load balancer, and each '
+              'replica.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
@@ -4413,6 +4420,7 @@ def serve_logs(
     follow: bool,
     controller: bool,
     load_balancer: bool,
+    sync_down: bool,
     replica_id: Optional[int],
 ):
     """Tail the log of a service.
@@ -4429,24 +4437,41 @@ def serve_logs(
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
+        \b
+        # Sync down logs for controller, load balancer, and all
+        # replicas for a service
+        sky serve logs [SERVICE_NAME] --sync-down
+        # Sync down logs for only controller. Same pattern
+        # applies for load balancer
+        sky serve logs [SERVICE_NAME] --controller --sync-down
+        # Sync down logs only for a single replica
+        sky serve logs [SERVICE_NAME] 3 --sync-down
     """
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)
     if num_flags > 1:
         raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
+                               '[REPLICA_ID], -s / --sync-down can be '
+                               'specified.')
+    if num_flags == 0 and not sync_down:
         raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified.')
+                               '[REPLICA_ID] must be specified if not '
+                               'using --sync-down.')
+
     if controller:
         target_component = serve_lib.ServiceComponent.CONTROLLER
     elif load_balancer:
         target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    else:
-        # Already checked that num_flags == 1.
-        assert replica_id is not None
+    elif replica_id is not None:
         target_component = serve_lib.ServiceComponent.REPLICA
+    else:
+        target_component = None
+
+    if sync_down:
+        serve_lib.sync_down_logs(service_name, target_component, replica_id)
+        return
     try:
+        assert target_component is not None
         serve_lib.tail_logs(service_name,
                             target=target_component,
                             replica_id=replica_id,
