@@ -134,6 +134,9 @@ available_node_types:
       # Use IDMSv2
       MetadataOptions:
         HttpTokens: required 
+      # Used for SkyPilot provisioner sky/provision/aws/instance.py to generate
+      # EFA network interface config for AWS EC2 SDK.
+      SkyPilotEfaInterfaceCount: {{efa_interface_count}}
 
 head_node_type: ray.head.default
 
