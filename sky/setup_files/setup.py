@@ -162,6 +162,7 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    'cloudpickle'
 ]
 
 local_ray = [
