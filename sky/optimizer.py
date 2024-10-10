@@ -388,9 +388,13 @@ class Optimizer:
                     fuzzy_candidates_str = (
                         f'\nTry one of these offered accelerators: {cyan}'
                         f'{fuzzy_candidates}{reset}')
+                node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
+                                                 r.repr_with_region_zone
+                                                 for r in node.resources)
                 error_msg = (
                     f'{source_hint.capitalize()} does not contain any '
-                    f'instances satisfying the request:\n{node.resources}.'
+                    f'instances satisfying the request: '
+                    f'{node_resources_reprs}.'
                     f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky show-gpus{reset} '
