@@ -2,7 +2,7 @@
 import pprint
 import threading
 import typing
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 if typing.TYPE_CHECKING:
     from sky import task
@@ -23,19 +23,42 @@ class Dag:
 
         self.graph = nx.DiGraph()
         self.name: Optional[str] = None
+        self.dependencies: Dict['task.Task', List['task.Task']] = {}
 
     def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
         self.tasks.append(task)
 
     def remove(self, task: 'task.Task') -> None:
+        dependant = [
+            task in self.graph.predecessors(node)
+            for node in self.graph.nodes
+        ]
+
+        dependant_names = ", ".join([
+            dep.name for dep in self.dependencies[task]
+            if dep.name is not None
+        ]) # TODO(andy): if the name is None, how to display?
+        if any(dependant):
+            raise ValueError(f'Task {task.name} is still being depended on by '
+                             f'tasks {dependant_names!r}. Try to remove the '
+                             'dependencies first.')
+
+        self.dependencies.pop(task, None)
+
         self.tasks.remove(task)
         self.graph.remove_node(task)
 
     def add_edge(self, op1: 'task.Task', op2: 'task.Task') -> None:
         assert op1 in self.graph.nodes
         assert op2 in self.graph.nodes
+
+        self.dependencies[op2] += [op1]
         self.graph.add_edge(op1, op2)
+
+    def add_dependency(self, dependant: 'task.Task',
+                    dependency: 'task.Task') -> None:
+        self.add_edge(dependency, dependant)
 
     def __len__(self) -> int:
         return len(self.tasks)
@@ -56,21 +79,12 @@ class Dag:
 
     def is_chain(self) -> bool:
         # NOTE: this method assumes that the graph has no cycle.
-        is_chain = True
-        visited_zero_out_degree = False
-        for node in self.graph.nodes:
-            out_degree = self.graph.out_degree(node)
-            if out_degree > 1:
-                is_chain = False
-                break
-            elif out_degree == 0:
-                if visited_zero_out_degree:
-                    is_chain = False
-                    break
-                else:
-                    visited_zero_out_degree = True
-        return is_chain
+        nodes = list(self.graph.nodes)
+        out_degrees = [self.graph.out_degree(node) for node in nodes]
 
+        return (len(nodes) <= 1 or
+                (all(degree <= 1 for degree in out_degrees) and
+                sum(degree == 0 for degree in out_degrees) == 1))
 
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""
