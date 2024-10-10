@@ -592,6 +592,8 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                                         f'{most_similar_field[0]!r}?')
                         else:
                             err_msg += f'Found unsupported field {field!r}.'
+        elif e.schema.get('errorMessage', None) is not None:
+            err_msg = err_msg_prefix + e.schema['errorMessage']
         else:
             message = e.message
             # Object in jsonschema is represented as dict in Python. Replace

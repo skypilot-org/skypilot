@@ -211,6 +211,11 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
 
     logger.debug(f'Creating {count} instances with config: \n{conf}')
 
+    # Add EFA devices.
+    efa_interface_count = conf.pop('SkyPilotEfaInterfaceCount', 0)
+    assert efa_interface_count <= 0 or not associate_public_ip_address, (
+        'EFA interfaces cannot have a public IP')
+
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
     num_subnets = len(subnet_ids)
@@ -229,6 +234,26 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
                 'AssociatePublicIpAddress': associate_public_ip_address,
                 'Groups': security_group_ids,
             }]
+            if efa_interface_count > 0:
+                network_interfaces = [{
+                    'SubnetId': subnet_id,
+                    'NetworkCardIndex': 0,
+                    'DeviceIndex': 0,
+                    'AssociatePublicIpAddress': False,
+                    'Groups': security_group_ids,
+                    'InterfaceType': 'efa',
+                    'DeleteOnTermination': True,
+                }]
+                for _ in range(efa_interface_count):
+                    network_interfaces.append({
+                        'SubnetId': subnet_id,
+                        'NetworkCardIndex': len(network_interfaces),
+                        'DeviceIndex': 1,
+                        'AssociatePublicIpAddress': False,
+                        'Groups': security_group_ids,
+                        'InterfaceType': 'efa',
+                        'DeleteOnTermination': True,
+                    })
             conf['NetworkInterfaces'] = network_interfaces
 
             instances = _ec2_call_with_retry_on_server_error(

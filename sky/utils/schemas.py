@@ -715,6 +715,9 @@ def get_config_schema():
                         'type': 'string',
                     },
                 },
+                'enable_efa': {
+                    'type': 'boolean',
+                },
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
@@ -723,7 +726,23 @@ def get_config_schema():
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
-            **_check_not_both_fields_present('instance_tags', 'labels')
+            'allOf': [
+                {
+                    'if': {
+                        'properties': {'enable_efa': {'const': True}},
+                        'required': ['enable_efa']
+                    },
+                    'then': {
+                        'properties': {'use_internal_ips': {'const': True}},
+                        'required': ['use_internal_ips'],
+                        'errorMessage': ('When `aws.enable_efa` is set to '
+                                        'true, `aws.use_internal_ips` '
+                                        'must also be set to true, as EFA '
+                                        'requires private IP addresses.')
+                    },
+                },
+            ],
+            **_check_not_both_fields_present('instance_tags', 'labels'),
         },
         'gcp': {
             'type': 'object',
