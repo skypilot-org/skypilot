@@ -14,7 +14,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
+MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 16
 
 logger = sky_logging.init_logger(__name__)
 
