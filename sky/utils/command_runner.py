@@ -258,6 +258,10 @@ class CommandRunner:
 
         rsync_command.append(f'-e {shlex.quote(rsh_option)}')
 
+        # Avoid rsync interpreting :, /, and + in node_destination as the
+        # default delimiter for options and arguments.
+        encoded_node_destination = node_destination.replace(':', '%3A').replace(
+            '/', '%2F').replace('+', '%2B')
         if up:
             resolved_target = target
             if target.startswith('~'):
@@ -268,7 +272,7 @@ class CommandRunner:
                 full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
-                f'{node_destination}:{resolved_target!r}',
+                f'{encoded_node_destination}:{resolved_target!r}',
             ])
         else:
             resolved_source = source
@@ -276,7 +280,7 @@ class CommandRunner:
                 remote_home_dir = get_remote_home_dir()
                 resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
-                f'{node_destination}:{resolved_source!r}',
+                f'{encoded_node_destination}:{resolved_source!r}',
                 f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)
