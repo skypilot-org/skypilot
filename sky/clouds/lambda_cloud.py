@@ -8,7 +8,7 @@ import requests
 from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.clouds.utils import lambda_utils
+from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -47,6 +47,9 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
     }
+
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(

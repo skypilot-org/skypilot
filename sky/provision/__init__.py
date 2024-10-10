@@ -19,6 +19,7 @@ from sky.provision import cudo
 from sky.provision import fluidstack
 from sky.provision import gcp
 from sky.provision import kubernetes
+from sky.provision import lambda_cloud
 from sky.provision import runpod
 from sky.provision import vsphere
 from sky.utils import command_runner
@@ -39,6 +40,8 @@ def _route_to_cloud_impl(func):
             provider_name = kwargs.pop('provider_name')
 
         module_name = provider_name.lower()
+        if module_name == 'lambda':
+            module_name = 'lambda_cloud'
         module = globals().get(module_name)
         assert module is not None, f'Unknown provider: {module_name}'
 
