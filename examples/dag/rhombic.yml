@@ -1,0 +1,77 @@
+name: pipeline
+depends_on:
+  - infer_A:
+    - data-processing
+  - infer_B:
+    - data-processing
+  - eval_A_B:
+    - infer_A
+    - infer_B
+---
+name: data-processing
+
+resources:
+  cpus: 2+
+  use_spot: true
+  any_of:
+    - cloud: aws
+    - cloud: gcp
+
+setup: |
+  echo setup for data-processing
+  sleep 20
+
+run: |
+  echo data-processing starts
+  sleep 30
+  echo data-processing ends
+
+---
+name: infer_A
+
+resources:
+  cpus: 2+
+  any_of:
+    - cloud: aws
+    - cloud: gcp
+
+setup: |
+  echo setup for infer_A
+  sleep 20
+
+run: |
+  echo infer_A starts
+  sleep 20
+  echo infer_A ends
+
+---
+
+name: infer_B
+
+resources:
+  cpus: 2+
+
+setup: |
+  echo setup for infer_B
+  sleep 20
+
+run: |
+  echo infer_B starts
+  sleep 20
+  echo infer_B ends
+
+---
+
+name: eval_A_B
+
+resources:
+  cpus: 2+
+
+setup: |
+  echo setup for eval
+  sleep 20
+
+run: |
+  echo eval starts
+  sleep 20
+  echo eval ends
