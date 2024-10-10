@@ -51,6 +51,8 @@ class Vsphere(clouds.Cloud):
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             (f'Opening ports is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.VPN:
+            (f'VPN is currently not supported on {_REPR}.'),
     }
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 80  # The name can't exceeds 80 characters

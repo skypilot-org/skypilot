@@ -46,6 +46,7 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.VPN: f'VPN is currently not supported in {_REPR}.',
     }
 
     @classmethod
