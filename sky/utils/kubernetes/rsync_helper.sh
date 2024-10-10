@@ -6,6 +6,7 @@ pod=$1
 shift
 echo "pod: $pod" >&2
 encoded_namespace_context=$1
+# Revert the encoded namespace+context to the original string.
 namespace_context=$(echo "$encoded_namespace_context" | sed 's|%3A|:/|g' | sed 's|%2B|+|g' | sed 's|%2F|/|g')
 echo "namespace_context: $namespace_context" >&2
 namespace=$(echo $namespace_context | cut -d+ -f1)
