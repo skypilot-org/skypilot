@@ -2768,13 +2768,14 @@ def _down_or_stop_clusters(
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
                 if not force:
                     try:
-                        # TODO(zhwu): This hint or raise is not transactional, which
-                        # means even if it passed the check with no in-progress spot
-                        # or service and prompt the confirmation for termination,
-                        # a user could still do a `sky jobs launch` or a
-                        # `sky serve up` before typing the delete, causing a leaked
-                        # managed job or service. We should make this check atomic
-                        # with the termination.
+                        # TODO(zhwu): This hint or raise is not transactional,
+                        # which means even if it passed the check with no
+                        # in-progress spot or service and prompt the
+                        # confirmation for termination, a user could still
+                        # do a `sky jobs launch` or a `sky serve up` before
+                        # typing the delete, causing a leaked managed job or
+                        # service. We should make this check atomic with the
+                        # termination.
                         hint_or_raise(controller_name)
                     except (exceptions.ClusterOwnerIdentityMismatchError,
                             RuntimeError) as e:
