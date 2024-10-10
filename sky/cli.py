@@ -1474,12 +1474,16 @@ def _status_kubernetes(show_all: bool):
         for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
             user = job_controller_info['user']
             pod = job_controller_info['pods'][0]
-            status_message = ('[bold cyan]Checking in-progress '
-                              f'managed jobs for {user}')
+            status_message = ('[bold cyan]Checking managed jobs controller')
             if len(jobs_controllers) > 1:
-                status_message += f' ({i+1}/{len(jobs_controllers)})'
+                status_message += f's ({i+1}/{len(jobs_controllers)})'
             spinner.update(f'{status_message}[/]')
-            job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
+            try:
+                job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
+            except RuntimeError as e:
+                logger.warning('Failed to get managed jobs from controller '
+                               f'{pod.metadata.name}: {str(e)}')
+                job_list = []
             # Add user field to jobs
             for job in job_list:
                 job['user'] = user
