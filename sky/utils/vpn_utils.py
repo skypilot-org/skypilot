@@ -217,6 +217,8 @@ def rewrite_cluster_info_by_vpn(
     for (instance_id, instance_list) in cluster_info.instances.items():
         # TODO(yi): test if this works on TPU VM.
         for (i, instance) in enumerate(instance_list):
-            instance.external_ip = vpn_config.get_private_ip(
-                f'{cluster_name}-{instance_id}-{i}')
+            hostname = f'{instance_id}-{i}'.split('/')[-1]
+            if not hostname.startswith(cluster_name):
+                hostname = f'{cluster_name}-{hostname}'
+            instance.external_ip = vpn_config.get_private_ip(hostname)
     return cluster_info

@@ -2482,14 +2482,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         def _run_setup_commands(runner_instance_id):
             runner, instance_id = runner_instance_id
-            command = vpn_config.get_setup_command(
-                f'{self.cluster_name}-{instance_id}')
-            returncode, _, stderr = runner.run([command],
-                                               require_outputs=True,
-                                               stream_logs=False)
+            hostname = instance_id.split('/')[-1]
+            if not hostname.startswith(self.cluster_name):
+                hostname = f'{self.cluster_name}-{hostname}'
+            command = vpn_config.get_setup_command(hostname)
+            returncode, stdout, stderr = runner.run([command],
+                                                    require_outputs=True,
+                                                    stream_logs=False)
             subprocess_utils.handle_returncode(
-                returncode, command,
-                f'Failed to setup VPN on the cluster. Stderr: {stderr}')
+                returncode, command, 'Failed to setup VPN on the cluster. '
+                f'Stdout: {stdout}. Stderr: {stderr}')
 
         subprocess_utils.run_in_parallel(_run_setup_commands,
                                          zip(runners, instance_ids))
@@ -4202,7 +4204,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.vpn_config)
             if handle.cached_cluster_info is not None:
                 for instance_id in handle.cached_cluster_info.instance_ids():
-                    vpn_config.remove_host('skypilot-' + instance_id)
+                    hostname = instance_id.split('/')[-1]
+                    if not hostname.startswith(handle.cluster_name):
+                        hostname = f'{handle.cluster_name}-{hostname}'
+                    vpn_config.remove_host(hostname)
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
