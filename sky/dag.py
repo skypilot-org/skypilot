@@ -1,75 +1,253 @@
 """DAGs: user applications to be run."""
-import pprint
 import threading
 import typing
-from typing import List, Optional
+from typing import cast, Dict, List, Optional, Set, Union
+
+import networkx as nx
+
+from sky.utils import common_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import task
+
+TaskOrName = Union['task.Task', str]
 
 
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks.
 
+    This class allows users to define and manage directed acyclic graphs
+    (DAGs) of tasks, representing complex workflows.
+
     Examples:
         >>> import sky
-        >>> with sky.Dag() as dag:
-        >>>     task = sky.Task(...)
+        >>> with sky.Dag(name='my_pipeline') as dag:
+        >>>     task1 = sky.Task(name='task1', ...)
+        >>>     task2 = sky.Task(name='task2', ...)
+        >>>     task1 >> task2
     """
 
-    def __init__(self) -> None:
-        self.tasks: List['task.Task'] = []
-        import networkx as nx  # pylint: disable=import-outside-toplevel
+    def __init__(self, name: Optional[str] = None) -> None:
+        """Initialize a new DAG.
 
+        Args:
+            name: Optional name for the DAG.
+        """
+        self.name = name
+        self._task_name_lookup: Dict[str, 'task.Task'] = {}
+        self.edges: Dict['task.Task', Set['task.Task']] = {}
         self.graph = nx.DiGraph()
-        self.name: Optional[str] = None
+
+    @property
+    def tasks(self) -> List['task.Task']:
+        """Return a list of all tasks in the DAG."""
+        return list(self._task_name_lookup.values())
+
+    def _get_task(self, task_or_name: TaskOrName) -> 'task.Task':
+        """Get a task object from a task or its name.
+
+        Args:
+            task_or_name: Either a Task object or the name of a task.
+
+        Returns:
+            The Task object.
+
+        Raises:
+            ValueError: If the task name is not found in the DAG.
+        """
+        if not isinstance(task_or_name, str):
+            return task_or_name
+        name = task_or_name
+        if name not in self._task_name_lookup:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Task {name} not found in DAG')
+        return self._task_name_lookup[name]
 
     def add(self, task: 'task.Task') -> None:
+        """Add a task to the DAG.
+
+        Args:
+            task: The Task object to add.
+
+        Raises:
+            ValueError: If the task already exists in the DAG or if its name
+            is already used.
+        """
+        if task.name is None:
+            task.name = common_utils.get_unique_task_name(task)
+        if task.name in self._task_name_lookup:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task {task.name!r} already exists in the DAG.'
+                    f' Or the task name is already used by another task.')
         self.graph.add_node(task)
-        self.tasks.append(task)
+        self._task_name_lookup[task.name] = task
 
-    def remove(self, task: 'task.Task') -> None:
-        self.tasks.remove(task)
+    def remove(self, task: Union['task.Task', str]) -> None:
+        """Remove a task from the DAG.
+
+        Args:
+            task: The Task object or name of the task to remove.
+
+        Raises:
+            ValueError: If the task is still being depended on by other tasks.
+        """
+        task = self._get_task(task)
+
+        # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
+        # and sink nodes.
+        # if dependents:
+        #     dependent_names = ', '.join([dep.name for dep in dependents])
+        #     with ux_utils.print_exception_no_traceback():
+        #         raise ValueError(f'Task {task.name} is still being depended '
+        #                          f'by tasks {dependent_names!r}. Try to '
+        #                          'remove the dependencies first.')
+        # Here's a workaround, proactively remove all downstream edges.
+        dependents = self.get_downstream(task)
+        for dependent in dependents:
+            self.remove_edge(task, dependent)
+
+        self.edges.pop(task, None)
         self.graph.remove_node(task)
+        assert task.name is not None
+        self._task_name_lookup.pop(task.name, None)
 
-    def add_edge(self, op1: 'task.Task', op2: 'task.Task') -> None:
-        assert op1 in self.graph.nodes
-        assert op2 in self.graph.nodes
-        self.graph.add_edge(op1, op2)
+    def add_edge(self, source: TaskOrName, target: TaskOrName) -> None:
+        """Add an edge from source task to target task.
+
+        Args:
+            source: The task that the target task depends on.
+            target: The task that depends on the source task.
+
+        Raises:
+            ValueError: If a task tries to depend on itself or if the
+            target task is not in the DAG.
+        """
+        source = self._get_task(source)
+        target = self._get_task(target)
+
+        if source.name == target.name:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Task {source.name} cannot depend on itself.')
+        assert target.name is not None
+        if target.name not in self._task_name_lookup:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Target task {target.name} is not '
+                                 'in the DAG.')
+
+        self.graph.add_edge(source, target)
+        if source not in self.edges:
+            self.edges[source] = set()
+        self.edges[source].add(target)
+
+    def add_downstream(self, source: TaskOrName, target: TaskOrName) -> None:
+        """Add downstream tasks for a source task.
+
+        Args:
+            source: The task that the downstream tasks depend on.
+            target: The task(s) to add as downstream tasks.
+        """
+        return self.add_edge(source, target)
+
+    def set_downstream(self, source: TaskOrName,
+                       targets: Union[List[TaskOrName], TaskOrName]) -> None:
+        """Set downstream tasks for a source task.
+
+        This replaces any existing downstream tasks for the given source.
+
+        Args:
+            source: The task that the downstream tasks depend on.
+            targets: The task(s) that depend on the source task.
+        """
+        source = self._get_task(source)
+        if not isinstance(targets, list):
+            targets = [targets]
+        self.remove_all_downstream(source)
+        for target in targets:
+            self.add_edge(source, target)
+
+    def remove_edge(self, source: TaskOrName, target: TaskOrName) -> None:
+        """Remove an edge between two tasks.
+
+        Args:
+            source: The source task to remove the edge from.
+            target: The target task to remove the edge to.
+        """
+        source = self._get_task(source)
+        target = self._get_task(target)
+
+        if source in self.edges and target in self.edges[source]:
+            self.edges[source].remove(target)
+            self.graph.remove_edge(source, target)
+
+    def remove_all_downstream(self, task: TaskOrName) -> None:
+        """Remove all downstream tasks for a given task.
+
+        Args:
+            task: The task to remove all downstream tasks from.
+        """
+        task = self._get_task(task)
+        if task in self.edges:
+            for target in list(self.edges[task]):
+                self.graph.remove_edge(task, target)
+            self.edges[task].clear()
+
+    def get_downstream(self, task: TaskOrName) -> Set['task.Task']:
+        """Get all downstream tasks for a given task.
+
+        Args:
+            task: The task to get downstream tasks for.
+
+        Returns:
+            A set of tasks that depend on the given task.
+        """
+        task = self._get_task(task)
+        return self.edges.get(task, set())
 
     def __len__(self) -> int:
-        return len(self.tasks)
+        """Return the number of tasks in the DAG."""
+        return len(self._task_name_lookup)
 
     def __enter__(self) -> 'Dag':
+        """Enter the runtime context related to this object."""
         push_dag(self)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
+        """Exit the runtime context related to this object."""
         pop_dag()
 
     def __repr__(self) -> str:
-        pformat = pprint.pformat(self.tasks)
-        return f'DAG:\n{pformat}'
+        """Return a string representation of the DAG."""
+        task_info = []
+        for task in self.tasks:
+            downstream = self.get_downstream(task)
+            downstream_names = ','.join(
+                cast(str, dep.name)
+                for dep in downstream) if downstream else '-'
+            task_info.append(f'{task.name}'
+                             f'({downstream_names})')
+
+        tasks_str = ' '.join(task_info)
+        return f'DAG({self.name}: {tasks_str})'
 
     def get_graph(self):
+        """Return the networkx graph representing the DAG."""
         return self.graph
 
     def is_chain(self) -> bool:
-        # NOTE: this method assumes that the graph has no cycle.
-        is_chain = True
-        visited_zero_out_degree = False
-        for node in self.graph.nodes:
-            out_degree = self.graph.out_degree(node)
-            if out_degree > 1:
-                is_chain = False
-                break
-            elif out_degree == 0:
-                if visited_zero_out_degree:
-                    is_chain = False
-                    break
-                else:
-                    visited_zero_out_degree = True
-        return is_chain
+        """Check if the DAG is a linear chain of tasks.
+
+        Returns:
+            True if the DAG is a linear chain, False otherwise.
+        """
+        nodes = list(self.graph.nodes)
+        out_degrees = [self.graph.out_degree(node) for node in nodes]
+
+        return (len(nodes) <= 1 or
+                (all(degree <= 1 for degree in out_degrees) and
+                 sum(degree == 0 for degree in out_degrees) == 1))
 
 
 class _DagContext(threading.local):
@@ -78,11 +256,13 @@ class _DagContext(threading.local):
     _previous_dags: List[Dag] = []
 
     def push_dag(self, dag: Dag):
+        """Push a DAG onto the stack."""
         if self._current_dag is not None:
             self._previous_dags.append(self._current_dag)
         self._current_dag = dag
 
     def pop_dag(self) -> Optional[Dag]:
+        """Pop the current DAG from the stack."""
         old_dag = self._current_dag
         if self._previous_dags:
             self._current_dag = self._previous_dags.pop()
@@ -91,6 +271,7 @@ class _DagContext(threading.local):
         return old_dag
 
     def get_current_dag(self) -> Optional[Dag]:
+        """Get the current DAG."""
         return self._current_dag
 
 

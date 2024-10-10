@@ -83,7 +83,7 @@ def launch(
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
-        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_utils.dump_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX

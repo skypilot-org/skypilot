@@ -13,6 +13,7 @@ import re
 import socket
 import sys
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
@@ -26,6 +27,9 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
 from sky.utils import validator
+
+if typing.TYPE_CHECKING:
+    from sky import task as task_lib
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -226,6 +230,13 @@ def get_global_job_id(job_timestamp: str,
     if task_id is not None:
         global_job_id += f'-{task_id}'
     return global_job_id
+
+
+def get_unique_task_name(_: 'task_lib.Task') -> str:
+    timestamp = int(time.time())
+    unique_suffix = uuid.uuid4().hex[:6]
+    name = f'task_{timestamp}_{unique_suffix}'
+    return name
 
 
 class Backoff:

@@ -761,7 +761,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
+        dag = dag_utils.load_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -778,7 +778,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
-        # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
+        # env update has been done for DAG in load_dag_from_yaml for YAML.
         task.update_envs(env)
 
     # Override.
