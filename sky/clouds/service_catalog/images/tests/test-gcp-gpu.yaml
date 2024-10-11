@@ -1,0 +1,11 @@
+resources:
+  accelerators: L4:1
+  cloud: gcp
+  image_id: projects/sky-dev-465/global/images/skypilot-gcp-gpu-ubuntu-20241011195047
+
+workdir: .
+num_nodes: 1
+
+run: |
+  docker run hello-world
+  nvidia-smi
