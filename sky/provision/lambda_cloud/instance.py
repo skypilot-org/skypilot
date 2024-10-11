@@ -120,9 +120,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     if head_instance_id is None:
         instance_ids = launch_nodes('head', 1)
-        assert len(
-            instance_ids
-        ) == 1, f'Expected exactly one instance, got {len(instance_ids)}'
+        assert len(instance_ids) == 1
         created_instance_ids.append(instance_ids[0])
         head_instance_id = instance_ids[0]
 
@@ -251,7 +249,8 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    raise NotImplementedError()
+    raise NotImplementedError(
+        'open_ports is not supported for Lambda Cloud')
 
 
 def cleanup_ports(
