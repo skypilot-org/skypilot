@@ -506,7 +506,6 @@ class RayCodeGen:
                             )).remote()
                     for i in range(pg.bundle_count)
                 ])
-                # print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
                 cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
                 job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
@@ -1597,7 +1596,7 @@ class RetryingVmProvisioner(object):
                 config_dict['handle'] = handle
                 logger.info(
                     ux_utils.finishing_message(
-                        f'Cluster {cluster_name!r} launched.', log_path))
+                        f'Cluster launched: {cluster_name!r}.', log_path))
                 return config_dict
 
             # The cluster is not ready. We must perform error recording and/or
