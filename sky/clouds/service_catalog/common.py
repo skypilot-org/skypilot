@@ -514,7 +514,7 @@ def get_instance_type_for_accelerator_impl(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
-                (df['AcceleratorCount'] == acc_count)]
+                (abs(df['AcceleratorCount'] - acc_count) <= 0.01)]
     result = _filter_region_zone(result, region, zone)
     if len(result) == 0:
         fuzzy_result = df[
