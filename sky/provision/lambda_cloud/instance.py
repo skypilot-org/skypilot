@@ -24,8 +24,9 @@ def _get_lambda_client():
     return _lambda_client
 
 
-def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]]) -> Dict[str, Dict[str, Any]]:
+def _filter_instances(
+        cluster_name_on_cloud: str,
+        status_filters: Optional[List[str]]) -> Dict[str, Dict[str, Any]]:
     lambda_client = _get_lambda_client()
     instances = lambda_client.list_instances()
     possible_names = [
@@ -119,7 +120,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     if head_instance_id is None:
         instance_ids = launch_nodes('head', 1)
-        assert len(instance_ids) == 1, f'Expected exactly one instance, got {len(instance_ids)}'
+        assert len(
+            instance_ids
+        ) == 1, f'Expected exactly one instance, got {len(instance_ids)}'
         created_instance_ids.append(instance_ids[0])
         head_instance_id = instance_ids[0]
 
