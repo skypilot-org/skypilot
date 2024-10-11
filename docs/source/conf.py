@@ -163,7 +163,7 @@ show_sphinx = False
 exclude_patterns = ['_gallery_original']
 myst_heading_anchors = 3
 
-googleanalytics_id = "G-92WF3MDCJV"
+googleanalytics_id = 'G-92WF3MDCJV'
 
 
 def setup(app):
