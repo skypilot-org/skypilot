@@ -10,8 +10,6 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
-import colorama
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common

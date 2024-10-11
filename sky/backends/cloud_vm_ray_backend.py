@@ -2807,9 +2807,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         blocked_resources=task.blocked_resources)
                     log_path = os.path.join(self.log_dir, 'provision.log')
                     rich_utils.force_update_status(
-                            ux_utils.spinner_message('Launching', log_path))
+                        ux_utils.spinner_message('Launching', log_path))
                     config_dict = retry_provisioner.provision_with_retries(
-                            task, to_provision_config, dryrun, stream_logs)
+                        task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state
