@@ -1,7 +1,7 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
 import random
 import typing
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from sky import sky_logging
 
@@ -28,8 +28,9 @@ class LoadBalancingPolicy:
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
-    def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
-        replica = self._select_replica(request)
+    def select_replica(self, request: 'fastapi.Request',
+                       disabled_replicas: Set[str]) -> Optional[str]:
+        replica = self._select_replica(request, disabled_replicas)
         if replica is not None:
             logger.info(f'Selected replica {replica} '
                         f'for request {_request_repr(request)}')
@@ -38,9 +39,13 @@ class LoadBalancingPolicy:
                            f'{_request_repr(request)}')
         return replica
 
+    def num_ready_replicas(self) -> int:
+        return len(self.ready_replicas)
+
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_replicas: Set[str]) -> Optional[str]:
         raise NotImplementedError
 
 
@@ -61,10 +66,13 @@ class RoundRobinPolicy(LoadBalancingPolicy):
         self.ready_replicas = ready_replicas
         self.index = 0
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_replicas: Set[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
-        self.index = (self.index + 1) % len(self.ready_replicas)
-        return ready_replica_url
+        while True:
+            ready_replica_url = self.ready_replicas[self.index]
+            self.index = (self.index + 1) % len(self.ready_replicas)
+            if ready_replica_url not in disabled_replicas:
+                return ready_replica_url
