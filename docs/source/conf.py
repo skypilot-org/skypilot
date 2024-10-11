@@ -37,8 +37,8 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
-    'sphinxemoji.sphinxemoji',
     'sphinxcontrib.googleanalytics',
+    'sphinxemoji.sphinxemoji',
     'sphinx_design',
     'myst_parser',
 ]
