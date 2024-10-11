@@ -58,6 +58,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
 
+    memory_gb_or_ratio = memory
     if memory is None:
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
