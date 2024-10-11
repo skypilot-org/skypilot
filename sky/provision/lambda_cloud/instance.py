@@ -101,7 +101,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     created_instance_ids = []
     ssh_key_name = _get_ssh_key_name()
 
-    def launch_nodes(node_type: str, quantity: int):
+    def launch_nodes(node_type: str, quantity: int) -> List[str]:
         try:
             instance_ids = lambda_client.create_instances(
                 instance_type=config.node_config['InstanceType'],
@@ -119,9 +119,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     if head_instance_id is None:
         instance_ids = launch_nodes('head', 1)
-        if len(instance_ids) != 1:
-            raise RuntimeError(
-                f'Expected exactly one instance, got {len(instance_ids)}')
+        assert len(instance_ids) == 1, f'Expected exactly one instance, got {len(instance_ids)}'
         created_instance_ids.append(instance_ids[0])
         head_instance_id = instance_ids[0]
 
@@ -237,8 +235,7 @@ def query_instances(
         'booting': status_lib.ClusterStatus.INIT,
         'active': status_lib.ClusterStatus.UP,
         'unhealthy': status_lib.ClusterStatus.INIT,
-        'terminating': status_lib.ClusterStatus.STOPPED,
-        'terminated': status_lib.ClusterStatus.STOPPED,
+        'terminating': status_lib.ClusterStatus.INIT,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for instance_id, instance in instances.items():
