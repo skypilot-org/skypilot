@@ -15,8 +15,8 @@ TaskOrName = Union['task.Task', str]
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks.
 
-    This class allows users to define and manage directed acyclic graphs (DAGs) of tasks,
-    representing complex workflows or pipelines.
+    This class allows users to define and manage directed acyclic graphs
+    (DAGs) of tasks, representing complex workflows or pipelines.
 
     Examples:
         >>> import sky
@@ -39,7 +39,8 @@ class Dag:
             name: Optional name for the DAG.
             tasks: Optional list of Task objects to add to the DAG.
             dependencies: Optional dictionary specifying task dependencies.
-                          Keys are dependent tasks, values are lists of tasks they depend on.
+                          Keys are dependent tasks, values are lists of tasks
+                          they depend on.
         """
         self.name = name
         self.tasks: List['task.Task'] = []
@@ -84,16 +85,17 @@ class Dag:
             task: The Task object to add.
 
         Raises:
-            ValueError: If the task already exists in the DAG or if its name is already used.
+            ValueError: If the task already exists in the DAG or if its name
+            is already used.
         """
         if task in self.tasks:
-            raise ValueError(f"Task {task.name} already exists in the DAG.")
+            raise ValueError(f'Task {task.name} already exists in the DAG.')
         self.graph.add_node(task)
         self.tasks.append(task)
         if task.name is not None:
             if task.name in self._task_name_lookup:
                 raise ValueError(
-                    f"Task name '{task.name}' is already used in the DAG.")
+                    f'Task name "{task.name}" is already used in the DAG.')
             self._task_name_lookup[task.name] = task
 
     def remove(self, task: Union['task.Task', str]) -> None:
@@ -125,24 +127,25 @@ class Dag:
     def add_dependency(self, dependent: TaskOrName,
                        dependency: TaskOrName) -> None:
         """Add a single dependency for a task.
-        
+
         This method adds a new dependency without removing existing ones.
 
         Args:
             dependent: The task that depends on another.
             dependency: The task that the dependent task depends on.
 
-        Raises: 
-            ValueError: If a task tries to depend on itself or if the dependency task is not in the DAG.
+        Raises:
+            ValueError: If a task tries to depend on itself or if the
+            dependency task is not in the DAG.
         """
         dependent = self._get_task(dependent)
         dependency = self._get_task(dependency)
 
         if dependent == dependency:
-            raise ValueError(f"Task {dependent.name} cannot depend on itself.")
+            raise ValueError(f'Task {dependent.name} cannot depend on itself.')
         if dependency not in self.tasks:
             raise ValueError(
-                f"Dependency task {dependency.name} is not in the DAG.")
+                f'Dependency task {dependency.name} is not in the DAG.')
 
         self.graph.add_edge(dependency, dependent)
         if dependent not in self.dependencies:
@@ -239,6 +242,7 @@ class Dag:
         return (len(nodes) <= 1 or
                 (all(degree <= 1 for degree in out_degrees) and
                  sum(degree == 0 for degree in out_degrees) == 1))
+
 
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""
