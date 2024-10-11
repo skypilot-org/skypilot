@@ -258,10 +258,6 @@ class CommandRunner:
 
         rsync_command.append(f'-e {shlex.quote(rsh_option)}')
 
-        # Avoid rsync interpreting :, /, and + in node_destination as the
-        # default delimiter for options and arguments.
-        encoded_node_destination = node_destination.replace(':', '%3A').replace(
-            '/', '%2F').replace('+', '%2B')
         if up:
             resolved_target = target
             if target.startswith('~'):
@@ -272,7 +268,7 @@ class CommandRunner:
                 full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
-                f'{encoded_node_destination}:{resolved_target!r}',
+                f'{node_destination}:{resolved_target!r}',
             ])
         else:
             resolved_source = source
@@ -280,7 +276,7 @@ class CommandRunner:
                 remote_home_dir = get_remote_home_dir()
                 resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
-                f'{encoded_node_destination}:{resolved_source!r}',
+                f'{node_destination}:{resolved_source!r}',
                 f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)
@@ -835,10 +831,17 @@ class KubernetesCommandRunner(CommandRunner):
         # Build command.
         helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
                                    'kubernetes', 'rsync_helper.sh')
+        namespace_context = f'{self.namespace}+{self.context}'
+        # Avoid rsync interpreting :, /, and + in namespace_context as the
+        # default delimiter for options and arguments.
+        # rsync_helper.sh will parse the namespace_context by reverting the
+        # encoding and pass it to kubectl exec.
+        encoded_namespace_context = namespace_context.replace(
+            ':', '%3A').replace('/', '%2F').replace('+', '%2B')
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{self.namespace}+{self.context}',
+            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,
