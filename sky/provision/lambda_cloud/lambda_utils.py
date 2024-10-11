@@ -176,9 +176,9 @@ class LambdaCloudClient:
         )
         return response.json().get('data', []).get('instance_ids', [])
 
-    def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
+    def remove_instances(self, instance_ids: List[str]) -> Dict[str, Any]:
         """Terminate instances."""
-        data = json.dumps({'instance_ids': list(instance_ids)})
+        data = json.dumps({'instance_ids': instance_ids})
         response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/terminate',
