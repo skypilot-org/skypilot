@@ -41,8 +41,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
     if ssh_control_filename is None:
         return None
-    user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    path = f'~/.ssh/control_masters/{ssh_control_filename}'
+    path = os.path.expanduser(path)
     os.makedirs(path, exist_ok=True)
     return path
 
