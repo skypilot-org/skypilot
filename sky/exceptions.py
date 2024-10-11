@@ -294,5 +294,5 @@ class UserRequestRejectedByPolicy(Exception):
 
 
 class NoClusterLaunchedError(Exception):
-    """Raised when no cluster is launched."""
+    """No cluster launched, so cleanup can be skipped during failover."""
     pass
