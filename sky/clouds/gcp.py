@@ -95,9 +95,9 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
 )
 
 # Image ID tags
-DEFAULT_CPU_IMAGE_ID = 'skypilot:cpu-debian-11'
+DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
 DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
-DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-debian-11'
+DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
 
 
 def _run_output(cmd):
