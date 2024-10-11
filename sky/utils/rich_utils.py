@@ -76,7 +76,7 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _status is None:
-            _status = console.status(msg)
+            _status = console.status(msg, refresh_per_second=4)
         return NestedStatus(msg)
     return _NoOpConsoleStatus()
 
