@@ -216,9 +216,6 @@ def get_cluster_info(
         head_instance_id=head_instance_id,
         provider_name='lambda',
         provider_config=provider_config,
-        custom_ray_options={
-            'use_external_ip': True,
-        },
     )
 
 
