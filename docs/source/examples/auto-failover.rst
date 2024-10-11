@@ -53,30 +53,26 @@ Cross-region failover
 
 The provisioner first retries across all regions within a task's chosen cloud.
 
-A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
+A common high-end GPU to use in AI is a NVIDIA A100 GPU.  These GPUs
 are often in high demand and hard to get.  Let's see how SkyPilot's auto-failover
 provisioner handles such a request:
 
 .. code-block:: console
 
-  $ sky launch -c gpu --gpus V100
+  $ sky launch -c gpu --gpus A100
 
   ...
-  Creating a new cluster: "gpu" [1x GCP(n1-highmem-8, {'V100': 1.0})].
-  Tip: to reuse an existing cluster, specify --cluster-name (-c) in the CLI or use sky.launch(.., cluster_name=..) in the Python API. Run `sky status` to see existing clusters.
-  To view detailed progress: tail -n100 -f sky_logs/sky-2022-02-11-21-17-43-171661/provision.log
-
-  Launching on GCP us-central1 (us-central1-a)
-  Got ZONE_RESOURCE_POOL_EXHAUSTED in us-central1-a (message: The zone 'projects/intercloud-320520/zones/us-central1-a' does not have enough resources available to fulfill the request.  Try a different zone, or try again later.)
+  Launching a new cluster 'gpu'. Proceed? [Y/n]: 
+  ⚙️ Launching on GCP us-central1 (us-central1-a).
+  W 10-11 18:25:57 instance_utils.py:112] Got return codes 'VM_MIN_COUNT_NOT_REACHED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS' in us-central1-a: 'Requested minimum count of 1 VMs could not be created'; "The zone 'projects/xxxxxx/zones/us-central1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'"
   ...
 
-  Launching on GCP us-central1 (us-central1-f)
-  Got ZONE_RESOURCE_POOL_EXHAUSTED in us-central1-f (message: The zone 'projects/intercloud-320520/zones/us-central1-f' does not have enough resources available to fulfill the request.  Try a different zone, or try again later.)
+  ⚙️ Launching on GCP us-central1 (us-central1-f)
   ...
 
-  Launching on GCP us-west1 (us-west1-a)
+  ⚙️ Launching on GCP us-west1 (us-west1-a)
   ...
-  Successfully connected to 35.230.120.87.
+  ✓ Cluster launched: a100-8.  View logs at: ~/sky_logs/sky-2024-10-11-18-32-48-894132/provision.log
 
 GCP was chosen as the best cloud to run the task. There was no capacity in any of the regions in US Central, so the auto-failover provisioner moved to US West instead, allowing for our instance to be successfully provisioned.
 
