@@ -831,10 +831,17 @@ class KubernetesCommandRunner(CommandRunner):
         # Build command.
         helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
                                    'kubernetes', 'rsync_helper.sh')
+        namespace_context = f'{self.namespace}+{self.context}'
+        # Avoid rsync interpreting :, /, and + in namespace_context as the
+        # default delimiter for options and arguments.
+        # rsync_helper.sh will parse the namespace_context by reverting the
+        # encoding and pass it to kubectl exec.
+        encoded_namespace_context = namespace_context.replace(
+            ':', '%3A').replace('/', '%2F').replace('+', '%2B')
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{self.namespace}+{self.context}',
+            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,

@@ -604,11 +604,20 @@ def format_job_table(
       a list of "rows" (each of which is a list of str).
     """
     jobs = collections.defaultdict(list)
+    # Check if the tasks have user information.
+    tasks_have_user = any([task.get('user') for task in tasks])
+    if max_jobs and tasks_have_user:
+        raise ValueError('max_jobs is not supported when tasks have user info.')
+
+    def get_hash(task):
+        if tasks_have_user:
+            return (task['user'], task['job_id'])
+        return task['job_id']
+
     for task in tasks:
         # The tasks within the same job_id are already sorted
         # by the task_id.
-        jobs[task['job_id']].append(task)
-    jobs = dict(jobs)
+        jobs[get_hash(task)].append(task)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
     for job_tasks in jobs.values():
@@ -616,17 +625,14 @@ def format_job_table(
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
 
-    if max_jobs is not None:
-        job_ids = sorted(jobs.keys(), reverse=True)
-        job_ids = job_ids[:max_jobs]
-        jobs = {job_id: jobs[job_id] for job_id in job_ids}
-
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
     ]
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
+    if tasks_have_user:
+        columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
@@ -641,9 +647,9 @@ def format_job_table(
     for task in all_tasks:
         # The tasks within the same job_id are already sorted
         # by the task_id.
-        jobs[task['job_id']].append(task)
+        jobs[get_hash(task)].append(task)
 
-    for job_id, job_tasks in jobs.items():
+    for job_hash, job_tasks in jobs.items():
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
@@ -679,6 +685,7 @@ def format_job_table(
             if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
+            job_id = job_hash[1] if tasks_have_user else job_hash
             job_values = [
                 job_id,
                 '',
@@ -697,6 +704,8 @@ def format_job_table(
                     '-',
                     failure_reason if failure_reason is not None else '-',
                 ])
+            if tasks_have_user:
+                job_values.insert(0, job_tasks[0].get('user', '-'))
             job_table.add_row(job_values)
 
         for task in job_tasks:
@@ -729,6 +738,8 @@ def format_job_table(
                     task['failure_reason']
                     if task['failure_reason'] is not None else '-',
                 ])
+            if tasks_have_user:
+                values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
 
         if len(job_tasks) > 1:
