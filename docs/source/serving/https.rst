@@ -3,12 +3,12 @@
 HTTPS Encryption
 ================
 
-SkyServe enables secure serving of models over HTTPS, which is essential for handling sensitive data or for models that require secure communication with other services. Currently, SkyServe supports HTTPS only on the load balancer (for communication between the client and the load balancer); HTTPS on the service replicas (for communication between the load balancer and the service replicas) is not yet supported.
+SkyServe enables secure serving of models over HTTPS, which is essential for handling sensitive data or for models that require secure communication with other services. Currently, SkyServe supports HTTPS encrypted endpoint (for communication between the client and the load balancer); HTTPS between the load balancer and the service replicas is not yet supported.
 
-HTTPS on Load Balancer
-----------------------
+HTTPS Encrypted Endpoint
+------------------------
 
-To enable HTTPS on the load balancer, you need to provide a certificate and a private key. Obtaining these from a trusted Certificate Authority (CA) is the most secure method. However, for development and testing purposes, you can generate a self-signed certificate and private key using the :code:`openssl` command-line tool. Here is an example of how to generate them:
+To create an HTTPS encrypted endpoint, you need to provide a certificate and a private key. Obtaining these from a trusted Certificate Authority (CA) is the most secure method. However, for development and testing purposes, you can generate a self-signed certificate and private key using the :code:`openssl` command-line tool. Here is an example of how to generate them:
 
 .. code-block:: bash
 
@@ -35,14 +35,14 @@ To deploy the service, run the following command:
 
 .. code-block:: bash
 
-  $ sky serve up https.yaml -n https
+  $ sky serve up https.yaml -n my-service
 
 If you are using a self-signed certificate, you may need to add the :code:`-k` flag to the :code:`curl` command to bypass certificate:
 
 .. code-block:: bash
   :emphasize-lines: 2
 
-  $ ENDPOINT=$(sky serve status --endpoint https)
+  $ ENDPOINT=$(sky serve status --endpoint my-service)
   $ curl -k $ENDPOINT
   <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
   <html>
