@@ -115,7 +115,7 @@ class RedirectOutputForProcess:
 
 def starting_message(message: str) -> str:
     """Gets the starting message for the given message."""
-    return f'⚙️ {message}'
+    return f'⚙︎ {message}'
 
 
 # Log path hint in the spinner during launching

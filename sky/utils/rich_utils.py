@@ -5,7 +5,7 @@ from typing import Union
 
 import rich.console as rich_console
 
-console = rich_console.Console()
+console = rich_console.Console(soft_wrap=True)
 _status = None
 _status_nesting_level = 0
 
