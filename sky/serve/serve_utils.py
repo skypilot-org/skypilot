@@ -945,8 +945,15 @@ class ServeCodeGen:
     def terminate_replica(cls, service_name: str, replica_id: int,
                           purge: bool) -> str:
         code = [
-            f'msg = serve_utils.terminate_replica({service_name!r}, '
-            f'{replica_id}, {purge})', 'print(msg, end="", flush=True)'
+            'try:',
+            f'    msg = serve_utils.terminate_replica({service_name!r}, '
+            f'{replica_id}, {purge})',
+            '    print(msg, end="", flush=True)',
+            'except AttributeError:',
+            '    raise RuntimeError("The version of sky controller '
+            'is outdated. Please terminate the service and spin up again '
+            'to support this feature.")',
+            '# Other exceptions will be propagated naturally'
         ]
         return cls._build(code)
 
