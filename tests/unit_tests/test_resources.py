@@ -156,6 +156,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
         'docker_container_name': 'sky_container',
         'docker_login_config': None,
         'docker_run_options': [],
+        'efa_interface_count': 0,
         'initial_setup_commands': [],
         'zones': 'fake-zone'
     }
