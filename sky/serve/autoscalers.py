@@ -98,7 +98,7 @@ class Autoscaler:
         self.update_mode = update_mode
 
     def collect_request_information(
-            self, request_aggregator_info: schemas.RequestAggregator) -> None:
+            self, request_aggregator_info: schemas.RequestsAggregator) -> None:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
@@ -223,9 +223,15 @@ class RequestRateAutoscaler(Autoscaler):
         self.downscale_counter = 0
 
     def collect_request_information(
-            self, request_aggregator_info: schemas.RequestAggregator) -> None:
+            self, request_aggregator_info: schemas.RequestsAggregator) -> None:
         """Collect request information from aggregator for autoscaling."""
-        self.request_timestamps.extend(request_aggregator_info.timestamps)
+        if isinstance(request_aggregator_info, schemas.TimestampAggregator):
+            self.request_timestamps.extend(request_aggregator_info.timestamps)
+        else:
+            logger.error(f'Unsupported request aggregator type: '
+                         f'{type(request_aggregator_info)}')
+            return
+
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.qps_window_size)

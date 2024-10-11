@@ -100,7 +100,11 @@ class SkyServeController:
         async def load_balancer_sync(
                 request: schemas.LoadBalancerRequest) -> fastapi.Response:
             request_aggregator = request.request_aggregator
-            timestamps = request_aggregator.timestamps
+            if isinstance(request_aggregator, schemas.TimestampAggregator):
+                timestamps = request_aggregator.timestamps
+            else:
+                raise ValueError(f'Unsupported request aggregator type: '
+                                 f'{type(request_aggregator)}')
 
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)

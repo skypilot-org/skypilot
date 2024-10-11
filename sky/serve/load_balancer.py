@@ -13,7 +13,7 @@ import uvicorn
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
-from sky.serve import serve_utils
+from sky.serve import schemas
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -39,8 +39,8 @@ class SkyServeLoadBalancer:
         self._load_balancer_port: int = load_balancer_port
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
-        self._request_aggregator: serve_utils.RequestsAggregator = (
-            serve_utils.RequestTimestamp())
+        self._request_aggregator: schemas.RequestsAggregator = (
+            schemas.TimestampAggregator())
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
         # for each client. We should wait for feedback on the best max
         # connections.
@@ -75,10 +75,9 @@ class SkyServeLoadBalancer:
                     async with session.post(
                             self._controller_url +
                             '/controller/load_balancer_sync',
-                            json={
-                                'request_aggregator':
-                                    self._request_aggregator.to_dict()
-                            },
+                            json=schemas.LoadBalancerRequest(
+                                request_aggregator=self._request_aggregator).
+                            model_dump(mode='json'),
                             timeout=aiohttp.ClientTimeout(5),
                     ) as response:
                         # Clean up after reporting request info to avoid OOM.

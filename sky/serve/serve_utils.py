@@ -137,51 +137,6 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
             return self._dict.values()
 
 
-class RequestsAggregator:
-    """Base class for request aggregator."""
-
-    def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request aggregator."""
-        raise NotImplementedError
-
-    def clear(self) -> None:
-        """Clear all current request aggregator."""
-        raise NotImplementedError
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the aggregator to a dict."""
-        raise NotImplementedError
-
-    def __repr__(self) -> str:
-        raise NotImplementedError
-
-
-class RequestTimestamp(RequestsAggregator):
-    """RequestTimestamp: Aggregates request timestamps.
-
-    This is useful for QPS-based autoscaling.
-    """
-
-    def __init__(self) -> None:
-        self.timestamps: List[float] = []
-
-    def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request aggregator."""
-        del request  # unused
-        self.timestamps.append(time.time())
-
-    def clear(self) -> None:
-        """Clear all current request aggregator."""
-        self.timestamps = []
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the aggregator to a dict."""
-        return {'timestamps': self.timestamps}
-
-    def __repr__(self) -> str:
-        return f'RequestTimestamp(timestamps={self.timestamps})'
-
-
 def generate_service_name():
     return f'sky-service-{uuid.uuid4().hex[:4]}'
 
