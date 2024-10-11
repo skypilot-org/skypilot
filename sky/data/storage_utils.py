@@ -1,4 +1,5 @@
 """Utility functions for the storage module."""
+import glob
 import os
 import shlex
 import subprocess
@@ -8,6 +9,8 @@ import colorama
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils.cli_utils import status_utils
 
@@ -63,6 +66,42 @@ def format_storage_table(storages: List[Dict[str, Any]],
         return 'No existing storage.'
 
 
+def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
+    """List files and patterns ignored by the .skyignore file
+    in the given source directory.
+    """
+    excluded_list: List[str] = []
+    expand_src_dir_path = os.path.expanduser(src_dir_path)
+    skyignore_path = os.path.join(expand_src_dir_path,
+                                  constants.SKY_IGNORE_FILE)
+
+    try:
+        with open(skyignore_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    # Make parsing consistent with rsync.
+                    # Rsync uses '/' as current directory.
+                    if line.startswith('/'):
+                        line = '.' + line
+                    else:
+                        line = '**/' + line
+                    # Find all files matching the pattern.
+                    matching_files = glob.glob(os.path.join(
+                        expand_src_dir_path, line),
+                                               recursive=True)
+                    # Process filenames to comply with cloud rsync format.
+                    for i in range(len(matching_files)):
+                        matching_files[i] = os.path.relpath(
+                            matching_files[i], expand_src_dir_path)
+                    excluded_list.extend(matching_files)
+    except IOError as e:
+        logger.warning(f'Error reading {skyignore_path}: '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    return excluded_list
+
+
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     """ Lists files and patterns ignored by git in the source directory
 
@@ -78,7 +117,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     expand_src_dir_path = os.path.expanduser(src_dir_path)
 
     git_exclude_path = os.path.join(expand_src_dir_path, '.git/info/exclude')
-    gitignore_path = os.path.join(expand_src_dir_path, '.gitignore')
+    gitignore_path = os.path.join(expand_src_dir_path,
+                                  constants.GIT_IGNORE_FILE)
 
     git_exclude_exists = os.path.isfile(git_exclude_path)
     gitignore_exists = os.path.isfile(gitignore_path)
@@ -162,3 +202,19 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                     to_be_excluded += '*'
                 excluded_list.append(to_be_excluded)
     return excluded_list
+
+
+def get_excluded_files(src_dir_path: str) -> List[str]:
+    # TODO: this could return a huge list of files,
+    # should think of ways to optimize.
+    """ List files and directories to be excluded."""
+    expand_src_dir_path = os.path.expanduser(src_dir_path)
+    skyignore_path = os.path.join(expand_src_dir_path,
+                                  constants.SKY_IGNORE_FILE)
+    if os.path.exists(skyignore_path):
+        logger.info(f'Exclude files to sync to cluster based on '
+                    f'{constants.SKY_IGNORE_FILE}.')
+        return get_excluded_files_from_skyignore(src_dir_path)
+    logger.info(f'Exclude files to sync to cluster based on '
+                f'{constants.GIT_IGNORE_FILE}.')
+    return get_excluded_files_from_gitignore(src_dir_path)

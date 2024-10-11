@@ -5103,7 +5103,8 @@ def _deploy_local_cluster(gpus: bool):
 
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
-    run_command = up_script_path + ' --gpus' if gpus else up_script_path
+    run_command = up_script_path + f' {common_utils.get_user_hash()}'
+    run_command = run_command + ' --gpus' if gpus else run_command
     run_command = shlex.split(run_command)
 
     # Setup logging paths
