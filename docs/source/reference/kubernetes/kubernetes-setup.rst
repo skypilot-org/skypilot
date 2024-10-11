@@ -288,17 +288,17 @@ Below, we provide tips on how to monitor SkyPilot resources on your Kubernetes c
 
 .. _kubernetes-observability-skystatus:
 
-SkyPilot CLI
-^^^^^^^^^^^^
+List SkyPilot resources across all users
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-We provide a convenience command, :code:`sky status --kubernetes`, to view the status of all SkyPilot resources in the cluster.
+We provide a convenience command, :code:`sky status --k8s`, to view the status of all SkyPilot resources in the cluster.
 
 Unlike :code:`sky status` which lists only the SkyPilot resources launched by the current user,
-:code:`sky status --kubernetes` lists all SkyPilot resources in the cluster across all users.
+:code:`sky status --k8s` lists all SkyPilot resources in the cluster across all users.
 
 .. code-block:: console
 
-    $ sky status --kubernetes
+    $ sky status --k8s
     Kubernetes cluster state (context: mycluster)
     SkyPilot clusters
     USER     NAME                           LAUNCHED    RESOURCES                                  STATUS
