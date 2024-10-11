@@ -535,6 +535,12 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
                                                      require_outputs=True,
                                                      stream_logs=False,
                                                      separate_stderr=True)
+
+    if returncode != 0 and 'AttributeError' in stderr:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('The version of sky controler may be outdated. '
+                               'Please terminate the service and spin up again '
+                               'to support this feature.') from None
     try:
         subprocess_utils.handle_returncode(returncode,
                                            code,
