@@ -48,6 +48,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1945,7 +1946,7 @@ class RetryingVmProvisioner(object):
                 if dryrun:
                     cloud_user = None
                 else:
-                    cloud_user = to_provision.cloud.get_current_user_identity()
+                    cloud_user = to_provision.cloud.get_active_user_identity()
 
                 requested_features = self._requested_features.copy()
                 # Skip stop feature for Kubernetes and RunPod controllers.
@@ -2081,7 +2082,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
             self,
@@ -2514,6 +2515,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
+
+        if version < 9:
+            # For backward compatibility, we should update the region of a
+            # SkyPilot cluster on Kubernetes to the actual context it is using.
+            # pylint: disable=import-outside-toplevel
+            launched_resources = state['launched_resources']
+            if isinstance(launched_resources.cloud, clouds.Kubernetes):
+                yaml_config = common_utils.read_yaml(
+                    os.path.expanduser(state['_cluster_yaml']))
+                context = kubernetes_utils.get_context_from_config(
+                    yaml_config['provider'])
+                state['launched_resources'] = launched_resources.copy(
+                    region=context)
 
         self.__dict__.update(state)
 
@@ -3057,7 +3071,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as large sizes will slow '
+                '.skyignore to exclude large files, as large sizes will slow '
                 f'down rsync.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
@@ -4162,11 +4176,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
                 # Kubernetes and RunPod clusters.
-                assert (controller_utils.Controllers.from_name(
-                    handle.cluster_name) is not None), handle.cluster_name
-                logger.info('Auto-stop is not supported for Kubernetes '
-                            'and RunPod clusters. Skipping.')
-                return
+                controller = controller_utils.Controllers.from_name(
+                    handle.cluster_name)
+                assert (controller is not None), handle.cluster_name
+                if (controller
+                        == controller_utils.Controllers.SKY_SERVE_CONTROLLER and
+                        isinstance(handle.launched_resources.cloud,
+                                   clouds.Kubernetes)):
+                    # For SkyServe controllers on Kubernetes: override autostop
+                    # behavior to force autodown (instead of no-op)
+                    # to avoid dangling controllers.
+                    down = True
+                else:
+                    logger.info('Auto-stop is not supported for Kubernetes '
+                                'and RunPod clusters. Skipping.')
+                    return
 
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
@@ -4184,6 +4208,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
+
+        # Add/Remove autodown annotations to/from Kubernetes pods.
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            kubernetes_utils.set_autodown_annotations(
+                handle=handle,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down)
 
     def is_definitely_autostopping(self,
                                    handle: CloudVmRayResourceHandle,
@@ -4454,7 +4485,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as large sizes '
+                        '.skyignore to exclude large files, as large sizes '
                         f'will slow down rsync. {style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(

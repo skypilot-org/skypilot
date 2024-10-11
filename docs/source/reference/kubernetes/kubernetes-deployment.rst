@@ -35,6 +35,13 @@ Below we include minimal guides to set up a new Kubernetes cluster in different 
 
         Amazon's hosted Kubernetes service.
 
+    .. grid-item-card::  On-demand Cloud VMs
+        :link: kubernetes-setup-ondemand
+        :link-type: ref
+        :text-align: center
+
+        We provide scripts to deploy k8s on on-demand cloud VMs.
+
 .. _kubernetes-setup-kind:
 
 
@@ -196,7 +203,10 @@ Deploying on Amazon EKS
 Deploying on on-prem clusters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
+If you have a list of IP addresses and the SSH credentials for your on-prem cluster, you can follow our
+:ref:`Using Existing Machines <existing-machines>` guide to set up SkyPilot on your on-prem cluster.
+
+Alternatively, you can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
 such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_,
 `k3s <https://docs.k3s.io/quick-start>`_ or
 `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.
@@ -268,3 +278,14 @@ After the GPU operator is installed, create the nvidia RuntimeClass required by 
       name: nvidia
     handler: nvidia
     EOF
+
+
+.. _kubernetes-setup-ondemand:
+
+Deploying on cloud VMs
+^^^^^^^^^^^^^^^^^^^^^^
+
+You can also spin up on-demand cloud VMs and deploy Kubernetes on them.
+
+We provide scripts to take care of provisioning VMs, installing Kubernetes, setting up GPU support and configuring your local kubeconfig.
+Refer to our `Deploying Kubernetes on VMs guide <https://github.com/skypilot-org/skypilot/tree/master/examples/k8s_cloud_deploy>`_ for more details.

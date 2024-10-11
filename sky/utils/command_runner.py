@@ -16,8 +16,6 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
-# The git exclude file to support.
-GIT_EXCLUDE = '.git/info/exclude'
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
 # shooting a lot of messages to the output. --info=progress2 is used
@@ -30,7 +28,10 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # Note that "-" is mandatory for rsync and means all patterns in the ignore
 # files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
 # do_not_exclude" doesn't work, even though git allows it.
-RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
+RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
+# The git exclude file to support.
+GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 
 _HASH_MAX_LENGTH = 10
@@ -85,6 +86,10 @@ def ssh_options_list(
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
         'IdentitiesOnly': 'yes',
+        # Add the current private key used for this SSH connection to the
+        # SSH agent, so that forward agent parameter will then make SSH
+        # agent forward it.
+        'AddKeysToAgent': 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
         'ExitOnForwardFailure': 'yes',
@@ -233,21 +238,23 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
 
         # --filter
-        rsync_command.append(RSYNC_FILTER_OPTION)
-
-        if up:
-            # Build --exclude-from argument.
-            # The source is a local path, so we need to resolve it.
-            resolved_source = pathlib.Path(source).expanduser().resolve()
-            if (resolved_source / GIT_EXCLUDE).exists():
-                # Ensure file exists; otherwise, rsync will error out.
-                #
-                # We shlex.quote() because the path may contain spaces:
-                #   'my dir/.git/info/exclude'
-                # Without quoting rsync fails.
-                rsync_command.append(
-                    RSYNC_EXCLUDE_OPTION.format(
-                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+        # The source is a local path, so we need to resolve it.
+        resolved_source = pathlib.Path(source).expanduser().resolve()
+        if (resolved_source / constants.SKY_IGNORE_FILE).exists():
+            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
+        else:
+            rsync_command.append(RSYNC_FILTER_GITIGNORE)
+            if up:
+                # Build --exclude-from argument.
+                if (resolved_source / GIT_EXCLUDE).exists():
+                    # Ensure file exists; otherwise, rsync will error out.
+                    #
+                    # We shlex.quote() because the path may contain spaces:
+                    #   'my dir/.git/info/exclude'
+                    # Without quoting rsync fails.
+                    rsync_command.append(
+                        RSYNC_EXCLUDE_OPTION.format(
+                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
         rsync_command.append(f'-e {shlex.quote(rsh_option)}')
 
@@ -649,13 +656,13 @@ class KubernetesCommandRunner(CommandRunner):
 
     def __init__(
         self,
-        node: Tuple[str, str],
+        node: Tuple[Tuple[str, Optional[str]], str],
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
 
         Example Usage:
-            runner = KubernetesCommandRunner((namespace, pod_name))
+            runner = KubernetesCommandRunner((namespace, context), pod_name))
             runner.run('ls -l')
             runner.rsync(source, target, up=True)
 
@@ -664,7 +671,11 @@ class KubernetesCommandRunner(CommandRunner):
         """
         del kwargs
         super().__init__(node)
-        self.namespace, self.pod_name = node
+        (self.namespace, self.context), self.pod_name = node
+
+    @property
+    def node_id(self) -> str:
+        return f'{self.context}-{self.namespace}-{self.pod_name}'
 
     @timeline.event
     def run(
@@ -719,9 +730,11 @@ class KubernetesCommandRunner(CommandRunner):
         if connect_timeout is None:
             connect_timeout = _DEFAULT_CONNECT_TIMEOUT
         kubectl_args = [
-            '--pod-running-timeout', f'{connect_timeout}s', '-n',
-            self.namespace, self.pod_name
+            '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
         ]
+        if self.context:
+            kubectl_args += ['--context', self.context]
+        kubectl_args += [self.pod_name]
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']
@@ -818,10 +831,17 @@ class KubernetesCommandRunner(CommandRunner):
         # Build command.
         helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
                                    'kubernetes', 'rsync_helper.sh')
+        namespace_context = f'{self.namespace}+{self.context}'
+        # Avoid rsync interpreting :, /, and + in namespace_context as the
+        # default delimiter for options and arguments.
+        # rsync_helper.sh will parse the namespace_context by reverting the
+        # encoding and pass it to kubectl exec.
+        encoded_namespace_context = namespace_context.replace(
+            ':', '%3A').replace('/', '%2F').replace('+', '%2B')
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{self.namespace}',
+            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,

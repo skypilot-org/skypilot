@@ -119,6 +119,8 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
     $ kubectl config set-context --current --namespace=mynamespace
 
 
+.. _kubernetes-custom-images:
+
 Using Custom Images
 -------------------
 By default, we use and maintain a SkyPilot container image that has conda and a few other basic tools installed.
@@ -139,6 +141,8 @@ Your image must satisfy the following requirements:
 .. note::
 
     If your cluster runs on non-x86_64 architecture (e.g., Apple Silicon), your image must be built natively for that architecture. Otherwise, your job may get stuck at :code:`Start streaming logs ...`. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3035>`_ for more.
+
+.. _kubernetes-custom-images-private-repos:
 
 Using Images from Private Repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

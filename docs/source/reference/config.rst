@@ -87,10 +87,21 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
+  # Admin policy to be applied to all tasks. (optional).
+  #
+  # The policy class to be applied to all tasks, which can be used to validate
+  # and mutate user requests.
+  #
+  # This is useful for enforcing certain policies on all tasks, e.g.,
+  # add custom labels; enforce certain resource limits; etc.
+  #
+  # The policy class should implement the sky.AdminPolicy interface.
+  admin_policy: my_package.SkyPilotPolicyV1
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
-    # Tags to assign to all instances launched by SkyPilot (optional).
+    # Tags to assign to all instances and buckets created by SkyPilot (optional).
     #
     # Example use case: cost tracking by user/team/project.
     #
@@ -483,6 +494,19 @@ Available fields and semantics:
     #
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
+
+    # Allowed context names to use for Kubernetes clusters (optional).
+    #
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
+    #
+    # If not specified, only the current active context is used for launching
+    # new clusters.
+    allowed_contexts:
+      - context1
+      - context2
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #

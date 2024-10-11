@@ -25,6 +25,24 @@ for development. To create a local development cluster, run:
 sky local up
 ```
 
+### Mocking a GPU node on your `sky local up` cluster
+
+To mock a GPU node on your local cluster, you can add a label and a nvidia.com/gpu virtual resource to a node.
+
+```bash
+# Make sure `sky local up` cluster is running
+kubectl label node skypilot-control-plane skypilot.co/accelerator=h100 # Or any other GPU. Be sure to use lowercase!
+
+# Add resource. Run proxy in a terminal window:
+kubectl proxy
+# In a new terminal, run
+curl --header "Content-Type: application/json-patch+json" \
+  --request PATCH \
+  --data '[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]' \
+  http://localhost:8001/api/v1/nodes/skypilot-control-plane/status
+```
+
+
 ## Running a GKE cluster
 1. Create a GKE cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
    * Note - only GKE standard clusters are supported. GKE autopilot clusters are not supported.

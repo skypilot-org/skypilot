@@ -82,6 +82,9 @@ _set_http_proxy_env_vars()
 from sky import backends
 from sky import benchmark
 from sky import clouds
+from sky.admin_policy import AdminPolicy
+from sky.admin_policy import MutatedUserRequest
+from sky.admin_policy import UserRequest
 from sky.clouds.service_catalog import list_accelerators
 from sky.core import autostop
 from sky.core import cancel
@@ -112,6 +115,7 @@ from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
+from sky.skypilot_config import Config
 from sky.status_lib import ClusterStatus
 from sky.task import Task
 
@@ -185,4 +189,9 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # Admin Policy
+    'UserRequest',
+    'MutatedUserRequest',
+    'AdminPolicy',
+    'Config',
 ]

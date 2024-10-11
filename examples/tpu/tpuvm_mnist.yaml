@@ -14,10 +14,11 @@ setup: |
     conda create -n flax python=3.10 -y
     conda activate flax
     # Make sure to install TPU related packages in a conda env to avoid package conflicts.
-    pip install "jax[tpu]==0.4.26" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-    pip install clu
+    pip install \
+      -f https://storage.googleapis.com/jax-releases/libtpu_releases.html "jax[tpu]==0.4.25" \
+      clu \
+      tensorflow tensorflow-datasets
     pip install -e flax
-    pip install tensorflow tensorflow-datasets
   fi
 
 
