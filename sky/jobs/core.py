@@ -140,9 +140,10 @@ def launch(
                    _disable_controller_check=True)
 
 
-def queue_kubernetes(pod_name: str,
-                     context: Optional[str] = None,
-                     skip_finished: bool = False) -> List[Dict[str, Any]]:
+def queue_from_kubernetes_pod(
+        pod_name: str,
+        context: Optional[str] = None,
+        skip_finished: bool = False) -> List[Dict[str, Any]]:
     """Gets the jobs queue from a specific controller pod.
 
     Args:

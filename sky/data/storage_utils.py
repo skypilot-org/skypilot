@@ -21,7 +21,7 @@ _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     'to the cloud storage for {path!r}'
     'due to the following error: {error_msg!r}')
 
-LAST_USE_TRUNC_LENGTH = 25
+_LAST_USE_TRUNC_LENGTH = 25
 
 
 def format_storage_table(storages: List[Dict[str, Any]],
@@ -48,7 +48,7 @@ def format_storage_table(storages: List[Dict[str, Any]],
             command = row['last_use']
         else:
             command = common_utils.truncate_long_string(row['last_use'],
-                                                        LAST_USE_TRUNC_LENGTH)
+                                                        _LAST_USE_TRUNC_LENGTH)
         storage_table.add_row([
             # NAME
             row['name'],

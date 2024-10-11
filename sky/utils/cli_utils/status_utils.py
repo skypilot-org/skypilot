@@ -342,13 +342,35 @@ def show_kubernetes_cluster_status_table(clusters: List[Any],
                    f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
     else:
-        click.echo('No existing SkyPilot clusters on Kubernetes.')
+        click.echo('No SkyPilot resources found in the '
+                   'active Kubernetes context.')
 
 
 def process_skypilot_pods(
     pods: List[Any],
     context: Optional[str] = None
 ) -> Tuple[List[Dict[Any, Any]], Dict[str, Any], Dict[str, Any]]:
+    """Process SkyPilot pods on k8s to extract cluster and controller info.
+
+    Args:
+        pods: List of Kubernetes pod objects.
+        context: Kubernetes context name, used to detect GPU label formatter.
+
+    Returns:
+        A tuple containing:
+        - List of dictionaries with cluster information.
+        - Dictionary of job controller information.
+        - Dictionary of serve controller information.
+
+        Each dictionary contains the following keys:
+            'cluster_name_on_cloud': The cluster_name_on_cloud used by SkyPilot
+            'cluster_name': The cluster name without the user hash
+            'user': The user who created the cluster. Fetched from pod label
+            'status': The cluster status (assumed UP if pod exists)
+            'pods': List of pod objects in the cluster
+            'launched_at': Timestamp of when the cluster was launched
+            'resources': sky.Resources object for the cluster
+    """
     clusters: Dict[str, Dict] = {}
     jobs_controllers: Dict[str, Dict] = {}
     serve_controllers: Dict[str, Dict] = {}

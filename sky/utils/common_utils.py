@@ -682,6 +682,7 @@ def deprecated_function(
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
+    """Truncate a string to a maximum length, preserving whole words."""
     if len(s) <= max_length:
         return s
     splits = s.split(' ')

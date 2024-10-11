@@ -1459,6 +1459,11 @@ def _get_services(service_names: Optional[List[str]],
 
 
 def _status_kubernetes(show_all: bool):
+    """Show all SkyPilot resources in the current Kubernetes context.
+
+    Args:
+        show_all (bool): Show all job information (e.g., start time, failures).
+    """
     context = kubernetes_utils.get_current_kube_config_context_name()
     try:
         pods = kubernetes_utils.get_skypilot_pods(context)
@@ -1479,7 +1484,8 @@ def _status_kubernetes(show_all: bool):
                 status_message += f's ({i+1}/{len(jobs_controllers)})'
             spinner.update(f'{status_message}[/]')
             try:
-                job_list = managed_jobs.queue_kubernetes(pod.metadata.name)
+                job_list = managed_jobs.queue_from_kubernetes_pod(
+                    pod.metadata.name)
             except RuntimeError as e:
                 logger.warning('Failed to get managed jobs from controller '
                                f'{pod.metadata.name}: {str(e)}')
