@@ -1,8 +1,6 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
 import dataclasses
 import enum
-from enum import auto
-from enum import Enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
@@ -821,14 +819,14 @@ class SkyPilotReplicaManager(ReplicaManager):
     # ReplicaManager Daemon Threads #
     #################################
 
-    class ReplicaRecordAction(Enum):
-        KEEP = auto()
-        REMOVE_SCALE_DOWN = auto()
-        REMOVE_PREEMPTION = auto()
-        REMOVE_VERSION_MISMATCH = auto()
+    class ReplicaRecordAction(str, enum.Enum):
+        KEEP = 'keep the error record'
+        REMOVE_SCALE_DOWN = 'for scale down normally'
+        REMOVE_PREEMPTION = 'for preemption recovery'
+        REMOVE_VERSION_MISMATCH = 'remove_version_mismatch'
 
-    def get_replica_record_action(self,
-                                  info: ReplicaInfo) -> ReplicaRecordAction:
+    def _get_replica_record_action(self,
+                                   info: ReplicaInfo) -> ReplicaRecordAction:
         if info.status_property.is_scale_down:
             # This means the cluster is deleted due to an autoscaler
             # decision or the cluster is recovering from preemption.
@@ -919,7 +917,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # TODO(tian): Currently, restart replicas that failed within
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
-                action = self.get_replica_record_action(info)
+                action = self._get_replica_record_action(info)
                 if action == self.ReplicaRecordAction.KEEP:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
