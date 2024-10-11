@@ -110,15 +110,17 @@ class Dag:
         task = self._get_task(task)
 
         dependents = list(self.graph.successors(task))
+        for dependent in dependents:
+            self.remove_dependency(dependent, task)
 
         # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
         # and sink nodes. And we need a proper way to always show task's name
         # if dependents:
         #     dependent_names = ', '.join(
         #         [dep.name for dep in dependents if dep.name is not None])
-        #     raise ValueError(f'Task {task.name} is still being depended on by '
-        #                      f'tasks {dependent_names!r}. Try to remove the '
-        #                      'dependencies first.')
+        #     raise ValueError(f'Task {task.name} is still being depended on '
+        #                      f'by tasks {dependent_names!r}. Try to remove
+        #                      'the dependencies first.')
 
         self.dependencies.pop(task, None)
         self.tasks.remove(task)
@@ -155,7 +157,7 @@ class Dag:
         self.dependencies[dependent].add(dependency)
 
     def add_edge(self, op1: 'task.Task', op2: 'task.Task') -> None:
-        return self.add_dependency(op1, op2)
+        return self.add_dependency(op2, op1)
 
     def set_dependencies(
             self, dependent: TaskOrName,
