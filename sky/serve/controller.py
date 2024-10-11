@@ -74,7 +74,7 @@ class SkyServeController:
                                             f'{self._service_name}')
                 active_versions = record['active_versions']
                 logger.info(f'All replica info: {replica_infos}')
-                scaling_options = self._autoscaler.evaluate_scaling(
+                scaling_options = self._autoscaler.generate_scaling_decisions(
                     replica_infos, active_versions)
                 for scaling_option in scaling_options:
                     logger.info(f'Scaling option received: {scaling_option}')
