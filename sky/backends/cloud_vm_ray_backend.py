@@ -2082,7 +2082,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 8
+    _VERSION = 9
 
     def __init__(
             self,
@@ -2515,6 +2515,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 8:
             self.cached_cluster_info = None
+
+        if version < 9:
+            # For backward compatibility, we should update the region of a
+            # SkyPilot cluster on Kubernetes to the actual context it is using.
+            # pylint: disable=import-outside-toplevel
+            launched_resources = state['launched_resources']
+            if isinstance(launched_resources.cloud, clouds.Kubernetes):
+                yaml_config = common_utils.read_yaml(
+                    os.path.expanduser(state['_cluster_yaml']))
+                context = kubernetes_utils.get_context_from_config(
+                    yaml_config['provider'])
+                state['launched_resources'] = launched_resources.copy(
+                    region=context)
 
         self.__dict__.update(state)
 
@@ -3043,7 +3056,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as large sizes will slow '
+                '.skyignore to exclude large files, as large sizes will slow '
                 f'down rsync.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
@@ -4457,7 +4470,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as large sizes '
+                        '.skyignore to exclude large files, as large sizes '
                         f'will slow down rsync. {style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(

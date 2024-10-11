@@ -1458,6 +1458,79 @@ def _get_services(service_names: Optional[List[str]],
     return num_services, msg
 
 
+def _status_kubernetes(show_all: bool):
+    """Show all SkyPilot resources in the current Kubernetes context.
+
+    Args:
+        show_all (bool): Show all job information (e.g., start time, failures).
+    """
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    all_clusters, jobs_controllers, serve_controllers = (
+        status_utils.process_skypilot_pods(pods, context))
+    all_jobs = []
+    with rich_utils.safe_status(
+            '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
+        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
+            user = job_controller_info['user']
+            pod = job_controller_info['pods'][0]
+            status_message = ('[bold cyan]Checking managed jobs controller')
+            if len(jobs_controllers) > 1:
+                status_message += f's ({i+1}/{len(jobs_controllers)})'
+            spinner.update(f'{status_message}[/]')
+            try:
+                job_list = managed_jobs.queue_from_kubernetes_pod(
+                    pod.metadata.name)
+            except RuntimeError as e:
+                logger.warning('Failed to get managed jobs from controller '
+                               f'{pod.metadata.name}: {str(e)}')
+                job_list = []
+            # Add user field to jobs
+            for job in job_list:
+                job['user'] = user
+            all_jobs.extend(job_list)
+    # Reconcile cluster state between managed jobs and clusters:
+    # To maintain a clear separation between regular SkyPilot clusters
+    # and those from managed jobs, we need to exclude the latter from
+    # the main cluster list.
+    # We do this by reconstructing managed job cluster names from each
+    # job's name and ID. We then use this set to filter out managed
+    # clusters from the main cluster list. This is necessary because there
+    # are no identifiers distinguishing clusters from managed jobs from
+    # regular clusters.
+    managed_job_cluster_names = set()
+    for job in all_jobs:
+        # Managed job cluster name is <job_name>-<job_id>
+        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+        managed_job_cluster_names.add(managed_cluster_name)
+    unmanaged_clusters = [
+        c for c in all_clusters
+        if c['cluster_name'] not in managed_job_cluster_names
+    ]
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
+        click.echo(msg)
+    if serve_controllers:
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
+
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -1503,6 +1576,14 @@ def _get_services(service_names: Optional[List[str]],
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
+@click.option(
+    '--kubernetes',
+    '--k8s',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1512,7 +1593,7 @@ def _get_services(service_names: Optional[List[str]],
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, clusters: List[str]):
+           show_services: bool, kubernetes: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1571,6 +1652,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    if kubernetes:
+        _status_kubernetes(all)
+        return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
@@ -3026,14 +3110,11 @@ def show_gpus(
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
 
-    if cloud_is_kubernetes and region is not None:
-        raise click.UsageError(
-            'The --region flag cannot be set with --cloud kubernetes.')
-
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
     def _get_kubernetes_realtime_gpu_table(
+            context: Optional[str] = None,
             name_filter: Optional[str] = None,
             quantity_filter: Optional[int] = None):
         if quantity_filter:
@@ -3048,7 +3129,7 @@ def show_gpus(
             gpus_only=True,
             clouds='kubernetes',
             name_filter=name_filter,
-            region_filter=region,
+            region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
         assert (set(counts.keys()) == set(capacity.keys()) == set(
@@ -3078,11 +3159,11 @@ def show_gpus(
             ])
         return realtime_gpu_table
 
-    def _get_kubernetes_node_info_table():
+    def _get_kubernetes_node_info_table(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        node_info_dict = kubernetes_utils.get_kubernetes_node_info()
+        node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
             node_table.add_row([
                 node_name, node_info.gpu_type,
@@ -3116,11 +3197,18 @@ def show_gpus(
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+                if region:
+                    context = region
+                else:
+                    # If region is not specified, we use the current context
+                    context = (
+                        kubernetes_utils.get_current_kube_config_context_name())
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table()
+                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
+                        context)
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3129,9 +3217,10 @@ def show_gpus(
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
+                           f'Kubernetes GPUs (context: {context})'
+                           f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
-                    k8s_node_table = _get_kubernetes_node_info_table()
+                    k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                            f'Kubernetes per node GPU availability'
@@ -5072,15 +5161,7 @@ def local():
     pass
 
 
-@click.option('--gpus/--no-gpus',
-              default=True,
-              is_flag=True,
-              help='Launch cluster without GPU support even '
-              'if GPUs are detected on the host.')
-@local.command('up', cls=_DocumentedCodeCommand)
-@usage_lib.entrypoint
-def local_up(gpus: bool):
-    """Creates a local cluster."""
+def _deploy_local_cluster(gpus: bool):
     cluster_created = False
 
     # Check if GPUs are available on the host
@@ -5105,7 +5186,8 @@ def local_up(gpus: bool):
 
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
-    run_command = up_script_path + ' --gpus' if gpus else up_script_path
+    run_command = up_script_path + f' {common_utils.get_user_hash()}'
+    run_command = run_command + ' --gpus' if gpus else run_command
     run_command = shlex.split(run_command)
 
     # Setup logging paths
@@ -5204,6 +5286,124 @@ def local_up(gpus: bool):
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
             f'{gpu_hint}')
+
+
+def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
+                           cleanup: bool):
+    success = False
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                  'deploy_remote_cluster.sh')
+    # Get directory of script and run it from there
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+
+    deploy_command = f'{up_script_path} {ip_file} {ssh_user} {ssh_key_path}'
+    if cleanup:
+        deploy_command += ' --cleanup'
+
+    # Convert the command to a format suitable for subprocess
+    deploy_command = shlex.split(deploy_command)
+
+    # Setup logging paths
+    run_timestamp = backend_utils.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'local_up.log')
+    tail_cmd = 'tail -n100 -f ' + log_path
+
+    # Check if ~/.kube/config exists:
+    if os.path.exists(os.path.expanduser('~/.kube/config')):
+        click.echo('Found existing kube config. '
+                   'It will be backed up to ~/.kube/config.bak.')
+    style = colorama.Style
+    click.echo('To view detailed progress: '
+               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+    if cleanup:
+        msg_str = 'Cleaning up remote cluster...'
+    else:
+        msg_str = 'Deploying remote cluster...'
+    with rich_utils.safe_status(f'[bold cyan]{msg_str}'):
+        returncode, _, stderr = log_lib.run_with_log(
+            cmd=deploy_command,
+            log_path=log_path,
+            require_outputs=True,
+            stream_logs=False,
+            line_processor=log_utils.SkyRemoteUpLineProcessor(),
+            cwd=cwd)
+    if returncode == 0:
+        success = True
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to deploy remote cluster. '
+                f'Full log: {log_path}'
+                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
+
+    if success:
+        if cleanup:
+            click.echo(f'{colorama.Fore.GREEN}'
+                       '🎉 Remote cluster cleaned up successfully.'
+                       f'{style.RESET_ALL}')
+        else:
+            click.echo('Cluster deployment done. You can now run tasks on '
+                       'this cluster.\nE.g., run a task with: '
+                       'sky launch --cloud kubernetes -- echo hello world.'
+                       f'\n{colorama.Fore.GREEN}🎉 Remote cluster deployed '
+                       f'successfully. {style.RESET_ALL}')
+
+
+@click.option('--gpus/--no-gpus',
+              default=True,
+              is_flag=True,
+              help='Launch cluster without GPU support even '
+              'if GPUs are detected on the host.')
+@click.option(
+    '--ips',
+    type=str,
+    required=False,
+    help='Path to the file containing IP addresses of remote machines.')
+@click.option('--ssh-user',
+              type=str,
+              required=False,
+              help='SSH username for accessing remote machines.')
+@click.option('--ssh-key-path',
+              type=str,
+              required=False,
+              help='Path to the SSH private key.')
+@click.option('--cleanup',
+              is_flag=True,
+              help='Clean up the remote cluster instead of deploying it.')
+@local.command('up', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
+             cleanup: bool):
+    """Creates a local or remote cluster."""
+
+    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
+        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
+        # all must be specified
+        if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
+            if not (ips and ssh_user and ssh_key_path):
+                raise click.BadParameter(
+                    'All --ips, --ssh-user, and --ssh-key-path '
+                    'must be specified together.')
+
+        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
+        # are all provided
+        if cleanup and not (ips and ssh_user and ssh_key_path):
+            raise click.BadParameter('--cleanup can only be used with '
+                                     '--ips, --ssh-user and --ssh-key-path.')
+
+    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
+
+    # If remote deployment arguments are specified, run remote up script
+    if ips and ssh_user and ssh_key_path:
+        # Convert ips and ssh_key_path to absolute paths
+        ips = os.path.abspath(ips)
+        ssh_key_path = os.path.abspath(ssh_key_path)
+        _deploy_remote_cluster(ips, ssh_user, ssh_key_path, cleanup)
+    else:
+        # Run local deployment (kind) if no remote args are specified
+        _deploy_local_cluster(gpus)
 
 
 @local.command('down', cls=_DocumentedCodeCommand)

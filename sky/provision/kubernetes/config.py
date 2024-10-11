@@ -247,7 +247,8 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
 
 
 def _configure_autoscaler_service_account(
-        namespace: str, context: str, provider_config: Dict[str, Any]) -> None:
+        namespace: str, context: Optional[str],
+        provider_config: Dict[str, Any]) -> None:
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
         logger.info('_configure_autoscaler_service_account: '
@@ -281,7 +282,7 @@ def _configure_autoscaler_service_account(
                 f'{created_msg(account_field, name)}')
 
 
-def _configure_autoscaler_role(namespace: str, context: str,
+def _configure_autoscaler_role(namespace: str, context: Optional[str],
                                provider_config: Dict[str, Any],
                                role_field: str) -> None:
     """ Reads the role from the provider config, creates if it does not exist.
@@ -330,7 +331,7 @@ def _configure_autoscaler_role(namespace: str, context: str,
 
 def _configure_autoscaler_role_binding(
         namespace: str,
-        context: str,
+        context: Optional[str],
         provider_config: Dict[str, Any],
         binding_field: str,
         override_name: Optional[str] = None,
@@ -620,7 +621,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
                 f'in namespace {fuse_device_manager_namespace!r}')
 
 
-def _configure_services(namespace: str, context: str,
+def _configure_services(namespace: str, context: Optional[str],
                         provider_config: Dict[str, Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
