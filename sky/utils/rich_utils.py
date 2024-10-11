@@ -34,12 +34,16 @@ class _NoOpConsoleStatus:
 class NestedStatus:
     """Handle nested status: inner one does not exit spinner when finished."""
 
-    def __init__(self):
-        self.previous_message = None
+    def __init__(self, message: str):
+        if _status is not None:
+            self.previous_message = _status.status
+        else:
+            self.previous_message = None
+        self.message = message
 
     def __enter__(self):
         global _status_nesting_level
-        self.previous_message = _status.status
+        _status.update(self.message)
         _status_nesting_level += 1
         _status.__enter__()
         return _status
@@ -73,8 +77,7 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
             not sky_logging.is_silent()):
         if _status is None:
             _status = console.status(msg)
-        _status.update(msg)
-        return NestedStatus()
+        return NestedStatus(msg)
     return _NoOpConsoleStatus()
 
 

@@ -1237,7 +1237,7 @@ class RetryingVmProvisioner(object):
 
             if prev_cluster_status != status_lib.ClusterStatus.UP:
                 logger.info(
-                    f'  {colorama.Style.DIM}Cluster {cluster_name!r} (status: '
+                    f'{colorama.Style.DIM}Cluster {cluster_name!r} (status: '
                     f'{prev_cluster_status.value}) was previously in '
                     f'{cloud} ({region.name}). Restarting.'
                     f'{colorama.Style.RESET_ALL}')
@@ -2806,9 +2806,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         wheel_hash,
                         blocked_resources=task.blocked_resources)
                     log_path = os.path.join(self.log_dir, 'provision.log')
-                    with rich_utils.safe_status(
-                            ux_utils.spinner_message('Launching', log_path)):
-                        config_dict = retry_provisioner.provision_with_retries(
+                    rich_utils.force_update_status(
+                            ux_utils.spinner_message('Launching', log_path))
+                    config_dict = retry_provisioner.provision_with_retries(
                             task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
