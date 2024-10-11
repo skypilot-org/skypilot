@@ -1,4 +1,5 @@
 """Kubernetes."""
+import functools
 import os
 import re
 import typing
