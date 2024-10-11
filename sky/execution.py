@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Union
 import colorama
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import global_user_state
@@ -16,6 +17,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -158,7 +160,16 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag, _ = admin_policy_utils.apply(
+        dag,
+        request_options=admin_policy.RequestOptions(
+            cluster_name=cluster_name,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            dryrun=dryrun,
+        ))
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -170,9 +181,8 @@ def _execute(
 
     cluster_exists = False
     if cluster_name is not None:
-        existing_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
-        cluster_exists = existing_handle is not None
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        cluster_exists = cluster_record is not None
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
