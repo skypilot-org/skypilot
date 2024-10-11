@@ -413,8 +413,8 @@ class RayCodeGen:
                 node_str = f'{num_nodes} node{{plural}}'
 
                 # We have this `INFO: Tip:` message only for backward
-                # compatibility, as if a cluster has the old SkyPilot version,
-                # it relies on this message to start the log streaming.
+                # compatibility, because if a cluster has the old SkyPilot version,
+                # it relies on this message to start log streaming.
                 # This message will be skipped for new clusters, because we use
                 # start_streaming_at for the `Waiting for task resources on`
                 # message.
