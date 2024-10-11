@@ -15,7 +15,7 @@ _df = common.read_catalog(cudo_mt.VMS_CSV,
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _DEFAULT_NUM_VCPUS = 8
-_DEFAULT_MEMORY_CPU_RATIO = 4
+_DEFAULT_MEMORY_CPU_RATIO = 2
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -60,7 +60,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
 
     if memory is None:
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
