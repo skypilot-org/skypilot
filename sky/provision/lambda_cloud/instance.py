@@ -249,8 +249,7 @@ def open_ports(
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    raise NotImplementedError(
-        'open_ports is not supported for Lambda Cloud')
+    raise NotImplementedError('open_ports is not supported for Lambda Cloud')
 
 
 def cleanup_ports(
