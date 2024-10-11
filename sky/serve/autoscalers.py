@@ -341,11 +341,12 @@ class Autoscaler:
         return scaling_decisions
 
 
-class HysteresisAutoscaler(Autoscaler):
-    """HysteresisAutoscaler: Autoscale with hysteresis.
+class _AutoscalerWithHysteresis(Autoscaler):
+    """_AutoscalerWithHysteresis: Autoscale with hysteresis.
 
-    Only scales when the number of replicas is above or below the target
-    number of replicas for a certain number of consecutive periods.
+    This is an internal class for developing autoscalers with hysteresis. It
+    only scales when the number of replicas is above or below the target number
+    of replicas for a certain number of consecutive periods.
     """
 
     def _setup_thresholds(self, spec: 'service_spec.SkyServiceSpec') -> None:
@@ -423,7 +424,7 @@ class HysteresisAutoscaler(Autoscaler):
             f'{self.scale_down_threshold}. ')
 
 
-class RequestRateAutoscaler(HysteresisAutoscaler):
+class RequestRateAutoscaler(_AutoscalerWithHysteresis):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
     Scales when the number of requests per replica in the given interval
