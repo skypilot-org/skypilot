@@ -118,6 +118,15 @@ def get_client(name: str,
             from azure.mgmt import authorization
             return authorization.AuthorizationManagementClient(
                 credential, subscription_id)
+        elif name == 'ml':
+            rg = kwargs.pop('resource_group', None)
+            ws = kwargs.pop('workspace_name', None)
+            assert rg is not None, ('Must provide resource_group keyword '
+                                    'arguments for ML client.')
+            assert ws is not None, ('Must provide workspace keyword '
+                                    'arguments for ML client.')
+            from azure.ai.ml import MLClient
+            return MLClient(credential, subscription_id, rg, ws)
         elif name == 'graph':
             import msgraph
             return msgraph.GraphServiceClient(credential)
@@ -457,6 +466,30 @@ def get_az_resource_group(
 def create_security_rule(**kwargs):
     from azure.mgmt.network import models
     return models.SecurityRule(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def create_az_ml_workspace(**kwargs):
+    from azure.ai.ml import entities
+    return entities.Workspace(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def create_az_ml_compute_instance(**kwargs):
+    from azure.ai.ml import entities
+    return entities.ComputeInstance(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def create_az_ml_compute_instance_ssh_settings(**kwargs):
+    from azure.ai.ml import entities
+    return entities.ComputeInstanceSshSettings(**kwargs)
+
+
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def create_az_ml_network_settings(**kwargs):
+    from azure.ai.ml import entities
+    return entities.NetworkSettings(**kwargs)
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

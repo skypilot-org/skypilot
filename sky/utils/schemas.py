@@ -768,6 +768,9 @@ def get_config_schema():
                 'storage_account': {
                     'type': 'string',
                 },
+                'use_az_ml': {
+                    'type': 'boolean',
+                },
             }
         },
         'kubernetes': {

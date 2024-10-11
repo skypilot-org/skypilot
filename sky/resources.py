@@ -44,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -221,6 +221,9 @@ class Resources:
 
         self._cluster_config_overrides = _cluster_config_overrides
 
+        self._use_az_ml = skypilot_config.get_nested(('azure', 'use_az_ml'),
+                                                     False)
+
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
@@ -232,6 +235,7 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
         self._try_validate_labels()
+        self._try_validate_az_ml()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -456,6 +460,10 @@ class Resources:
         if self._cluster_config_overrides is None:
             return {}
         return self._cluster_config_overrides
+
+    @property
+    def use_az_ml(self) -> bool:
+        return self._use_az_ml
 
     @requires_fuse.setter
     def requires_fuse(self, value: Optional[bool]) -> None:
@@ -987,6 +995,25 @@ class Resources:
                 raise ValueError(
                     'The following labels are invalid:'
                     '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
+
+    def _try_validate_az_ml(self) -> None:
+        if not self.use_az_ml:
+            return
+        if self.ports is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Open ports are not supported for Azure Machine Learning.')
+        if (self.disk_tier is not None or
+                self.disk_size != _DEFAULT_DISK_SIZE_GB):
+            # Azure ML does not support custom disk size and disk tier.
+            # Reference: https://stackoverflow.com/questions/66923216/change-disk-type-azure-ml  # pylint: disable=line-too-long
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Custom disk size and disk tier are not '
+                                 'supported for Azure Machine Learning.')
+        if self.image_id is not None and self.extract_docker_image() is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Custom image is not supported for Azure Machine Learning.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -1574,5 +1601,8 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+
+        if version < 20:
+            self._use_az_ml = state.pop('_use_az_ml', False)
 
         self.__dict__.update(state)

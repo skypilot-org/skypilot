@@ -7,6 +7,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
+from sky import skypilot_config
 from sky.clouds import Azure
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
@@ -18,7 +19,14 @@ from sky.utils import ux_utils
 # user is using the latest catalog.
 _PULL_FREQUENCY_HOURS = 7
 
-_df = common.read_catalog('azure/vms.csv',
+_USE_AZ_ML = skypilot_config.get_nested(('azure', 'use_az_ml'), False)
+
+if _USE_AZ_ML:
+    catalog_file = 'azure/az_ml_vms.csv'
+else:
+    catalog_file = 'azure/vms.csv'
+
+_df = common.read_catalog(catalog_file,
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 _image_df = common.read_catalog('azure/images.csv',
@@ -29,11 +37,13 @@ _DEFAULT_INSTANCE_FAMILY = [
     # The latest general-purpose instance family as of Mar. 2023.
     # CPU: Intel Ice Lake 8370C.
     # Memory: 4 GiB RAM per 1 vCPU;
-    'Ds_v5',
+    # Azure ML only supports up to Ds_v3.
+    'Ds_v5' if not _USE_AZ_ML else 'Ds_v3',
     # The latest memory-optimized instance family as of Mar. 2023.
     # CPU: Intel Ice Lake 8370C.
     # Memory: 8 GiB RAM per 1 vCPU.
-    'Es_v5',
+    # Azure ML only supports up to Es_v3.
+    'Es_v5' if not _USE_AZ_ML else 'Es_v3',
     # The latest compute-optimized instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8370C, Cascade Lake 8272CL, or Skylake 8168.
     # Memory: 2 GiB RAM per 1 vCPU.

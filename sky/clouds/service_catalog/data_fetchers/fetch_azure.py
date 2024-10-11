@@ -309,8 +309,8 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     return df_ret
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+def get_arg_parser(description: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--all-regions',
                        action='store_true',
@@ -327,23 +327,34 @@ if __name__ == '__main__':
                         'running in github action, as the multiprocessing '
                         'does not work well with the azure client due '
                         'to ssl issues.')
-    args = parser.parse_args()
+    return parser
 
-    SINGLE_THREADED = args.single_threaded
 
-    if args.regions:
-        region_filter = set(args.regions) - EXCLUDED_REGIONS
-    elif args.all_regions:
+def get_region_filter(all_regions: bool, regions: Optional[List[str]],
+                      exclude: Optional[List[str]]) -> Set[str]:
+    if regions:
+        region_filter = set(regions) - EXCLUDED_REGIONS
+    elif all_regions:
         region_filter = set(get_regions()) - EXCLUDED_REGIONS
     else:
         region_filter = US_REGIONS
     region_filter = region_filter - set(
-        args.exclude) if args.exclude else region_filter
+        exclude) if exclude is not None else region_filter
 
     if not region_filter:
         raise ValueError('No regions to fetch. Please check your arguments.')
 
-    instance_df = get_all_regions_instance_types_df(region_filter)
+    return region_filter
+
+
+if __name__ == '__main__':
+    az_parser = get_arg_parser('Fetch Azure pricing data.')
+    args = az_parser.parse_args()
+
+    SINGLE_THREADED = args.single_threaded
+
+    instance_df = get_all_regions_instance_types_df(
+        get_region_filter(args.all_regions, args.regions, args.exclude))
     os.makedirs('azure', exist_ok=True)
     instance_df.to_csv('azure/vms.csv', index=False)
     print('Azure Service Catalog saved to azure/vms.csv')
