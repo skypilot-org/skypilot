@@ -85,31 +85,37 @@ Cross-cloud failover
 If all regions within the chosen cloud failed, the provisioner retries on the next
 cheapest cloud.
 
-Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All
-regions in GCP failed to provide the resource, so the provisioner switched to
-AWS, where it succeeded after two regions:
+Here is an example of cross-cloud failover when requesting 8x A100 GPUs.  All
+regions in Azure failed to provide the resource, so the provisioner switched to
+GCP, where it succeeded after one region:
 
 .. code-block:: console
 
-  $ sky launch -c v100-8 --gpus V100:8
+  $ sky launch -c a100-8 --gpus A100:8
+
+  Considered resources (1 node):
+  ----------------------------------------------------------------------------------------------------
+   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+  ----------------------------------------------------------------------------------------------------
+   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔     
+   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39               
+   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77               
+  ----------------------------------------------------------------------------------------------------
+  Launching a new cluster 'a100-8'. Proceed? [Y/n]: 
 
   ...
-  Creating a new cluster: "v100-8" [1x GCP(n1-highmem-8, {'V100': 8.0})].
-  Tip: to reuse an existing cluster, specify --cluster-name (-c) in the CLI or use sky.launch(.., cluster_name=..) in the Python API. Run `sky status` to see existing clusters.
-  To view detailed progress: tail -n100 -f sky_logs/sky-2022-02-23-16-39-58-577551/provision.log
-
-  Launching on GCP us-central1 (us-central1-a)
-  Got ZONE_RESOURCE_POOL_EXHAUSTED in us-central1-a (message: The zone 'projects/intercloud-320520/zones/us-central1-a' does not have enough resources available to fulfill the request.  Try a different zone, or try again later.)
+  ⚙️ Launching on Azure eastus.
+  E 10-11 18:24:59 instance.py:457] Failed to create instances: [azure.core.exceptions.HttpResponseError] (InvalidTemplateDeployment)
+  sky.exceptions.ResourcesUnavailableError: Failed to acquire resources in all zones in eastus
   ...
 
-  Launching on AWS us-east-2 (us-east-2a,us-east-2b,us-east-2c)
-  Got error(s) in all zones of us-east-2:
-    create_instances: Attempt failed with An error occurred (InsufficientInstanceCapacity) when calling the RunInstances operation (reached max retries: 0): We currently do not have sufficient p3.16xlarge capacity in the Availability Zone you requested (us-east-2a). Our system will be working on provisioning additional capacity. You can currently get p3.16xlarge capacity by not specifying an Availability Zone in your request or choosing us-east-2b., retrying.
+  ⚙️ Launching on GCP us-central1 (us-central1-a).
+  W 10-11 18:25:57 instance_utils.py:112] Got return codes 'VM_MIN_COUNT_NOT_REACHED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS' in us-central1-a: 'Requested minimum count of 1 VMs could not be created'; "The zone 'projects/xxxxxx/zones/us-central1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'"
   ...
 
-  Launching on AWS us-west-2 (us-west-2a,us-west-2b,us-west-2c,us-west-2d)
-  ...
-  Successfully provisioned or found existing VM. Setup completed.
+  ⚙️ Launching on GCP us-central1 (us-central1-b).
+    Instance is up.
+  ✓ Cluster launched: a100-8.  View logs at: ~/sky_logs/sky-2024-10-11-18-24-14-357884/provision.log
 
 
 Multiple Candidate GPUs
