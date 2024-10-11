@@ -4,9 +4,8 @@ This module includes the set of functions
 to access the SCP catalog and check credentials for the SCP access.
 """
 
-import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -160,7 +159,7 @@ class SCP(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='scp')
 
@@ -188,11 +187,9 @@ class SCP(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
         image_id = self._get_image_id(r.image_id, region.name, r.instance_type)
         return {
             'instance_type': resources.instance_type,
