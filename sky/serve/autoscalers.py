@@ -115,6 +115,8 @@ def _select_nonterminal_replicas_to_scale_down(
 class Autoscaler:
     """Abstract class for autoscalers."""
 
+    # --------------- APIs to implement for custom autoscaler ---------------
+
     def __init__(self, service_name: str,
                  spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
@@ -145,13 +147,6 @@ class Autoscaler:
         """Calculate target number of replicas."""
         raise NotImplementedError
 
-    def _clip_target_num_replicas(self, target_num_replicas: int) -> int:
-        """Clip target number of replicas with current minimal and maximum
-        number of replicas.
-        """
-        return max(self.min_replicas, min(self.max_replicas,
-                                          target_num_replicas))
-
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
         if version <= self.latest_version:
@@ -172,6 +167,30 @@ class Autoscaler:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate Autoscaling decisions based on replica information."""
+        raise NotImplementedError
+
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
+        """Dump dynamic states from autoscaler."""
+        raise NotImplementedError
+
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        """Load dynamic states to autoscaler."""
+        raise NotImplementedError
+
+    # --------------- Utility Functions ---------------
+
+    def _clip_target_num_replicas(self, target_num_replicas: int) -> int:
+        """Clip target number of replicas with current minimal and maximum
+        number of replicas.
+        """
+        return max(self.min_replicas, min(self.max_replicas,
+                                          target_num_replicas))
+
     @classmethod
     def from_spec(cls, service_name: str,
                   spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
@@ -180,26 +199,6 @@ class Autoscaler:
             return FallbackRequestRateAutoscaler(service_name, spec)
         else:
             return RequestRateAutoscaler(service_name, spec)
-
-    def _dump_dynamic_states(self) -> Dict[str, Any]:
-        """Dump dynamic states from autoscaler."""
-        raise NotImplementedError
-
-    def dump_dynamic_states(self) -> Dict[str, Any]:
-        """Dump dynamic states from autoscaler."""
-        states = {'latest_version_ever_ready': self.latest_version_ever_ready}
-        states.update(self._dump_dynamic_states())
-        return states
-
-    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
-        """Load dynamic states to autoscaler."""
-        raise NotImplementedError
-
-    def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
-        """Load dynamic states to autoscaler."""
-        self.latest_version_ever_ready = dynamic_states.pop(
-            'latest_version_ever_ready', constants.INITIAL_VERSION)
-        self._load_dynamic_states(dynamic_states)
 
     def get_decision_interval(self) -> int:
         """Get the decision interval for the autoscaler.
@@ -276,13 +275,6 @@ class Autoscaler:
             if info.version < latest_version_with_min_replicas
         ]
 
-    def _generate_scaling_decisions(
-        self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> List[AutoscalerDecision]:
-        """Generate Autoscaling decisions based on replica information."""
-        raise NotImplementedError
-
     def generate_scaling_decisions(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
@@ -339,6 +331,18 @@ class Autoscaler:
             logger.info('No scaling needed.')
 
         return scaling_decisions
+
+    def dump_dynamic_states(self) -> Dict[str, Any]:
+        """Dump dynamic states from autoscaler."""
+        states = {'latest_version_ever_ready': self.latest_version_ever_ready}
+        states.update(self._dump_dynamic_states())
+        return states
+
+    def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        """Load dynamic states to autoscaler."""
+        self.latest_version_ever_ready = dynamic_states.pop(
+            'latest_version_ever_ready', constants.INITIAL_VERSION)
+        self._load_dynamic_states(dynamic_states)
 
 
 class _AutoscalerWithHysteresis(Autoscaler):
