@@ -19,12 +19,15 @@ source "googlecompute" "gpu-ubuntu" {
   accelerator_type    = "projects/sky-dev-465/zones/${var.zone}/acceleratorTypes/nvidia-l4"
   accelerator_count   = 1
   on_host_maintenance = "TERMINATE"
-  ssh_username        = "packer"
+  ssh_username        = "gcpuser"
 }
 
 build {
   name    = "gcp-gpu-ubuntu-build"
   sources = ["sources.googlecompute.gpu-ubuntu"]
+  provisioner "shell" {
+    script = "./provisioners/docker.sh"
+  }
   provisioner "shell" {
     script = "./provisioners/cuda.sh"
   }

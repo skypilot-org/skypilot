@@ -11,12 +11,15 @@ source "googlecompute" "cpu-ubuntu" {
   tags                = ["packer"]
   disk_size           = 10
   machine_type        = "e2-medium"
-  ssh_username        = "packer"
+  ssh_username        = "gcpuser"
 }
 
 build {
   name    = "gcp-cpu-ubuntu-build"
   sources = ["sources.googlecompute.cpu-ubuntu"]
+  provisioner "shell" {
+    script = "./provisioners/docker.sh"
+  }
   provisioner "shell" {
     script = "./provisioners/skypilot.sh"
   }

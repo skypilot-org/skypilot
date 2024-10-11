@@ -1,0 +1,10 @@
+resources:
+  cpus: 2+
+  cloud: gcp
+  image_id: projects/sky-dev-465/global/images/${IMAGE_NAME}
+
+workdir: .
+num_nodes: 1
+
+run: |
+  docker run hello-world

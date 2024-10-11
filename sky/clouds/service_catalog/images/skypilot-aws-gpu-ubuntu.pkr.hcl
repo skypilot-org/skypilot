@@ -35,6 +35,9 @@ build {
     "source.amazon-ebs.gpu-ubuntu"
   ]
   provisioner "shell" {
+    script = "./provisioners/docker.sh"
+  }
+  provisioner "shell" {
     script = "./provisioners/cuda.sh"
   }
   provisioner "shell" {
