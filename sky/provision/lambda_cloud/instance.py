@@ -25,7 +25,7 @@ def _get_lambda_client():
 
 
 def _filter_instances(cluster_name_on_cloud: str,
-                      status_filters: Optional[List[str]]) -> Dict[str, Any]:
+                      status_filters: Optional[List[str]]) -> Dict[str, Dict[str, Any]]:
     lambda_client = _get_lambda_client()
     instances = lambda_client.list_instances()
     possible_names = [
