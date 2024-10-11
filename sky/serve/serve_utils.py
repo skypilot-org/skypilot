@@ -296,9 +296,8 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         update_mode = UpdateMode(mode)
     except ValueError:
         with ux_utils.print_exception_no_traceback():
-            # pylint: disable=raise-missing-from
             raise ValueError(f'Invalid update mode: {mode}. '
-                             f'Please specify one of {UpdateMode}.')
+                             f'Please specify one of {UpdateMode}.') from None
 
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +

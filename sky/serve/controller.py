@@ -132,9 +132,9 @@ class SkyServeController:
             new_autoscaler = autoscalers.Autoscaler.from_spec(
                 self._service_name, service)
             if not isinstance(self._autoscaler, type(new_autoscaler)):
-                logger.info(f'Autoscaler type changed to '
-                            f'{type(new_autoscaler)}, '
-                            f'updating autoscaler.')
+                logger.info(
+                    f'Autoscaler type changed to {type(new_autoscaler)}, '
+                    f'updating autoscaler.')
                 old_autoscaler = self._autoscaler
                 self._autoscaler = new_autoscaler
                 self._autoscaler.load_dynamic_states(
