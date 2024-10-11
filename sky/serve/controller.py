@@ -177,9 +177,9 @@ class SkyServeController:
                 return responses.JSONResponse(
                     status_code=409,
                     content={
-                        'message': f'Already scheduled to terminate '
-                                   f'replica {replica_id} of service '
-                                   f'{self._service_name!r}.'
+                        'message': f'Replica {replica_id} of service '
+                                   f'{self._service_name!r} is already '
+                                   f'in the process of terminating.'
                     })
 
             if (replica_status in serve_state.ReplicaStatus.failed_statuses()
