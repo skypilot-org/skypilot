@@ -1,10 +1,10 @@
 name: pipeline
 depends_on:
-  - infer_A:
+  infer_A:
     - data-processing
-  - infer_B:
+  infer_B:
     - data-processing
-  - eval_A_B:
+  eval_A_B:
     - infer_A
     - infer_B
 ---
