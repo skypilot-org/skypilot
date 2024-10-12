@@ -3,7 +3,7 @@
 
 import time
 import typing
-from typing import Any, Dict, List, Literal
+from typing import List, Literal
 
 import pydantic
 
@@ -37,18 +37,6 @@ class TimestampAggregator(RequestsAggregator):
 
     def clear(self) -> None:
         self.timestamps.clear()
-
-
-class OtherAggregator(RequestsAggregator):
-    """OtherAggregator: Aggregates other types of requests."""
-    type: Literal['other'] = 'other'
-    data: Dict[str, Any] = pydantic.Field(default_factory=dict)
-
-    def add(self, request: 'fastapi.Request') -> None:
-        raise NotImplementedError
-
-    def clear(self) -> None:
-        raise NotImplementedError
 
 
 class LoadBalancerRequest(pydantic.BaseModel):

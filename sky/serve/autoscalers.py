@@ -225,12 +225,11 @@ class RequestRateAutoscaler(Autoscaler):
     def collect_request_information(
             self, request_aggregator_info: schemas.RequestsAggregator) -> None:
         """Collect request information from aggregator for autoscaling."""
-        if isinstance(request_aggregator_info, schemas.TimestampAggregator):
-            self.request_timestamps.extend(request_aggregator_info.timestamps)
-        else:
+        if not isinstance(request_aggregator_info, schemas.TimestampAggregator):
             logger.error(f'Unsupported request aggregator type: '
                          f'{type(request_aggregator_info)}')
             return
+        self.request_timestamps.extend(request_aggregator_info.timestamps)
 
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,

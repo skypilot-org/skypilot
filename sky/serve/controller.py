@@ -99,13 +99,15 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(
                 request: schemas.LoadBalancerRequest) -> fastapi.Response:
-            request_aggregator = request.request_aggregator
-            if not isinstance(request_aggregator, schemas.TimestampAggregator):
+            request_aggregator_info = request.request_aggregator_info
+            if not isinstance(request_aggregator_info,
+                              schemas.TimestampAggregator):
                 raise ValueError(f'Unsupported request aggregator type: '
-                                 f'{type(request_aggregator)}')
-            timestamps = request_aggregator.timestamps
+                                 f'{type(request_aggregator_info)}')
+            timestamps = request_aggregator_info.timestamps
             logger.info(f'Received {len(timestamps)} inflight requests.')
-            self._autoscaler.collect_request_information(request_aggregator)
+            self._autoscaler.collect_request_information(
+                request_aggregator_info)
             return responses.JSONResponse(content={
                 'ready_replica_urls':
                     self._replica_manager.get_active_replica_urls()
