@@ -31,8 +31,8 @@ class _NoOpConsoleStatus:
         pass
 
 
-class NestedStatus:
-    """Handle nested status: inner one does not exit spinner when finished."""
+class _RevertibleStatus:
+    """A wrapper for status that can revert to previous message after exit."""
 
     def __init__(self, message: str):
         if _status is not None:
@@ -77,14 +77,14 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
             not sky_logging.is_silent()):
         if _status is None:
             _status = console.status(msg, refresh_per_second=8)
-        return NestedStatus(msg)
+        return _RevertibleStatus(msg)
     return _NoOpConsoleStatus()
 
 
 def stop_safe_status():
     """Stops all nested statuses.
 
-    This is useful when we need to stop all statuses, e.g., we are going to
+    This is useful when we need to stop all statuses, e.g., when we are going to
     stream logs from user program and do not want it to interfere with the
     spinner display.
     """
