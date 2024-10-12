@@ -98,6 +98,10 @@ class S3CloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
 
+class GCSPathNotFoundError(Exception):
+    """Custom exception to indicate that a GCS path does not exist."""
+    pass
+
 class GcsCloudStorage(CloudStorage):
     """Google Cloud Storage."""
 
@@ -113,7 +117,27 @@ class GcsCloudStorage(CloudStorage):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
         return (f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
                 f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} {gsutil_alias}')
+    
+    def url_exists(self, url: str) -> bool:
+        """Check if the given URL exists in Google Cloud Storage."""
+        check_command = f'{self._INSTALL_GSUTIL} && {self._gsutil_command} ls {url}'
+        try:
+            subprocess.run(check_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, shell=True, executable='/bin/bash')
+            return True
+        except subprocess.CalledProcessError:
+            return False
+        
+    def check_path_exists(self, url):
+        # Command to check if the path exists using gsutil
+        command = [self._gsutil_command, "-q", "stat", url]
 
+        try:
+            # Execute the command
+            subprocess.run(command, check=True)
+            return
+        except subprocess.CalledProcessError:
+            raise GCSPathNotFoundError(f"{url} does not exist in Google Cloud Storage. (Typo, perhaps?)")
+    
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
         In cloud object stores, a "directory" refers to a regular object whose
@@ -122,6 +146,7 @@ class GcsCloudStorage(CloudStorage):
         commands = [self._INSTALL_GSUTIL]
         commands.append(f'{self._gsutil_command} ls -d {url}')
         command = ' && '.join(commands)
+        self.check_path_exists(url)
         p = subprocess.run(command,
                            stdout=subprocess.PIPE,
                            shell=True,
