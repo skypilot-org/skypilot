@@ -31,5 +31,6 @@ class Options(enum.Enum):
                          str(self.default)).lower() in ('true', '1')
 
     @property
-    def key(self) -> str:
+    def env_key(self) -> str:
+        """The environment variable key name."""
         return self.value[0]
