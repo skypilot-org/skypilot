@@ -736,7 +736,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # There may be existing (non-translated) storage mounts, so log this
         # whenever task.storage_mounts is non-empty.
         rich_utils.force_update_status(
-            ux_utils.spinner_message('Uploading storage local sources[/]  '
+            ux_utils.spinner_message('Uploading local sources to storage[/]  '
                                      '[dim]View storages: sky storage ls'))
     try:
         task.sync_storage_mounts()

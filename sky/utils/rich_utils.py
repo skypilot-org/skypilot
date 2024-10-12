@@ -82,7 +82,12 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
 
 def stop_safe_status():
-    """Stop the safe status."""
+    """Stops all nested statuses.
+
+    This is useful when we need to stop all statuses, e.g., we are going to
+    stream logs from user program and do not want it to interfere with the
+    spinner display.
+    """
     if (threading.current_thread() is threading.main_thread() and
             _status is not None):
         _status.stop()
