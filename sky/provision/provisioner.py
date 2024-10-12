@@ -418,6 +418,7 @@ def _post_provision_setup(
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
+    docker_config = config_from_yaml.get('docker', {})
 
     with rich_utils.safe_status(
             ux_utils.spinner_message(
@@ -431,10 +432,11 @@ def _post_provision_setup(
         vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
-        logger.info(f'  {colorama.Style.DIM}{vm_str}{plural} {verb} up.'
-                    f'{colorama.Style.RESET_ALL}')
+        indent_str = (ux_utils.INDENT_SYMBOL
+                      if docker_config else ux_utils.INDENT_LAST_SYMBOL)
+        logger.info(f'{indent_str}{colorama.Style.DIM}{vm_str}{plural} {verb} '
+                    f'up.{colorama.Style.RESET_ALL}')
 
-        docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
                 ux_utils.spinner_message(
@@ -453,6 +455,8 @@ def _post_provision_setup(
             cluster_info.docker_user = docker_user
             ssh_credentials['docker_user'] = docker_user
             logger.debug(f'Docker user: {docker_user}')
+            logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
+                        f'Docker container is up.{colorama.Style.RESET_ALL}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
