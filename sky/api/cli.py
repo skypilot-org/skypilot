@@ -1432,6 +1432,35 @@ def _get_services(service_names: Optional[List[str]],
     return num_services, msg
 
 
+def _status_kubernetes(show_all: bool):
+    """Show all SkyPilot resources in the current Kubernetes context.
+
+    Args:
+        show_all (bool): Show all job information (e.g., start time, failures).
+    """
+    request_id = sdk.kubernetes_status()
+    unmanaged_clusters, all_jobs, serve_controllers = sdk.stream_and_get(
+        request_id)
+
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
+        click.echo(msg)
+    if serve_controllers:
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
+
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -1477,6 +1506,14 @@ def _get_services(service_names: Optional[List[str]],
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
+@click.option(
+    '--kubernetes',
+    '--k8s',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1492,7 +1529,8 @@ def _get_services(service_names: Optional[List[str]],
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, clusters: List[str], all_users: bool):
+           show_services: bool, kubernetes: bool, clusters: List[str],
+           all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1551,6 +1589,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    if kubernetes:
+        _status_kubernetes(all)
+        return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
@@ -5456,7 +5497,7 @@ def api_ls(request_id: Optional[str], all: bool):
     for request in request_list:
         r_id = request.request_id
         if not all:
-            r_id = status_utils.truncate_long_string(r_id, 8)
+            r_id = common_utils.truncate_long_string(r_id, 8)
         table.add_row([
             r_id, request.name,
             log_utils.readable_time_duration(request.created_at), request.status

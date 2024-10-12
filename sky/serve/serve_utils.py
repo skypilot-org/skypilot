@@ -300,6 +300,10 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         raise ValueError('The service is up-ed in an old version and does not '
                          'support update. Please `sky serve down` '
                          'it first and relaunch the service. ')
+    elif resp.status_code == 400:
+        raise ValueError(f'Client error during service update: {resp.text}')
+    elif resp.status_code == 500:
+        raise RuntimeError(f'Server error during service update: {resp.text}')
     elif resp.status_code != 200:
         raise ValueError(f'Failed to update service: {resp.text}')
 

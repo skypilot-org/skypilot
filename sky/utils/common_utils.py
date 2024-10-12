@@ -652,3 +652,23 @@ def zip_files_and_folders(items: List[str], output_file):
                         zipf.write(os.path.join(root, file))
             else:
                 raise ValueError(f'{item} does not exist.')
+
+
+def truncate_long_string(s: str, max_length: int = 35) -> str:
+    """Truncate a string to a maximum length, preserving whole words."""
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'  # Use '…'?
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'

@@ -300,7 +300,10 @@ class AWS(clouds.Cloud):
         # The command for getting the current zone is from:
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
-            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" '
+            '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
+            'curl -H "X-aws-ec2-metadata-token: $TOKEN" -s '
+            'http://169.254.169.254/latest/dynamic/instance-identity/document'
             f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
             'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str

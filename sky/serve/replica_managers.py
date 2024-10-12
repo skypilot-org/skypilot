@@ -37,6 +37,7 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -171,9 +172,10 @@ def _get_resources_ports(task_yaml: str) -> str:
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
     assert len(task.resources) >= 1, task
-    task_resources = list(task.resources)[0]
+    task_resources: 'resources.Resources' = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
+    assert task_resources.ports is not None
     return task_resources.ports[0]
 
 

@@ -1329,8 +1329,7 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
@@ -1795,8 +1794,7 @@ class GcsStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             # we exclude .git directory from the sync
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
@@ -2521,8 +2519,7 @@ class AzureBlobStore(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
             # we exclude .git directory from the sync
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/')
             excludes_list = ';'.join(
                 [file_name.rstrip('*') for file_name in excluded_list])
@@ -2926,8 +2923,7 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'

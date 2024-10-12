@@ -2001,3 +2001,28 @@ def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
         # we need to use in-cluster auth.
         context = None
     return context
+
+
+def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
+    """Gets all SkyPilot pods in the Kubernetes cluster.
+
+    Args:
+        context: Kubernetes context to use. If None, uses the current context.
+
+    Returns:
+        A list of Kubernetes pod objects.
+    """
+    if context is None:
+        context = get_current_kube_config_context_name()
+
+    try:
+        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
+            label_selector='skypilot-cluster',
+            _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error():
+        raise exceptions.ResourcesUnavailableError(
+            'Timed out trying to get SkyPilot pods from Kubernetes cluster. '
+            'Please check if the cluster is healthy and retry. To debug, run: '
+            'kubectl get pods --selector=skypilot-cluster --all-namespaces'
+        ) from None
+    return pods

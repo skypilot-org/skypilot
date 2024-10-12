@@ -77,6 +77,13 @@ def realtime_gpu_availability(context: Optional[str] = None,
 
 @usage_lib.entrypoint
 @api_common.check_health
+def kubernetes_status() -> str:
+    response = requests.get(f'{api_common.get_server_url()}/kubernetes_status')
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
 def list_accelerators(gpus_only: bool = True,
                       name_filter: Optional[str] = None,
                       region_filter: Optional[str] = None,

@@ -3,7 +3,7 @@ import os
 import shlex
 import subprocess
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -18,6 +18,7 @@ from sky import sky_logging
 from sky import task
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
+from sky.jobs.api import core as managed_jobs_core
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -31,6 +32,7 @@ from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -907,6 +909,80 @@ def realtime_gpu_availability(
                 available[gpu],
             ))
     return realtime_gpu_availability_list
+
+
+def kubernetes_status(
+) -> Tuple[List[status_utils.SkyPilotClusterOnKubernetesPayload], Dict[
+    str, status_utils.SkyPilotClusterOnKubernetesPayload], Dict[
+        str, status_utils.SkyPilotClusterOnKubernetesPayload]]:
+    """Get all SkyPilot resources in the current Kubernetes context."""
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    clusters, jobs_controllers, serve_controllers = (
+        status_utils.process_skypilot_pods(pods, context))
+    all_jobs = []
+    with rich_utils.safe_status(
+            '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
+        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
+            user = job_controller_info.user
+            pod = job_controller_info.pods[0]
+            status_message = ('[bold cyan]Checking managed jobs controller')
+            if len(jobs_controllers) > 1:
+                status_message += f's ({i+1}/{len(jobs_controllers)})'
+            spinner.update(f'{status_message}[/]')
+            try:
+                job_list = managed_jobs_core.queue_from_kubernetes_pod(
+                    pod.metadata.name)
+            except RuntimeError as e:
+                logger.warning('Failed to get managed jobs from controller '
+                               f'{pod.metadata.name}: {str(e)}')
+                job_list = []
+            # Add user field to jobs
+            for job in job_list:
+                job['user'] = user
+            all_jobs.extend(job_list)
+    # Reconcile cluster state between managed jobs and clusters:
+    # To maintain a clear separation between regular SkyPilot clusters
+    # and those from managed jobs, we need to exclude the latter from
+    # the main cluster list.
+    # We do this by reconstructing managed job cluster names from each
+    # job's name and ID. We then use this set to filter out managed
+    # clusters from the main cluster list. This is necessary because there
+    # are no identifiers distinguishing clusters from managed jobs from
+    # regular clusters.
+    managed_job_cluster_names = set()
+    for job in all_jobs:
+        # Managed job cluster name is <job_name>-<job_id>
+        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+        managed_job_cluster_names.add(managed_cluster_name)
+    unmanaged_clusters = [
+        c for c in clusters if c.cluster_name not in managed_job_cluster_names
+    ]
+    # Update resources_str in clusters:
+    unmanaged_cluster_payloads = []
+    for cluster in unmanaged_clusters:
+        cluster_payload = (status_utils.SkyPilotClusterOnKubernetesPayload.
+                           from_cluster(cluster))
+        unmanaged_cluster_payloads.append(cluster_payload)
+    job_controller_payloads = {}
+    for cluster_name, controller in jobs_controllers.items():
+        job_controller_payload = (
+            status_utils.SkyPilotClusterOnKubernetesPayload.from_cluster(
+                controller))
+        job_controller_payloads[cluster_name] = job_controller_payload
+    serve_controller_payloads = {}
+    for cluster_name, controller in serve_controllers.items():
+        serve_controller_payload = (
+            status_utils.SkyPilotClusterOnKubernetesPayload.from_cluster(
+                controller))
+        serve_controller_payloads[cluster_name] = serve_controller_payload
+    return (unmanaged_cluster_payloads, job_controller_payloads,
+            serve_controller_payloads)
 
 
 @usage_lib.entrypoint
