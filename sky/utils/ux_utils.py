@@ -26,9 +26,13 @@ INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
+# Log path hint in the spinner during launching
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
+                  f'{colorama.Style.RESET_ALL}')
+
 
 def console_newline():
-    """Print a newline to the console using rich.
+    """Prints a newline to the console using rich.
 
     Useful when catching exceptions inside console.status()
     """
@@ -63,7 +67,7 @@ def print_exception_no_traceback():
 
 @contextlib.contextmanager
 def enable_traceback():
-    """Revert the effect of print_exception_no_traceback().
+    """Reverts the effect of print_exception_no_traceback().
 
     This is used for usage_lib to collect the full traceback.
     """
@@ -74,7 +78,7 @@ def enable_traceback():
 
 
 class RedirectOutputForProcess:
-    """Redirect stdout and stderr to a file.
+    """Redirects stdout and stderr to a file.
 
     This class enabled output redirect for multiprocessing.Process.
     Example usage:
@@ -121,10 +125,6 @@ def starting_message(message: str) -> str:
     """Gets the starting message for the given message."""
     return f'⚙︎ {message}'
 
-
-# Log path hint in the spinner during launching
-_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
-                  f'{colorama.Style.RESET_ALL}')
 
 
 def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
