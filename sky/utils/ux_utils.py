@@ -126,7 +126,6 @@ def starting_message(message: str) -> str:
     return f'⚙︎ {message}'
 
 
-
 def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
     """Gets the log path hint for the given log path."""
     log_path = str(log_path)
