@@ -193,7 +193,11 @@ def _get_cloud_dependencies_installation_commands(
     # TODO(tian): Make dependency installation command a method of cloud
     # class and get all installation command for enabled clouds.
     commands = []
-    prefix_str = '⠇ Check & install cloud dependencies on controller: '
+    # We use <step>/<total> instead of strong formatting, as we need to update
+    # the <total> at the end of the for loop, and python does not support
+    # partial string formatting.
+    prefix_str = (f'[<step>/<total>] Check & install cloud dependencies '
+                  'on controller: ')
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
     empty_str = ' ' * 10
@@ -213,12 +217,16 @@ def _get_cloud_dependencies_installation_commands(
             # fluidstack and paperspace
             continue
         if isinstance(cloud, clouds.AWS):
-            commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
+            commands.append(f'echo -en "\\r{step_prefix}AWS{empty_str}" && ' +
                             aws_dependencies_installation)
             setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Azure):
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
+                f'echo -en "\\r{step_prefix}Azure{empty_str}" && '
                 'pip list | grep azure-cli > /dev/null 2>&1 || '
                 'pip install "azure-cli>=2.31.0" azure-core '
                 '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
@@ -230,8 +238,10 @@ def _get_cloud_dependencies_installation_commands(
                 'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
             setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.GCP):
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
+                f'echo -en "\\r{step_prefix}GCP{empty_str}" && '
                 'pip list | grep google-api-python-client > /dev/null 2>&1 || '
                 'pip install "google-api-python-client>=2.69.0" '
                 '> /dev/null 2>&1')
@@ -244,8 +254,10 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
             setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Kubernetes):
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
+                f'echo -en "\\r{step_prefix}Kubernetes{empty_str}" && '
                 'pip list | grep kubernetes > /dev/null 2>&1 || '
                 'pip install "kubernetes>=20.0.0" > /dev/null 2>&1 &&'
                 # Install k8s + skypilot dependencies
@@ -265,38 +277,53 @@ def _get_cloud_dependencies_installation_commands(
                 'kubectl /usr/local/bin/kubectl))')
             setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Cudo):
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
+                f'echo -en "\\r{step_prefix}Cudo{empty_str}" && '
                 'pip list | grep cudo-compute > /dev/null 2>&1 || '
                 'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
             setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.RunPod):
-            commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
+            commands.append(f'echo -en "\\r{step_prefix}RunPod{empty_str}" && '
                             'pip list | grep runpod > /dev/null 2>&1 || '
                             'pip install "runpod>=1.5.1" > /dev/null 2>&1')
             setup_clouds.append(str(cloud))
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
+                step_prefix = prefix_str.replace('<step>',
+                                                 str(len(setup_clouds) + 1))
                 commands.append(
-                    f'echo -en "\\r{prefix_str}IBM{empty_str}" '
+                    f'echo -en "\\r{step_prefix}IBM{empty_str}" '
                     '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
                     'pip install ibm-cloud-sdk-core ibm-vpc '
                     'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
                 setup_clouds.append(str(cloud))
             elif isinstance(cloud, clouds.OCI):
+                step_prefix = prefix_str.replace('<step>',
+                                                 str(len(setup_clouds) + 1))
                 commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
                                 'pip list | grep oci > /dev/null 2>&1 || '
                                 'pip install oci > /dev/null 2>&1')
                 setup_clouds.append(str(cloud))
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
-                        aws_dependencies_installation)
+        step_prefix = prefix_str.replace('<step>', str(len(setup_clouds) + 1))
+        commands.append(
+            f'echo -en "\\r{step_prefix}Cloudflare{empty_str}" && ' +
+            aws_dependencies_installation)
         setup_clouds.append(cloudflare.NAME)
-    commands.append(f'echo -e "\\r{prefix_str.replace("⠇", " ")}done.'
-                    f'{empty_str}"')
+
+    finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
+    commands.append(f'echo -e "\\r{finish_prefix}done.{empty_str}"')
+    commands = [
+        command.replace('<total>', str(len(setup_clouds)))
+        for command in commands
+    ]
     return commands
 
 

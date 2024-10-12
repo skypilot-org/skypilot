@@ -234,7 +234,6 @@ def run_with_log(
                 skip_lines += [
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
-                    'Shared connection to',
                 ]
                 # We need this even if the log_path is '/dev/null' to ensure the
                 # progress bar is shown.
