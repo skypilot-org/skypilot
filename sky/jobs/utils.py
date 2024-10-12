@@ -60,8 +60,8 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
-    '{status_str}. [dim]It may take a few minutes[/]\n'
-    '  [dim]View controller logs: sky jobs logs --controller {job_id}[/]')
+    '{status_str}. It may take a few minutes.\n'
+    '  [dim]View controller logs: sky jobs logs --controller {job_id}')
 _JOB_CANCELLED_MESSAGE = (
     ux_utils.spinner_message('Waiting for task status to be updated.') +
     ' It may take a minute.')
