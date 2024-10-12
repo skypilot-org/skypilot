@@ -196,7 +196,7 @@ def _get_cloud_dependencies_installation_commands(
     # We use <step>/<total> instead of strong formatting, as we need to update
     # the <total> at the end of the for loop, and python does not support
     # partial string formatting.
-    prefix_str = (f'[<step>/<total>] Check & install cloud dependencies '
+    prefix_str = ('[<step>/<total>] Check & install cloud dependencies '
                   'on controller: ')
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
