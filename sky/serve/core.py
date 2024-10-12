@@ -211,6 +211,7 @@ def up(
         )
 
         style = colorama.Style
+        fore = colorama.Fore
 
         assert controller_job_id is not None and controller_handle is not None
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
@@ -272,9 +273,9 @@ def up(
             assert endpoint is not None, 'Did not get endpoint for controller.'
 
         sky_logging.print(
-            f'{colorama.Fore.CYAN}Service name: '
-            f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
-            f'\n{colorama.Fore.CYAN}Endpoint URL: '
+            f'{fore.CYAN}Service name: '
+            f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
+            f'\n{fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
             f'\n📋 Useful Commands'
             f'\n{ux_utils.INDENT_SYMBOL}To check service status:\t'
