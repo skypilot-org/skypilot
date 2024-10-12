@@ -474,7 +474,8 @@ def get_controller_resources(
     # TODO(tian): Consider respecting the regions/zones specified for the
     # resources as well.
 
-    requested_clouds_with_region_zone: Dict[str, Dict[str, Set[str]]] = {}
+    requested_clouds_with_region_zone: Dict[str, Dict[Optional[str],
+                                                      Set[Optional[str]]]] = {}
     for resource in task_resources:
         cloud_name = str(resource.cloud) if resource.cloud is not None else None
         if cloud_name is not None:
@@ -488,20 +489,17 @@ def get_controller_resources(
                     continue
                 requested_clouds_with_region_zone[cloud_name] = {}
             if resource.region is None:
-                requested_clouds_with_region_zone[cloud_name] = {
-                    '_allow_any_region': {'_allow_any_zone'}
-                }
-            elif '_allow_any_region' not in requested_clouds_with_region_zone[
-                    cloud_name]:
+                requested_clouds_with_region_zone[cloud_name] = {None: {None}}
+            elif None not in requested_clouds_with_region_zone[cloud_name]:
                 if resource.region not in requested_clouds_with_region_zone[
                         cloud_name]:
                     requested_clouds_with_region_zone[cloud_name][
                         resource.region] = set()
                 if resource.zone is None:
                     requested_clouds_with_region_zone[cloud_name][
-                        resource.region] = {'_allow_any_zone'}
-                elif '_allow_any_zone' not in requested_clouds_with_region_zone[
-                        cloud_name][resource.region]:
+                        resource.region] = {None}
+                elif None not in requested_clouds_with_region_zone[cloud_name][
+                        resource.region]:
                     requested_clouds_with_region_zone[cloud_name][
                         resource.region].add(resource.zone)
         else:
@@ -519,12 +517,11 @@ def get_controller_resources(
         return {controller_resources_to_use}
     return {
         controller_resources_to_use.copy(
-            cloud=cloud,
-            region=(None if region == '_allow_any_region' else region),
-            zone=(None if zone == '_allow_any_zone' else zone))
+            cloud=clouds.CLOUD_REGISTRY.from_str(cloud_name),
+            region=region,
+            zone=zone)
         for cloud_name, regions in requested_clouds_with_region_zone.items()
         for region, zones in regions.items() for zone in zones
-        for cloud in [clouds.CLOUD_REGISTRY.from_str(cloud_name)]
     }
 
 
