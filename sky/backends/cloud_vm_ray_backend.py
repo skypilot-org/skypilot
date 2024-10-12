@@ -136,7 +136,7 @@ _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 # We don't do import then __file__ because that script needs to be filled in
 # (so import would fail).
 _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
-    pathlib.Path(sky.__file__).resolve().parent / 'serve' / 'monkey_patches' /
+    pathlib.Path(sky.__file__).resolve().parent / 'backends' / 'monkey_patches' /
     'monkey_patch_ray_up.py')
 
 # The maximum size of a command line arguments is 128 KB, i.e. the command
