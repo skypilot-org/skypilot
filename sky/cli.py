@@ -1458,6 +1458,79 @@ def _get_services(service_names: Optional[List[str]],
     return num_services, msg
 
 
+def _status_kubernetes(show_all: bool):
+    """Show all SkyPilot resources in the current Kubernetes context.
+
+    Args:
+        show_all (bool): Show all job information (e.g., start time, failures).
+    """
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    all_clusters, jobs_controllers, serve_controllers = (
+        status_utils.process_skypilot_pods(pods, context))
+    all_jobs = []
+    with rich_utils.safe_status(
+            '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
+        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
+            user = job_controller_info['user']
+            pod = job_controller_info['pods'][0]
+            status_message = ('[bold cyan]Checking managed jobs controller')
+            if len(jobs_controllers) > 1:
+                status_message += f's ({i+1}/{len(jobs_controllers)})'
+            spinner.update(f'{status_message}[/]')
+            try:
+                job_list = managed_jobs.queue_from_kubernetes_pod(
+                    pod.metadata.name)
+            except RuntimeError as e:
+                logger.warning('Failed to get managed jobs from controller '
+                               f'{pod.metadata.name}: {str(e)}')
+                job_list = []
+            # Add user field to jobs
+            for job in job_list:
+                job['user'] = user
+            all_jobs.extend(job_list)
+    # Reconcile cluster state between managed jobs and clusters:
+    # To maintain a clear separation between regular SkyPilot clusters
+    # and those from managed jobs, we need to exclude the latter from
+    # the main cluster list.
+    # We do this by reconstructing managed job cluster names from each
+    # job's name and ID. We then use this set to filter out managed
+    # clusters from the main cluster list. This is necessary because there
+    # are no identifiers distinguishing clusters from managed jobs from
+    # regular clusters.
+    managed_job_cluster_names = set()
+    for job in all_jobs:
+        # Managed job cluster name is <job_name>-<job_id>
+        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+        managed_job_cluster_names.add(managed_cluster_name)
+    unmanaged_clusters = [
+        c for c in all_clusters
+        if c['cluster_name'] not in managed_job_cluster_names
+    ]
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
+        click.echo(msg)
+    if serve_controllers:
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
+
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -1503,6 +1576,14 @@ def _get_services(service_names: Optional[List[str]],
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
+@click.option(
+    '--kubernetes',
+    '--k8s',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1512,7 +1593,7 @@ def _get_services(service_names: Optional[List[str]],
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, clusters: List[str]):
+           show_services: bool, kubernetes: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1571,6 +1652,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    if kubernetes:
+        _status_kubernetes(all)
+        return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
@@ -3113,7 +3197,12 @@ def show_gpus(
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
-                context = region
+                if region:
+                    context = region
+                else:
+                    # If region is not specified, we use the current context
+                    context = (
+                        kubernetes_utils.get_current_kube_config_context_name())
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
@@ -3128,7 +3217,7 @@ def show_gpus(
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs (Context: {context})'
+                           f'Kubernetes GPUs (context: {context})'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
