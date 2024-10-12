@@ -13,6 +13,10 @@ History:
    remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
+ - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
+   make_deploy_resources_variables(): Bug fix for specify the image_id as
+   the ocid of the image in the task.yaml file, in this case the image_id
+   for the node config should be set to the ocid instead of a dict.
 """
 import json
 import logging
@@ -220,7 +224,9 @@ class OCI(clouds.Cloud):
             listing_id = image_cols[1]
             res_ver = image_cols[2]
         else:
-            image_id = resources.image_id
+            # Oct.12,2024 by HysunHe: Bug fix - resources.image_id is an
+            # dict. The image_id here should be the ocid format.
+            image_id = image_str
             listing_id = None
             res_ver = None
 
