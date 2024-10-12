@@ -123,22 +123,23 @@ class Optimizer:
                 for a task.
             exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
-        _check_specified_clouds(dag)
+        with rich_utils.safe_status(ux_utils.spinner_message('Optimizing')):
+            _check_specified_clouds(dag)
 
-        # This function is effectful: mutates every node in 'dag' by setting
-        # node.best_resources if it is None.
-        Optimizer._add_dummy_source_sink_nodes(dag)
-        try:
-            unused_best_plan = Optimizer._optimize_dag(
-                dag=dag,
-                minimize_cost=minimize == OptimizeTarget.COST,
-                blocked_resources=blocked_resources,
-                quiet=quiet)
-        finally:
-            # Make sure to remove the dummy source/sink nodes, even if the
-            # optimization fails.
-            Optimizer._remove_dummy_source_sink_nodes(dag)
-        return dag
+            # This function is effectful: mutates every node in 'dag' by setting
+            # node.best_resources if it is None.
+            Optimizer._add_dummy_source_sink_nodes(dag)
+            try:
+                unused_best_plan = Optimizer._optimize_dag(
+                    dag=dag,
+                    minimize_cost=minimize == OptimizeTarget.COST,
+                    blocked_resources=blocked_resources,
+                    quiet=quiet)
+            finally:
+                # Make sure to remove the dummy source/sink nodes, even if the
+                # optimization fails.
+                Optimizer._remove_dummy_source_sink_nodes(dag)
+            return dag
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
@@ -259,6 +260,9 @@ class Optimizer:
             launchable_resources: Dict[resources_lib.Resources,
                                        List[resources_lib.Resources]]
         ) -> Dict[resources_lib.Resources, int]:
+            if not resources_utils.need_to_query_reservations():
+                return {}
+
             num_available_reserved_nodes_per_resource = {}
 
             def get_reservations_available_resources(
@@ -269,7 +273,7 @@ class Optimizer:
             launchable_resources_list: List[resources_lib.Resources] = sum(
                 launchable_resources.values(), [])
             with rich_utils.safe_status(
-                    '[cyan]Checking reserved resources...[/]'):
+                    ux_utils.spinner_message('Checking reserved resources')):
                 subprocess_utils.run_in_parallel(
                     get_reservations_available_resources,
                     launchable_resources_list)
@@ -337,8 +341,8 @@ class Optimizer:
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
                         num_available_reserved_nodes = (
-                            num_available_reserved_nodes_per_resource[resources]
-                        )
+                            num_available_reserved_nodes_per_resource.get(
+                                resources, 0))
 
                         # We consider the cost of the unused reservation
                         # resources to be 0 since we are already paying for
@@ -384,10 +388,14 @@ class Optimizer:
                     fuzzy_candidates_str = (
                         f'\nTry one of these offered accelerators: {cyan}'
                         f'{fuzzy_candidates}{reset}')
+                node_resources_reprs = ', '.join(f'{node.num_nodes}x ' +
+                                                 r.repr_with_region_zone
+                                                 for r in node.resources)
                 error_msg = (
                     f'{source_hint.capitalize()} does not contain any '
-                    f'instances satisfying the request:\n{node}.'
-                    f'\n\nTo fix: relax or change the '
+                    f'instances satisfying the request: '
+                    f'{node_resources_reprs}.'
+                    f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
                     f'Hint: {bold}sky show-gpus{reset} '
                     'to list available accelerators.\n'
@@ -716,7 +724,6 @@ class Optimizer:
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool,
     ):
-        logger.info('== Optimizer ==')
         ordered_node_to_cost_map = collections.OrderedDict()
         ordered_best_plan = collections.OrderedDict()
         for node in topo_order:
@@ -738,15 +745,18 @@ class Optimizer:
                     node.get_inputs() is None and node.get_outputs() is None):
                 print_hourly_cost = True
 
-        if print_hourly_cost:
-            logger.info(f'{colorama.Style.BRIGHT}Estimated cost: '
-                        f'{colorama.Style.RESET_ALL}${total_cost:.1f} / hour\n')
-        else:
-            logger.info(f'{colorama.Style.BRIGHT}Estimated total runtime: '
-                        f'{colorama.Style.RESET_ALL}{total_time / 3600:.1f} '
-                        'hours\n'
-                        f'{colorama.Style.BRIGHT}Estimated total cost: '
-                        f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
+        if not env_options.Options.MINIMIZE_LOGGING.get():
+            if print_hourly_cost:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Estimated cost: '
+                    f'{colorama.Style.RESET_ALL}${total_cost:.1f} / hour\n')
+            else:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Estimated total runtime: '
+                    f'{colorama.Style.RESET_ALL}{total_time / 3600:.1f} '
+                    'hours\n'
+                    f'{colorama.Style.BRIGHT}Estimated total cost: '
+                    f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
 
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
@@ -845,7 +855,7 @@ class Optimizer:
             best_plan_table = _create_table(['TASK', '#NODES'] +
                                             resource_fields)
             best_plan_table.add_rows(best_plan_rows)
-            logger.info(f'{best_plan_table}\n')
+            logger.info(f'{best_plan_table}')
 
         # Print the egress plan if any data egress is scheduled.
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
@@ -864,6 +874,10 @@ class Optimizer:
             }
             task_str = (f'for task {task.name!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
+            if num_tasks > 1:
+                # Add a new line for better readability, when there are multiple
+                # tasks.
+                logger.info('')
             logger.info(
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'
                 f'({task.num_nodes} node{plural}):'
@@ -934,7 +948,7 @@ class Optimizer:
 
             table = _create_table(field_names)
             table.add_rows(rows)
-            logger.info(f'{table}\n')
+            logger.info(f'{table}')
 
             # Warning message for using disk_tier=ultra
             # TODO(yi): Consider price of disks in optimizer and
@@ -965,10 +979,10 @@ class Optimizer:
                             f'Multiple {cloud} instances satisfy '
                             f'{acc_name}:{int(acc_count)}. '
                             f'The cheapest {candidate_list[0]!r} is considered '
-                            f'among:\n{instance_list}.\n')
+                            f'among:\n{instance_list}.')
             if is_multi_instances:
                 logger.info(
-                    f'To list more details, run \'sky show-gpus {acc_name}\'.')
+                    f'To list more details, run: sky show-gpus {acc_name}\n')
 
     @staticmethod
     def _optimize_dag(
@@ -1101,8 +1115,7 @@ class Optimizer:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
                                            node_to_cost_map, minimize_cost)
-            if not env_options.Options.MINIMIZE_LOGGING.get():
-                Optimizer._print_candidates(local_node_to_candidate_map)
+            Optimizer._print_candidates(local_node_to_candidate_map)
         return best_plan
 
 
