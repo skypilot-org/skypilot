@@ -279,26 +279,26 @@ def up(
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
             f'\n📋 Useful Commands'
             f'\n{ux_utils.INDENT_SYMBOL}To check service status:\t'
-            f'{constants.BOLD}sky serve status {service_name} '
-            f'[--endpoint]{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky serve status {service_name} '
+            f'[--endpoint]{ux_utils.RESET_BOLD}'
             f'\n{ux_utils.INDENT_SYMBOL}To teardown the service:\t'
-            f'{constants.BOLD}sky serve down {service_name}'
-            f'{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky serve down {service_name}'
+            f'{ux_utils.RESET_BOLD}'
             f'\n{ux_utils.INDENT_SYMBOL}To see replica logs:\t'
-            f'{constants.BOLD}sky serve logs {service_name} [REPLICA_ID]'
-            f'{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky serve logs {service_name} [REPLICA_ID]'
+            f'{ux_utils.RESET_BOLD}'
             f'\n{ux_utils.INDENT_SYMBOL}To see load balancer logs:\t'
-            f'{constants.BOLD}sky serve logs --load-balancer {service_name}'
-            f'{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky serve logs --load-balancer {service_name}'
+            f'{ux_utils.RESET_BOLD}'
             f'\n{ux_utils.INDENT_SYMBOL}To see controller logs:\t'
-            f'{constants.BOLD}sky serve logs --controller {service_name}'
-            f'{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky serve logs --controller {service_name}'
+            f'{ux_utils.RESET_BOLD}'
             f'\n{ux_utils.INDENT_SYMBOL}To monitor the status:\t'
-            f'{constants.BOLD}watch -n10 sky serve status {service_name}'
-            f'{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}watch -n10 sky serve status {service_name}'
+            f'{ux_utils.RESET_BOLD}'
             f'\n{ux_utils.INDENT_LAST_SYMBOL}To send a test request:\t'
-            f'{constants.BOLD}curl {endpoint}'
-            f'{constants.RESET_BOLD}'
+            f'{ux_utils.BOLD}curl {endpoint}'
+            f'{ux_utils.RESET_BOLD}'
             '\n\n' +
             ux_utils.finishing_message('Service is spinning up and replicas '
                                        'will be ready shortly.'))
@@ -323,11 +323,11 @@ def update(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
-        f'To spin up a new service, use {constants.BOLD}'
-        f'sky serve up{constants.RESET_BOLD}',
+        f'To spin up a new service, use {ux_utils.BOLD}'
+        f'sky serve up{ux_utils.RESET_BOLD}',
         non_existent_message='Service does not exist. '
         'To spin up a new service, '
-        f'use {constants.BOLD}sky serve up{constants.RESET_BOLD}',
+        f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
     )
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -353,8 +353,8 @@ def update(
     if len(service_statuses) == 0:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find service {service_name!r}.'
-                               f'To spin up a service, use {constants.BOLD}'
-                               f'sky serve up{constants.RESET_BOLD}')
+                               f'To spin up a service, use {ux_utils.BOLD}'
+                               f'sky serve up{ux_utils.RESET_BOLD}')
 
     if len(service_statuses) > 1:
         with ux_utils.print_exception_no_traceback():
@@ -435,8 +435,8 @@ def update(
 
     print(f'{colorama.Fore.GREEN}Service {service_name!r} update scheduled.'
           f'{colorama.Style.RESET_ALL}\n'
-          f'Please use {constants.BOLD}sky serve status {service_name} '
-          f'{constants.RESET_BOLD}to check the latest status.')
+          f'Please use {ux_utils.BOLD}sky serve status {service_name} '
+          f'{ux_utils.RESET_BOLD}to check the latest status.')
 
 
 @usage_lib.entrypoint

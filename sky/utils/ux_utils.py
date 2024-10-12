@@ -22,6 +22,10 @@ console = rich_console.Console()
 INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
 INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
 
+# Console formatting constants
+BOLD = '\033[1m'
+RESET_BOLD = '\033[0m'
+
 
 def console_newline():
     """Print a newline to the console using rich.

@@ -289,7 +289,3 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
-
-# UX constants
-BOLD = '\033[1m'
-RESET_BOLD = '\033[0m'
