@@ -1814,7 +1814,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if show_managed_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed jobs{colorama.Style.RESET_ALL}')
-            with rich_utils.safe_status('[cyan]Checking managed jobs[/]'):
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message('Checking managed jobs')):
                 managed_jobs_query_interrupted, result = _try_get_future_result(
                     managed_jobs_future)
                 if managed_jobs_query_interrupted:
@@ -1855,7 +1856,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
             else:
-                with rich_utils.safe_status('[cyan]Checking services[/]'):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message('Checking services')):
                     interrupted, result = _try_get_future_result(
                         services_future)
                     if interrupted:
@@ -2551,8 +2553,8 @@ def start(
                                'is currently not supported.\n'
                                'Please start the former independently.')
     if controllers:
-        bold = backend_utils.BOLD
-        reset_bold = backend_utils.RESET_BOLD
+        bold = ux_utils.BOLD
+        reset_bold = ux_utils.RESET_BOLD
         if len(controllers) != 1:
             raise click.UsageError(
                 'Starting multiple controllers is currently not supported.\n'
@@ -2673,7 +2675,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     assert controller is not None, controller_name
 
     with rich_utils.safe_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            ux_utils.spinner_message('Checking for in-progress managed jobs')):
         try:
             managed_jobs_ = managed_jobs.queue(refresh=False,
                                                skip_finished=True)
@@ -2725,7 +2727,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking for live services')):
         try:
             services = serve_lib.status()
         except exceptions.ClusterNotUpError as e:
@@ -2909,9 +2912,9 @@ def _down_or_stop_clusters(
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
-        total=len(clusters))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'{operation} {len(clusters)} cluster{plural}'),
+                             total=len(clusters))
 
     def _down_or_stop(name: str):
         success_progress = False
@@ -3680,7 +3683,7 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
+                fg='cyan')
     dag = sky.optimize(dag)
 
     if not yes:
@@ -3774,7 +3777,8 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
 
     """
     click.secho('Fetching managed job statuses...', fg='yellow')
-    with rich_utils.safe_status('[cyan]Checking managed jobs[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
         _, msg = _get_managed_jobs(refresh=refresh,
                                    skip_finished=skip_finished,
                                    show_all=all,
@@ -3825,10 +3829,12 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message='All managed jobs should have finished.',
-        exit_if_not_accessible=True)
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
+        backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            stopped_message='All managed jobs should have finished.',
+            exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -4390,7 +4396,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       sky serve status my-service
     """
     # This won't pollute the output of --endpoint.
-    with rich_utils.safe_status('[cyan]Checking services[/]'):
+    with rich_utils.safe_status(ux_utils.spinner_message('Checking services')):
         _, msg = _get_services(service_names,
                                show_all=all,
                                show_endpoint=endpoint,
@@ -4845,11 +4851,11 @@ def benchmark_launch(
             f'\n{colorama.Fore.CYAN}Benchmark name: '
             f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
             '\nTo see the benchmark results: '
-            f'{backend_utils.BOLD}sky bench show '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky bench show '
+            f'{benchmark}{ux_utils.RESET_BOLD}'
             '\nTo teardown the clusters: '
-            f'{backend_utils.BOLD}sky bench down '
-            f'{benchmark}{backend_utils.RESET_BOLD}')
+            f'{ux_utils.BOLD}sky bench down '
+            f'{benchmark}{ux_utils.RESET_BOLD}')
         subprocess_utils.run('sky bench ls')
     else:
         logger.error('No benchmarking clusters are created.')
@@ -5140,9 +5146,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
-        total=len(to_delete))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'Deleting {len(to_delete)} benchmark{plural}'),
+                             total=len(to_delete))
 
     def _delete_benchmark(benchmark: str) -> None:
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
@@ -5157,8 +5163,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
                        f'has {num_clusters} un-terminated cluster{plural}. '
                        f'Terminate the cluster{plural} with '
-                       f'{backend_utils.BOLD} sky bench down {benchmark} '
-                       f'{backend_utils.RESET_BOLD} '
+                       f'{ux_utils.BOLD} sky bench down {benchmark} '
+                       f'{ux_utils.RESET_BOLD} '
                        'before deleting the benchmark report.')
             success = False
         else:
@@ -5259,7 +5265,7 @@ def _deploy_local_cluster(gpus: bool):
                 f'Full log: {log_path}'
                 f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     # Run sky check
-    with rich_utils.safe_status('[bold cyan]Running sky check...'):
+    with rich_utils.safe_status(ux_utils.spinner_message('Running sky check')):
         sky_check.check(clouds=['kubernetes'], quiet=True)
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
@@ -5456,7 +5462,8 @@ def local_down():
                             'local_down.log')
     tail_cmd = 'tail -n100 -f ' + log_path
 
-    with rich_utils.safe_status('[bold cyan]Removing local cluster...'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Removing local cluster')):
         style = colorama.Style
         click.echo('To view detailed progress: '
                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -5479,7 +5486,8 @@ def local_down():
                     f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     if cluster_removed:
         # Run sky check
-        with rich_utils.safe_status('[bold cyan]Running sky check...'):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Running sky check')):
             sky_check.check(clouds=['kubernetes'], quiet=True)
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
