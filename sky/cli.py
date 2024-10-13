@@ -4523,20 +4523,27 @@ def serve_logs(
     Example:
 
     .. code-block:: bash
+
         # Generic format
         sky serve logs [OPTIONS] SERVICE_NAME [REPLICA_ID]
+        \b
         # Tail the controller logs of a service
         sky serve logs --controller [SERVICE_NAME]
+        \b
         # Print the load balancer logs so far and exit
         sky serve logs --load-balancer --no-follow [SERVICE_NAME]
+        \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
+        \b
         # Sync down logs for controller, load balancer, and all
         # replicas for a service (all components)
         sky serve logs [SERVICE_NAME] --sync-down
+        \b
         # Sync down logs for only controller. Same pattern
         # applies for load balancer (single component)
         sky serve logs [SERVICE_NAME] --controller --sync-down
+        \b
         # Sync down logs only for a single replica
         # (single component)
         sky serve logs [SERVICE_NAME] 3 --sync-down
