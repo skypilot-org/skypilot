@@ -111,6 +111,32 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       cluster_names=cluster_names)
 
 
+def status_kubernetes():
+    """Get all SkyPilot clusters and controllers in the Kubernetes cluster.
+
+    Managed jobs and services are also included in the clusters returned.
+    The caller must parse the controllers to identify which clusters are run
+    as managed jobs or services.
+
+    Returns:
+        A tuple containing:
+        - List of dictionaries with cluster information.
+        - Dictionary of job controller information.
+        - Dictionary of serve controller information.
+        - Context used to fetch the cluster information.
+
+        Each dictionary contains the following keys:
+            'cluster_name_on_cloud': The cluster_name_on_cloud used by SkyPilot
+            'cluster_name': The cluster name without the user hash
+            'user': The user who created the cluster. Fetched from pod label
+            'status': The cluster status (assumed UP if pod exists)
+            'pods': List of pod objects in the cluster
+            'launched_at': Timestamp of when the cluster was launched
+            'resources': sky.Resources object for the cluster
+    """
+    return backend_utils.get_clusters_kubernetes()
+
+
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).

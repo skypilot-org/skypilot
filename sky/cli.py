@@ -1464,15 +1464,8 @@ def _status_kubernetes(show_all: bool):
     Args:
         show_all (bool): Show all job information (e.g., start time, failures).
     """
-    context = kubernetes_utils.get_current_kube_config_context_name()
-    try:
-        pods = kubernetes_utils.get_skypilot_pods(context)
-    except exceptions.ResourcesUnavailableError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Failed to get SkyPilot pods from '
-                             f'Kubernetes: {str(e)}') from e
-    all_clusters, jobs_controllers, serve_controllers = (
-        status_utils.process_skypilot_pods(pods, context))
+    all_clusters, jobs_controllers, serve_controllers, context = (
+        core.status_kubernetes())
     all_jobs = []
     with rich_utils.safe_status(
             '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
