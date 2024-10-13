@@ -1,14 +1,11 @@
 """Utilities for sky status."""
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import click
 import colorama
 
 from sky import backends
-from sky import clouds as sky_clouds
-from sky import resources as resources_lib
 from sky import status_lib
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils

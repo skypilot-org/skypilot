@@ -57,7 +57,6 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
@@ -752,7 +751,7 @@ def _replace_yaml_dicts(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources.Resources',
+        to_provision: resources_lib.Resources,
         num_nodes: int,
         cluster_config_template: str,
         cluster_name: str,
@@ -2561,8 +2560,8 @@ def get_clusters_kubernetes():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Failed to get SkyPilot pods from '
                              f'Kubernetes: {str(e)}') from e
-    all_clusters, jobs_controllers, serve_controllers = (
-        process_skypilot_pods(pods, context))
+    all_clusters, jobs_controllers, serve_controllers = (process_skypilot_pods(
+        pods, context))
     return all_clusters, jobs_controllers, serve_controllers, context
 
 
@@ -2983,4 +2982,3 @@ def get_endpoints(cluster: str,
         return {
             port_num: urls[0].url() for port_num, urls in port_details.items()
         }
-
