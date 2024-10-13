@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -120,22 +121,21 @@ def status_kubernetes():
 
     Returns:
         A tuple containing:
-        - List of dictionaries with cluster information.
-        - Dictionary of job controller information.
-        - Dictionary of serve controller information.
+        - List of KubernetesClusterInfo with all cluster information.
+        - List of KubernetesClusterInfo with job controller information.
+        - List of KubernetesClusterInfo with serve controller information.
         - Context used to fetch the cluster information.
-
-        Each dictionary contains the following keys:
-            'cluster_name_on_cloud': The cluster_name_on_cloud used by SkyPilot
-            'cluster_name': The cluster name without the user hash
-            'user': The user who created the cluster. Fetched from pod label
-            'status': The cluster status (assumed UP if pod exists)
-            'pods': List of pod objects in the cluster
-            'launched_at': Timestamp of when the cluster was launched
-            'resources': sky.Resources object for the cluster
     """
-    return backend_utils.get_clusters_kubernetes()
-
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    all_clusters, jobs_controllers, serve_controllers = (
+        kubernetes_utils.process_skypilot_pods(pods, context))
+    return all_clusters, jobs_controllers, serve_controllers, context
 
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:

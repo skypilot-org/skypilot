@@ -300,19 +300,19 @@ def _get_estimated_cost_for_cost_report(
     return f'$ {cost:.2f}'
 
 
-def show_kubernetes_cluster_status_table(clusters: List[Any],
+def show_kubernetes_cluster_status_table(clusters: List['KubernetesClusterInfo'],
                                          show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
-        StatusColumn('USER', lambda c: c['user']),
-        StatusColumn('NAME', lambda c: c['cluster_name']),
+        StatusColumn('USER', lambda c: c.user),
+        StatusColumn('NAME', lambda c: c.cluster_name),
         StatusColumn(
             'LAUNCHED',
-            lambda c: log_utils.readable_time_duration(c['launched_at'])),
+            lambda c: log_utils.readable_time_duration(c.launched_at)),
         StatusColumn('RESOURCES',
-                     lambda c: c['resources_str'],
+                     lambda c: c.resources_str,
                      trunc_length=70 if not show_all else 0),
-        StatusColumn('STATUS', lambda c: c['status'].colored_str()),
+        StatusColumn('STATUS', lambda c: c.status.colored_str()),
         # TODO(romilb): We should consider adding POD_NAME field here when --all
         #  is passed to help users fetch pod name programmatically.
     ]
@@ -324,7 +324,7 @@ def show_kubernetes_cluster_status_table(clusters: List[Any],
 
     # Sort table by user, then by cluster name
     sorted_clusters = sorted(clusters,
-                             key=lambda c: (c['user'], c['cluster_name']))
+                             key=lambda c: (c.user, c.cluster_name))
 
     for cluster in sorted_clusters:
         row = []

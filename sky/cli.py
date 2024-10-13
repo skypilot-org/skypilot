@@ -1469,9 +1469,9 @@ def _status_kubernetes(show_all: bool):
     all_jobs = []
     with rich_utils.safe_status(
             '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
-        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
-            user = job_controller_info['user']
-            pod = job_controller_info['pods'][0]
+        for i, job_controller_info in enumerate(jobs_controllers):
+            user = job_controller_info.user
+            pod = job_controller_info.pods[0]
             status_message = ('[bold cyan]Checking managed jobs controller')
             if len(jobs_controllers) > 1:
                 status_message += f's ({i+1}/{len(jobs_controllers)})'
@@ -1503,7 +1503,7 @@ def _status_kubernetes(show_all: bool):
         managed_job_cluster_names.add(managed_cluster_name)
     unmanaged_clusters = [
         c for c in all_clusters
-        if c['cluster_name'] not in managed_job_cluster_names
+        if c.cluster_name not in managed_job_cluster_names
     ]
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
