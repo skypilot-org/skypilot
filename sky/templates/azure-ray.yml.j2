@@ -84,6 +84,9 @@ available_node_types:
         {%- if disk_performance_tier is not none %}
         disk_performance_tier: {{disk_performance_tier}}
         {%- endif %}
+        {%- if enable_disk_bursting is not none %}
+        enable_disk_bursting: {{enable_disk_bursting}}
+        {%- endif %}
         # TODO: attach disk
 
 head_node_type: ray.head.default
