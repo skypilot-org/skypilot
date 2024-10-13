@@ -15,10 +15,10 @@ import jinja2
 import yaml
 
 import sky
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky import clouds
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
@@ -32,6 +32,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import resources as resources_lib
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
@@ -2057,7 +2058,7 @@ def process_skypilot_pods(
         - List of KubernetesClusterInfo with serve controller information.
     """
     # pylint: disable=import-outside-toplevel
-    from sky import resources as resources_lib  # Avoid circular import
+    from sky import resources as resources_lib
     clusters: Dict[str, KubernetesClusterInfo] = {}
     jobs_controllers: List[KubernetesClusterInfo] = []
     serve_controllers: List[KubernetesClusterInfo] = []
@@ -2084,8 +2085,7 @@ def process_skypilot_pods(
                     'nvidia.com/gpu', '0'))
             gpu_name = None
             if gpu_count > 0:
-                label_formatter, _ = (
-                    detect_gpu_label_formatter(context))
+                label_formatter, _ = (detect_gpu_label_formatter(context))
                 assert label_formatter is not None, (
                     'GPU label formatter cannot be None if there are pods '
                     f'requesting GPUs: {pod.metadata.name}')
@@ -2113,8 +2113,7 @@ def process_skypilot_pods(
                 pods=[],
                 launched_at=start_time,
                 resources=resources,
-                resources_str=''
-            )
+                resources_str='')
             clusters[cluster_name_on_cloud] = cluster_info
             # Check if cluster name is name of a controller
             # Can't use controller_utils.Controllers.from_name(cluster_name)
@@ -2136,4 +2135,3 @@ def process_skypilot_pods(
         num_pods = len(cluster.pods)
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
-
