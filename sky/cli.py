@@ -4517,7 +4517,9 @@ def serve_logs(
     Example:
 
     .. code-block:: bash
-
+        # Generic format
+        sky serve logs [OPTIONS] SERVICE_NAME [REPLICA_ID]
+        \b
         # Tail the controller logs of a service
         sky serve logs --controller [SERVICE_NAME]
         \b
@@ -4528,20 +4530,23 @@ def serve_logs(
         sky serve logs [SERVICE_NAME] 1
         \b
         # Sync down logs for controller, load balancer, and all
-        # replicas for a service
+        # replicas for a service (all components)
         sky serve logs [SERVICE_NAME] --sync-down
+        \b
         # Sync down logs for only controller. Same pattern
-        # applies for load balancer
+        # applies for load balancer (single component)
         sky serve logs [SERVICE_NAME] --controller --sync-down
+        \b
         # Sync down logs only for a single replica
+        # (single component)
         sky serve logs [SERVICE_NAME] 3 --sync-down
     """
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)
     if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID], -s / --sync-down can be '
-                               'specified.')
+        raise click.UsageError('When using -s / --sync-down, at most one of '
+                               '--controller, --load-balancer, or [REPLICA_ID] '
+                               'can be specified.')
     if num_flags == 0 and not sync_down:
         raise click.UsageError('One of --controller, --load-balancer, '
                                '[REPLICA_ID] must be specified if not '
@@ -4554,6 +4559,7 @@ def serve_logs(
     elif replica_id is not None:
         target_component = serve_lib.ServiceComponent.REPLICA
     else:
+        # sync down logs for all components
         target_component = None
 
     if sync_down:
