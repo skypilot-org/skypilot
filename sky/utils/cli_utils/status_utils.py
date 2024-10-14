@@ -1,16 +1,19 @@
 """Utilities for sky status."""
+import typing
 from typing import Any, Callable, Dict, List, Optional
 
 import click
 import colorama
 
 from sky import backends
-from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import utils as kubernetes_utils
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
