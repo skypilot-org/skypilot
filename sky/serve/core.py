@@ -550,8 +550,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     logger.info(
         f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '
         f'{service_name!r} has been scheduled.{colorama.Style.RESET_ALL}\n'
-        f'Please use {backend_utils.BOLD}sky serve status {service_name} '
-        f'{backend_utils.RESET_BOLD}to check the latest status.')
+        f'Please use {ux_utils.BOLD}sky serve status {service_name} '
+        f'{ux_utils.RESET_BOLD}to check the latest status.')
 
 
 @usage_lib.entrypoint
