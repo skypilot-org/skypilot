@@ -330,7 +330,7 @@ Cudo Compute
        ✔ context: default
        config file saved ~/.config/cudo/cudo.yml
 
-     pip install "cudo-compute>=0.1.10"
+     pip install "cudo-compute>=0.2.0"
 
 If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
 
