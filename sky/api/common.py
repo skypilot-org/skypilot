@@ -17,6 +17,7 @@ from sky import skypilot_config
 from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -111,13 +112,15 @@ def check_health(func):
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             if not is_api_server_running():
                 if server_url == DEFAULT_SERVER_URL:
-                    logger.info('Failed to connect to SkyPilot API server at '
-                                f'{server_url}. Starting a local server.')
+                    logger.info(f'{colorama.Style.DIM}Failed to connect to '
+                                f'SkyPilot API server at {server_url}. '
+                                'Starting a local server.'
+                                f'{colorama.Style.RESET_ALL}')
                     start_uvicorn_in_background(reload=api_server_reload,
                                                 deploy=deploy)
                     logger.info(
-                        f'{colorama.Fore.GREEN}SkyPilot API server started.'
-                        f'{colorama.Style.RESET_ALL}')
+                        ux_utils.finishing_message(
+                            'SkyPilot API server started.'))
                 else:
                     raise RuntimeError(
                         f'Could not connect to SkyPilot server at {server_url}.'
