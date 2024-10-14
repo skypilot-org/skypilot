@@ -383,7 +383,7 @@ def test_aws_region():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -406,7 +406,7 @@ def test_gcp_region_and_service_account():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -446,7 +446,7 @@ def test_azure_region():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -864,14 +864,14 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky status -r {name} | grep "UP"',
         f'sky logs {name} 1 --status',
-        f'sky logs {name} 1 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
         'sleep 60',
         f'sky status -r {name} | grep "STOPPED"',
         f'sky start -y {name}',
-        f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')

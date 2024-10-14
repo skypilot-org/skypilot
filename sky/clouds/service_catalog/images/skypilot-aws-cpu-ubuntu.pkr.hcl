@@ -7,9 +7,9 @@ locals {
   timestamp = regex_replace(timestamp(), "[- TZ:]", "")
 }
 
-source "amazon-ebs" "gpu-ubuntu" {
-  ami_name      = "skypilot-aws-gpu-ubuntu-${local.timestamp}"
-  instance_type = "g6.xlarge"
+source "amazon-ebs" "cpu-ubuntu" {
+  ami_name      = "skypilot-aws-cpu-ubuntu-${local.timestamp}"
+  instance_type = "t2.micro"
   region        = var.region
   ssh_username  = "ubuntu"
   source_ami_filter {
@@ -23,25 +23,17 @@ source "amazon-ebs" "gpu-ubuntu" {
   }
   launch_block_device_mappings {
     device_name = "/dev/sda1"
-    volume_size = 50
+    volume_size = 8
     volume_type = "gp2"
     delete_on_termination = true
   }
 }
 
 build {
-  name = "aws-gpu-ubuntu-build"
-  sources = [
-    "source.amazon-ebs.gpu-ubuntu"
-  ]
+  name    = "aws-cpu-ubuntu-build"
+  sources = ["sources.amazon-ebs.cpu-ubuntu"]
   provisioner "shell" {
     script = "./provisioners/docker.sh"
-  }
-  provisioner "shell" {
-    script = "./provisioners/cuda.sh"
-  }
-  provisioner "shell" {
-    script = "./provisioners/nvidia-container-toolkit.sh"
   }
   provisioner "shell" {
     script = "./provisioners/skypilot.sh"
