@@ -16,7 +16,6 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 import zipfile
 
-import colorama
 import jinja2
 import jsonschema
 import yaml
@@ -439,11 +438,9 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     Returns:
         A string that represents the exception.
     """
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
-    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+        return f'[{class_fullname(e.__class__)}] {e}'
+    return f'{class_fullname(e.__class__)}: {e}'
 
 
 def remove_color(s: str):

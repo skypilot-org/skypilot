@@ -1,13 +1,10 @@
 """Utilities for sky status."""
-import dataclasses
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import click
 import colorama
 
 from sky import backends
-from sky import clouds as sky_clouds
-from sky import resources as resources_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -309,19 +306,19 @@ def _get_estimated_cost_for_cost_report(
     return f'$ {cost:.2f}'
 
 
-def show_kubernetes_cluster_status_table(clusters: List[Any],
-                                         show_all: bool) -> None:
+def show_kubernetes_cluster_status_table(
+        clusters: List['kubernetes_utils.KubernetesClusterInfo'],
+        show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
-        StatusColumn('USER', lambda c: c['user']),
-        StatusColumn('NAME', lambda c: c['cluster_name']),
-        StatusColumn(
-            'LAUNCHED',
-            lambda c: log_utils.readable_time_duration(c['launched_at'])),
+        StatusColumn('USER', lambda c: c.user),
+        StatusColumn('NAME', lambda c: c.cluster_name),
+        StatusColumn('LAUNCHED',
+                     lambda c: log_utils.readable_time_duration(c.launched_at)),
         StatusColumn('RESOURCES',
-                     lambda c: c['resources_str'],
+                     lambda c: c.resources_str,
                      trunc_length=70 if not show_all else 0),
-        StatusColumn('STATUS', lambda c: c['status'].colored_str()),
+        StatusColumn('STATUS', lambda c: c.status.colored_str()),
         # TODO(romilb): We should consider adding POD_NAME field here when --all
         #  is passed to help users fetch pod name programmatically.
     ]
@@ -332,8 +329,7 @@ def show_kubernetes_cluster_status_table(clusters: List[Any],
     cluster_table = log_utils.create_table(columns)
 
     # Sort table by user, then by cluster name
-    sorted_clusters = sorted(clusters,
-                             key=lambda c: (c['user'], c['cluster_name']))
+    sorted_clusters = sorted(clusters, key=lambda c: (c.user, c.cluster_name))
 
     for cluster in sorted_clusters:
         row = []
@@ -350,154 +346,3 @@ def show_kubernetes_cluster_status_table(clusters: List[Any],
     else:
         click.echo('No SkyPilot resources found in the '
                    'active Kubernetes context.')
-
-
-@dataclasses.dataclass
-class SkyPilotClusterOnKubernetes:
-    """SkyPilot Cluster on Kubernetes."""
-    cluster_name_on_cloud: str
-    cluster_name: str
-    user: str
-    status: status_lib.ClusterStatus
-    pods: List[Any]
-    launched_at: float
-    resources: resources_lib.Resources
-
-
-@dataclasses.dataclass
-class SkyPilotClusterOnKubernetesPayload:
-    """SkyPilot Cluster on Kubernetes payload."""
-    cluster_name_on_cloud: str
-    cluster_name: str
-    user: str
-    status: str
-    resources_str: str
-    launched_at: float
-
-    @classmethod
-    def from_cluster(
-        cls, cluster: SkyPilotClusterOnKubernetes
-    ) -> 'SkyPilotClusterOnKubernetesPayload':
-        resources_str = f'{len(cluster.pods)}x {cluster.resources}'
-        return cls(
-            cluster_name_on_cloud=cluster.cluster_name_on_cloud,
-            cluster_name=cluster.cluster_name,
-            user=cluster.user,
-            status=cluster.status.value,
-            resources_str=resources_str,
-            launched_at=cluster.launched_at,
-        )
-
-
-def _parse_pod_resources(
-        pod: Any,
-        context: Optional[str] = None,
-        try_detect_gpu: bool = True) -> resources_lib.Resources:
-    cpu_request = kubernetes_utils.parse_cpu_or_gpu_resource(
-        pod.spec.containers[0].resources.requests.get('cpu', '0'))
-    memory_request = kubernetes_utils.parse_memory_resource(
-        pod.spec.containers[0].resources.requests.get('memory', '0'), unit='G')
-    if try_detect_gpu:
-        gpu_count = kubernetes_utils.parse_cpu_or_gpu_resource(
-            pod.spec.containers[0].resources.requests.get(
-                'nvidia.com/gpu', '0'))
-    else:
-        gpu_count = 0
-    if gpu_count > 0:
-        label_formatter, _ = (
-            kubernetes_utils.detect_gpu_label_formatter(context))
-        assert label_formatter is not None, (
-            'GPU label formatter cannot be None if there are pods '
-            f'requesting GPUs: {pod.metadata.name}')
-        gpu_label = label_formatter.get_label_key()
-        # Get GPU name from pod node selector
-        if pod.spec.node_selector is not None:
-            gpu_name = label_formatter.get_accelerator_from_label_value(
-                pod.spec.node_selector.get(gpu_label))
-
-    resources = resources_lib.Resources(
-        cloud=sky_clouds.Kubernetes(),
-        cpus=int(cpu_request),
-        memory=int(memory_request),
-        accelerators=(f'{gpu_name}:{gpu_count}' if gpu_count > 0 else None))
-    return resources
-
-
-def process_skypilot_pods(
-    pods: List[Any],
-    context: Optional[str] = None
-) -> Tuple[List[SkyPilotClusterOnKubernetes], Dict[
-        str, SkyPilotClusterOnKubernetes], Dict[str,
-                                                SkyPilotClusterOnKubernetes]]:
-    """Process SkyPilot pods on k8s to extract cluster and controller info.
-
-    Args:
-        pods: List of Kubernetes pod objects.
-        context: Kubernetes context name, used to detect GPU label formatter.
-
-    Returns:
-        A tuple containing:
-        - List of SkyPilotClusterOnKubernetesPayload objects.
-        - Dictionary of job controller information.
-        - Dictionary of serve controller information.
-    """
-    clusters: Dict[str, SkyPilotClusterOnKubernetes] = {}
-    jobs_controllers: Dict[str, SkyPilotClusterOnKubernetes] = {}
-    serve_controllers: Dict[str, SkyPilotClusterOnKubernetes] = {}
-
-    for pod in pods:
-        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
-        cluster_name = cluster_name_on_cloud.rsplit(
-            '-', 1
-        )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
-
-        # Check if cluster name is name of a controller
-        # Can't use controller_utils.Controllers.from_name(cluster_name)
-        # because hash is different across users
-        if '-controller-' in cluster_name_on_cloud:
-            start_time = pod.status.start_time.timestamp()
-            controller_info = SkyPilotClusterOnKubernetes(
-                cluster_name_on_cloud=cluster_name_on_cloud,
-                cluster_name=cluster_name,
-                user=pod.metadata.labels.get('skypilot-user'),
-                status=status_lib.ClusterStatus.UP,
-                # Assuming UP if pod exists
-                pods=[pod],
-                launched_at=start_time,
-                resources=_parse_pod_resources(pod,
-                                               context,
-                                               try_detect_gpu=False),
-            )
-            if 'sky-jobs-controller' in cluster_name_on_cloud:
-                jobs_controllers[cluster_name_on_cloud] = controller_info
-            elif 'sky-serve-controller' in cluster_name_on_cloud:
-                serve_controllers[cluster_name_on_cloud] = controller_info
-
-        if cluster_name_on_cloud not in clusters:
-            # Parse the start time for the cluster
-            start_time = pod.status.start_time
-            if start_time is not None:
-                start_time = pod.status.start_time.timestamp()
-
-            if pod.status.phase == 'Pending':
-                # If pod is pending, do not show it in the status
-                continue
-
-            clusters[cluster_name_on_cloud] = SkyPilotClusterOnKubernetes(
-                cluster_name_on_cloud=cluster_name_on_cloud,
-                cluster_name=cluster_name,
-                user=pod.metadata.labels.get('skypilot-user'),
-                status=status_lib.ClusterStatus.UP,
-                pods=[],
-                launched_at=start_time,
-                resources=_parse_pod_resources(pod, context),
-            )
-        else:
-            # Update start_time if this pod started earlier
-            pod_start_time = pod.status.start_time
-            if pod_start_time is not None:
-                pod_start_time = pod_start_time.timestamp()
-                if pod_start_time < clusters[cluster_name_on_cloud].launched_at:
-                    clusters[cluster_name_on_cloud].launched_at = pod_start_time
-        clusters[cluster_name_on_cloud].pods.append(pod)
-    return list(clusters.values()), jobs_controllers, serve_controllers

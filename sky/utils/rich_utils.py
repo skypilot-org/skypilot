@@ -9,9 +9,10 @@ import rich.console as rich_console
 
 from sky.utils import message_utils
 
-console = rich_console.Console()
+console = rich_console.Console(soft_wrap=True)
 _status = None
 _rich_status = None
+_status_nesting_level = 0
 
 _logging_lock = threading.RLock()
 
@@ -70,6 +71,7 @@ class EncodedStatus:
     """A class to encode status messages."""
 
     def __init__(self, msg: str):
+        self.status = msg
         self.encoded_msg = EncodedStatusMessage(msg)
         print(self.encoded_msg.init(), flush=True)
 
@@ -81,6 +83,7 @@ class EncodedStatus:
         print(self.encoded_msg.exit(), flush=True)
 
     def update(self, msg: str):
+        self.status = msg
         print(self.encoded_msg.update(msg), flush=True)
 
     def stop(self):
@@ -110,18 +113,65 @@ class _NoOpConsoleStatus:
 
 
 # TODO(zhwu): we need a wrapper for the rich.progress in our code as well.
+class _RevertibleStatus:
+    """A wrapper for status that can revert to previous message after exit."""
+
+    def __init__(self, message: str):
+        self.previous_message = None
+        if _status is not None:
+            self.previous_message = _status.status
+        self.message = message
+
+    def __enter__(self):
+        global _status_nesting_level
+        _status.update(self.message)
+        _status_nesting_level += 1
+        _status.__enter__()
+        return _status
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _status_nesting_level, _status
+        _status_nesting_level -= 1
+        if _status_nesting_level <= 0:
+            _status_nesting_level = 0
+            if _status is not None:
+                _status.__exit__(exc_type, exc_val, exc_tb)
+                _status = None
+        else:
+            _status.update(self.previous_message)
+
+    def update(self, *args, **kwargs):
+        _status.update(*args, **kwargs)
+
+    def stop(self):
+        _status.stop()
+
+    def start(self):
+        _status.start()
+
+
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
+    global _status
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
-        global _status
         if _status is None:
             _status = EncodedStatus(msg)
-            return _status
-        _status.update(msg)
-        return _status
+        return _RevertibleStatus(msg)
     return _NoOpConsoleStatus()
+
+
+def stop_safe_status():
+    """Stops all nested statuses.
+
+    This is useful when we need to stop all statuses, e.g., when we are going to
+    stream logs from user program and do not want it to interfere with the
+    spinner display.
+    """
+    if (threading.current_thread() is threading.main_thread() and
+            _status is not None):
+        _status.stop()
 
 
 def force_update_status(msg: str):

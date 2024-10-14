@@ -15,6 +15,7 @@ import jinja2
 import yaml
 
 import sky
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -26,10 +27,12 @@ from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import resources as resources_lib
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
@@ -2026,3 +2029,137 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
             'kubectl get pods --selector=skypilot-cluster --all-namespaces'
         ) from None
     return pods
+
+
+@dataclasses.dataclass
+class KubernetesClusterInfo:
+    cluster_name_on_cloud: str
+    cluster_name: str
+    user: str
+    status: status_lib.ClusterStatus
+    pods: List[Any]
+    launched_at: float
+    resources: 'resources_lib.Resources'
+    resources_str: str
+
+
+@dataclasses.dataclass
+class SkyPilotClusterOnKubernetesPayload:
+    """SkyPilot Cluster on Kubernetes payload."""
+    cluster_name_on_cloud: str
+    cluster_name: str
+    user: str
+    status: str
+    resources_str: str
+    launched_at: float
+
+    @classmethod
+    def from_cluster(
+            cls, cluster: KubernetesClusterInfo
+    ) -> 'SkyPilotClusterOnKubernetesPayload':
+        resources_str = f'{len(cluster.pods)}x {cluster.resources}'
+        return cls(
+            cluster_name_on_cloud=cluster.cluster_name_on_cloud,
+            cluster_name=cluster.cluster_name,
+            user=cluster.user,
+            status=cluster.status.value,
+            resources_str=resources_str,
+            launched_at=cluster.launched_at,
+        )
+
+
+def process_skypilot_pods(
+    pods: List[Any],
+    context: Optional[str] = None
+) -> Tuple[List[KubernetesClusterInfo], List[KubernetesClusterInfo],
+           List[KubernetesClusterInfo]]:
+    """Process SkyPilot pods on k8s to extract cluster and controller info.
+
+    Args:
+        pods: List of Kubernetes pod objects.
+        context: Kubernetes context name, used to detect GPU label formatter.
+
+    Returns:
+        A tuple containing:
+        - List of KubernetesClusterInfo with all cluster information.
+        - List of KubernetesClusterInfo with job controller information.
+        - List of KubernetesClusterInfo with serve controller information.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky import resources as resources_lib
+    clusters: Dict[str, KubernetesClusterInfo] = {}
+    jobs_controllers: List[KubernetesClusterInfo] = []
+    serve_controllers: List[KubernetesClusterInfo] = []
+
+    for pod in pods:
+        cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
+        cluster_name = cluster_name_on_cloud.rsplit(
+            '-', 1
+        )[0]  # Remove the user hash to get cluster name (e.g., mycluster-2ea4)
+        if cluster_name_on_cloud not in clusters:
+            # Parse the start time for the cluster
+            start_time = pod.status.start_time
+            if start_time is not None:
+                start_time = pod.status.start_time.timestamp()
+
+            # Parse resources
+            cpu_request = parse_cpu_or_gpu_resource(
+                pod.spec.containers[0].resources.requests.get('cpu', '0'))
+            memory_request = parse_memory_resource(
+                pod.spec.containers[0].resources.requests.get('memory', '0'),
+                unit='G')
+            gpu_count = parse_cpu_or_gpu_resource(
+                pod.spec.containers[0].resources.requests.get(
+                    'nvidia.com/gpu', '0'))
+            gpu_name = None
+            if gpu_count > 0:
+                label_formatter, _ = (detect_gpu_label_formatter(context))
+                assert label_formatter is not None, (
+                    'GPU label formatter cannot be None if there are pods '
+                    f'requesting GPUs: {pod.metadata.name}')
+                gpu_label = label_formatter.get_label_key()
+                # Get GPU name from pod node selector
+                if pod.spec.node_selector is not None:
+                    gpu_name = label_formatter.get_accelerator_from_label_value(
+                        pod.spec.node_selector.get(gpu_label))
+
+            resources = resources_lib.Resources(
+                cloud=clouds.Kubernetes(),
+                cpus=int(cpu_request),
+                memory=int(memory_request),
+                accelerators=(f'{gpu_name}:{gpu_count}'
+                              if gpu_count > 0 else None))
+            if pod.status.phase == 'Pending':
+                # If pod is pending, do not show it in the status
+                continue
+
+            cluster_info = KubernetesClusterInfo(
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                cluster_name=cluster_name,
+                user=pod.metadata.labels.get('skypilot-user'),
+                status=status_lib.ClusterStatus.UP,
+                pods=[],
+                launched_at=start_time,
+                resources=resources,
+                resources_str='')
+            clusters[cluster_name_on_cloud] = cluster_info
+            # Check if cluster name is name of a controller
+            # Can't use controller_utils.Controllers.from_name(cluster_name)
+            # because hash is different across users
+            if 'sky-jobs-controller' in cluster_name_on_cloud:
+                jobs_controllers.append(cluster_info)
+            elif 'sky-serve-controller' in cluster_name_on_cloud:
+                serve_controllers.append(cluster_info)
+        else:
+            # Update start_time if this pod started earlier
+            pod_start_time = pod.status.start_time
+            if pod_start_time is not None:
+                pod_start_time = pod_start_time.timestamp()
+                if pod_start_time < clusters[cluster_name_on_cloud].launched_at:
+                    clusters[cluster_name_on_cloud].launched_at = pod_start_time
+        clusters[cluster_name_on_cloud].pods.append(pod)
+    # Update resources_str in clusters:
+    for cluster in clusters.values():
+        num_pods = len(cluster.pods)
+        cluster.resources_str = f'{num_pods}x {cluster.resources}'
+    return list(clusters.values()), jobs_controllers, serve_controllers

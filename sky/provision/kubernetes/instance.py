@@ -632,7 +632,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        logger.warning(f'run_instances: Error occurred when creating pods: {e}')
+        e_msg = common_utils.format_exception(e).replace('\n', ' ')
+        logger.warning('run_instances: Error occurred when creating pods: '
+                       f'{e_msg}')
         raise
 
 

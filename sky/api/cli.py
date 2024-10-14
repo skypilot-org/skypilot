@@ -1439,11 +1439,11 @@ def _status_kubernetes(show_all: bool):
         show_all (bool): Show all job information (e.g., start time, failures).
     """
     request_id = sdk.kubernetes_status()
-    unmanaged_clusters, all_jobs, serve_controllers = sdk.stream_and_get(
+    (unmanaged_clusters, all_jobs, serve_controllers, context) = sdk.stream_and_get(
         request_id)
 
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Kubernetes cluster state'
+               f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
     status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
                                                       show_all)
@@ -2526,8 +2526,8 @@ def start(
                                'is currently not supported.\n'
                                'Please start the former independently.')
     if controllers:
-        bold = backend_utils.BOLD
-        reset_bold = backend_utils.RESET_BOLD
+        bold = ux_utils.BOLD
+        reset_bold = ux_utils.RESET_BOLD
         if len(controllers) != 1:
             raise click.UsageError(
                 'Starting multiple controllers is currently not supported.\n'
@@ -4802,11 +4802,11 @@ def benchmark_launch(
             f'\n{colorama.Fore.CYAN}Benchmark name: '
             f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
             '\nTo see the benchmark results: '
-            f'{backend_utils.BOLD}sky bench show '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky bench show '
+            f'{benchmark}{ux_utils.RESET_BOLD}'
             '\nTo teardown the clusters: '
-            f'{backend_utils.BOLD}sky bench down '
-            f'{benchmark}{backend_utils.RESET_BOLD}')
+            f'{ux_utils.BOLD}sky bench down '
+            f'{benchmark}{ux_utils.RESET_BOLD}')
         subprocess_utils.run('sky bench ls')
     else:
         logger.error('No benchmarking clusters are created.')
@@ -5114,8 +5114,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
                        f'has {num_clusters} un-terminated cluster{plural}. '
                        f'Terminate the cluster{plural} with '
-                       f'{backend_utils.BOLD} sky bench down {benchmark} '
-                       f'{backend_utils.RESET_BOLD} '
+                       f'{ux_utils.BOLD} sky bench down {benchmark} '
+                       f'{ux_utils.RESET_BOLD} '
                        'before deleting the benchmark report.')
             success = False
         else:
