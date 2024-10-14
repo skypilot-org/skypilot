@@ -10,7 +10,7 @@ import rich.console as rich_console
 from sky.utils import message_utils
 
 console = rich_console.Console(soft_wrap=True)
-_status = None
+_status: Optional['EncodedStatus'] = None
 _rich_status = None
 _status_nesting_level = 0
 
