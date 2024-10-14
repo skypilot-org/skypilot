@@ -129,8 +129,10 @@ def up(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
 
-    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
-                                                                   path='serve')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing service')):
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task, path='serve')
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
@@ -215,7 +217,8 @@ def up(
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
         with rich_utils.safe_status(
-                '[cyan]Waiting for the service to register[/]'):
+                ux_utils.spinner_message(
+                    'Waiting for the service to register')):
             # This function will check the controller job id in the database
             # and return the endpoint if the job id matches. Otherwise it will
             # return None.
@@ -274,34 +277,31 @@ def up(
             f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
             f'\n{fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
-            '\nTo see detailed info:\t\t'
-            f'{backend_utils.BOLD}sky serve status {service_name} '
-            f'[--endpoint]{backend_utils.RESET_BOLD}'
-            '\nTo teardown the service:\t'
-            f'{backend_utils.BOLD}sky serve down {service_name}'
-            f'{backend_utils.RESET_BOLD}'
-            '\n'
-            '\nTo see logs of a replica:\t'
-            f'{backend_utils.BOLD}sky serve logs {service_name} [REPLICA_ID]'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo see logs of load balancer:\t'
-            f'{backend_utils.BOLD}sky serve logs --load-balancer {service_name}'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo see logs of controller:\t'
-            f'{backend_utils.BOLD}sky serve logs --controller {service_name}'
-            f'{backend_utils.RESET_BOLD}'
-            '\n'
-            '\nTo monitor replica status:\t'
-            f'{backend_utils.BOLD}watch -n10 sky serve status {service_name}'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo send a test request:\t\t'
-            f'{backend_utils.BOLD}curl {endpoint}'
-            f'{backend_utils.RESET_BOLD}'
-            '\n'
-            f'\n{fore.GREEN}SkyServe is spinning up your service now.'
-            f'{style.RESET_ALL}'
-            f'\n{fore.GREEN}The replicas should be ready within a '
-            f'short time.{style.RESET_ALL}')
+            f'\n📋 Useful Commands'
+            f'\n{ux_utils.INDENT_SYMBOL}To check service status:\t'
+            f'{ux_utils.BOLD}sky serve status {service_name} '
+            f'[--endpoint]{ux_utils.RESET_BOLD}'
+            f'\n{ux_utils.INDENT_SYMBOL}To teardown the service:\t'
+            f'{ux_utils.BOLD}sky serve down {service_name}'
+            f'{ux_utils.RESET_BOLD}'
+            f'\n{ux_utils.INDENT_SYMBOL}To see replica logs:\t'
+            f'{ux_utils.BOLD}sky serve logs {service_name} [REPLICA_ID]'
+            f'{ux_utils.RESET_BOLD}'
+            f'\n{ux_utils.INDENT_SYMBOL}To see load balancer logs:\t'
+            f'{ux_utils.BOLD}sky serve logs --load-balancer {service_name}'
+            f'{ux_utils.RESET_BOLD}'
+            f'\n{ux_utils.INDENT_SYMBOL}To see controller logs:\t'
+            f'{ux_utils.BOLD}sky serve logs --controller {service_name}'
+            f'{ux_utils.RESET_BOLD}'
+            f'\n{ux_utils.INDENT_SYMBOL}To monitor the status:\t'
+            f'{ux_utils.BOLD}watch -n10 sky serve status {service_name}'
+            f'{ux_utils.RESET_BOLD}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}To send a test request:\t'
+            f'{ux_utils.BOLD}curl {endpoint}'
+            f'{ux_utils.RESET_BOLD}'
+            '\n\n' +
+            ux_utils.finishing_message('Service is spinning up and replicas '
+                                       'will be ready shortly.'))
         return service_name, endpoint
 
 
@@ -323,11 +323,11 @@ def update(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
         'Service controller is stopped. There is no service to update. '
-        f'To spin up a new service, use {backend_utils.BOLD}'
-        f'sky serve up{backend_utils.RESET_BOLD}',
+        f'To spin up a new service, use {ux_utils.BOLD}'
+        f'sky serve up{ux_utils.RESET_BOLD}',
         non_existent_message='Service does not exist. '
         'To spin up a new service, '
-        f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
+        f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
     )
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -353,8 +353,8 @@ def update(
     if len(service_statuses) == 0:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find service {service_name!r}.'
-                               f'To spin up a service, use {backend_utils.BOLD}'
-                               f'sky serve up{backend_utils.RESET_BOLD}')
+                               f'To spin up a service, use {ux_utils.BOLD}'
+                               f'sky serve up{ux_utils.RESET_BOLD}')
 
     if len(service_statuses) > 1:
         with ux_utils.print_exception_no_traceback():
@@ -374,8 +374,10 @@ def update(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
-    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
-                                                                   path='serve')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing service')):
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task, path='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
     returncode, version_string_payload, stderr = backend.run_on_head(
@@ -433,8 +435,8 @@ def update(
 
     print(f'{colorama.Fore.GREEN}Service {service_name!r} update scheduled.'
           f'{colorama.Style.RESET_ALL}\n'
-          f'Please use {backend_utils.BOLD}sky serve status {service_name} '
-          f'{backend_utils.RESET_BOLD}to check the latest status.')
+          f'Please use {ux_utils.BOLD}sky serve status {service_name} '
+          f'{ux_utils.RESET_BOLD}to check the latest status.')
 
 
 @usage_lib.entrypoint
