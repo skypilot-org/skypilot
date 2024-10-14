@@ -93,3 +93,7 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # the user can be notified to update their SkyPilot serve version on the remote
 # cluster.
 SERVE_VERSION = 2
+
+TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
+    'The version of sky controller is outdated. Please terminate the service '
+    'and spin up again to support this feature.')

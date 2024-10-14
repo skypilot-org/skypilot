@@ -947,10 +947,9 @@ class ServeCodeGen:
         code = [
             f'(lambda: print(serve_utils.terminate_replica({service_name!r}, '
             f'{replica_id}, {purge}), end="", flush=True) '
-            'if hasattr(serve_utils, "terminate_replica") else '
-            'exec("raise RuntimeError(\\"The version of sky controller '
-            'is outdated. Please terminate the service and spin up again '
-            'to support this feature.\\")"))()'
+            'if getattr(constants, "SERVE_VERSION", 0) >= 2 else '
+            f'exec("raise RuntimeError(constants.TERMINATE_REPLICA_'
+            'VERSION_MISMATCH_ERROR)"))()'
         ]
         return cls._build(code)
 
