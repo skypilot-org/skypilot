@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Popular third-party dependencies
+sudo apt-get install jq -y
+
 # Function to find processes using a specific file
 mylsof() {
   p=$(for pid in /proc/{0..9}*; do
