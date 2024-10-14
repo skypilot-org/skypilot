@@ -948,8 +948,8 @@ class ServeCodeGen:
             f'(lambda: print(serve_utils.terminate_replica({service_name!r}, '
             f'{replica_id}, {purge}), end="", flush=True) '
             'if getattr(constants, "SERVE_VERSION", 0) >= 2 else '
-            f'exec("raise RuntimeError(constants.TERMINATE_REPLICA_'
-            'VERSION_MISMATCH_ERROR)"))()'
+            f'exec("raise RuntimeError('
+            f'{constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})"))()'
         ]
         return cls._build(code)
 
