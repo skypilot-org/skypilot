@@ -17,6 +17,8 @@ History:
    make_deploy_resources_variables(): Bug fix for specify the image_id as
    the ocid of the image in the task.yaml file, in this case the image_id
    for the node config should be set to the ocid instead of a dict.
+ - Hysun He (hysun.he@oracle.com) @ Oct 13, 2024:
+   Support more OS types additional to ubuntu for OCI resources.
 """
 import json
 import logging
@@ -295,10 +297,18 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
+        image_tag = self._get_image_tag(image_id=resources.image_id,
+                                        instance_type=resources.instance_type,
+                                        region=region.name)
+
+        os_type = service_catalog.get_image_os_from_tag(tag=image_tag,
+                                                        region=region.name,
+                                                        clouds='oci')
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'os_type': os_type,
             'cpus': str(cpus),
             'memory': resources.memory,
             'disk_size': resources.disk_size,
@@ -501,59 +511,45 @@ class OCI(clouds.Cloud):
         region_name: str,
         instance_type: str,
     ) -> str:
-        if image_id is None:
-            return self._get_default_image(region_name=region_name,
-                                           instance_type=instance_type)
-        if None in image_id:
-            image_id_str = image_id[None]
-        else:
-            assert region_name in image_id, image_id
-            image_id_str = image_id[region_name]
-        if image_id_str.startswith('skypilot:'):
+        image_id_str = self._get_image_tag(image_id=image_id,
+                                           instance_type=instance_type,
+                                           region=region_name)
+
+        if not image_id_str.startswith('ocid1.image'):
             image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
                                                                  region_name,
                                                                  clouds='oci')
-            if image_id_str is None:
-                logger.critical(
-                    '! Real image_id not found! - {region_name}:{image_id}')
-                # Raise ResourcesUnavailableError to make sure the failover
-                # in CloudVMRayBackend will be correctly triggered.
-                # TODO(zhwu): This is a information leakage to the cloud
-                # implementor, we need to find a better way to handle this.
-                raise exceptions.ResourcesUnavailableError(
-                    '! ERR: No image found in catalog for region '
-                    f'{region_name}. Try setting a valid image_id.')
+
+        # Image_id should be impossible be None, except for the case when
+        # user specify an image tag which does not exist in the image.csv
+        # catalog file which only possible in "test" / "evaluation" phase.
+        # Therefore, we use assert here.
+        assert image_id_str is not None
 
         logger.debug(f'Got real image_id {image_id_str}')
         return image_id_str
 
-    def _get_default_image(self, region_name: str, instance_type: str) -> str:
+    def _get_image_tag(self, image_id: Optional[Dict[Optional[str], str]],
+                       instance_type: str, region: str):
+        if image_id is None:
+            image_tag = self._get_default_image_tag(instance_type)
+        elif None in image_id:
+            image_tag = image_id[None]
+        else:
+            assert region in image_id, image_id
+            image_tag = image_id[region]
+        return image_tag
+
+    def _get_default_image_tag(self, instance_type: str) -> str:
         acc = self.get_accelerators_from_instance_type(instance_type)
 
         if acc is None:
             image_tag = oci_utils.oci_config.get_default_image_tag()
-            image_id_str = service_catalog.get_image_id_from_tag(image_tag,
-                                                                 region_name,
-                                                                 clouds='oci')
         else:
             assert len(acc) == 1, acc
             image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
-            image_id_str = service_catalog.get_image_id_from_tag(image_tag,
-                                                                 region_name,
-                                                                 clouds='oci')
 
-        if image_id_str is not None:
-            logger.debug(
-                f'Got default image_id {image_id_str} from tag {image_tag}')
-            return image_id_str
-
-        # Raise ResourcesUnavailableError to make sure the failover in
-        # CloudVMRayBackend will be correctly triggered.
-        # TODO(zhwu): This is a information leakage to the cloud implementor,
-        # we need to find a better way to handle this.
-        raise exceptions.ResourcesUnavailableError(
-            'ERR: No image found in catalog for region '
-            f'{region_name}. Try update your default image_id settings.')
+        return image_tag
 
     def get_vpu_from_disktier(
             self, cpus: Optional[float],

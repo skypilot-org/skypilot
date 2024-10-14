@@ -1,7 +1,9 @@
 """OCI Configuration.
 History:
- - Zhanghao Wu @ Oct 2023: Formatting and refactoring
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
+ - Zhanghao Wu @ Oct 2023: Formatting and refactoring
+ - Hysun He (hysun.he@oracle.com) @ Oct, 2024: Add default image OS
+   configuration.
 """
 import logging
 import os
@@ -122,4 +124,12 @@ class OCIConfig:
             ('oci', 'default', 'oci_config_profile'), 'DEFAULT')
 
 
+    @classmethod
+    def get_default_image_OS(cls) -> str:
+        # Get the default image OS. Instead of hardcoding, we give a choice to
+        # set the default image OS type in the sky's user-config file. (if not
+        # specified, use the hardcode one at last)
+        return skypilot_config.get_nested(
+            ('oci', 'default', 'image_os_type'), 'ubuntu')
+        
 oci_config = OCIConfig()
