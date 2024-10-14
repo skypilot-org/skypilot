@@ -260,6 +260,7 @@ def cleanup_ports(
     """See sky/provision/__init__.py"""
     del cluster_name_on_cloud, ports, provider_config  # Unused.
 
+
 def query_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
