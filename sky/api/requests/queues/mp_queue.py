@@ -14,7 +14,7 @@ class QueueManager(managers.BaseManager):
 def _register_queue(queue_names: List[str]):
     queues: Dict[str,
                  queue.Queue] = {name: queue.Queue() for name in queue_names}
-    for name, q in queues.items():
+    for name, q in queues.items():  # pylint: disable=cell-var-from-loop
         QueueManager.register(name, callable=lambda: q)
 
 

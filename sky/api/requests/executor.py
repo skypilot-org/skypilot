@@ -83,11 +83,11 @@ class RequestQueue:
 
     def __init__(self,
                  schedule_type: ScheduleType,
-                 queue_backend: Optional[QueueBackend] = None):
+                 backend: Optional[QueueBackend] = None):
         self.name = schedule_type.value
-        self.queue_backend = queue_backend
+        self.backend = backend
         self.queue: Union[queue_lib.Queue, 'redis.Redis']
-        if queue_backend == QueueBackend.MULTIPROCESSING:
+        if backend == QueueBackend.MULTIPROCESSING:
             self.queue = mp_queue.get_queue(self.name)
         else:
             assert redis is not None, 'Redis is not installed'
@@ -97,14 +97,14 @@ class RequestQueue:
                                      socket_timeout=0.1)
 
     def put(self, obj: Any):
-        if self.queue_backend == QueueBackend.REDIS:
+        if self.backend == QueueBackend.REDIS:
             assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
             self.queue.lpush(self.name, obj)
         else:
             self.queue.put(obj)  # type: ignore
 
     def get(self):
-        if self.queue_backend == QueueBackend.REDIS:
+        if self.backend == QueueBackend.REDIS:
             assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
             return self.queue.rpop(self.name)
         else:
@@ -126,7 +126,7 @@ queue_backend = get_queue_backend()
 
 @functools.lru_cache(maxsize=None)
 def _get_queue(schedule_type: ScheduleType) -> RequestQueue:
-    return RequestQueue(schedule_type, queue_backend=queue_backend)
+    return RequestQueue(schedule_type, backend=queue_backend)
 
 
 def _wrapper(request_id: str, ignore_return_value: bool):

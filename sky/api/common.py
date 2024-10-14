@@ -127,7 +127,8 @@ def check_health(func):
                         raise RuntimeError(
                             'Could not connect to SkyPilot server at '
                             f'{server_url}. Please ensure that the server is '
-                            f'running and {constants.SKY_API_SERVER_URL_ENV_VAR} '
+                            f'running and '
+                            f'{constants.SKY_API_SERVER_URL_ENV_VAR} '
                             'environment variable is set correctly. Try: '
                             f'curl {server_url}/health')
         return func(*args, **kwargs)
