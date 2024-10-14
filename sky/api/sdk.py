@@ -583,10 +583,13 @@ def stream_and_get(request_id: str) -> Any:
 @api_common.check_health
 def api_start():
     """Start the API server."""
-    logger.info(f'SkyPilot API server: {api_common.get_server_url()}')
-    if api_common.is_api_server_local():
-        logger.info(
-            f'Check API server logs: tail -f {constants.API_SERVER_LOGS}')
+    is_local_api_server = api_common.is_api_server_local()
+    prefix_symbol = (ux_utils.INDENT_SYMBOL if is_local_api_server else
+                     ux_utils.INDENT_LAST_SYMBOL)
+    logger.info(f'{prefix_symbol}SkyPilot API server: {api_common.get_server_url()}')
+    if is_local_api_server:
+        logger.info(ux_utils.INDENT_LAST_SYMBOL +
+            f'View API server logs at: {constants.API_SERVER_LOGS}')
         return
 
 

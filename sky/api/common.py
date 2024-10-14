@@ -18,7 +18,7 @@ from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
-
+from sky.utils import rich_utils
 if typing.TYPE_CHECKING:
     import sky
     from sky import dag as dag_lib
@@ -111,23 +111,24 @@ def check_health(func):
         with filelock.FileLock(
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             if not is_api_server_running():
-                if server_url == DEFAULT_SERVER_URL:
-                    logger.info(f'{colorama.Style.DIM}Failed to connect to '
+                with rich_utils.client_status('Starting API server'):
+                    if server_url == DEFAULT_SERVER_URL:
+                        logger.info(f'{colorama.Style.DIM}Failed to connect to '
                                 f'SkyPilot API server at {server_url}. '
                                 'Starting a local server.'
                                 f'{colorama.Style.RESET_ALL}')
-                    start_uvicorn_in_background(reload=api_server_reload,
-                                                deploy=deploy)
-                    logger.info(
-                        ux_utils.finishing_message(
-                            'SkyPilot API server started.'))
-                else:
-                    raise RuntimeError(
-                        f'Could not connect to SkyPilot server at {server_url}.'
-                        ' Please ensure that the server is running and that the'
-                        f' {constants.SKY_API_SERVER_URL_ENV_VAR} environment '
-                        'variable is set correctly. Try: '
-                        f'curl {server_url}/health')
+                        start_uvicorn_in_background(reload=api_server_reload,
+                                                    deploy=deploy)
+                        logger.info(
+                            ux_utils.finishing_message(
+                                'SkyPilot API server started.'))
+                    else:
+                        raise RuntimeError(
+                            f'Could not connect to SkyPilot server at {server_url}.'
+                            ' Please ensure that the server is running and that the'
+                            f' {constants.SKY_API_SERVER_URL_ENV_VAR} environment '
+                            'variable is set correctly. Try: '
+                            f'curl {server_url}/health')
         return func(*args, **kwargs)
 
     return wrapper

@@ -595,10 +595,7 @@ if __name__ == '__main__':
     cmd_args = parser.parse_args()
     num_workers = None
     if cmd_args.deploy:
-        if executor.get_queue_backend() == executor.QueueBackend.MULTIPROCESSING:
-            logger.info('API server is running locally, --deploy is ignored.')
-        else:
-            num_workers = os.cpu_count()
+        num_workers = os.cpu_count()
 
     workers = []
     try:
@@ -606,7 +603,7 @@ if __name__ == '__main__':
         if num_queue_workers is None:
             num_queue_workers = 4
         num_queue_workers *= 2
-        workers = executor.start_request_queue_workers(
+        workers = executor.start(
             num_queue_workers=num_queue_workers)
 
         logger.info('Starting API server')
