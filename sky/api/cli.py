@@ -1439,8 +1439,8 @@ def _status_kubernetes(show_all: bool):
         show_all (bool): Show all job information (e.g., start time, failures).
     """
     request_id = sdk.kubernetes_status()
-    (unmanaged_clusters, all_jobs, serve_controllers, context) = sdk.stream_and_get(
-        request_id)
+    (unmanaged_clusters, all_jobs, serve_controllers,
+     context) = sdk.stream_and_get(request_id)
 
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
