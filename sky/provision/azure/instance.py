@@ -441,15 +441,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     if to_start_count > 0:
         resource_client = azure.get_client('resource', subscription_id)
         logger.debug(f'run_instances: Creating {to_start_count} instances.')
-        created_instances = _create_instances(
-            compute_client=compute_client,
-            resource_client=resource_client,
-            cluster_name_on_cloud=cluster_name_on_cloud,
-            resource_group=resource_group,
-            provider_config=provider_config,
-            node_config=config.node_config,
-            tags=tags,
-            count=to_start_count)
+        try:
+            created_instances = _create_instances(
+                compute_client=compute_client,
+                resource_client=resource_client,
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                resource_group=resource_group,
+                provider_config=provider_config,
+                node_config=config.node_config,
+                tags=tags,
+                count=to_start_count)
+        except Exception as e:
+            err_message = common_utils.format_exception(
+                e, use_bracket=True).replace('\n', ' ')
+            logger.error(f'Failed to create instances: {err_message}')
+            raise
         created_instance_ids = [inst.name for inst in created_instances]
 
     non_running_instance_statuses = list(
