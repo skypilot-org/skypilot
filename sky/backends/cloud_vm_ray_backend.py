@@ -2843,9 +2843,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
-                    logger.error(ux_utils.error_message(
-                        'Failed to provision resources. '
-                        f'{ux_utils.log_path_hint(log_path)}'))
+                    logger.error(
+                        ux_utils.error_message(
+                            'Failed to provision resources. '
+                            f'{ux_utils.log_path_hint(log_path)}'))
                     error_message += (
                         '\nTo keep retrying until the cluster is up, use '
                         'the `--retry-until-up` flag.')

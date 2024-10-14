@@ -121,8 +121,6 @@ class RedirectOutputForProcess:
                 raise
 
 
-
-
 def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
     """Gets the log path hint for the given log path."""
     log_path = str(log_path)
@@ -131,9 +129,11 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
         log_path = '~' + log_path[len(expanded_home):]
     return _LOG_PATH_HINT.format(log_path=log_path)
 
+
 def starting_message(message: str) -> str:
     """Gets the starting message for the given message."""
     return f'{colorama.Style.RESET_ALL}⚙︎ {message}'
+
 
 def finishing_message(
         message: str,
@@ -149,7 +149,9 @@ def finishing_message(
     path_hint = log_path_hint(log_path)
     return f'{success_prefix}  {path_hint}'
 
-def error_message(message: str, log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+
+def error_message(message: str,
+                  log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
     """Gets the error message for the given message."""
     error_prefix = f'{colorama.Style.RESET_ALL}{colorama.Fore.RED}⨯{colorama.Style.RESET_ALL} {message}'
     if log_path is None:
