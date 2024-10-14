@@ -132,6 +132,9 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
 
 def starting_message(message: str) -> str:
     """Gets the starting message for the given message."""
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
     return f'{colorama.Style.RESET_ALL}⚙︎ {message}'
 
 
@@ -153,7 +156,11 @@ def finishing_message(
 def error_message(message: str,
                   log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
     """Gets the error message for the given message."""
-    error_prefix = f'{colorama.Style.RESET_ALL}{colorama.Fore.RED}⨯{colorama.Style.RESET_ALL} {message}'
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    error_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.RED}⨯'
+                    f'{colorama.Style.RESET_ALL} {message}')
     if log_path is None:
         return error_prefix
     path_hint = log_path_hint(log_path)
@@ -162,7 +169,11 @@ def error_message(message: str,
 
 def retry_message(message: str) -> str:
     """Gets the retry message for the given message."""
-    return f'{colorama.Fore.YELLOW}↺{colorama.Style.RESET_ALL} {message}'
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    return (f'{colorama.Style.RESET_ALL}{colorama.Fore.YELLOW}↺'
+            f'{colorama.Style.RESET_ALL} {message}')
 
 
 def spinner_message(
