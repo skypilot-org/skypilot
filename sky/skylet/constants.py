@@ -148,7 +148,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # costly to create a new conda env, and venv should be a lightweight and
     # faster alternative when the python version satisfies the requirement.
     f'PYTHON_EXEC={SKY_PYTHON_CMD}; '
-    f'[[ $( $PYTHON_EXEC --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
+    '[[ $( $PYTHON_EXEC --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
     '{ '
     'echo "Creating conda env with Python 3.10" && '
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
