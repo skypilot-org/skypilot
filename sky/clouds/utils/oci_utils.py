@@ -123,13 +123,13 @@ class OCIConfig:
         return skypilot_config.get_nested(
             ('oci', 'default', 'oci_config_profile'), 'DEFAULT')
 
-
     @classmethod
-    def get_default_image_OS(cls) -> str:
+    def get_default_image_os(cls) -> str:
         # Get the default image OS. Instead of hardcoding, we give a choice to
         # set the default image OS type in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
-        return skypilot_config.get_nested(
-            ('oci', 'default', 'image_os_type'), 'ubuntu')
-        
+        return skypilot_config.get_nested(('oci', 'default', 'image_os_type'),
+                                          'ubuntu')
+
+
 oci_config = OCIConfig()

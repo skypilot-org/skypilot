@@ -213,7 +213,7 @@ def get_image_os_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     del region
     df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
     if df.empty:
-        os_type = oci_utils.oci_config.get_default_image_OS()
+        os_type = oci_utils.oci_config.get_default_image_os()
     else:
         os_type = df['OS'].iloc[0]
 
