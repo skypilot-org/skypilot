@@ -130,6 +130,11 @@ class GcsCloudStorage(CloudStorage):
         out = p.stdout.decode().strip()
         # Edge Case: Gcloud command is run for first time #437
         out = out.split('\n')[-1]
+        if 'CommandException: One or more URLs matched no objects' in out or \
+             'bucket does not exist' in out:
+            raise sky_exceptions.StorageBucketGetError(
+                f'{url} does not exist in Google Cloud Storage. '
+                '(Typo, perhaps?)')
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
