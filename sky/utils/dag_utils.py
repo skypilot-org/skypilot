@@ -73,7 +73,7 @@ def load_dag_from_yaml(
     Supports various formats:
     1. Single task without separators
     2. Multiple tasks with separators (linear dependency by default)
-    3. DAG with explicit 'depends_on' field
+    3. DAG with explicit 'dependencies' field
 
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
@@ -95,11 +95,11 @@ def load_dag_from_yaml(
     if not configs:
         raise ValueError('Empty YAML file.')
 
-    has_header = set(configs[0].keys()) <= {'name', 'depends_on'}
+    has_header = set(configs[0].keys()) <= {'name', 'dependencies'}
     if has_header:
         header = configs.pop(0)
         dag.name = header.get('name')
-        dependencies = header.get('depends_on', {})
+        dependencies = header.get('dependencies', {})
     else:
         multi_tasks = len(configs) > 1
         if multi_tasks:
@@ -160,7 +160,7 @@ def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
             if deps:
                 dependencies[task.name] = [dep.name for dep in deps]
         if dependencies:
-            header['depends_on'] = dependencies
+            header['dependencies'] = dependencies
 
     task_configs = [task.to_yaml_config() for task in dag.tasks]
 

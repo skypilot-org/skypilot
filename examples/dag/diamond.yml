@@ -1,5 +1,5 @@
 name: pipeline
-depends_on:
+dependencies:
   infer_A:
     - data-processing
   infer_B:
