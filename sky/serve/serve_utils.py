@@ -37,6 +37,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import fastapi
 
+    from sky import task as task_lib
     from sky.serve import replica_managers
 
 SKY_SERVE_CONTROLLER_NAME: str = (
@@ -189,6 +190,13 @@ def generate_service_name():
 def generate_remote_service_dir_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
     return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
+
+
+def generate_task_name(_task: 'task_lib.Task') -> str:
+    timestamp = int(time.time())
+    unique_suffix = uuid.uuid4().hex[:6]
+    name = f'task_{timestamp}_{unique_suffix}'
+    return name
 
 
 def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:

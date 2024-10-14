@@ -6,6 +6,8 @@ from typing import Dict, List, Optional, Set, Union
 
 import networkx as nx
 
+from sky.serve import serve_utils
+
 if typing.TYPE_CHECKING:
     from sky import task
 
@@ -69,6 +71,8 @@ class Dag:
             ValueError: If the task already exists in the DAG or if its name
             is already used.
         """
+        if task.name is None:
+            task.name = serve_utils.generate_task_name(task)
         if task in self.tasks:
             raise ValueError(f'Task {task.name} already exists in the DAG.')
         if task.name in self._task_name_lookup:
@@ -76,8 +80,7 @@ class Dag:
                 f'Task name "{task.name}" is already used in the DAG.')
         self.graph.add_node(task)
         self.tasks.append(task)
-        if task.name is not None:
-            self._task_name_lookup[task.name] = task
+        self._task_name_lookup[task.name] = task
 
     def remove(self, task: Union['task.Task', str]) -> None:
         """Remove a task from the DAG.
@@ -95,19 +98,18 @@ class Dag:
             self.remove_dependency(dependent, task)
 
         # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
-        # and sink nodes. And we need a proper way to always show task's name
+        # and sink nodes.
         # if dependents:
-        #     dependent_names = ', '.join(
-        #         [dep.name for dep in dependents if dep.name is not None])
+        #     dependent_names = ', '.join([dep.name for dep in dependents])
         #     raise ValueError(f'Task {task.name} is still being depended on '
-        #                      f'by tasks {dependent_names!r}. Try to remove
+        #                      f'by tasks {dependent_names!r}. Try to remove '
         #                      'the dependencies first.')
 
         self.dependencies.pop(task, None)
         self.tasks.remove(task)
         self.graph.remove_node(task)
-        if task.name is not None:
-            self._task_name_lookup.pop(task.name, None)
+        assert task.name is not None
+        self._task_name_lookup.pop(task.name, None)
 
     def add_dependency(self, dependent: TaskOrName,
                        dependency: TaskOrName) -> None:
