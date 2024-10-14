@@ -595,7 +595,10 @@ if __name__ == '__main__':
     cmd_args = parser.parse_args()
     num_workers = None
     if cmd_args.deploy:
-        num_workers = os.cpu_count()
+        if executor.get_queue_backend() == executor.QueueBackend.MULTIPROCESSING:
+            logger.info('API server is running locally, --deploy is ignored.')
+        else:
+            num_workers = os.cpu_count()
 
     workers = []
     try:

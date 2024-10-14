@@ -54,14 +54,14 @@ class ScheduleType(enum.Enum):
         return [cls.NON_BLOCKING]
 
 
-class _QueueBackend(enum.Enum):
+class QueueBackend(enum.Enum):
     REDIS = 'redis'
     MULTIPROCESSING = 'multiprocessing'
 
 
-def get_queue_backend() -> _QueueBackend:
+def get_queue_backend() -> QueueBackend:
     if redis is None:
-        return _QueueBackend.MULTIPROCESSING
+        return QueueBackend.MULTIPROCESSING
     try:
         assert redis is not None, 'Redis is not installed'
         queue = redis.Redis(host='localhost',
@@ -69,21 +69,21 @@ def get_queue_backend() -> _QueueBackend:
                             db=0,
                             socket_timeout=0.1)
         queue.ping()
-        return _QueueBackend.REDIS
+        return QueueBackend.REDIS
     # pylint: disable=broad-except
     except (redis_exceptions.ConnectionError
             if redis_exceptions is not None else Exception):
-        return _QueueBackend.MULTIPROCESSING
+        return QueueBackend.MULTIPROCESSING
 
 
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing."""
 
-    def __init__(self, name: str, queue_type: Optional[_QueueBackend] = None):
+    def __init__(self, name: str, queue_type: Optional[QueueBackend] = None):
         self.name = name
         self.queue_type = queue_type
         self.queue: Union[multiprocessing.queues.Queue, 'redis.Redis']
-        if queue_type == _QueueBackend.MULTIPROCESSING:
+        if queue_type == QueueBackend.MULTIPROCESSING:
             self.queue = multiprocessing.Queue()
         else:
             assert redis is not None, 'Redis is not installed'
@@ -93,7 +93,7 @@ class RequestQueue:
                                      socket_timeout=0.1)
 
     def put(self, obj: Any):
-        if self.queue_type == _QueueBackend.REDIS:
+        if self.queue_type == QueueBackend.REDIS:
             assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
             self.queue.lpush(self.name, obj)
         else:
@@ -102,7 +102,7 @@ class RequestQueue:
             self.queue.put(obj)
 
     def get(self):
-        if self.queue_type == _QueueBackend.REDIS:
+        if self.queue_type == QueueBackend.REDIS:
             assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
             return self.queue.rpop(self.name)
         else:
