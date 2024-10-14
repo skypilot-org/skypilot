@@ -189,7 +189,7 @@ def test_get_controller_resources_with_task_resources(
         assert config == default_controller_resources, config
     assert not expected_combinations
 
-    # 7. Mixed case: Some resources have clouds and regions or zones, others do not.
+    # 6. Mixed case: Some resources have clouds and regions or zones, others do not.
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
