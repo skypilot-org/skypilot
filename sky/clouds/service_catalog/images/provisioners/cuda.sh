@@ -13,3 +13,8 @@ sudo apt-get update
 # Current State: Driver Version 535.183.06 and CUDA Version 12.2
 sudo apt-get install -y cuda-drivers-535
 sudo apt-get install -y cuda-toolkit-12-4
+
+# Install cuDNN
+# https://docs.nvidia.com/deeplearning/cudnn/latest/installation/linux.html#installing-on-linux
+sudo apt-get install libcudnn8
+sudo apt-get install libcudnn8-dev

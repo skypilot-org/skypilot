@@ -8,7 +8,7 @@ locals {
 }
 
 source "amazon-ebs" "gpu-ubuntu" {
-  ami_name      = "skypilot-aws-gpu-ubuntu"
+  ami_name      = "skypilot-aws-gpu-ubuntu-${local.timestamp}"
   instance_type = "g6.xlarge"
   region        = var.region
   ssh_username  = "ubuntu"
