@@ -121,9 +121,6 @@ class RedirectOutputForProcess:
                 raise
 
 
-def starting_message(message: str) -> str:
-    """Gets the starting message for the given message."""
-    return f'⚙︎ {message}'
 
 
 def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
@@ -134,17 +131,31 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
         log_path = '~' + log_path[len(expanded_home):]
     return _LOG_PATH_HINT.format(log_path=log_path)
 
+def starting_message(message: str) -> str:
+    """Gets the starting message for the given message."""
+    return f'{colorama.Style.RESET_ALL}⚙︎ {message}'
 
 def finishing_message(
         message: str,
         log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
     """Gets the finishing message for the given message."""
-    success_prefix = (f'{colorama.Fore.GREEN}✓ {message}'
-                      f'{colorama.Style.RESET_ALL}')
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    success_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.GREEN}✓ '
+                      f'{message}{colorama.Style.RESET_ALL}')
     if log_path is None:
         return success_prefix
     path_hint = log_path_hint(log_path)
     return f'{success_prefix}  {path_hint}'
+
+def error_message(message: str, log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+    """Gets the error message for the given message."""
+    error_prefix = f'{colorama.Style.RESET_ALL}{colorama.Fore.RED}⨯{colorama.Style.RESET_ALL} {message}'
+    if log_path is None:
+        return error_prefix
+    path_hint = log_path_hint(log_path)
+    return f'{error_prefix}  {path_hint}'
 
 
 def retry_message(message: str) -> str:
