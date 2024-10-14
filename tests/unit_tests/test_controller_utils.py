@@ -138,3 +138,81 @@ def test_get_controller_resources_with_task_resources(
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()
     assert config == default_controller_resources, config
+
+    # 4. All resources have clouds, regions, and zones specified.
+    # Return a set with all combinations.
+    all_cloud_regions_zones = [
+        sky.Resources(cloud=sky.AWS(), region='us-east-1', zone='us-east-1a'),
+        sky.Resources(cloud=sky.AWS(), region='ap-south-1', zone='ap-south-1b'),
+        sky.Resources(cloud=sky.GCP(),
+                      region='us-central1',
+                      zone='us-central1-a'),
+        sky.Resources(cloud=sky.GCP(),
+                      region='europe-west1',
+                      zone='europe-west1-b')
+    ]
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller_utils.Controllers.from_type(controller_type),
+        task_resources=all_cloud_regions_zones)
+    expected_combinations = {('AWS', 'us-east-1', 'us-east-1a'),
+                             ('AWS', 'ap-south-1', 'ap-south-1b'),
+                             ('GCP', 'us-central1', 'us-central1-a'),
+                             ('GCP', 'europe-west1', 'europe-west1-b')}
+    for r in controller_resources:
+        config = r.to_yaml_config()
+        cloud = config.pop('cloud')
+        region = config.pop('region')
+        zone = config.pop('zone')
+        assert (cloud, region, zone) in expected_combinations
+        expected_combinations.remove((cloud, region, zone))
+        assert config == default_controller_resources, config
+    assert not expected_combinations
+
+    # 5. Clouds and regions are specified but zones are only partially specified.
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller_utils.Controllers.from_type(controller_type),
+        task_resources=[
+            sky.Resources(cloud=sky.AWS(), region='us-west-2'),
+            sky.Resources(cloud=sky.GCP(),
+                          region='us-central1',
+                          zone='us-central1-a')
+        ])
+    expected_combinations = {('AWS', 'us-west-2', None),
+                             ('GCP', 'us-central1', 'us-central1-a')}
+    for r in controller_resources:
+        config = r.to_yaml_config()
+        cloud = config.pop('cloud')
+        region = config.pop('region')
+        zone = config.pop('zone', None)
+        assert (cloud, region, zone) in expected_combinations
+        expected_combinations.remove((cloud, region, zone))
+        assert config == default_controller_resources, config
+    assert not expected_combinations
+
+    # 7. Mixed case: Some resources have clouds and regions or zones, others do not.
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller_utils.Controllers.from_type(controller_type),
+        task_resources=[
+            sky.Resources(cloud=sky.GCP(), region='europe-west1'),
+            sky.Resources(cloud=sky.GCP()),
+            sky.Resources(cloud=sky.AWS(),
+                          region='eu-north-1',
+                          zone='eu-north-1a'),
+            sky.Resources(cloud=sky.AWS(), region='eu-north-1'),
+            sky.Resources(cloud=sky.Azure()),
+        ])
+    expected_combinations = {
+        ('AWS', 'eu-north-1', None),
+        ('GCP', None, None),
+        ('Azure', None, None),
+    }
+    assert len(controller_resources) == len(expected_combinations)
+    for r in controller_resources:
+        config = r.to_yaml_config()
+        cloud = config.pop('cloud')
+        region = config.pop('region', None)
+        zone = config.pop('zone', None)
+        assert (cloud, region, zone) in expected_combinations
+        expected_combinations.remove((cloud, region, zone))
+        assert config == default_controller_resources, config
+    assert not expected_combinations
