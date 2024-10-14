@@ -603,8 +603,7 @@ if __name__ == '__main__':
         if num_queue_workers is None:
             num_queue_workers = 4
         num_queue_workers *= 2
-        workers = executor.start(
-            num_queue_workers=num_queue_workers)
+        workers = executor.start(num_queue_workers=num_queue_workers)
 
         logger.info('Starting API server')
         # TODO(zhwu): --deploy is broken right now. Need to fix it.

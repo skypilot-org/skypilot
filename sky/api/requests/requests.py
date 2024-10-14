@@ -218,7 +218,7 @@ def create_table(cursor, conn):
         return_value TEXT,
         error BLOB,
         pid INTEGER)""")
-    
+
 
 _DB = None
 

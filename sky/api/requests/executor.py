@@ -1,6 +1,6 @@
 """Executor for the requests."""
-import functools
 import enum
+import functools
 import multiprocessing
 import os
 import queue as queue_lib
@@ -8,7 +8,7 @@ import sys
 import time
 import traceback
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 from sky import sky_logging
 from sky.api.requests import payloads
@@ -81,7 +81,9 @@ def get_queue_backend() -> QueueBackend:
 class RequestQueue:
     """The queue for the requests, either redis or multiprocessing."""
 
-    def __init__(self, schedule_type: ScheduleType, queue_backend: Optional[QueueBackend] = None):
+    def __init__(self,
+                 schedule_type: ScheduleType,
+                 queue_backend: Optional[QueueBackend] = None):
         self.name = schedule_type.value
         self.queue_backend = queue_backend
         self.queue: Union[queue_lib.Queue, 'redis.Redis']
@@ -99,7 +101,7 @@ class RequestQueue:
             assert isinstance(self.queue, redis.Redis), 'Redis is not installed'
             self.queue.lpush(self.name, obj)
         else:
-            self.queue.put(obj)
+            self.queue.put(obj)  # type: ignore
 
     def get(self):
         if self.queue_backend == QueueBackend.REDIS:
@@ -118,11 +120,14 @@ class RequestQueue:
         else:
             return self.queue.qsize()
 
+
 queue_backend = get_queue_backend()
+
 
 @functools.lru_cache(maxsize=None)
 def _get_queue(schedule_type: ScheduleType) -> RequestQueue:
     return RequestQueue(schedule_type, queue_backend=queue_backend)
+
 
 def _wrapper(request_id: str, ignore_return_value: bool):
     """Wrapper for a request task."""
@@ -258,13 +263,13 @@ def request_worker(worker_id: int, non_blocking: bool = False):
                 f'Request worker {worker_id} -- request {request_id} submitted')
 
 
-def start(
-        num_queue_workers: int = 1) -> List[multiprocessing.Process]:
+def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:
     """Start the request workers."""
     # Setup the queues.
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
-        mp_queue.create_mp_queues([schedule_type.value for schedule_type in ScheduleType])
+        mp_queue.create_mp_queues(
+            [schedule_type.value for schedule_type in ScheduleType])
     logger.info('Request queues created')
 
     workers = []
