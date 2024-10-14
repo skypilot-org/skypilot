@@ -220,7 +220,31 @@ Available fields:
       # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
-
+      #
+      # OCI
+      # To find OCI images: https://docs.oracle.com/en-us/iaas/images
+      # It is recommended to specify a tag in the images catalog file (images.csv) as the image_id value.
+      # For example,
+      #   image_id: skypilot:gpu-ubuntu-2004
+      #   image_id: skypilot:cpu-ubuntu-2004
+      #   image_id: skypilot:gpu-oraclelinux8-cuda12_2
+      # For an image you want to use but not listed in the catalog file, you may manually
+      # add it by taking the existing entries in the file as examples. In this way, OCI 
+      # marketplace images and custom images are also supported.
+      #
+      # The image_id value can also be an OCID of an image. For example,
+      #   image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaaw6cprwn27lbvai3dpba3nyhu7ll4f3x3iysadt4guphgljur2tia
+      # Please note that, in this way, the OS of the provisioned VM is ubuntu by default
+      # because there is no information about OS in the ocid. To change the default OS 
+      # setting, you can configure oci.default.image_os_type in the sky config file.
+      #
+      # It is also possible to specify a per-region image id (failover will only
+      # go through the regions specified as keys; useful when you have the
+      # custom images in multiple regions):
+      #   image_id:
+      #     us-east-1: ami-0729d913a335efca7
+      #     us-west-2: ami-050814f384259894c
+      image_id: ami-0868a20f5a3bf9702
       # Labels to apply to the instances (optional).
       #
       # If specified, these labels will be applied to the VMs or pods created
