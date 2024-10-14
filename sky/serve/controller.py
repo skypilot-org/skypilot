@@ -179,7 +179,7 @@ class SkyServeController:
                     content={
                         'message': f'Replica {replica_id} of service '
                                    f'{self._service_name!r} is already '
-                                   f'in the process of terminating.'
+                                   f'in the process of terminating. Skip terminating now.'
                     })
 
             if (replica_status in serve_state.ReplicaStatus.failed_statuses()
