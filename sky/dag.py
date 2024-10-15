@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Union
 import networkx as nx
 
 from sky.serve import serve_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import task
@@ -58,7 +59,8 @@ class Dag:
             return task_or_name
         name = task_or_name
         if name not in self._task_name_lookup:
-            raise ValueError(f'Task {name} not found in DAG')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Task {name} not found in DAG')
         return self._task_name_lookup[name]
 
     def add(self, task: 'task.Task') -> None:
@@ -74,10 +76,12 @@ class Dag:
         if task.name is None:
             task.name = serve_utils.generate_task_name(task)
         if task in self.tasks:
-            raise ValueError(f'Task {task.name} already exists in the DAG.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Task {task.name} already exists in the DAG.')
         if task.name in self._task_name_lookup:
-            raise ValueError(
-                f'Task name "{task.name}" is already used in the DAG.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task name "{task.name}" is already used in the DAG.')
         self.graph.add_node(task)
         self.tasks.append(task)
         self._task_name_lookup[task.name] = task
@@ -101,9 +105,10 @@ class Dag:
         # and sink nodes.
         # if dependents:
         #     dependent_names = ', '.join([dep.name for dep in dependents])
-        #     raise ValueError(f'Task {task.name} is still being depended on '
-        #                      f'by tasks {dependent_names!r}. Try to remove '
-        #                      'the dependencies first.')
+        #     with ux_utils.print_exception_no_traceback():
+        #         raise ValueError(f'Task {task.name} is still being depended '
+        #                          f'by tasks {dependent_names!r}. Try to '
+        #                          'remove the dependencies first.')
 
         self.dependencies.pop(task, None)
         self.tasks.remove(task)
@@ -129,10 +134,13 @@ class Dag:
         dependency = self._get_task(dependency)
 
         if dependent == dependency:
-            raise ValueError(f'Task {dependent.name} cannot depend on itself.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Task {dependent.name} cannot depend on itself.')
         if dependency not in self.tasks:
-            raise ValueError(
-                f'Dependency task {dependency.name} is not in the DAG.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Dependency task {dependency.name} is not in the DAG.')
 
         self.graph.add_edge(dependency, dependent)
         if dependent not in self.dependencies:

@@ -93,7 +93,8 @@ def load_dag_from_yaml(
     dag = dag_lib.Dag()
 
     if not configs:
-        raise ValueError('Empty YAML file.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Empty YAML file.')
 
     has_header = set(configs[0].keys()) <= {'name', 'dependencies'}
     if has_header:
@@ -103,8 +104,9 @@ def load_dag_from_yaml(
     else:
         multi_tasks = len(configs) > 1
         if multi_tasks:
-            raise ValueError('Multiple task definitions without a valid'
-                             'header.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Multiple task definitions without a valid'
+                                 'header.')
         # Single task without header
         dag.name = configs[0].get('name')
         dependencies = {}
@@ -118,7 +120,8 @@ def load_dag_from_yaml(
     # Create tasks
     for config in configs:
         if not isinstance(config, dict):
-            raise ValueError(f'Invalid task configuration: {config}')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid task configuration: {config}')
 
         task = task_lib.Task.from_yaml_config(config, env_overrides)
         tasks.append(task)
@@ -136,7 +139,8 @@ def load_dag_from_yaml(
             dag.add_dependency(tasks[i], tasks[i - 1])
 
     if not tasks:
-        raise ValueError('No tasks defined in the YAML file')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('No tasks defined in the YAML file')
 
     return dag
 
