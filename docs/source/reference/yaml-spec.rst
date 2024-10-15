@@ -227,7 +227,7 @@ Available fields:
       # For example,
       #   image_id: skypilot:gpu-ubuntu-2004
       #   image_id: skypilot:cpu-ubuntu-2004
-      #   image_id: skypilot:gpu-oraclelinux8-cuda12_2
+      #   image_id: skypilot:gpu-oraclelinux8-cuda122
       # For an image you want to use but not listed in the catalog file, you may manually
       # add it by taking the existing entries in the file as examples. In this way, OCI 
       # marketplace images and custom images are also supported.
