@@ -1,8 +1,7 @@
 """DAGs: user applications to be run."""
-import pprint
 import threading
 import typing
-from typing import Dict, List, Optional, Set, Union
+from typing import cast, Dict, List, Optional, Set, Union
 
 import networkx as nx
 
@@ -223,8 +222,15 @@ class Dag:
 
     def __repr__(self) -> str:
         """Return a string representation of the DAG."""
-        pformat = pprint.pformat(self.tasks)
-        return f'DAG:\n{pformat}'
+        task_info = []
+        for task in self.tasks:
+            deps = self.get_dependencies(task)
+            dep_names = ','.join(
+                cast(str, dep.name) for dep in deps) if deps else '-'
+            task_info.append(f'{task.name}({dep_names})')
+
+        tasks_str = ' '.join(task_info)
+        return f'DAG({self.name}: {tasks_str})'
 
     def get_graph(self):
         """Return the networkx graph representing the DAG."""
