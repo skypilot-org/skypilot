@@ -139,6 +139,9 @@ class Dag:
             self.dependencies[dependent] = set()
         self.dependencies[dependent].add(dependency)
 
+    # Backward compatibility for old DAG API.
+    # TODO(andy): Remove this after 2 minor releases, which is 0.6.3.
+    # Be careful the parameter order is different from add_dependency.
     def add_edge(self, op1: 'task.Task', op2: 'task.Task') -> None:
         return self.add_dependency(op2, op1)
 
