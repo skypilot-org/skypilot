@@ -163,7 +163,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
-    with requests.update_rest_task(request_id) as request_task:
+    with requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
         request_task.pid = pid
@@ -185,7 +185,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 stacktrace = traceback.format_exc()
             setattr(e, 'stacktrace', stacktrace)
             usage_lib.store_exception(e)
-            with requests.update_rest_task(request_id) as request_task:
+            with requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = requests.RequestStatus.FAILED
                 request_task.set_error(e)
@@ -193,7 +193,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
             logger.info(f'Request {request_id} failed due to {e}')
             return None
         else:
-            with requests.update_rest_task(request_id) as request_task:
+            with requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = requests.RequestStatus.SUCCEEDED
                 if not ignore_return_value:
@@ -282,7 +282,7 @@ def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:
 
     # Wait for the queues to be created. This is necessary to avoid request
     # workers to be refused by the connection to the queue.
-    time.sleep(1)
+    time.sleep(2)
 
     workers = []
     for worker_id in range(num_queue_workers):

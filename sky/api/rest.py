@@ -536,7 +536,7 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
         request_ids = [abort_body.request_id]
 
     for request_id in request_ids:
-        with requests_lib.update_rest_task(request_id) as request_record:
+        with requests_lib.update_request(request_id) as request_record:
             if request_record is None:
                 print(f'No task with request ID {request_id}')
                 raise fastapi.HTTPException(
@@ -565,9 +565,16 @@ async def requests(
     """Get the list of requests."""
     del request  # Unused.
     if request_ls_body.request_id is None:
+        if not request_ls_body.all:
+            statuses = [
+                requests_lib.RequestStatus.PENDING,
+                requests_lib.RequestStatus.RUNNING,
+            ]
+        else:
+            statuses = None
         return [
             request_task.readable_encode()
-            for request_task in requests_lib.get_request_tasks()
+            for request_task in requests_lib.get_request_tasks(status=statuses)
         ]
     else:
         request_task = requests_lib.get_request(request_ls_body.request_id)

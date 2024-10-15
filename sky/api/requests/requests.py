@@ -249,15 +249,15 @@ def request_lock_path(request_id: str) -> str:
 
 @contextlib.contextmanager
 @init_db
-def update_rest_task(request_id: str):
-    """Get a REST task."""
-    rest_task = _get_rest_task_no_lock(request_id)
-    yield rest_task
-    if rest_task is not None:
-        _dump_request_no_lock(rest_task)
+def update_request(request_id: str):
+    """Get a REST request."""
+    request = _get_request_no_lock(request_id)
+    yield request
+    if request is not None:
+        _dump_request_no_lock(request)
 
 
-def _get_rest_task_no_lock(request_id: str) -> Optional[Request]:
+def _get_request_no_lock(request_id: str) -> Optional[Request]:
     """Get a REST task."""
     assert _DB is not None
     with _DB.conn:
@@ -274,14 +274,14 @@ def _get_rest_task_no_lock(request_id: str) -> Optional[Request]:
 def get_request(request_id: str) -> Optional[Request]:
     """Get a REST task."""
     with filelock.FileLock(request_lock_path(request_id)):
-        return _get_rest_task_no_lock(request_id)
+        return _get_request_no_lock(request_id)
 
 
 @init_db
 def create_if_not_exists(request: Request) -> bool:
     """Create a REST task if it does not exist."""
     with filelock.FileLock(request_lock_path(request.request_id)):
-        if _get_rest_task_no_lock(request.request_id) is not None:
+        if _get_request_no_lock(request.request_id) is not None:
             return False
         _dump_request_no_lock(request)
         return True
@@ -310,9 +310,9 @@ def get_request_tasks(
     return requests
 
 
-def _dump_request_no_lock(request_task: Request):
-    """Dump a REST task."""
-    row = request_task.to_row()
+def _dump_request_no_lock(request: Request):
+    """Dump a REST request."""
+    row = request.to_row()
     fill_str = ', '.join(['?'] * len(row))
     assert _DB is not None
     with _DB.conn:
