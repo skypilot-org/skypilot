@@ -959,7 +959,8 @@ class Task:
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
-                storage.add_store(store_type, store_region)
+                is_workdir = storage.name.startswith('skypilot-workdir')
+                storage.add_store(store_type, store_region, is_workdir)
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
@@ -970,7 +971,6 @@ class Task:
             if storage.mode == storage_lib.StorageMode.COPY:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
-                    # TODO: allow for Storage mounting of different clouds
                     if isinstance(storage.source,
                                   str) and storage.source.startswith('s3://'):
                         blob_path = storage.source
