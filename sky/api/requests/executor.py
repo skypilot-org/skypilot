@@ -41,6 +41,14 @@ P = ParamSpec('P')
 logger = sky_logging.init_logger(__name__)
 
 
+# On macOS, the default start method for multiprocessing is 'fork', which 
+# can cause issues with certain types of resources, including those used in
+# the QueueManager in mp_queue.py.
+# The 'spawn' start method is generally more compatible across different
+# platforms, including macOS.
+multiprocessing.set_start_method('spawn', force=True)
+
+
 class ScheduleType(enum.Enum):
     """The schedule type for the requests."""
     BLOCKING = 'blocking'
@@ -271,6 +279,10 @@ def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:
         mp_queue.create_mp_queues(
             [schedule_type.value for schedule_type in ScheduleType])
     logger.info('Request queues created')
+
+    # Wait for the queues to be created. This is necessary to avoid request
+    # workers to be refused by the connection to the queue.
+    time.sleep(1)
 
     workers = []
     for worker_id in range(num_queue_workers):
