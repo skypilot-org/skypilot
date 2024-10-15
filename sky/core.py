@@ -144,8 +144,9 @@ all_clusters, unmanaged_clusters, all_jobs, context
     all_clusters, jobs_controllers, _ = (kubernetes_utils.process_skypilot_pods(
         pods, context))
     all_jobs = []
-    with rich_utils.safe_status(ux_utils.spinner_message(
-            '[bold cyan]Checking in-progress managed jobs[/]')) as spinner:
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                '[bold cyan]Checking in-progress managed jobs[/]')) as spinner:
         for i, job_controller_info in enumerate(jobs_controllers):
             user = job_controller_info.user
             pod = job_controller_info.pods[0]
