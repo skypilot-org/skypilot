@@ -3265,7 +3265,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Only set this when setup needs to be run outside the self._setup()
             # as part of a job (--detach-setup).
             self._setup_cmd = setup_cmd
-            logger.info(ux_utils.finishing_message('Setup Detached.'))
+            logger.info(ux_utils.finishing_message('Setup detached.'))
             return
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -3282,8 +3282,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         managed_job_dag: Optional['dag.Dag'] = None,
     ) -> None:
         """Executes generated code on the head node."""
-        style = colorama.Style
-
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
@@ -3695,8 +3693,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
-        else:
-            logger.info(f'Streaming logs for job {job_id}.')
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

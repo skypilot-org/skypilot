@@ -804,14 +804,6 @@ def tail_logs(cluster_name: str,
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
-    job_str = f'job {job_id}'
-    if job_id is None:
-        job_str = 'the last job'
-    sky_logging.print(
-        f'{colorama.Fore.YELLOW}'
-        f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
-        f'{colorama.Style.RESET_ALL}')
-
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.tail_logs(handle, job_id, follow=follow)
 

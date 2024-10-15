@@ -4,7 +4,7 @@ import re
 from typing import Any, Optional
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload(.*?)>(.*?)</sky-payload>')
-_PAYLOAD_STR = '<sky-payload{type}>{content}</sky-payload>'
+_PAYLOAD_STR = '<sky-payload{type}>{content}</sky-payload>\n'
 
 
 def encode_payload(payload: Any, payload_type: Optional[str] = None) -> str:

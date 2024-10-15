@@ -2070,6 +2070,13 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
+    job_str = f'job {job_id}'
+    if job_id is None:
+        job_str = 'the last job'
+    logger.info(
+        f'{colorama.Fore.YELLOW}'
+        f'Tailing logs of {job_str} on cluster {cluster!r}...'
+        f'{colorama.Style.RESET_ALL}')
     request = sdk.tail_logs(cluster, job_id, follow)
     sdk.stream_and_get(request)
 
@@ -5458,7 +5465,7 @@ def api_get(request_id: Optional[str]):
 
 
 @api.command('abort', cls=_DocumentedCodeCommand)
-@click.argument('request_id', required=False, type=Optional[str])
+@click.argument('request_id', required=False, type=str)
 @click.option('--all',
               '-a',
               is_flag=True,

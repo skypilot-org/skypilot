@@ -571,7 +571,7 @@ def stream_and_get(request_id: str) -> Any:
                 msg = line.decode('utf-8')
                 msg = rich_utils.decode_rich_status(msg)
                 if msg is not None:
-                    print(msg)
+                    print(msg, flush=True)
         return get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.info(f'Check more loggings with: sky api get {request_id}')
