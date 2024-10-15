@@ -5,7 +5,7 @@ from typing import cast, Dict, List, Optional, Set, Union
 
 import networkx as nx
 
-from sky.serve import serve_utils
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -75,7 +75,7 @@ class Dag:
             is already used.
         """
         if task.name is None:
-            task.name = serve_utils.generate_task_name(task)
+            task.name = common_utils.get_unique_task_name(task)
         if task.name in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

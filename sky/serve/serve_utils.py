@@ -192,13 +192,6 @@ def generate_remote_service_dir_name(service_name: str) -> str:
     return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
 
 
-def generate_task_name(_task: 'task_lib.Task') -> str:
-    timestamp = int(time.time())
-    unique_suffix = uuid.uuid4().hex[:6]
-    name = f'task_{timestamp}_{unique_suffix}'
-    return name
-
-
 def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
