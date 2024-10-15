@@ -141,6 +141,7 @@ def upload_mounts_to_api_server(
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
 
     # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
+    # TODO(zhwu): Handle .skyignore file.
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
@@ -179,18 +180,19 @@ def upload_mounts_to_api_server(
 
     server_url = get_server_url()
     if upload_list:
-        logger.info('Uploading files to API server...')
-        with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-            common_utils.zip_files_and_folders(upload_list, f)
-            f.seek(0)
-            files = {'file': (f.name, f)}
-            # Send the POST request with the file
-            response = requests.post(
-                f'{server_url}/upload?user_hash={common_utils.get_user_hash()}',
-                files=files)
-            if response.status_code != 200:
-                err_msg = response.content.decode('utf-8')
-                raise RuntimeError(f'Failed to upload files: {err_msg}')
+        with rich_utils.client_status('Uploading files to API server'):
+            with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
+                common_utils.zip_files_and_folders(upload_list, f)
+                f.seek(0)
+                files = {'file': (f.name, f)}
+                # Send the POST request with the file
+                response = requests.post(
+                    f'{server_url}/upload?'
+                    f'user_hash={common_utils.get_user_hash()}',
+                    files=files)
+                if response.status_code != 200:
+                    err_msg = response.content.decode('utf-8')
+                    raise RuntimeError(f'Failed to upload files: {err_msg}')
 
     return dag
 

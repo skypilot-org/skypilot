@@ -3265,7 +3265,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Only set this when setup needs to be run outside the self._setup()
             # as part of a job (--detach-setup).
             self._setup_cmd = setup_cmd
-            logger.info(ux_utils.finishing_message('Setup completed.'))
+            logger.info(ux_utils.finishing_message('Setup Detached.'))
             return
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -3379,51 +3379,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
-        try:
-            if not detach_run:
-                if (handle.cluster_name in controller_utils.Controllers.
-                        JOBS_CONTROLLER.value.candidate_cluster_names):
-                    self.tail_managed_job_logs(handle, job_id)
-                else:
-                    # Sky logs. Not using subprocess.run since it will make the
-                    # ssh keep connected after ctrl-c.
-                    self.tail_logs(handle, job_id)
-        finally:
-            name = handle.cluster_name
-            controller = controller_utils.Controllers.from_name(name)
-            if controller == controller_utils.Controllers.JOBS_CONTROLLER:
-                logger.info(
-                    f'\n📋 Useful Commands'
-                    f'\nManaged Job ID: '
-                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
-                    f'{ux_utils.BOLD}sky jobs cancel {job_id}'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
-                    f'{ux_utils.BOLD}sky jobs logs {job_id}'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
-                    f'{ux_utils.BOLD}sky jobs logs --controller {job_id}'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To view all managed jobs:\t\t'
-                    f'{ux_utils.BOLD}sky jobs queue'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To view managed job '
-                    f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
-                    f'{ux_utils.RESET_BOLD}')
-            elif controller is None:
-                logger.info(f'\n📋 Useful Commands'
-                            f'\nJob ID: {job_id}'
-                            f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
-                            f'{ux_utils.BOLD}sky cancel {name} {job_id}'
-                            f'{ux_utils.RESET_BOLD}'
-                            f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t'
-                            f'{ux_utils.BOLD}sky logs {name} {job_id}'
-                            f'{ux_utils.RESET_BOLD}'
-                            f'\n{ux_utils.INDENT_LAST_SYMBOL}To view job '
-                            'queue:\t\t'
-                            f'{ux_utils.BOLD}sky queue {name}'
-                            f'{ux_utils.RESET_BOLD}')
+        if not detach_run:
+            if (handle.cluster_name in controller_utils.Controllers.
+                    JOBS_CONTROLLER.value.candidate_cluster_names):
+                self.tail_managed_job_logs(handle, job_id)
+            else:
+                # Sky logs. Not using subprocess.run since it will make the
+                # ssh keep connected after ctrl-c.
+                self.tail_logs(handle, job_id)
 
     def _add_job(self, handle: CloudVmRayResourceHandle,
                  job_name: Optional[str], resources_str: str) -> int:
@@ -3502,26 +3465,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
-        name = handle.cluster_name
-        controller = controller_utils.Controllers.from_name(name)
-        if controller is not None:
-            return
-        logger.info(f'\nCluster name: {name}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To log into the head VM:\t'
-                    f'{ux_utils.BOLD}ssh {name}'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To submit a job:'
-                    f'\t\t{ux_utils.BOLD}sky exec {name} yaml_file'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To stop the cluster:'
-                    f'\t{ux_utils.BOLD}sky stop {name}'
-                    f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To teardown the cluster:'
-                    f'\t{ux_utils.BOLD}sky down {name}'
-                    f'{ux_utils.RESET_BOLD}')
-        if (gcp_utils.is_tpu(handle.launched_resources) and
-                not gcp_utils.is_tpu_vm(handle.launched_resources)):
-            logger.info('Tip: `sky down` will delete launched TPU(s) too.')
+        """Post-execute cleanup."""
+        del handle, down  # Unused.
+        # All logic is handled in previous stages, no-op.
 
     def _teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
         storage_mounts = task.storage_mounts
@@ -3749,6 +3695,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
+        else:
+            logger.info(f'Streaming logs for job {job_id}.')
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

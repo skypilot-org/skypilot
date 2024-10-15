@@ -1,5 +1,6 @@
 """Utility functions for UX."""
 import contextlib
+import enum
 import os
 import sys
 import traceback
@@ -156,3 +157,51 @@ def spinner_message(
         return colored_spinner
     path_hint = log_path_hint(log_path)
     return f'{colored_spinner}  {path_hint}'
+
+
+class CommandHintType(enum.Enum):
+    CLUSTER_JOB = 'cluster_job'
+    MANAGED_JOB = 'managed_job'
+
+
+def command_hint_messages(hint_type: CommandHintType,
+                          job_id: str,
+                          cluster_name: Optional[str] = None) -> str:
+    """Gets the command hint messages for the given job id."""
+    if hint_type == CommandHintType.CLUSTER_JOB:
+        return (f'\n📋 Useful Commands'
+                f'\nJob ID: {job_id}'
+                f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
+                f'{BOLD}sky cancel {cluster_name} {job_id}{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To stream job logs:\t\t'
+                f'{BOLD}sky logs {cluster_name} {job_id}{RESET_BOLD}'
+                f'\n{INDENT_LAST_SYMBOL}To view job queue:\t\t'
+                f'\n{BOLD}sky queue {cluster_name}{RESET_BOLD}'
+                f'\nCluster name: {cluster_name}'
+                f'\n{INDENT_SYMBOL}To log into the head VM:\t'
+                f'{BOLD}ssh {cluster_name}'
+                f'{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To submit a job:'
+                f'\t\t{BOLD}sky exec {cluster_name} yaml_file'
+                f'{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To stop the cluster:'
+                f'\t{BOLD}sky stop {cluster_name}'
+                f'{RESET_BOLD}'
+                f'\n{INDENT_LAST_SYMBOL}To teardown the cluster:'
+                f'\t{BOLD}sky down {cluster_name}'
+                f'{RESET_BOLD}')
+    elif hint_type == CommandHintType.MANAGED_JOB:
+        return (f'\n📋 Useful Commands'
+                f'\nManaged Job ID: {job_id}'
+                f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
+                f'{BOLD}sky jobs cancel {job_id}{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To stream job logs:\t\t'
+                f'{BOLD}sky jobs logs {job_id}{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To stream controller logs:\t\t'
+                f'{BOLD}sky jobs logs --controller {job_id}{RESET_BOLD}'
+                f'\n{INDENT_SYMBOL}To view all managed jobs:\t\t'
+                f'{BOLD}sky jobs queue{RESET_BOLD}'
+                f'\n{INDENT_LAST_SYMBOL}To view managed job dashboard:\t\t'
+                f'{BOLD}sky jobs dashboard{RESET_BOLD}')
+    else:
+        raise ValueError(f'Invalid hint type: {hint_type}')

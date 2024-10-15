@@ -285,9 +285,7 @@ _VALIDATE_LAUNCH_OUTPUT = (
     # ⚙️ Launching on Kubernetes.
     #   Pod is up.
     # ✓ Cluster launched: test. View logs at: ~/sky_logs/sky-2024-10-07-19-44-18-177288/provision.log
-    # ⚙️ Running setup on 1 pod.
-    # running setup
-    # ✓ Setup completed.
+    # ✓ Setup Detached.
     # ⚙️ Job submitted, ID: 1.
     # ├── Waiting for task resources on 1 node.
     # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
@@ -312,7 +310,7 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
-    'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+    'echo "$s" | grep -A 1 "Setup Detached" | grep "Job Submitted" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '
     'grep "Waiting for task resources on " && '

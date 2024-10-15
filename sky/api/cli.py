@@ -1119,9 +1119,11 @@ def launch(
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])
         if not detach_run:
-            click.secho('Streaming logs...', fg='yellow')
             sdk.stream_and_get(
-                sdk.tail_logs(handle.get_cluster_name(), job_id, True))
+                sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True))
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
+                                           job_id, handle.get_cluster_name()))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1266,8 +1268,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        click.secho('Streaming logs...', fg='yellow')
-        sdk.stream_and_get(sdk.tail_logs(cluster, job_id, True))
+        sdk.stream_and_get(sdk.tail_logs(cluster, job_id, follow=True))
 
 
 def _get_managed_jobs(
