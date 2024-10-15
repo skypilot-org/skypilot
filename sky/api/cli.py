@@ -2073,10 +2073,9 @@ def logs(
     job_str = f'job {job_id}'
     if job_id is None:
         job_str = 'the last job'
-    logger.info(
-        f'{colorama.Fore.YELLOW}'
-        f'Tailing logs of {job_str} on cluster {cluster!r}...'
-        f'{colorama.Style.RESET_ALL}')
+    logger.info(f'{colorama.Fore.YELLOW}'
+                f'Tailing logs of {job_str} on cluster {cluster!r}...'
+                f'{colorama.Style.RESET_ALL}')
     request = sdk.tail_logs(cluster, job_id, follow)
     sdk.stream_and_get(request)
 

@@ -40,6 +40,7 @@ cloud_to_pytest_keyword = {
     'oci': 'oci',
     'kubernetes': 'kubernetes',
     'vsphere': 'vsphere',
+    'runpod': 'runpod',
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
