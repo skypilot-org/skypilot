@@ -35,13 +35,15 @@ class Dag:
         Args:
             name: Optional name for the DAG.
         """
-
         self.name = name
-        self.tasks: List['task.Task'] = []
         self._task_name_lookup: Dict[str, 'task.Task'] = {}
         self.dependencies: Dict['task.Task', Set['task.Task']] = {}
-
         self.graph = nx.DiGraph()
+
+    @property
+    def tasks(self) -> List['task.Task']:
+        """Return a list of all tasks in the DAG."""
+        return list(self._task_name_lookup.values())
 
     def _get_task(self, task_or_name: TaskOrName) -> 'task.Task':
         """Get a task object from a task or its name.
@@ -75,15 +77,12 @@ class Dag:
         """
         if task.name is None:
             task.name = serve_utils.generate_task_name(task)
-        if task in self.tasks:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Task {task.name} already exists in the DAG.')
         if task.name in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Task name "{task.name}" is already used in the DAG.')
+                    f'Task {task.name!r} already exists in the DAG.'
+                    f' Or the task name is already used by another task.')
         self.graph.add_node(task)
-        self.tasks.append(task)
         self._task_name_lookup[task.name] = task
 
     def remove(self, task: Union['task.Task', str]) -> None:
@@ -111,7 +110,6 @@ class Dag:
         #                          'remove the dependencies first.')
 
         self.dependencies.pop(task, None)
-        self.tasks.remove(task)
         self.graph.remove_node(task)
         assert task.name is not None
         self._task_name_lookup.pop(task.name, None)
@@ -133,11 +131,12 @@ class Dag:
         dependent = self._get_task(dependent)
         dependency = self._get_task(dependency)
 
-        if dependent == dependency:
+        if dependent.name == dependency.name:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Task {dependent.name} cannot depend on itself.')
-        if dependency not in self.tasks:
+        assert dependency.name is not None
+        if dependency.name not in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Dependency task {dependency.name} is not in the DAG.')
@@ -211,7 +210,7 @@ class Dag:
 
     def __len__(self) -> int:
         """Return the number of tasks in the DAG."""
-        return len(self.tasks)
+        return len(self._task_name_lookup)
 
     def __enter__(self) -> 'Dag':
         """Enter the runtime context related to this object."""
