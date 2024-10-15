@@ -963,4 +963,7 @@ class ServeCodeGen:
             f'{version}, **mode_kwargs)',
             'print(msg, end="", flush=True)',
         ]
+        if mode == UpdateMode.ROLLING:
+            raise exceptions.NotSupportedError(
+                f'Rolling updates not supported on {service_name} service')
         return cls._build(code)
