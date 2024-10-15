@@ -2029,7 +2029,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 
 @dataclasses.dataclass
-class KubernetesClusterInfo:
+class KubernetesSkyPilotClusterInfo:
     cluster_name_on_cloud: str
     cluster_name: str
     user: str
@@ -2043,8 +2043,9 @@ class KubernetesClusterInfo:
 def process_skypilot_pods(
     pods: List[Any],
     context: Optional[str] = None
-) -> Tuple[List[KubernetesClusterInfo], List[KubernetesClusterInfo],
-           List[KubernetesClusterInfo]]:
+) -> Tuple[List[KubernetesSkyPilotClusterInfo],
+           List[KubernetesSkyPilotClusterInfo],
+           List[KubernetesSkyPilotClusterInfo]]:
     """Process SkyPilot pods on k8s to extract cluster and controller info.
 
     Args:
@@ -2053,15 +2054,15 @@ def process_skypilot_pods(
 
     Returns:
         A tuple containing:
-        - List of KubernetesClusterInfo with all cluster information.
-        - List of KubernetesClusterInfo with job controller information.
-        - List of KubernetesClusterInfo with serve controller information.
+        - List of KubernetesSkyPilotClusterInfo with all cluster info.
+        - List of KubernetesSkyPilotClusterInfo with job controller info.
+        - List of KubernetesSkyPilotClusterInfo with serve controller info.
     """
     # pylint: disable=import-outside-toplevel
     from sky import resources as resources_lib
-    clusters: Dict[str, KubernetesClusterInfo] = {}
-    jobs_controllers: List[KubernetesClusterInfo] = []
-    serve_controllers: List[KubernetesClusterInfo] = []
+    clusters: Dict[str, KubernetesSkyPilotClusterInfo] = {}
+    jobs_controllers: List[KubernetesSkyPilotClusterInfo] = []
+    serve_controllers: List[KubernetesSkyPilotClusterInfo] = []
 
     for pod in pods:
         cluster_name_on_cloud = pod.metadata.labels.get('skypilot-cluster')
@@ -2105,7 +2106,7 @@ def process_skypilot_pods(
                 # If pod is pending, do not show it in the status
                 continue
 
-            cluster_info = KubernetesClusterInfo(
+            cluster_info = KubernetesSkyPilotClusterInfo(
                 cluster_name_on_cloud=cluster_name_on_cloud,
                 cluster_name=cluster_name,
                 user=pod.metadata.labels.get('skypilot-user'),

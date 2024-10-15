@@ -305,7 +305,7 @@ def _get_estimated_cost_for_cost_report(
 
 
 def show_kubernetes_cluster_status_table(
-        clusters: List['kubernetes_utils.KubernetesClusterInfo'],
+        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
         show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
