@@ -37,19 +37,26 @@ aws ec2 get-image-block-public-access-state --region us-east-1
 aws ec2 modify-image-attribute --image-id ${IMAGE_ID} --launch-permission "{\"Add\": [{\"Group\":\"all\"}]}"
 
 # Generate images for all regions and output a CSV file to be uploaded to SkyPilot Catalog
-TODO
+python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor gpu
 ```
 
 ## Test Images
 Update the image ID in `sky/clouds/gcp.py` and run the test:
-```
+```bash
 pytest tests/test_smoke.py::test_minimal --gcp
 pytest tests/test_smoke.py::test_huggingface --gcp
 pytest tests/test_smoke.py::test_job_queue_with_docker --gcp
 pytest tests/test_smoke.py::test_cancel_gcp
 ```
 
-## Ship Images
+## Ship Images & Cleanup
 Create a PR to update [`SkyPilot Catalog`](https://github.com/skypilot-org/skypilot-catalog/tree/master/catalogs). 
 
-TODO: add PR examples.
+### GCP
+Example PR: https://github.com/skypilot-org/skypilot-catalog/pull/86
+
+### AWS
+```bash
+python aws_utils/image_delete.py --tag ${TAG}
+```
+Example PR: TODO
