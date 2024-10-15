@@ -162,7 +162,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
         os.close(original_stderr)
 
     pid = multiprocessing.current_process().pid
-    logger.info(f'Running task {request_id} with pid {pid}')
+    logger.info(f'Running request {request_id} with pid {pid}')
     with requests.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
@@ -189,8 +189,8 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 assert request_task is not None, request_id
                 request_task.status = requests.RequestStatus.FAILED
                 request_task.set_error(e)
-            logger.info(f'Task {request_id} failed due to {e}')
             restore_output(original_stdout, original_stderr)
+            logger.info(f'Request {request_id} failed due to {e}')
             return None
         else:
             with requests.update_rest_task(request_id) as request_task:
@@ -199,7 +199,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 if not ignore_return_value:
                     request_task.set_return_value(return_value)
             restore_output(original_stdout, original_stderr)
-            logger.info(f'Task {request_id} finished')
+            logger.info(f'Request {request_id} finished')
         return return_value
 
 
