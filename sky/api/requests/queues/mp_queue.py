@@ -28,7 +28,11 @@ def _start_manager(queue_names: List[str], port: int):
 
 
 def create_mp_queues(queue_names: List[str], port: int = 50010):
-    server_process = multiprocessing.Process(target=_start_manager, args=(queue_names, port,))
+    server_process = multiprocessing.Process(target=_start_manager,
+                                             args=(
+                                                 queue_names,
+                                                 port,
+                                             ))
     server_process.start()
 
 

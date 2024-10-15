@@ -40,8 +40,7 @@ P = ParamSpec('P')
 
 logger = sky_logging.init_logger(__name__)
 
-
-# On macOS, the default start method for multiprocessing is 'fork', which 
+# On macOS, the default start method for multiprocessing is 'fork', which
 # can cause issues with certain types of resources, including those used in
 # the QueueManager in mp_queue.py.
 # The 'spawn' start method is generally more compatible across different
