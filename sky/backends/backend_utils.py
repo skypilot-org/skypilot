@@ -56,7 +56,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
+    from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
@@ -751,7 +751,7 @@ def _replace_yaml_dicts(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources.Resources',
+        to_provision: 'resources_lib.Resources',
         num_nodes: int,
         cluster_config_template: str,
         cluster_name: str,

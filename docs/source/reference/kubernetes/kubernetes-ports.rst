@@ -59,40 +59,18 @@ To restrict your services to be accessible only within the cluster, you can set 
 
 Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/config.yaml``):
 
-.. tab-set::
+.. code-block:: yaml
 
-    .. tab-item:: GCP
-        :sync: internal-lb-gke
-
-        .. code-block:: yaml
-
-          # ~/.sky/config.yaml
-          kubernetes:
-            custom_metadata:
-                annotations:
-                   networking.gke.io/load-balancer-type: "Internal"
-
-    .. tab-item:: AWS
-        :sync: internal-lb-aws
-
-        .. code-block:: yaml
-
-          # ~/.sky/config.yaml
-          kubernetes:
-            custom_metadata:
-                annotations:
-                  service.beta.kubernetes.io/aws-load-balancer-internal: "true"
-
-    .. tab-item:: Azure
-        :sync: internal-lb-azure
-
-        .. code-block:: yaml
-
-          # ~/.sky/config.yaml
-          kubernetes:
-            custom_metadata:
-                annotations:
-                  service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    # ~/.sky/config.yaml
+    kubernetes:
+      custom_metadata:
+        annotations:
+          # For GCP/GKE
+          networking.gke.io/load-balancer-type: "Internal"
+          # For AWS/EKS
+          service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+          # For Azure/AKS
+          service.beta.kubernetes.io/azure-load-balancer-internal: "true"
 
 
 .. _kubernetes-ingress:

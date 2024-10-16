@@ -1464,54 +1464,8 @@ def _status_kubernetes(show_all: bool):
     Args:
         show_all (bool): Show all job information (e.g., start time, failures).
     """
-    context = kubernetes_utils.get_current_kube_config_context_name()
-    try:
-        pods = kubernetes_utils.get_skypilot_pods(context)
-    except exceptions.ResourcesUnavailableError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Failed to get SkyPilot pods from '
-                             f'Kubernetes: {str(e)}') from e
-    all_clusters, jobs_controllers, serve_controllers = (
-        status_utils.process_skypilot_pods(pods, context))
-    all_jobs = []
-    with rich_utils.safe_status(
-            '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
-        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
-            user = job_controller_info['user']
-            pod = job_controller_info['pods'][0]
-            status_message = ('[bold cyan]Checking managed jobs controller')
-            if len(jobs_controllers) > 1:
-                status_message += f's ({i+1}/{len(jobs_controllers)})'
-            spinner.update(f'{status_message}[/]')
-            try:
-                job_list = managed_jobs.queue_from_kubernetes_pod(
-                    pod.metadata.name)
-            except RuntimeError as e:
-                logger.warning('Failed to get managed jobs from controller '
-                               f'{pod.metadata.name}: {str(e)}')
-                job_list = []
-            # Add user field to jobs
-            for job in job_list:
-                job['user'] = user
-            all_jobs.extend(job_list)
-    # Reconcile cluster state between managed jobs and clusters:
-    # To maintain a clear separation between regular SkyPilot clusters
-    # and those from managed jobs, we need to exclude the latter from
-    # the main cluster list.
-    # We do this by reconstructing managed job cluster names from each
-    # job's name and ID. We then use this set to filter out managed
-    # clusters from the main cluster list. This is necessary because there
-    # are no identifiers distinguishing clusters from managed jobs from
-    # regular clusters.
-    managed_job_cluster_names = set()
-    for job in all_jobs:
-        # Managed job cluster name is <job_name>-<job_id>
-        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
-        managed_job_cluster_names.add(managed_cluster_name)
-    unmanaged_clusters = [
-        c for c in all_clusters
-        if c['cluster_name'] not in managed_job_cluster_names
-    ]
+    all_clusters, unmanaged_clusters, all_jobs, context = (
+        core.status_kubernetes())
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
@@ -1523,7 +1477,7 @@ def _status_kubernetes(show_all: bool):
                    f'{colorama.Style.RESET_ALL}')
         msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
         click.echo(msg)
-    if serve_controllers:
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
         #  Currently we show a hint that services are shown as clusters.
         click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
