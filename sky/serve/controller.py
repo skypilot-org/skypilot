@@ -203,14 +203,15 @@ class SkyServeController:
 
             self._replica_manager.scale_down(replica_id, purge=purge)
 
-            message = (f'Replica {replica_id} of service '
-                       f'{self._service_name!r} is scheduled to be ')
-            return responses.JSONResponse(
-                status_code=200,
-                content={
-                    'message': message +
-                               'terminated.' if not purge else 'purged.'
-                })
+            action = 'terminated' if not purge else 'purged'
+            message = (f'{colorama.Fore.GREEN}Replica {replica_id} of service '
+                       f'{self._service_name!r} is scheduled to be '
+                       f'{action}.{colorama.Style.RESET_ALL}\n'
+                       f'Please use {ux_utils.BOLD}sky serve status '
+                       f'{self._service_name}{ux_utils.RESET_BOLD}'
+                       f' to check the latest status.')
+            return responses.JSONResponse(status_code=200,
+                                          content={'message': message})
 
         @self._app.exception_handler(Exception)
         async def validation_exception_handler(

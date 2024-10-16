@@ -547,13 +547,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    sky_logging.print(stdout)
-
-    logger.info(
-        f'{colorama.Fore.GREEN}Termination of replica {replica_id} for '
-        f'{service_name!r} has been scheduled.{colorama.Style.RESET_ALL}\n'
-        f'Please use {ux_utils.BOLD}sky serve status {service_name} '
-        f'{ux_utils.RESET_BOLD}to check the latest status.')
+    message = common_utils.decode_payload(stdout)
+    sky_logging.print(message)
 
 
 @usage_lib.entrypoint
