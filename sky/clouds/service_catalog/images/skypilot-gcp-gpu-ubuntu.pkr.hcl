@@ -37,4 +37,10 @@ build {
   provisioner "shell" {
     script = "./provisioners/skypilot.sh"
   }
+  provisioner "shell" {
+    environment_vars = [
+      "CLOUD=gcp",
+    ]
+    script = "./provisioners/cloud.sh"
+  }
 }

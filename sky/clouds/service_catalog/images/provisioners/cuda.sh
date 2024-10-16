@@ -4,6 +4,7 @@
 # For CUDA driver version, choose the latest version that works for ALL GPU types.
 #   GCP: https://cloud.google.com/compute/docs/gpus/install-drivers-gpu#minimum-driver
 #   AWS: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/install-nvidia-driver.html
+export DEBIAN_FRONTEND=noninteractive
 
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
@@ -18,3 +19,6 @@ sudo apt-get install -y cuda-toolkit-12-4
 # https://docs.nvidia.com/deeplearning/cudnn/latest/installation/linux.html#installing-on-linux
 sudo apt-get install libcudnn8
 sudo apt-get install libcudnn8-dev
+
+# Cleanup
+rm cuda-keyring_1.1-1_all.deb
