@@ -316,11 +316,13 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
-        raise ValueError(f'Service {service_name!r} does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
     replica_info = serve_state.get_replica_info_from_id(service_name,
                                                         replica_id)
     if replica_info is None:
-        raise ValueError(f'Replica {replica_id} does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Replica {replica_id} does not exist.')
 
     controller_port = service_status['controller_port']
     resp = requests.post(
@@ -333,9 +335,10 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
 
     message: str = resp.json()['message']
     if resp.status_code != 200:
-        raise ValueError(f'Failed to terminate replica {replica_id} '
-                         f'in {service_name}. '
-                         f'Reason:\n{message}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to terminate replica {replica_id} '
+                             f'in {service_name}. '
+                             f'Reason:\n{message}')
     return common_utils.encode_payload(message)
 
 
