@@ -419,6 +419,11 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
                 if count != 8:
                     # H100 only has 8 cards.
                     continue
+            if 'H100-MEGA-80GB' in gpu_name:
+                gpu_name = 'H100-MEGA'
+                if count != 8:
+                    # H100-MEGA only has 8 cards.
+                    continue
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
@@ -447,6 +452,7 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'A100-80GB': 80 * 1024,
         'A100': 40 * 1024,
         'H100': 80 * 1024,
+        'H100-MEGA': 80 * 1024,
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
@@ -496,6 +502,8 @@ def get_gpu_df(skus: List[Dict[str, Any]],
                 gpu_name = 'A100 80GB'
             if gpu_name == 'H100':
                 gpu_name = 'H100 80GB'
+            if gpu_name == 'H100-MEGA':
+                gpu_name = 'H100 80GB Plus'
             if f'{gpu_name} GPU' not in sku['description']:
                 continue
 
