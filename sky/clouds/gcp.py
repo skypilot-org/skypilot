@@ -546,6 +546,10 @@ class GCP(clouds.Cloud):
         resources_vars[
             'force_enable_external_ips'] = skypilot_config.get_nested(
                 ('gcp', 'force_enable_external_ips'), False)
+
+        # Add gVNIC from config
+        resources_vars['enable_gvnic'] = skypilot_config.get_nested(('gcp', 'enable_gvnic'), False)
+
         return resources_vars
 
     def _get_feasible_launchable_resources(
