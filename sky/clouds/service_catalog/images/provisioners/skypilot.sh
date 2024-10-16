@@ -59,7 +59,7 @@ conda create -y -n skypilot-runtime python=3.10
 conda activate skypilot-runtime
 
 # Set up Python environment
-$([ -s ~/.sky/python_path ] && cat ~/.sky/python_path 2> /dev/null || which python3) -m venv ~/skypilot-runtime --system-site-packages
+$([ -s ~/.sky/python_path ] && cat ~/.sky/python_path 2> /dev/null || which python3) -m venv ~/skypilot-runtime
 echo "$(echo ~/skypilot-runtime)/bin/python" > ~/.sky/python_path
 source ~/.bashrc
 
