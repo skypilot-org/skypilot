@@ -150,7 +150,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         controller_job_id=job_id,
         policy=service_spec.autoscaling_policy_str(),
         requested_resources_str=backend_utils.get_task_resources_str(task),
-        status=serve_state.ServiceStatus.CONTROLLER_INIT)
+        status=serve_state.ServiceStatus.CONTROLLER_INIT,
+        tls_encrypted=service_spec.tls_credential is not None)
     # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
     if not success:
@@ -213,7 +214,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.set_service_controller_port(service_name,
                                                     controller_port)
 
-            # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
 
             load_balancer_port = common_utils.find_free_port(
@@ -227,7 +227,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port))
+                args=(controller_addr, load_balancer_port,
+                      service_spec.tls_credential))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)
