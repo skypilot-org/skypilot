@@ -229,21 +229,29 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                 file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
+        def _get_client_file_mounts_path(original_path: str) -> str:
+            return str(client_file_mounts_dir /
+                       file_mounts_mapping[original_path].lstrip('/'))
+
         if 'file_mounts' in task_config:
             file_mounts = task_config['file_mounts']
             for dst, src in file_mounts.items():
                 if isinstance(src, str):
                     if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = str(
-                            client_file_mounts_dir /
-                            file_mounts_mapping[src].lstrip('/'))
+                        file_mounts[dst] = _get_client_file_mounts_path(src)
                 elif isinstance(src, dict):
                     if 'source' in src:
                         source = src['source']
-                        if not data_utils.is_cloud_store_url(source):
-                            src['source'] = str(
-                                client_file_mounts_dir /
-                                file_mounts_mapping[source].lstrip('/'))
+                        if isinstance(source, str):
+                            if data_utils.is_cloud_store_url(source):
+                                continue
+                            src['source'] = _get_client_file_mounts_path(source)
+                        else:
+                            new_source = []
+                            for src_item in source:
+                                new_source.append(
+                                    _get_client_file_mounts_path(src_item))
+                            src['source'] = new_source
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
 
