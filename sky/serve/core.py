@@ -124,7 +124,8 @@ def up(
     # 1. controller cluster name: 'sky-serve-controller-<service_name>'
     # 2. replica cluster name: '<service_name>-<replica_id>'
     # In both cases, service name shares the same regex with cluster name.
-    if re.fullmatch(skylet_constants.CLUSTER_NAME_VALID_REGEX, service_name) is None:
+    if re.fullmatch(skylet_constants.CLUSTER_NAME_VALID_REGEX,
+                    service_name) is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service name {service_name!r} is invalid: '
                              f'ensure it is fully matched by regex (e.g., '
@@ -207,7 +208,8 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        idle_minutes_to_autostop = skylet_constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        idle_minutes_to_autostop = (
+            skylet_constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
         controller_job_id, controller_handle = sky.launch(
             task=controller_task,
             stream_logs=False,
