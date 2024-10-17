@@ -29,7 +29,7 @@ class SkyServiceSpec:
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
-        load_balancing_policy: Optional[str] = None,  # New field
+        load_balancing_policy: Optional[str] = None,
         # The following arguments are deprecated.
         # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
         # Deprecated: Always be True
@@ -180,7 +180,8 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
-        service_config['load_balancing_policy'] = config.get('load_balancing_policy', None)
+        service_config['load_balancing_policy'] = config.get(
+            'load_balancing_policy', None)
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -236,7 +237,8 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
-        add_if_not_none('service', 'load_balancing_policy', self._load_balancing_policy)
+        add_if_not_none('service', 'load_balancing_policy',
+                        self._load_balancing_policy)
         return config
 
     def probe_str(self):

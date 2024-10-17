@@ -14,6 +14,7 @@ logger = sky_logging.init_logger(__name__)
 LB_POLICIES = {}
 DEFAULT_LB_POLICY = 'round_robin'
 
+
 def _request_repr(request: 'fastapi.Request') -> str:
     return ('<Request '
             f'method="{request.method}" '
