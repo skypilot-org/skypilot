@@ -169,8 +169,10 @@ def upload_mounts_to_api_server(
         if task_.storage_mounts is not None:
             for storage in task_.storage_mounts.values():
                 storage_source = storage.source
-                if (storage_source is not None and
-                        not data_utils.is_cloud_store_url(storage_source)):
+                is_cloud_store_url = (
+                    isinstance(storage_source, str) and
+                    data_utils.is_cloud_store_url(storage_source))
+                if (storage_source is not None and not is_cloud_store_url):
                     if isinstance(storage_source, str):
                         storage_source = [storage_source]
                     for src in storage_source:
