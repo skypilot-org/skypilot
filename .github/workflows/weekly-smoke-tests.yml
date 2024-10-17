@@ -1,0 +1,76 @@
+name: Smoke Tests
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Run every Sunday at midnight UTC
+  workflow_dispatch:  # Allow manual trigger
+  push:
+    branches:
+      - master
+      - 'releases/**'
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+  merge_group:
+
+env:
+  SKYPILOT_DISABLE_USAGE_COLLECTION: 1
+  SKYPILOT_DEBUG: 1
+
+jobs:
+  smoke-test:
+    strategy:
+      matrix:
+        python-version: [3.8]
+        test-group: [aws, gcp, azure, lambda, kubernetes]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        if: startsWith(runner.os, 'Linux')
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-smoke-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-smoke-${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[all]"
+          pip install -r requirements-dev.txt
+
+      - name: Set up cloud credentials
+        env:
+          AWS_CREDENTIALS: ${{ secrets.AWS_CREDENTIALS }}
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          mkdir -p ~/.aws ~/.config/gcloud ~/.azure
+          echo "$AWS_CREDENTIALS" > ~/.aws/credentials
+          echo "$GCP_CREDENTIALS" > ~/.config/gcloud/application_default_credentials.json
+          echo "$AZURE_CREDENTIALS" > ~/.azure/credentials
+
+      - name: Run smoke tests
+        env:
+          SKYPILOT_DISABLE_USAGE_COLLECTION: ${{ env.SKYPILOT_DISABLE_USAGE_COLLECTION }}
+          SKYPILOT_DEBUG: ${{ env.SKYPILOT_DEBUG }}
+        run: |
+          pytest tests/test_smoke.py --${{ matrix.test-group }} --terminate-on-failure
+        timeout-minutes: 180  # 3 hours
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results-${{ matrix.test-group }}
+          path: test-results/
