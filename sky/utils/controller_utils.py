@@ -515,14 +515,16 @@ def get_controller_resources(
             break
     if not requested_clouds_with_region_zone:
         return {controller_resources_to_use}
-    return {
-        controller_resources_to_use.copy(
-            cloud=clouds.CLOUD_REGISTRY.from_str(cloud_name),
-            region=region,
-            zone=zone)
-        for cloud_name, regions in requested_clouds_with_region_zone.items()
-        for region, zones in regions.items() for zone in zones
-    }
+    result = set()
+    for cloud_name, regions in requested_clouds_with_region_zone.items():
+        for region, zones in regions.items():
+            for zone in zones:
+                resource_copy = controller_resources_to_use.copy(
+                    cloud=clouds.CLOUD_REGISTRY.from_str(cloud_name),
+                    region=region,
+                    zone=zone)
+                result.add(resource_copy)
+    return result
 
 
 def _setup_proxy_command_on_controller(
