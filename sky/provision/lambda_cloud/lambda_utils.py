@@ -1,4 +1,5 @@
 """Lambda Cloud helper functions."""
+
 import json
 import os
 import time
@@ -76,7 +77,7 @@ class Metadata:
 
 
 def raise_lambda_error(response: requests.Response) -> None:
-    """Raise LambdaCloudError if appropriate. """
+    """Raise LambdaCloudError if appropriate."""
     status_code = response.status_code
     if status_code == 200:
         return
@@ -131,20 +132,22 @@ class LambdaCloudClient:
         self.api_key = self._credentials['api_key']
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
-    def create_instances(self,
-                         instance_type: str = 'gpu_1x_a100_sxm4',
-                         region: str = 'us-east-1',
-                         quantity: int = 1,
-                         name: str = '',
-                         ssh_key_name: str = '') -> List[str]:
+    def create_instances(
+        self,
+        instance_type: str = 'gpu_1x_a100_sxm4',
+        region: str = 'us-east-1',
+        quantity: int = 1,
+        name: str = '',
+        ssh_key_name: str = '',
+    ) -> List[str]:
         """Launch new instances."""
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
         # launch requests are rate limited at ~1 request every 10 seconds.
         # So don't use launch requests to check availability.
         # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
-        available_regions = self.list_catalog()[instance_type]\
-                ['regions_with_capacity_available']
+        available_regions = (self.list_catalog()[instance_type]
+                             ['regions_with_capacity_available'])
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
             if len(available_regions) > 0:
@@ -163,27 +166,25 @@ class LambdaCloudClient:
             'instance_type_name': instance_type,
             'ssh_key_names': [ssh_key_name],
             'quantity': quantity,
-            'name': name
+            'name': name,
         })
         response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/launch',
             data=data,
-            headers=self.headers)
+            headers=self.headers,
+        )
         return response.json().get('data', []).get('instance_ids', [])
 
-    def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
+    def remove_instances(self, instance_ids: List[str]) -> Dict[str, Any]:
         """Terminate instances."""
-        data = json.dumps({
-            'instance_ids': [
-                instance_ids[0]  # TODO(ewzeng) don't hardcode
-            ]
-        })
+        data = json.dumps({'instance_ids': instance_ids})
         response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/terminate',
             data=data,
-            headers=self.headers)
+            headers=self.headers,
+        )
         return response.json().get('data', []).get('terminated_instances', [])
 
     def list_instances(self) -> List[Dict[str, Any]]:
