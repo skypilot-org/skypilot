@@ -755,6 +755,9 @@ def get_config_schema():
                 'force_enable_external_ips': {
                     'type': 'boolean'
                 },
+                'enable_gvnic': {
+                    'type': 'boolean'
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
