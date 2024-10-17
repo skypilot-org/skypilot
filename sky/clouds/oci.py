@@ -297,7 +297,7 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
-        image_tag = self._get_image_tag(image_id=resources.image_id,
+        image_tag = self._get_image_str(image_id=resources.image_id,
                                         instance_type=resources.instance_type,
                                         region=region.name)
 
@@ -511,11 +511,11 @@ class OCI(clouds.Cloud):
         region_name: str,
         instance_type: str,
     ) -> str:
-        image_id_str = self._get_image_tag(image_id=image_id,
+        image_id_str = self._get_image_str(image_id=image_id,
                                            instance_type=instance_type,
                                            region=region_name)
 
-        if not image_id_str.startswith('ocid1.image'):
+        if image_id_str.startswith('skypilot:'):
             image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
                                                                  region_name,
                                                                  clouds='oci')
@@ -532,13 +532,13 @@ class OCI(clouds.Cloud):
     def _get_image_str(self, image_id: Optional[Dict[Optional[str], str]],
                        instance_type: str, region: str):
         if image_id is None:
-            image_tag = self._get_default_image_tag(instance_type)
+            image_str = self._get_default_image_id(instance_type)
         elif None in image_id:
-            image_tag = image_id[None]
+            image_str = image_id[None]
         else:
             assert region in image_id, image_id
-            image_tag = image_id[region]
-        return image_tag
+            image_str = image_id[region]
+        return image_str
 
     def _get_default_image_id(self, instance_type: str) -> str:
         acc = self.get_accelerators_from_instance_type(instance_type)
