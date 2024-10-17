@@ -130,12 +130,14 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @api_common.check_health
-def optimize(dag: 'sky.Dag') -> str:
+def optimize(
+        dag: 'sky.Dag',
+        minimize: common.OptimizeTarget = common.OptimizeTarget.COST) -> str:
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
 
-    body = payloads.OptimizeBody(dag=dag_str)
+    body = payloads.OptimizeBody(dag=dag_str, minimize=minimize)
     response = requests.post(f'{api_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)

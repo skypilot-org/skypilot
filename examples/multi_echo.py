@@ -27,17 +27,18 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
         task = sky.Task(num_nodes=2).set_resources(cluster_resources)
     # `detach_run` will only detach the `run` command. The provision and
     # `setup` are still blocking.
-    sky.launch(dag, cluster_name=cluster, detach_run=True)
+    sky.launch(dag, cluster_name=cluster)
 
     # Submit multiple tasks in parallel to trigger queueing behaviors.
     def _exec(i):
         task = sky.Task(run=f'echo {i}; sleep 5')
         resources = sky.Resources(accelerators={'T4': 0.5})
         task.set_resources(resources)
-        sky.exec(task, cluster_name=cluster, detach_run=True)
+        sky.exec(task, cluster_name=cluster)
 
     with pool.ThreadPool(8) as p:
         list(p.imap(_exec, range(32)))
+
 
 
 if __name__ == '__main__':
