@@ -229,6 +229,7 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                 file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
+
         def _get_client_file_mounts_path(original_path: str) -> str:
             return str(client_file_mounts_dir /
                        file_mounts_mapping[original_path].lstrip('/'))

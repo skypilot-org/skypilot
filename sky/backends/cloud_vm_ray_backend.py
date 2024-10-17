@@ -4671,6 +4671,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
+            if storage_obj.mode != storage_lib.StorageMode.MOUNT:
+                # Skip non-mount storage objects, as there is no need to
+                # reconstruct them during cluster restart.
+                continue
             storage_mounts_metadata[dst] = storage_obj.handle
         lock_path = (
             backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))

@@ -40,7 +40,6 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
         list(p.imap(_exec, range(32)))
 
 
-
 if __name__ == '__main__':
     cluster = None
     cloud = None
