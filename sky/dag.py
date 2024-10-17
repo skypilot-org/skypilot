@@ -36,7 +36,7 @@ class Dag:
         """
         self.name = name
         self._task_name_lookup: Dict[str, 'task.Task'] = {}
-        self.dependencies: Dict['task.Task', Set['task.Task']] = {}
+        self.edges: Dict['task.Task', Set['task.Task']] = {}
         self.graph = nx.DiGraph()
 
     @property
@@ -95,10 +95,6 @@ class Dag:
         """
         task = self._get_task(task)
 
-        dependents = list(self.graph.successors(task))
-        for dependent in dependents:
-            self.remove_dependency(dependent, task)
-
         # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
         # and sink nodes.
         # if dependents:
@@ -107,105 +103,107 @@ class Dag:
         #         raise ValueError(f'Task {task.name} is still being depended '
         #                          f'by tasks {dependent_names!r}. Try to '
         #                          'remove the dependencies first.')
+        # Here's a workaround, proactively remove all downstream edges.
+        dependents = self.get_downstream(task)
+        for dependent in dependents:
+            self.remove_edge(task, dependent)
 
-        self.dependencies.pop(task, None)
+        self.edges.pop(task, None)
         self.graph.remove_node(task)
         assert task.name is not None
         self._task_name_lookup.pop(task.name, None)
 
-    def add_dependency(self, dependent: TaskOrName,
-                       dependency: TaskOrName) -> None:
-        """Add a single dependency for a task.
-
-        This method adds a new dependency without removing existing ones.
+    def add_edge(self, source: TaskOrName, target: TaskOrName) -> None:
+        """Add an edge from source task to target task.
 
         Args:
-            dependent: The task that depends on another.
-            dependency: The task that the dependent task depends on.
+            source: The task that the target task depends on.
+            target: The task that depends on the source task.
 
         Raises:
             ValueError: If a task tries to depend on itself or if the
-            dependency task is not in the DAG.
+            target task is not in the DAG.
         """
-        dependent = self._get_task(dependent)
-        dependency = self._get_task(dependency)
+        source = self._get_task(source)
+        target = self._get_task(target)
 
-        if dependent.name == dependency.name:
+        if source.name == target.name:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Task {dependent.name} cannot depend on itself.')
-        assert dependency.name is not None
-        if dependency.name not in self._task_name_lookup:
+                raise ValueError(f'Task {source.name} cannot depend on itself.')
+        assert target.name is not None
+        if target.name not in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Dependency task {dependency.name} is not in the DAG.')
+                raise ValueError(f'Target task {target.name} is not '
+                                 'in the DAG.')
 
-        self.graph.add_edge(dependency, dependent)
-        if dependent not in self.dependencies:
-            self.dependencies[dependent] = set()
-        self.dependencies[dependent].add(dependency)
+        self.graph.add_edge(source, target)
+        if source not in self.edges:
+            self.edges[source] = set()
+        self.edges[source].add(target)
 
-    # Backward compatibility for old DAG API.
-    # TODO(andy): Remove this after 2 minor releases, which is 0.6.3.
-    # Be careful the parameter order is different from add_dependency.
-    def add_edge(self, op1: 'task.Task', op2: 'task.Task') -> None:
-        return self.add_dependency(op2, op1)
-
-    def set_dependencies(
-            self, dependent: TaskOrName,
-            dependencies: Union[List[TaskOrName], TaskOrName]) -> None:
-        """Set dependencies for a task, replacing any existing dependencies.
+    def add_downstream(self, source: TaskOrName, target: TaskOrName) -> None:
+        """Add downstream tasks for a source task.
 
         Args:
-            dependent: The task to set dependencies for.
-            dependencies: The task(s) that the dependent task depends on.
+            source: The task that the downstream tasks depend on.
+            target: The task(s) to add as downstream tasks.
         """
-        dependent = self._get_task(dependent)
-        self.remove_all_dependencies(dependent)
-        if not isinstance(dependencies, list):
-            dependencies = [dependencies]
-        for dependency in dependencies:
-            self.add_dependency(dependent, dependency)
+        return self.add_edge(source, target)
 
-    def remove_dependency(self, dependent: TaskOrName,
-                          dependency: TaskOrName) -> None:
-        """Remove a specific dependency for a task.
+    def set_downstream(self, source: TaskOrName,
+                       targets: Union[List[TaskOrName], TaskOrName]) -> None:
+        """Set downstream tasks for a source task.
+
+        This replaces any existing downstream tasks for the given source.
 
         Args:
-            dependent: The task to remove a dependency from.
-            dependency: The dependency to remove.
+            source: The task that the downstream tasks depend on.
+            targets: The task(s) that depend on the source task.
         """
-        dependent = self._get_task(dependent)
-        dependency = self._get_task(dependency)
+        source = self._get_task(source)
+        if not isinstance(targets, list):
+            targets = [targets]
+        self.remove_all_downstream(source)
+        for target in targets:
+            self.add_edge(source, target)
 
-        if dependent in self.dependencies and dependency in self.dependencies[
-                dependent]:
-            self.dependencies[dependent].remove(dependency)
-            self.graph.remove_edge(dependency, dependent)
-
-    def remove_all_dependencies(self, task: TaskOrName) -> None:
-        """Remove all dependencies for a given task.
+    def remove_edge(self, source: TaskOrName, target: TaskOrName) -> None:
+        """Remove an edge between two tasks.
 
         Args:
-            task: The task to remove all dependencies from.
+            source: The source task to remove the edge from.
+            target: The target task to remove the edge to.
+        """
+        source = self._get_task(source)
+        target = self._get_task(target)
+
+        if source in self.edges and target in self.edges[source]:
+            self.edges[source].remove(target)
+            self.graph.remove_edge(source, target)
+
+    def remove_all_downstream(self, task: TaskOrName) -> None:
+        """Remove all downstream tasks for a given task.
+
+        Args:
+            task: The task to remove all downstream tasks from.
         """
         task = self._get_task(task)
-        if task in self.dependencies:
-            for dependency in list(self.dependencies[task]):
-                self.graph.remove_edge(dependency, task)
-            self.dependencies[task].clear()
+        if task in self.edges:
+            for target in list(self.edges[task]):
+                self.graph.remove_edge(task, target)
+            self.edges[task].clear()
 
-    def get_dependencies(self, task: TaskOrName) -> Set['task.Task']:
-        """Get all dependencies for a given task.
+    def get_downstream(self, task: TaskOrName) -> Set['task.Task']:
+        """Get all downstream tasks for a given task.
 
         Args:
-            task: The task to get dependencies for.
+            task: The task to get downstream tasks for.
 
         Returns:
-            A set of tasks that the given task depends on.
+            A set of tasks that depend on the given task.
         """
         task = self._get_task(task)
-        return self.dependencies.get(task, set())
+        return self.edges.get(task, set())
 
     def __len__(self) -> int:
         """Return the number of tasks in the DAG."""
@@ -224,10 +222,12 @@ class Dag:
         """Return a string representation of the DAG."""
         task_info = []
         for task in self.tasks:
-            deps = self.get_dependencies(task)
-            dep_names = ','.join(
-                cast(str, dep.name) for dep in deps) if deps else '-'
-            task_info.append(f'{task.name}({dep_names})')
+            downstream = self.get_downstream(task)
+            downstream_names = ','.join(
+                cast(str, dep.name)
+                for dep in downstream) if downstream else '-'
+            task_info.append(f'{task.name}'
+                             f'({downstream_names})')
 
         tasks_str = ' '.join(task_info)
         return f'DAG({self.name}: {tasks_str})'

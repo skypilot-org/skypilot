@@ -1,12 +1,12 @@
 name: pipeline
-dependencies:
-  infer_A:
-    - data-processing
-  infer_B:
-    - data-processing
-  eval_A_B:
+downstream:
+  data-processing:
     - infer_A
     - infer_B
+  infer_A:
+    - eval_A_B
+  infer_B:
+    - eval_A_B
 ---
 name: data-processing
 

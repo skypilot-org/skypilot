@@ -96,11 +96,11 @@ def load_dag_from_yaml(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Empty YAML file.')
 
-    has_header = set(configs[0].keys()) <= {'name', 'dependencies'}
+    has_header = set(configs[0].keys()) <= {'name', 'downstream'}
     if has_header:
         header = configs.pop(0)
         dag.name = header.get('name')
-        dependencies = header.get('dependencies', {})
+        downstream = header.get('downstream', {})
     else:
         multi_tasks = len(configs) > 1
         if multi_tasks:
@@ -109,7 +109,7 @@ def load_dag_from_yaml(
                                  'header.')
         # Single task without header
         dag.name = configs[0].get('name')
-        dependencies = {}
+        downstream = {}
 
     # Handle YAML with only 'name'
     if not configs:
@@ -128,15 +128,16 @@ def load_dag_from_yaml(
         dag.add(task)
 
     # Handle dependencies
-    if dependencies:
+    if downstream:
         # Explicit dependencies
-        for dependent, deps in dependencies.items():
-            deps = [deps] if not isinstance(deps, list) else deps
-            dag.set_dependencies(dependent, deps)
+        for upstream, downs in downstream.items():
+            downs = [downs] if not isinstance(downs, list) else downs
+            for down in downs:
+                dag.add_edge(upstream, down)
     elif len(tasks) > 1:
         # Implicit linear dependency
-        for i in range(1, len(tasks)):
-            dag.add_dependency(tasks[i], tasks[i - 1])
+        for i in range(len(tasks) - 1):
+            dag.add_edge(tasks[i], tasks[i + 1])
 
     if not tasks:
         with ux_utils.print_exception_no_traceback():
@@ -158,13 +159,13 @@ def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     header: Dict[str, Any] = {'name': dag.name}
 
     if not dag.is_chain():
-        dependencies = {}
+        downstream = {}
         for task in dag.tasks:
-            deps = dag.get_dependencies(task)
-            if deps:
-                dependencies[task.name] = [dep.name for dep in deps]
-        if dependencies:
-            header['dependencies'] = dependencies
+            downs = list(dag.get_downstream(task))
+            if downs:
+                downstream[task.name] = [down.name for down in downs]
+        if downstream:
+            header['downstream'] = downstream
 
     task_configs = [task.to_yaml_config() for task in dag.tasks]
 
