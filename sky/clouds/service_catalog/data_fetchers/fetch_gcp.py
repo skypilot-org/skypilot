@@ -506,7 +506,8 @@ def get_gpu_df(skus: List[Dict[str, Any]],
                 # Seems that H100-MEGA has two different descriptions in SKUs in
                 # different regions: 'H100 80GB Mega' and 'H100 80GB Plus'.
                 gpu_names = ['H100 80GB Mega', 'H100 80GB Plus']
-            if not any(f'{gpu_name} GPU' in sku['description'] for gpu_name in gpu_names):
+            if not any(f'{gpu_name} GPU' in sku['description']
+                       for gpu_name in gpu_names):
                 continue
 
             unit_price = _get_unit_price(sku)
