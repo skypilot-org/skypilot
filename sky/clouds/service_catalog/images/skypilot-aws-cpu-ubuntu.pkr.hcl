@@ -38,4 +38,10 @@ build {
   provisioner "shell" {
     script = "./provisioners/skypilot.sh"
   }
+  provisioner "shell" {
+    environment_vars = [
+      "CLOUD=aws",
+    ]
+    script = "./provisioners/cloud.sh"
+  }
 }
