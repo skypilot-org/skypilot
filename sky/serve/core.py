@@ -615,6 +615,9 @@ def sync_down_logs(service_name: str,
                    replica_id: Optional[int]) -> None:
     """Sync down logs for a given service.
 
+    - This function synchronizes logs from remote service to local machine.
+    - It supports downloading logs for different components of the service.
+
     Args:
         service_name: name of service.
         service_component: component to sync down the logs of.
@@ -622,7 +625,14 @@ def sync_down_logs(service_name: str,
             - None means to sync down logs for everything.
         replica_id: The replica ID to tail the logs of.
             - Only used when target is replica.
+
+    Raises:
+        ValueError: If the service_component is not a valid string or
+                    serve_utils.ServiceComponent, or if replica_id is not
+                    specified when service_component is REPLICA.
+        RuntimeError: If there is an error during log sync process.
     """
+
     if isinstance(service_component, str):
         service_component = serve_utils.ServiceComponent(service_component)
     if not isinstance(service_component, serve_utils.ServiceComponent):
@@ -646,19 +656,24 @@ def sync_down_logs(service_name: str,
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
 
-    # backend = backend_utils.get_backend_from_handle(controller_handle)
+    # Prepare logs for download.
     if service_component is None:
         assert replica_id is None
+
+    # Get SSH credentials and initialize SSHCommandRunner.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         controller_handle.cluster_yaml, controller_handle.docker_user)
     runner = command_runner.SSHCommandRunner(
         node=(controller_handle.head_ip, controller_handle.head_ssh_port),
         **ssh_credentials,
     )
+
+    # Define local directory for logs and get the current timestamp.
     sky_logs_directory = os.path.expanduser(skylet_constants.SKY_LOGS_DIRECTORY)
     run_timestamp = backend_utils.get_run_timestamp()
     sync_down_all_components = service_component is None
 
+    # Prepare and download replica logs (single/all components).
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.REPLICA):
         prepare_code = (
@@ -680,6 +695,8 @@ def sync_down_logs(service_name: str,
                 'down for replica logs.')
         except exceptions.CommandError as e:
             raise RuntimeError(e.error_msg) from e
+
+        # Define remote directory for logs and download them.
         remote_service_dir_name = (
             serve_utils.generate_remote_service_dir_name(service_name))
         dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
@@ -688,6 +705,8 @@ def sync_down_logs(service_name: str,
                      target=sky_logs_directory,
                      up=False,
                      stream_logs=False)
+
+        # Remove the logs from the remote server after downloading.
         remove_code = (
             serve_utils.ServeCodeGen.remove_replica_logs_for_download(
                 service_name, run_timestamp))
@@ -745,6 +764,7 @@ def sync_down_logs(service_name: str,
             target_directory = os.path.join(
                 target_directory, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
 
+    # Final message indicating where the logs can be found.
     log_message = (f'Synced down log{"s" if not single_file_synced else ""} '
                    f'can be found at: {target_directory}')
     logger.info(log_message)
