@@ -373,8 +373,7 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
     # the jump pod so it does not need to be run for it.
     set_k8s_ssh_cmd = (
         'set -ex; '
-        'prefix_cmd() '
-        '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+        'prefix_cmd() { if [ $(id -u) -ne 0 ]; then if command -v sudo >/dev/null 2>&1; then echo "sudo"; else echo ""; fi; else echo ""; fi; }; '
         'export DEBIAN_FRONTEND=noninteractive;'
         '$(prefix_cmd) apt-get update;'
         '$(prefix_cmd) apt install openssh-server rsync -y; '
