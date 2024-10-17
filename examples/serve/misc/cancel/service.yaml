@@ -4,6 +4,8 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 120
+  replicas: 2
+  load_balancing_policy: round_robin
 
 resources:
   ports: 9000
