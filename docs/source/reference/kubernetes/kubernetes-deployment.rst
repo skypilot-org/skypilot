@@ -114,8 +114,8 @@ Deploying on Google Cloud GKE
      # Example:
      # gcloud container clusters get-credentials testcluster --region us-central1-c
 
-3. [If using GPUs] If your GKE nodes have GPUs, you may need to to
-   `manually install <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_
+3. [If using GPUs] If your GKE nodes have GPUs and you are using GKE version 1.30.1-gke.115600 or older, you may need to to
+   `manually install <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_
    nvidia drivers. You can do so by deploying the daemonset
    depending on the GPU and OS on your nodes:
 
