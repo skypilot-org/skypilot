@@ -232,8 +232,7 @@ class SkyServeLoadBalancer:
 def run_load_balancer(controller_addr: str,
                       load_balancer_port: int,
                       policy_name: Optional[str] = None):
-    """
-    Run the load balancer.
+    """ Run the load balancer.
 
     Args:
         controller_addr: The address of the controller.
