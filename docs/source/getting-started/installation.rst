@@ -213,9 +213,13 @@ Google Cloud Platform (GCP)
 
   gcloud init
 
-  # Run this if you don't have a credentials file.
+  # Generate credentials for cloud API access
   # This will generate ~/.config/gcloud/application_default_credentials.json.
   gcloud auth application-default login
+
+  # Generate credentials for the gcloud CLI access
+  # This will generate ~/.config/gcloud/credentials.db
+  gcloud auth login
 
 .. tip::
 
