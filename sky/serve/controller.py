@@ -208,8 +208,8 @@ class SkyServeController:
                        f'{self._service_name!r} is scheduled to be '
                        f'{action}.{colorama.Style.RESET_ALL}\n'
                        f'Please use {ux_utils.BOLD}sky serve status '
-                       f'{self._service_name}{ux_utils.RESET_BOLD}'
-                       f' to check the latest status.')
+                       f'{self._service_name}{ux_utils.RESET_BOLD} '
+                       f'to check the latest status.')
             return responses.JSONResponse(status_code=200,
                                           content={'message': message})
 

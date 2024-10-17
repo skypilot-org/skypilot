@@ -322,7 +322,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
                                                         replica_id)
     if replica_info is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Replica {replica_id} does not exist.')
+            raise ValueError(f'Replica {replica_id} for service {service_name} does not exist.')
 
     controller_port = service_status['controller_port']
     resp = requests.post(
@@ -337,9 +337,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     if resp.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Failed to terminate replica {replica_id} '
-                             f'in {service_name}. '
-                             f'Reason:\n{message}')
-    return common_utils.encode_payload(message)
+                             f'in {service_name}. Reason:\n{message}')
+    return message
 
 
 def _get_service_status(
