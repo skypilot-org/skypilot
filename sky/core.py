@@ -695,8 +695,8 @@ def cancel(
     cluster_name: str,
     all: bool = False,
     job_ids: Optional[List[int]] = None,
-    # pylint: disable=invalid-name
-    _try_cancel_if_cluster_is_init: bool = False,
+    # Internal only:
+    try_cancel_if_cluster_is_init: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
@@ -706,7 +706,7 @@ def cancel(
     When `all` is False and `job_ids` is None, cancel the latest running job.
 
     Additional arguments:
-        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+        try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
             This is used by the jobs controller to cancel the job when the
             worker node is preempted in the spot cluster.
@@ -736,7 +736,7 @@ def cancel(
             operation='cancelling jobs',
         )
     except exceptions.ClusterNotUpError as e:
-        if not _try_cancel_if_cluster_is_init:
+        if not try_cancel_if_cluster_is_init:
             raise
         assert (e.handle is None or
                 isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
