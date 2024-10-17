@@ -529,7 +529,7 @@ class OCI(clouds.Cloud):
         logger.debug(f'Got real image_id {image_id_str}')
         return image_id_str
 
-    def _get_image_tag(self, image_id: Optional[Dict[Optional[str], str]],
+    def _get_image_str(self, image_id: Optional[Dict[Optional[str], str]],
                        instance_type: str, region: str):
         if image_id is None:
             image_tag = self._get_default_image_tag(instance_type)
