@@ -3,6 +3,7 @@
 
 service:
   readiness_probe: /health
+  load_balancing_policy: round_robin
   replica_policy:
     min_replicas: 2
     max_replicas: 3

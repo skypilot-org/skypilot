@@ -13,6 +13,7 @@ service:
     path: /v1/models
     initial_delay_seconds: 1800
   replicas: 2
+  load_balancing_policy: round_robin
 
 resources:
   ports: 8087

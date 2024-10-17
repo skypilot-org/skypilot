@@ -1,4 +1,4 @@
-# SkyServe YAML to run a simple http server.
+# SkyServe YAML to run a simple HTTP server using Python's built-in HTTP server.
 #
 # Usage:
 #   sky serve up -n http examples/serve/http_server/task.yaml
@@ -11,7 +11,7 @@ service:
     path: /health
     initial_delay_seconds: 20
   replicas: 2
-
+  load_balancing_policy: round_robin
 resources:
   ports: 8080
   cpus: 2+

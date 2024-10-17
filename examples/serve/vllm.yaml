@@ -12,6 +12,7 @@ service:
     # vllm takes 5-10 minutes to install
     initial_delay_seconds: 1200
   replicas: 2
+  load_balancing_policy: round_robin
 
 resources:
   ports: 8081
