@@ -497,14 +497,16 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             if sku['category']['usageType'] != ondemand_or_spot:
                 continue
 
-            gpu_name = row['AcceleratorName']
-            if gpu_name == 'A100-80GB':
-                gpu_name = 'A100 80GB'
-            if gpu_name == 'H100':
-                gpu_name = 'H100 80GB'
-            if gpu_name == 'H100-MEGA':
-                gpu_name = 'H100 80GB Plus'
-            if f'{gpu_name} GPU' not in sku['description']:
+            gpu_names = [row['AcceleratorName']]
+            if gpu_names[0] == 'A100-80GB':
+                gpu_names = ['A100 80GB']
+            if gpu_names[0] == 'H100':
+                gpu_names = ['H100 80GB']
+            if gpu_names[0] == 'H100-MEGA':
+                # Seems that H100-MEGA has two different descriptions in SKUs in
+                # different regions: 'H100 80GB Mega' and 'H100 80GB Plus'.
+                gpu_names = ['H100 80GB Mega', 'H100 80GB Plus']
+            if not any(f'{gpu_name} GPU' in sku['description'] for gpu_name in gpu_names):
                 continue
 
             unit_price = _get_unit_price(sku)
