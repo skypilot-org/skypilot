@@ -7,6 +7,8 @@ import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_IGNORE_FILE = '.skyignore'
+GIT_IGNORE_FILE = '.gitignore'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
 # Default Ray tempdir is /tmp/ray.
@@ -153,8 +155,8 @@ CONDA_INSTALLATION_COMMANDS = (
     # We use --system-site-packages to reuse the system site packages to avoid
     # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
+    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages;'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
 _sky_version = str(version.parse(sky.__version__))

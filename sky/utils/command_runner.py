@@ -17,8 +17,6 @@ from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
-# The git exclude file to support.
-GIT_EXCLUDE = '.git/info/exclude'
 # Rsync options
 # TODO(zhwu): This will print a per-file progress bar (with -P),
 # shooting a lot of messages to the output. --info=progress2 is used
@@ -31,7 +29,10 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # Note that "-" is mandatory for rsync and means all patterns in the ignore
 # files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
 # do_not_exclude" doesn't work, even though git allows it.
-RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
+RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
+# The git exclude file to support.
+GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 
 _HASH_MAX_LENGTH = 10
@@ -171,7 +172,7 @@ class CommandRunner:
         cmd: Union[str, List[str]],
         process_stream: bool,
         separate_stderr: bool,
-        skip_lines: int,
+        skip_num_lines: int,
         source_bashrc: bool = False,
     ) -> str:
         """Returns the command to run."""
@@ -203,12 +204,12 @@ class CommandRunner:
             ]
         if not separate_stderr:
             command.append('2>&1')
-        if not process_stream and skip_lines:
+        if not process_stream and skip_num_lines:
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
                 #  bash: no job control in this shell
-                f'| stdbuf -o0 tail -n +{skip_lines}',
+                f'| stdbuf -o0 tail -n +{skip_num_lines}',
                 # This is required to make sure the executor of command can get
                 # correct returncode, since linux pipe is used.
                 '; exit ${PIPESTATUS[0]}'
@@ -238,21 +239,23 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
 
         # --filter
-        rsync_command.append(RSYNC_FILTER_OPTION)
-
-        if up:
-            # Build --exclude-from argument.
-            # The source is a local path, so we need to resolve it.
-            resolved_source = pathlib.Path(source).expanduser().resolve()
-            if (resolved_source / GIT_EXCLUDE).exists():
-                # Ensure file exists; otherwise, rsync will error out.
-                #
-                # We shlex.quote() because the path may contain spaces:
-                #   'my dir/.git/info/exclude'
-                # Without quoting rsync fails.
-                rsync_command.append(
-                    RSYNC_EXCLUDE_OPTION.format(
-                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
+        # The source is a local path, so we need to resolve it.
+        resolved_source = pathlib.Path(source).expanduser().resolve()
+        if (resolved_source / constants.SKY_IGNORE_FILE).exists():
+            rsync_command.append(RSYNC_FILTER_SKYIGNORE)
+        else:
+            rsync_command.append(RSYNC_FILTER_GITIGNORE)
+            if up:
+                # Build --exclude-from argument.
+                if (resolved_source / GIT_EXCLUDE).exists():
+                    # Ensure file exists; otherwise, rsync will error out.
+                    #
+                    # We shlex.quote() because the path may contain spaces:
+                    #   'my dir/.git/info/exclude'
+                    # Without quoting rsync fails.
+                    rsync_command.append(
+                        RSYNC_EXCLUDE_OPTION.format(
+                            shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
         rsync_command.append(f'-e {shlex.quote(rsh_option)}')
 
@@ -318,7 +321,7 @@ class CommandRunner:
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
-            skip_lines: int = 0,
+            skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -333,7 +336,7 @@ class CommandRunner:
             connect_timeout: timeout in seconds for the ssh connection.
             source_bashrc: Whether to source the ~/.bashrc before running the
                 command.
-            skip_lines: The number of lines to skip at the beginning of the
+            skip_num_lines: The number of lines to skip at the beginning of the
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
@@ -527,7 +530,7 @@ class SSHCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
-            skip_lines: int = 0,
+            skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -548,7 +551,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: timeout in seconds for the ssh connection.
             source_bashrc: Whether to source the bashrc before running the
                 command.
-            skip_lines: The number of lines to skip at the beginning of the
+            skip_num_lines: The number of lines to skip at the beginning of the
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
@@ -571,7 +574,7 @@ class SSHCommandRunner(CommandRunner):
         command_str = self._get_command_to_run(cmd,
                                                process_stream,
                                                separate_stderr,
-                                               skip_lines=skip_lines,
+                                               skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
@@ -691,7 +694,7 @@ class KubernetesCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
-            skip_lines: int = 0,
+            skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
 
@@ -711,7 +714,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: timeout in seconds for the pod connection.
             source_bashrc: Whether to source the bashrc before running the
                 command.
-            skip_lines: The number of lines to skip at the beginning of the
+            skip_num_lines: The number of lines to skip at the beginning of the
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
@@ -749,7 +752,7 @@ class KubernetesCommandRunner(CommandRunner):
         command_str = self._get_command_to_run(cmd,
                                                process_stream,
                                                separate_stderr,
-                                               skip_lines=skip_lines,
+                                               skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
@@ -829,10 +832,17 @@ class KubernetesCommandRunner(CommandRunner):
         # Build command.
         helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
                                    'kubernetes', 'rsync_helper.sh')
+        namespace_context = f'{self.namespace}+{self.context}'
+        # Avoid rsync interpreting :, /, and + in namespace_context as the
+        # default delimiter for options and arguments.
+        # rsync_helper.sh will parse the namespace_context by reverting the
+        # encoding and pass it to kubectl exec.
+        encoded_namespace_context = namespace_context.replace(
+            ':', '%3A').replace('/', '%2F').replace('+', '%2B')
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{self.namespace}+{self.context}',
+            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,

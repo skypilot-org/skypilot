@@ -1,4 +1,5 @@
 """Utilities for sky status."""
+import typing
 from typing import Any, Callable, Dict, List, Optional
 
 import click
@@ -7,8 +8,12 @@ import colorama
 from sky import backends
 from sky import status_lib
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
+
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import utils as kubernetes_utils
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
@@ -17,25 +22,6 @@ NUM_COST_REPORT_LINES = 5
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
-
-
-def truncate_long_string(s: str, max_length: int = 35) -> str:
-    if len(s) <= max_length:
-        return s
-    splits = s.split(' ')
-    if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'  # Use '…'?
-    # Truncate on word boundary.
-    i = 0
-    total = 0
-    for i, part in enumerate(splits):
-        total += len(part)
-        if total >= max_length:
-            break
-    prefix = ' '.join(splits[:i])
-    if len(prefix) < max_length:
-        prefix += s[len(prefix):max_length]
-    return prefix + '...'
 
 
 class StatusColumn:
@@ -54,7 +40,7 @@ class StatusColumn:
     def calc(self, record):
         val = self.calc_func(record)
         if self.trunc_length != 0:
-            val = truncate_long_string(str(val), self.trunc_length)
+            val = common_utils.truncate_long_string(str(val), self.trunc_length)
         return val
 
 
@@ -316,3 +302,45 @@ def _get_estimated_cost_for_cost_report(
         return '-'
 
     return f'$ {cost:.2f}'
+
+
+def show_kubernetes_cluster_status_table(
+        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
+        show_all: bool) -> None:
+    """Compute cluster table values and display for Kubernetes clusters."""
+    status_columns = [
+        StatusColumn('USER', lambda c: c.user),
+        StatusColumn('NAME', lambda c: c.cluster_name),
+        StatusColumn('LAUNCHED',
+                     lambda c: log_utils.readable_time_duration(c.launched_at)),
+        StatusColumn('RESOURCES',
+                     lambda c: c.resources_str,
+                     trunc_length=70 if not show_all else 0),
+        StatusColumn('STATUS', lambda c: c.status.colored_str()),
+        # TODO(romilb): We should consider adding POD_NAME field here when --all
+        #  is passed to help users fetch pod name programmatically.
+    ]
+
+    columns = [
+        col.name for col in status_columns if col.show_by_default or show_all
+    ]
+    cluster_table = log_utils.create_table(columns)
+
+    # Sort table by user, then by cluster name
+    sorted_clusters = sorted(clusters, key=lambda c: (c.user, c.cluster_name))
+
+    for cluster in sorted_clusters:
+        row = []
+        for status_column in status_columns:
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(cluster))
+        cluster_table.add_row(row)
+
+    if clusters:
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'SkyPilot clusters'
+                   f'{colorama.Style.RESET_ALL}')
+        click.echo(cluster_table)
+    else:
+        click.echo('No SkyPilot resources found in the '
+                   'active Kubernetes context.')
