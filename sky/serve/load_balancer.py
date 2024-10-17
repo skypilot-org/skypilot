@@ -76,8 +76,8 @@ class SkyServeLoadBalancer:
                             self._controller_url +
                             '/controller/load_balancer_sync',
                             json=schemas.LoadBalancerRequest(
-                                request_aggregator=self._request_aggregator).
-                            model_dump(mode='json'),
+                                request_aggregator_info=self._request_aggregator).
+                            model_dump(),
                             timeout=aiohttp.ClientTimeout(5),
                     ) as response:
                         # Clean up after reporting request info to avoid OOM.

@@ -3,7 +3,7 @@
 
 import time
 import typing
-from typing import List, Literal
+from typing import List
 
 import pydantic
 
@@ -15,20 +15,16 @@ if typing.TYPE_CHECKING:
 
 class RequestsAggregator(pydantic.BaseModel):
     """RequestsAggregator: Base class for request aggregators."""
-    type: str
-
     def add(self, request: 'fastapi.Request') -> None:
         raise NotImplementedError
 
     def clear(self) -> None:
         raise NotImplementedError
 
-
 class TimestampAggregator(RequestsAggregator):
     """TimestampAggregator: Aggregates request timestamps.
     This is useful for QPS-based autoscaling.
     """
-    type: Literal['timestamp'] = 'timestamp'
     timestamps: List[float] = pydantic.Field(default_factory=list)
 
     def add(self, request: 'fastapi.Request') -> None:
@@ -38,11 +34,16 @@ class TimestampAggregator(RequestsAggregator):
     def clear(self) -> None:
         self.timestamps.clear()
 
-
 class LoadBalancerRequest(pydantic.BaseModel):
     """LoadBalancerRequest: Request to load balance."""
-    request_aggregator: RequestsAggregator = pydantic.Field(
-        ..., discriminator='type')
+    request_aggregator_info: RequestsAggregator
+
+    @pydantic.field_validator('request_aggregator_info', mode='before')
+    def parse_request_aggregator(cls, value):
+        if 'timestamps' in value:
+            return TimestampAggregator(**value)
+        else:
+            raise ValueError('Unsupported request aggregator type')
 
 
 class UpdateServiceRequest(pydantic.BaseModel):
