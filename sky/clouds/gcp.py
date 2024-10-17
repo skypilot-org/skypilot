@@ -483,7 +483,7 @@ class GCP(clouds.Cloud):
                 if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}'
-                elif acc == 'H100':
+                elif acc in ('H100', 'H100-MEGA'):
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
@@ -546,6 +546,11 @@ class GCP(clouds.Cloud):
         resources_vars[
             'force_enable_external_ips'] = skypilot_config.get_nested(
                 ('gcp', 'force_enable_external_ips'), False)
+
+        # Add gVNIC from config
+        resources_vars['enable_gvnic'] = skypilot_config.get_nested(
+            ('gcp', 'enable_gvnic'), False)
+
         return resources_vars
 
     def _get_feasible_launchable_resources(

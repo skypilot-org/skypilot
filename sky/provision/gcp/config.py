@@ -670,8 +670,12 @@ def _configure_subnet(region: str, cluster_name: str,
         'accessConfigs': [{
             'name': 'External NAT',
             'type': 'ONE_TO_ONE_NAT',
-        }],
+        }]
     }]
+    # Add gVNIC if specified in config
+    enable_gvnic = config.provider_config.get('enable_gvnic', False)
+    if enable_gvnic:
+        default_interfaces[0]['nicType'] = 'gVNIC'
     enable_external_ips = _enable_external_ips(config)
     if not enable_external_ips:
         # Removing this key means the VM will not be assigned an external IP.
