@@ -28,6 +28,8 @@ from sky.api.requests import requests as requests_lib
 from sky.clouds import service_catalog
 from sky.jobs.api import rest as jobs_rest
 from sky.serve.api import rest as serve_rest
+from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
@@ -225,6 +227,55 @@ async def upload_zip_file(user_hash: str,
         return {'detail': str(e)}
 
 
+@app.post('/download')
+async def download(download_body: payloads.DownloadBody):
+    """Download a folder from the cluster to the local machine."""
+    folder_paths = [
+        pathlib.Path(folder_path) for folder_path in download_body.folder_paths
+    ]
+    user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
+    logs_dir_on_api_server = common.api_server_logs_dir_prefix(user_hash)
+    for folder_path in folder_paths:
+        if not str(folder_path).startswith(str(logs_dir_on_api_server)):
+            raise fastapi.HTTPException(
+                status_code=400, detail=f'Invalid folder path: {folder_path}')
+
+        if not folder_path.exists():
+            raise fastapi.HTTPException(
+                status_code=404, detail=f'Folder not found: {folder_path}')
+
+    # Create a temporary zip file
+    zip_filename = f'folder_{int(time.time())}.zip'
+    zip_path = pathlib.Path(common.api_server_logs_dir_prefix(
+        user_hash)).expanduser().resolve() / zip_filename
+
+    try:
+        folders = [
+            str(folder_path.expanduser().resolve())
+            for folder_path in folder_paths
+        ]
+        common_utils.zip_files_and_folders(folders, zip_path)
+
+        # Add home path to the response headers, so that the client can replace
+        # the remote path in the zip file to the local path.
+        headers = {
+            'Content-Disposition': f'attachment; filename="{zip_filename}"',
+            'X-Home-Path': str(pathlib.Path.home())
+        }
+
+        # Return the zip file as a download
+        return fastapi.responses.FileResponse(
+            path=zip_path,
+            filename=zip_filename,
+            media_type='application/zip',
+            headers=headers,
+            background=fastapi.BackgroundTasks().add_task(
+                lambda: zip_path.unlink(missing_ok=True)))
+    except Exception as e:
+        raise fastapi.HTTPException(status_code=500,
+                                    detail=f'Error creating zip file: {str(e)}')
+
+
 @app.post('/launch')
 async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     """Launch a task.
@@ -375,6 +426,28 @@ async def logs(request: fastapi.Request,
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
+    )
+
+
+@app.post('/download_logs')
+async def download_logs(request: fastapi.Request,
+                        cluster_jobs_body: payloads.ClusterJobsBody) -> None:
+
+    user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
+    logs_dir_on_api_server = common.api_server_logs_dir_prefix(user_hash)
+    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
+    print('zhwu DEBUG: logs_dir_on_api_server', logs_dir_on_api_server)
+    cluster_job_download_logs_body = payloads.ClusterJobsDownloadLogsBody(
+        cluster_name=cluster_jobs_body.cluster_name,
+        job_ids=cluster_jobs_body.job_ids,
+        local_dir=str(logs_dir_on_api_server),
+    )
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='download_logs',
+        request_body=cluster_job_download_logs_body,
+        func=core.download_logs,
         schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 

@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 import colorama
 import filelock
@@ -215,6 +215,11 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
 
     client_file_mounts_dir = client_dir / 'file_mounts'
 
+    def _get_client_file_mounts_path(
+            original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
+        return str(client_file_mounts_dir /
+                   file_mounts_mapping[original_path].lstrip('/'))
+
     task_configs = common_utils.read_yaml_all(str(client_task_path))
     for task_config in task_configs:
         if task_config is None:
@@ -230,28 +235,27 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
         if workdir_only:
             continue
 
-        def _get_client_file_mounts_path(original_path: str) -> str:
-            return str(client_file_mounts_dir /
-                       file_mounts_mapping[original_path].lstrip('/'))
-
         if 'file_mounts' in task_config:
             file_mounts = task_config['file_mounts']
             for dst, src in file_mounts.items():
                 if isinstance(src, str):
                     if not data_utils.is_cloud_store_url(src):
-                        file_mounts[dst] = _get_client_file_mounts_path(src)
+                        file_mounts[dst] = _get_client_file_mounts_path(
+                            src, file_mounts_mapping)
                 elif isinstance(src, dict):
                     if 'source' in src:
                         source = src['source']
                         if isinstance(source, str):
                             if data_utils.is_cloud_store_url(source):
                                 continue
-                            src['source'] = _get_client_file_mounts_path(source)
+                            src['source'] = _get_client_file_mounts_path(
+                                source, file_mounts_mapping)
                         else:
                             new_source = []
                             for src_item in source:
                                 new_source.append(
-                                    _get_client_file_mounts_path(src_item))
+                                    _get_client_file_mounts_path(
+                                        src_item, file_mounts_mapping))
                             src['source'] = new_source
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
@@ -261,3 +265,9 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
 
     dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
     return dag
+
+
+def api_server_logs_dir_prefix(user_hash: Optional[str] = None) -> pathlib.Path:
+    if user_hash is None:
+        user_hash = common_utils.get_user_hash()
+    return CLIENT_DIR / user_hash / 'sky_logs'

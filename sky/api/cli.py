@@ -2031,9 +2031,15 @@ def logs(
     job_ids = None if not job_ids else job_ids
 
     if sync_down:
-        raise NotImplementedError('Downloading logs is not supported yet.')
-        # sdk.download_logs(cluster, job_ids)
-        # return
+        with rich_utils.client_status(
+                ux_utils.spinner_message('Downloading logs')):
+            log_local_path_dict = sdk.download_logs(cluster, job_ids)
+        style = colorama.Style
+        fore = colorama.Fore
+        for job, log_local_path in log_local_path_dict.items():
+            logger.info(f'{fore.CYAN}Job {job} logs: {log_local_path}'
+                        f'{style.RESET_ALL}')
+        return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id: Optional[int] = None

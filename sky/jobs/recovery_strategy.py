@@ -166,7 +166,7 @@ class StrategyExecutor:
             # then kill the user process on remaining worker nodes.
             core.cancel(cluster_name=self.cluster_name,
                         all=True,
-                        _try_cancel_if_cluster_is_init=True)
+                        try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.info('Failed to cancel the job on the cluster. The cluster '
                         'might be already down or the head node is preempted.'

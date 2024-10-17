@@ -182,6 +182,18 @@ class ClusterJobsBody(RequestBody):
     job_ids: Optional[List[int]]
 
 
+class ClusterJobsDownloadLogsBody(RequestBody):
+    """The request body for the cluster jobs download logs endpoint."""
+    cluster_name: str
+    job_ids: Optional[List[int]]
+    local_dir: str = constants.SKY_LOGS_DIRECTORY
+
+
+class DownloadBody(RequestBody):
+    """The request body for the download endpoint."""
+    folder_paths: List[str]
+
+
 class StorageBody(RequestBody):
     """The request body for the storage endpoint."""
     name: str

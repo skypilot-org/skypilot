@@ -3630,15 +3630,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             for run_timestamp in run_timestamps
         ]
         local_log_dirs = [
-            os.path.expanduser(os.path.join(local_dir, run_timestamp))
+            os.path.join(local_dir, run_timestamp)
             for run_timestamp in run_timestamps
         ]
-
-        style = colorama.Style
-        fore = colorama.Fore
-        for job_id, log_dir in zip(job_ids, local_log_dirs):
-            logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
-                        f'{style.RESET_ALL}')
 
         runners = handle.get_command_runners()
 
@@ -3656,7 +3650,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # are not created locally. We do not add additional '*' as
                     # kubernetes's rsync does not work with an ending '*'.
                     source=f'{remote_log_dir}/',
-                    target=local_log_dir,
+                    target=os.path.expanduser(local_log_dir),
                     up=False,
                     stream_logs=False,
                 )
