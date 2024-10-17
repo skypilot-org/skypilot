@@ -547,8 +547,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    message = common_utils.decode_payload(stdout)
-    sky_logging.print(message)
+    sky_logging.print(stdout)
 
 
 @usage_lib.entrypoint

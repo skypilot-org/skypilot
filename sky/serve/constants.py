@@ -98,5 +98,5 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 SERVE_VERSION = 2
 
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
-    'The version of service is outdated and does not support manually terminate replicas. Please terminate the service '
-    'and spin up again.')
+    'The version of service is outdated and does not support manually '
+    'terminating replicas. Please terminate the service and spin up again.')
