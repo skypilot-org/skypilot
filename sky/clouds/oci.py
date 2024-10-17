@@ -540,7 +540,7 @@ class OCI(clouds.Cloud):
             image_tag = image_id[region]
         return image_tag
 
-    def _get_default_image_tag(self, instance_type: str) -> str:
+    def _get_default_image_id(self, instance_type: str) -> str:
         acc = self.get_accelerators_from_instance_type(instance_type)
 
         if acc is None:
