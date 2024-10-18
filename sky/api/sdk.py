@@ -286,7 +286,9 @@ def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def download_logs(cluster_name: str, job_ids: Optional[List[int]]) -> Dict[str, str]:
+def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> Dict[str, str]:
+    if job_ids is not None:
+        job_ids = [int(job_id) for job_id in job_ids]
     body = payloads.ClusterJobsBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
