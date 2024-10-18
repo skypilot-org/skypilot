@@ -246,9 +246,11 @@ def set_service_status_and_active_versions_from_replica(
         update_mode: UpdateMode) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
-        raise ValueError('The service is up-ed in an old version and does not '
-                         'support update. Please `sky serve down` '
-                         'it first and relaunch the service.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'The service is up-ed in an old version and does not '
+                'support update. Please `sky serve down` '
+                'it first and relaunch the service.')
     if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
         # When the service is shutting down, there is a period of time which the
         # controller still responds to the request, and the replica is not
@@ -289,7 +291,8 @@ def update_service_status() -> None:
 def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     service_status = _get_service_status(service_name)
     if service_status is None:
-        raise ValueError(f'Service {service_name!r} does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
@@ -299,15 +302,21 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
             'mode': mode,
         })
     if resp.status_code == 404:
-        raise ValueError('The service is up-ed in an old version and does not '
-                         'support update. Please `sky serve down` '
-                         'it first and relaunch the service. ')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'The service is up-ed in an old version and does not '
+                'support update. Please `sky serve down` '
+                'it first and relaunch the service. ')
     elif resp.status_code == 400:
-        raise ValueError(f'Client error during service update: {resp.text}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Client error during service update: {resp.text}')
     elif resp.status_code == 500:
-        raise RuntimeError(f'Server error during service update: {resp.text}')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Server error during service update: {resp.text}')
     elif resp.status_code != 200:
-        raise ValueError(f'Failed to update service: {resp.text}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to update service: {resp.text}')
 
     service_msg = resp.json()['message']
     return common_utils.encode_payload(service_msg)
@@ -527,10 +536,12 @@ def load_service_initialization_result(payload: str) -> int:
 def check_service_status_healthy(service_name: str) -> Optional[str]:
     service_record = serve_state.get_service_from_name(service_name)
     if service_record is None:
-        return f'Service {service_name!r} does not exist.'
+        with ux_utils.print_exception_no_traceback():
+            return f'Service {service_name!r} does not exist.'
     if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT:
-        return (f'Service {service_name!r} is still initializing its '
-                'controller. Please try again later.')
+        with ux_utils.print_exception_no_traceback():
+            return (f'Service {service_name!r} is still initializing its '
+                    'controller. Please try again later.')
     return None
 
 
@@ -633,8 +644,9 @@ def stream_replica_logs(service_name: str, replica_id: int,
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
-        return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
-                f'{colorama.Style.RESET_ALL}')
+        with ux_utils.print_exception_no_traceback():
+            return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
+                    f'{colorama.Style.RESET_ALL}')
 
     replica_cluster_name = generate_replica_cluster_name(
         service_name, replica_id)
@@ -644,8 +656,9 @@ def stream_replica_logs(service_name: str, replica_id: int,
         for info in replica_info:
             if info.replica_id == replica_id:
                 return info.status
-        raise ValueError(
-            _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
 
     finish_stream = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
@@ -664,7 +677,8 @@ def stream_replica_logs(service_name: str, replica_id: int,
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
-        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
+        with ux_utils.print_exception_no_traceback():
+            return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     # Notify user here to make sure user won't think the log is finished.
