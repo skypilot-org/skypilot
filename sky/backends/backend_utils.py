@@ -2551,7 +2551,8 @@ def get_endpoints(cluster: str,
     cluster_records = get_clusters(refresh=common.StatusRefreshMode.NONE,
                                    cluster_names=[cluster])
     if not cluster_records:
-        raise ValueError(f'Cluster {cluster!r} not found.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(f'Cluster {cluster!r} not found.')
     assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]
     if (not skip_status_check and
