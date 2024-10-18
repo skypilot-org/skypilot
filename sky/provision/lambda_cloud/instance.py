@@ -5,10 +5,10 @@ from typing import Any, Dict, List, Optional
 
 from sky import authentication as auth
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 import sky.provision.lambda_cloud.lambda_utils as lambda_utils
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 1

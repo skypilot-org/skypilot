@@ -530,9 +530,9 @@ def status(
 
 @usage_lib.entrypoint
 @api_common.check_health
-def endpoints(cluster_name: str, port: Optional[Union[int, str]] = None) -> str:
+def endpoints(cluster: str, port: Optional[Union[int, str]] = None) -> str:
     body = payloads.EndpointBody(
-        cluster_name=cluster_name,
+        cluster=cluster,
         port=port,
     )
     response = requests.post(f'{api_common.get_server_url()}/endpoints',

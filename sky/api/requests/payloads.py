@@ -201,7 +201,7 @@ class StorageBody(RequestBody):
 
 class EndpointBody(RequestBody):
     """The request body for the endpoint."""
-    cluster_name: str
+    cluster: str
     port: Optional[Union[int, str]] = None
 
 

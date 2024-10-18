@@ -124,6 +124,7 @@ def status(
                                           all_users=all_users)
     return clusters
 
+
 def status_kubernetes(
 ) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
            List['kubernetes_utils.KubernetesSkyPilotClusterInfo'], List[Dict[
@@ -216,8 +217,8 @@ def endpoints(cluster: str,
     """
     with rich_utils.safe_status(
             ux_utils.spinner_message(
-                f'Fetching endpoints for cluster {cluster_name}')):
-        return backend_utils.get_endpoints(cluster=cluster_name, port=port)
+                f'Fetching endpoints for cluster {cluster}')):
+        return backend_utils.get_endpoints(cluster=cluster, port=port)
 
 
 @usage_lib.entrypoint

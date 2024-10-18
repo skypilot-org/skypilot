@@ -19,7 +19,6 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import network_utils
@@ -2056,7 +2055,7 @@ class KubernetesSkyPilotClusterInfoPayload:
 
     @classmethod
     def from_cluster(
-            cls, cluster: KubernetesClusterInfo
+        cls, cluster: KubernetesSkyPilotClusterInfo
     ) -> 'KubernetesSkyPilotClusterInfoPayload':
         resources_str = f'{len(cluster.pods)}x {cluster.resources}'
         return cls(
