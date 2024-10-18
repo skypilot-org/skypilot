@@ -513,12 +513,13 @@ def get_controller_resources(
     # the clouds of the resources if the controller does not exist.
     # TODO(tian): Consider respecting the regions/zones specified for the
     # resources as well.
-    requested_clouds: Set['clouds.Cloud'] = set()
+
+    requested_clouds_with_region_zone: Dict[str, Dict[Optional[str],
+                                                      Set[Optional[str]]]] = {}
     for resource in task_resources:
-        # cloud is an object and will not be able to be distinguished by set.
-        # Here we manually check if the cloud is in the set.
-        if resource.cloud is not None:
-            if not clouds.cloud_in_iterable(resource.cloud, requested_clouds):
+        cloud_name = str(resource.cloud) if resource.cloud is not None else None
+        if cloud_name is not None:
+            if cloud_name not in requested_clouds_with_region_zone:
                 try:
                     resource.cloud.check_features_are_supported(
                         resources.Resources(),
@@ -526,7 +527,21 @@ def get_controller_resources(
                 except exceptions.NotSupportedError:
                     # Skip the cloud if it does not support hosting controllers.
                     continue
-                requested_clouds.add(resource.cloud)
+                requested_clouds_with_region_zone[cloud_name] = {}
+            if resource.region is None:
+                requested_clouds_with_region_zone[cloud_name] = {None: {None}}
+            elif None not in requested_clouds_with_region_zone[cloud_name]:
+                if resource.region not in requested_clouds_with_region_zone[
+                        cloud_name]:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region] = set()
+                if resource.zone is None:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region] = {None}
+                elif None not in requested_clouds_with_region_zone[cloud_name][
+                        resource.region]:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region].add(resource.zone)
         else:
             # if one of the resource.cloud is None, this could represent user
             # does not know which cloud is best for the specified resources.
@@ -536,14 +551,20 @@ def get_controller_resources(
             #     - cloud: runpod
             #       accelerators: A40
             # In this case, we allow the controller to be launched on any cloud.
-            requested_clouds.clear()
+            requested_clouds_with_region_zone.clear()
             break
-    if not requested_clouds:
+    if not requested_clouds_with_region_zone:
         return {controller_resources_to_use}
-    return {
-        controller_resources_to_use.copy(cloud=controller_cloud)
-        for controller_cloud in requested_clouds
-    }
+    result = set()
+    for cloud_name, regions in requested_clouds_with_region_zone.items():
+        for region, zones in regions.items():
+            for zone in zones:
+                resource_copy = controller_resources_to_use.copy(
+                    cloud=clouds.CLOUD_REGISTRY.from_str(cloud_name),
+                    region=region,
+                    zone=zone)
+                result.add(resource_copy)
+    return result
 
 
 def _setup_proxy_command_on_controller(
