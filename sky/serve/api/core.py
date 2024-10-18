@@ -211,6 +211,7 @@ def up(
             _disable_controller_check=True,
         )
 
+
         style = colorama.Style
         fore = colorama.Fore
 
@@ -273,7 +274,7 @@ def up(
                 skip_status_check=True).get(lb_port)
             assert endpoint is not None, 'Did not get endpoint for controller.'
 
-        sky_logging.print(
+        logger.info(
             f'{fore.CYAN}Service name: '
             f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
             f'\n{fore.CYAN}Endpoint URL: '
@@ -502,7 +503,7 @@ def down(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    sky_logging.print(stdout)
+    logger.info(stdout)
 
 
 @usage_lib.entrypoint

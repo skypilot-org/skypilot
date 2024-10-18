@@ -486,7 +486,31 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    setup_completed = False
     while True:
+        job_status = job_lib.get_status(job_id)
+        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+            # Wait for the controller process to finish setting up. It can be
+            # slow if a lot cloud dependencies are being installed.
+            if (time.time() - start_time >
+                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to start the controller '
+                        f'process for the service {service_name!r} '
+                        f'within '
+                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
+                    )
+            # No need to check the service status as the controller process
+            # is still setting up.
+            time.sleep(1)
+            continue
+
+        if not setup_completed:
+            setup_completed = True
+            # Reset the start time to wait for the service to be registered.
+            start_time = time.time()
+
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
             if job_id != record['controller_job_id']:

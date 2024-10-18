@@ -79,10 +79,10 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
             if retry_cnt < 20:
                 retry_cnt += 1
             else:
-                raise RuntimeError(
-                    f'Failed to connect to SkyPilot server at {server_url}. '
-                    'Please check the logs for more information: '
-                    f'tail -f {constants.API_SERVER_LOGS}') from e
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to connect to SkyPilot server at {server_url}. '
+                        f'\nView logs at: {constants.API_SERVER_LOGS}') from e
             time.sleep(0.5)
 
 
@@ -124,13 +124,14 @@ def check_health(func):
                             ux_utils.finishing_message(
                                 'SkyPilot API server started.'))
                     else:
-                        raise RuntimeError(
-                            'Could not connect to SkyPilot server at '
-                            f'{server_url}. Please ensure that the server is '
-                            f'running and '
-                            f'{constants.SKY_API_SERVER_URL_ENV_VAR} '
-                            'environment variable is set correctly. Try: '
-                            f'curl {server_url}/health')
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError(
+                                'Could not connect to SkyPilot server at '
+                                f'{server_url}. Please ensure that the server is '
+                                'running and '
+                                f'{constants.SKY_API_SERVER_URL_ENV_VAR} '
+                                'environment variable is set correctly. Try: '
+                                f'curl {server_url}/health')
         return func(*args, **kwargs)
 
     return wrapper
