@@ -313,6 +313,36 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
     return common_utils.encode_payload(service_msg)
 
 
+def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
+    service_status = _get_service_status(service_name)
+    if service_status is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
+    replica_info = serve_state.get_replica_info_from_id(service_name,
+                                                        replica_id)
+    if replica_info is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Replica {replica_id} for service {service_name} does not '
+                'exist.')
+
+    controller_port = service_status['controller_port']
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/terminate_replica',
+        json={
+            'replica_id': replica_id,
+            'purge': purge,
+        })
+
+    message: str = resp.json()['message']
+    if resp.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to terminate replica {replica_id} '
+                             f'in {service_name}. Reason:\n{message}')
+    return message
+
+
 def _get_service_status(
         service_name: str,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
@@ -735,7 +765,7 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
-    # Don't use backend_utils.is_controller_up since it is too slow.
+    # Don't use backend_utils.is_controller_accessible since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
@@ -912,6 +942,18 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.terminate_services({service_names!r}, '
             f'purge={purge})', 'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def terminate_replica(cls, service_name: str, replica_id: int,
+                          purge: bool) -> str:
+        code = [
+            f'(lambda: print(serve_utils.terminate_replica({service_name!r}, '
+            f'{replica_id}, {purge}), end="", flush=True) '
+            'if getattr(constants, "SERVE_VERSION", 0) >= 2 else '
+            f'exec("raise RuntimeError('
+            f'{constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})"))()'
         ]
         return cls._build(code)
 

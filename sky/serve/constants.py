@@ -92,4 +92,11 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # change for the serve_utils.ServeCodeGen, we need to bump this version, so that
 # the user can be notified to update their SkyPilot serve version on the remote
 # cluster.
-SERVE_VERSION = 1
+# Changelog:
+# v1.0 - Introduce rolling update.
+# v2.0 - Added template-replica feature.
+SERVE_VERSION = 2
+
+TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
+    'The version of service is outdated and does not support manually '
+    'terminating replicas. Please terminate the service and spin up again.')
