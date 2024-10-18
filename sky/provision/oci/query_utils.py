@@ -26,8 +26,11 @@ else:
 
 _logger = sky_logging.init_logger(__name__)
 
+
 def debug_enabled(logger: Logger):
+
     def decorate(f):
+
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             dt_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -36,7 +39,9 @@ def debug_enabled(logger: Logger):
                 return f(*args, **kwargs)
             finally:
                 logger.debug(f'{dt_str} Exit {f}')
+
         return wrapper
+
     return decorate
 
 
@@ -225,10 +230,10 @@ class QueryHelper:
     def create_vcn_subnet(cls, net_client,
                           skypilot_compartment) -> Optional[str]:
 
-        skypilot_vcn = None # VCN for the resources
-        subnet = None # Subnet for the VMs
-        ig = None # Internet gateway
-        sg = None # Service gateway
+        skypilot_vcn = None  # VCN for the resources
+        subnet = None  # Subnet for the VMs
+        ig = None  # Internet gateway
+        sg = None  # Service gateway
 
         try:
             create_vcn_response = net_client.create_vcn(
@@ -353,7 +358,7 @@ class QueryHelper:
 
         except oci_adaptor.oci.exceptions.ServiceError as e:
             _logger.error(f'Create VCN Error: Create new VCN '
-                         f'{oci_utils.oci_config.VCN_NAME} failed: {str(e)}')
+                          f'{oci_utils.oci_config.VCN_NAME} failed: {str(e)}')
             # In case of partial success while creating vcn
             cls.delete_vcn(net_client, skypilot_vcn, subnet, ig, sg)
             subnet = None
@@ -372,19 +377,19 @@ class QueryHelper:
                 delete_ig_response = net_client.delete_internet_gateway(
                     ig_id=internet_gateway)
                 _logger.debug(f'Deleted internet gateway {internet_gateway}'
-                             f'-{delete_ig_response.data}')
+                              f'-{delete_ig_response.data}')
             if service_gateway is not None:
                 # Delete service gateway
                 delete_sg_response = net_client.delete_service_gateway(
                     service_gateway_id=service_gateway)
                 _logger.debug(f'Deleted service gateway {service_gateway}'
-                             f'-{delete_sg_response.data}')
+                              f'-{delete_sg_response.data}')
             if skypilot_subnet is not None:
                 # Delete subnet
                 delete_subnet_response = net_client.delete_subnet(
                     subnet_id=skypilot_subnet)
                 _logger.debug(f'Deleted subnet {skypilot_subnet}'
-                             f'-{delete_subnet_response.data}')
+                              f'-{delete_subnet_response.data}')
             # Delete vcn
             retry_count = 0
             while retry_count < oci_utils.oci_config.MAX_RETRY_COUNT:
@@ -407,5 +412,6 @@ class QueryHelper:
         except oci_adaptor.oci.exceptions.ServiceError as e:
             _logger.error(
                 f'Delete VCN {oci_utils.oci_config.VCN_NAME} Error: {str(e)}')
+
 
 query_helper = QueryHelper()
