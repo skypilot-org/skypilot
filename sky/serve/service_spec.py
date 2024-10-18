@@ -237,7 +237,7 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
-        add_if_not_none('service', 'load_balancing_policy',
+        add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
         return config
 

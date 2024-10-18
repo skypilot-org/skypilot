@@ -47,7 +47,7 @@ class SkyServeLoadBalancer:
             load_balancing_policy_name)
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
-        # TODO: httpx.Client has a resource limit of 100 max connections
+        # TODO(tian): httpx.Client has a resource limit of 100 max connections
         # for each client. We should wait for feedback on the best max
         # connections.
         # Reference: https://www.python-httpx.org/advanced/resource-limits/
@@ -231,7 +231,7 @@ class SkyServeLoadBalancer:
 
 def run_load_balancer(controller_addr: str,
                       load_balancer_port: int,
-                      policy_name: Optional[str] = None):
+                      load_balancing_policy_name: Optional[str] = None):
     """ Run the load balancer.
 
     Args:
@@ -240,14 +240,11 @@ def run_load_balancer(controller_addr: str,
         policy_name: The name of the load balancing policy to use. Defaults to
             None.
     """
-    try:
-        load_balancer = SkyServeLoadBalancer(
-            controller_url=controller_addr,
-            load_balancer_port=load_balancer_port,
-            load_balancing_policy_name=policy_name)
-        load_balancer.run()
-    except ValueError as e:
-        logger.error(f'Failed to start load balancer: {e}')
+    load_balancer = SkyServeLoadBalancer(
+        controller_url=controller_addr,
+        load_balancer_port=load_balancer_port,
+        load_balancing_policy_name=load_balancing_policy_name)
+    load_balancer.run()
 
 
 if __name__ == '__main__':
