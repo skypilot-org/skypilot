@@ -247,6 +247,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
     GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
     TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
+    ACCELERATOR_COUNT_LABEL_KEY = 'cloud.google.com/gke-accelerator-count'
     TPU_TOPOLOGY_LABEL_KEY = 'cloud.google.com/gke-tpu-topology'
 
     @classmethod
@@ -676,7 +677,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
 
 
 def get_tpu_topology_label_key_value(
-        accelerator: str) -> Tuple[str, Optional[str]]:
+        accelerator: str, accelerator_count: int) -> Tuple[str, Optional[str]]:
     """Returns the TPU topology label key and value for given accelerator type.
 
     Args:
@@ -701,6 +702,8 @@ def get_tpu_topology_label_key_value(
     for labels in node_labels.values():
         labels_dict = dict(labels)
         if labels_dict.get(tpu_label_key) == accelerator:
+            tpu_chip_count = labels_dict.get(GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY)
+            #reduce topology and compare number with acc count
             topology_value = labels_dict.get(tpu_topology_label_key)
             return tpu_topology_label_key, topology_value
 
