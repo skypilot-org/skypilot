@@ -197,11 +197,6 @@ class DockerInitializer:
 
         self._check_docker_installed()
 
-        # SkyPilot: Add the current user to the docker group
-        # if not already added.
-        self._run('id -nG $USER | grep -qw docker || '
-                  'sudo usermod -aG docker $USER')
-
         # SkyPilot: Check if the container is exited but not removed.
         # If true, then we can start the container directly.
         # Notice that we will skip all setup commands, so we need to
@@ -340,7 +335,11 @@ class DockerInitializer:
 
     def _check_docker_installed(self):
         no_exist = 'NoExist'
+        # SkyPilot: Add the current user to the docker group first (if needed),
+        # before checking if docker is installed to avoid permission issues.
         cleaned_output = self._run(
+            'id -nG $USER | grep -qw docker || '
+            'sudo usermod -aG docker $USER > /dev/null 2>&1;'
             f'command -v {self.docker_cmd} || echo {no_exist!r}')
         if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
