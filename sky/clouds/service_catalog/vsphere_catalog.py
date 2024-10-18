@@ -2,7 +2,7 @@
 import io
 import os
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
@@ -85,7 +85,7 @@ def get_default_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(
         _get_df(), instance_type)
 
