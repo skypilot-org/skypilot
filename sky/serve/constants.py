@@ -3,6 +3,8 @@
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
+CONTROLLER_LOG_FILE_NAME = 'controller.log'
+LOAD_BALANCER_LOG_FILE_NAME = 'load_balancer.log'
 
 # The filelock for selecting service ports on controller VM when starting a
 # service. We need to have a filelock to avoid port collision when starting
@@ -93,3 +95,6 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # the user can be notified to update their SkyPilot serve version on the remote
 # cluster.
 SERVE_VERSION = 1
+
+# Pattern used for extracting replica ID from replica launch or log files.
+REPLICA_ID_PATTERN = r'.*replica_(\d+)(_launch)?\.log'
