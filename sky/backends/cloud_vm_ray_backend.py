@@ -4003,12 +4003,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             region = config['provider']['region']
 
             # pylint: disable=import-outside-toplevel
-            from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-
-            from sky.skylet.providers.oci.query_helper import oci_query_helper
+            from sky.provision.constants import TAG_RAY_CLUSTER_NAME
+            from sky.provision.oci.query_utils import query_helper
 
             # 0: All terminated successfully, failed count otherwise
-            returncode = oci_query_helper.terminate_instances_by_tags(
+            returncode = query_helper.terminate_instances_by_tags(
                 {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}, region)
 
             # To avoid undefined local variables error.
