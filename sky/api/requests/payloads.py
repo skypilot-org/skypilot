@@ -179,13 +179,13 @@ class ClusterJobBody(RequestBody):
 class ClusterJobsBody(RequestBody):
     """The request body for the cluster jobs endpoint."""
     cluster_name: str
-    job_ids: Optional[List[int]]
+    job_ids: Optional[List[str]]
 
 
 class ClusterJobsDownloadLogsBody(RequestBody):
     """The request body for the cluster jobs download logs endpoint."""
     cluster_name: str
-    job_ids: Optional[List[int]]
+    job_ids: Optional[List[str]]
     local_dir: str = constants.SKY_LOGS_DIRECTORY
 
 
