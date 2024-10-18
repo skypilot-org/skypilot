@@ -13,7 +13,7 @@ envs:
 service:
   readiness_probe: /health
   replicas: 2
-
+  load_balancing_policy: round_robin
 resources:
   ports: 8080
   accelerators: A100:1
