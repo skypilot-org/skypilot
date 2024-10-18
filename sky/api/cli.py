@@ -1439,10 +1439,8 @@ def _status_kubernetes(show_all: bool):
     Args:
         show_all (bool): Show all job information (e.g., start time, failures).
     """
-    request_id = sdk.kubernetes_status()
-    (unmanaged_clusters, all_jobs, serve_controllers,
-     context) = sdk.stream_and_get(request_id)
-
+    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
+        sdk.status_kubernetes()))
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
@@ -1454,7 +1452,7 @@ def _status_kubernetes(show_all: bool):
                    f'{colorama.Style.RESET_ALL}')
         msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
         click.echo(msg)
-    if serve_controllers:
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
         #  Currently we show a hint that services are shown as clusters.
         click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '

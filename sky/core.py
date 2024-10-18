@@ -14,7 +14,6 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
-from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import task
 from sky.backends import backend_utils
@@ -126,9 +125,9 @@ def status(
 
 
 def status_kubernetes(
-) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
-           List['kubernetes_utils.KubernetesSkyPilotClusterInfo'], List[Dict[
-               str, Any]], Optional[str]]:
+) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+           List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+           List[Dict[str, Any]], Optional[str]]:
     """Get all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
@@ -137,11 +136,11 @@ def status_kubernetes(
 all_clusters, unmanaged_clusters, all_jobs, context
     Returns:
         A tuple containing:
-        - all_clusters: List of KubernetesSkyPilotClusterInfo with info for
-            all clusters, including managed jobs, services and controllers.
-        - unmanaged_clusters: List of KubernetesSkyPilotClusterInfo with info
-            for all clusters excluding managed jobs and services. Controllers
-            are included.
+        - all_clusters: List of KubernetesSkyPilotClusterInfoPayload with info
+            for all clusters, including managed jobs, services and controllers.
+        - unmanaged_clusters: List of KubernetesSkyPilotClusterInfoPayload with
+            info for all clusters excluding managed jobs and services.
+            Controllers are included.
         - all_jobs: List of managed jobs from all controllers. Each entry is a
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
@@ -167,7 +166,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
                 status_message += f's ({i + 1}/{len(jobs_controllers)})'
             spinner.update(f'{status_message}[/]')
             try:
-                job_list = managed_jobs.queue_from_kubernetes_pod(
+                job_list = managed_jobs_core.queue_from_kubernetes_pod(
                     pod.metadata.name)
             except RuntimeError as e:
                 logger.warning('Failed to get managed jobs from controller '
@@ -194,6 +193,14 @@ all_clusters, unmanaged_clusters, all_jobs, context
     unmanaged_clusters = [
         c for c in all_clusters
         if c.cluster_name not in managed_job_cluster_names
+    ]
+    all_clusters = [
+        kubernetes_utils.KubernetesSkyPilotClusterInfoPayload.from_cluster(c)
+        for c in all_clusters
+    ]
+    unmanaged_clusters = [
+        kubernetes_utils.KubernetesSkyPilotClusterInfoPayload.from_cluster(c)
+        for c in unmanaged_clusters
     ]
     return all_clusters, unmanaged_clusters, all_jobs, context
 

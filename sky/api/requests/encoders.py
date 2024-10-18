@@ -3,6 +3,7 @@
 # pydantic models, so we can take advantage of model_dump_json of pydantic,
 # instead of implementing our own handlers.
 import base64
+import dataclasses
 import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
+    from sky.provision.kubernetes import utils as kubernetes_utils
 
 handlers: Dict[str, Any] = {}
 
@@ -74,6 +76,28 @@ def encode_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
     return jobs
+
+
+@register_handler('status_kubernetes')
+def encode_status_kubernetes(
+    return_value: Tuple[
+        List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+        List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+        List[Dict[str, Any]], Optional[str]]
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]],
+           Optional[str]]:
+    all_clusters, unmanaged_clusters, all_jobs, context = return_value
+    encoded_all_clusters = []
+    encoded_unmanaged_clusters = []
+    for cluster in all_clusters:
+        encoded_cluster = dataclasses.asdict(cluster)
+        encoded_cluster['status'] = encoded_cluster['status'].value
+        encoded_all_clusters.append(encoded_cluster)
+    for cluster in unmanaged_clusters:
+        encoded_cluster = dataclasses.asdict(cluster)
+        encoded_cluster['status'] = encoded_cluster['status'].value
+        encoded_unmanaged_clusters.append(encoded_cluster)
+    return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
 @register_handler('jobs/queue')

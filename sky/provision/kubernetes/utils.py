@@ -2049,7 +2049,7 @@ class KubernetesSkyPilotClusterInfoPayload:
     cluster_name_on_cloud: str
     cluster_name: str
     user: str
-    status: str
+    status: status_lib.ClusterStatus
     resources_str: str
     launched_at: float
 
@@ -2062,7 +2062,7 @@ class KubernetesSkyPilotClusterInfoPayload:
             cluster_name_on_cloud=cluster.cluster_name_on_cloud,
             cluster_name=cluster.cluster_name,
             user=cluster.user,
-            status=cluster.status.value,
+            status=cluster.status,
             resources_str=resources_str,
             launched_at=cluster.launched_at,
         )

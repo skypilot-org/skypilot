@@ -2,11 +2,12 @@
 import base64
 import pickle
 import typing
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import jobs as managed_jobs
 from sky.clouds.service_catalog import common
 from sky.data import storage
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import registry
@@ -53,6 +54,28 @@ def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
 
     return clusters
+
+
+@register_handler('status_kubernetes')
+def decode_status_kubernetes(
+    return_value: Tuple[List[Dict[str, Any]], List[Dict[str, Any]],
+                        List[Dict[str, Any]], Optional[str]]
+) -> Tuple[List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
+           List[kubernetes_utils.KubernetesSkyPilotClusterInfoPayload],
+           List[Dict[str, Any]], Optional[str]]:
+    (encoded_all_clusters, encoded_unmanaged_clusters, all_jobs,
+     context) = return_value
+    all_clusters = []
+    for cluster in encoded_all_clusters:
+        cluster['status'] = status_lib.ClusterStatus(cluster['status'])
+        all_clusters.append(
+            kubernetes_utils.KubernetesSkyPilotClusterInfoPayload(**cluster))
+    unmanaged_clusters = []
+    for cluster in encoded_unmanaged_clusters:
+        cluster['status'] = status_lib.ClusterStatus(cluster['status'])
+        unmanaged_clusters.append(
+            kubernetes_utils.KubernetesSkyPilotClusterInfoPayload(**cluster))
+    return all_clusters, unmanaged_clusters, all_jobs, context
 
 
 @register_handler('launch', 'exec', 'jobs/launch')

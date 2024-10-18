@@ -81,7 +81,8 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Failed to connect to SkyPilot server at {server_url}. '
+                        'Failed to connect to SkyPilot server at '
+                        f'{server_url}. '
                         f'\nView logs at: {constants.API_SERVER_LOGS}') from e
             time.sleep(0.5)
 
@@ -127,8 +128,8 @@ def check_health(func):
                         with ux_utils.print_exception_no_traceback():
                             raise RuntimeError(
                                 'Could not connect to SkyPilot server at '
-                                f'{server_url}. Please ensure that the server is '
-                                'running and '
+                                f'{server_url}. Please ensure that the server '
+                                'is running and '
                                 f'{constants.SKY_API_SERVER_URL_ENV_VAR} '
                                 'environment variable is set correctly. Try: '
                                 f'curl {server_url}/health')

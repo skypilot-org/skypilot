@@ -141,13 +141,13 @@ async def realtime_gpu_availability(
     )
 
 
-@app.get('/kubernetes_status')
-async def kubernetes_status(request: fastapi.Request):
+@app.get('/status_kubernetes')
+async def status_kubernetes(request: fastapi.Request):
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='kubernetes_status',
+        request_name='status_kubernetes',
         request_body=payloads.RequestBody(),
-        func=core.kubernetes_status,
+        func=core.status_kubernetes,
         schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 
