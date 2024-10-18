@@ -46,7 +46,7 @@ VMs.  The task is invoked under that working directory (so that it can call
 scripts, access checkpoints, etc.).
 
 .. note::
-  To exclude large files from being loaded, see :ref:`exclude-uploading-files`.
+  To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
 
 .. note::
 
