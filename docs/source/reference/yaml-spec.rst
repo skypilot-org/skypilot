@@ -22,8 +22,8 @@ Available fields:
     # If a relative path is used, it's evaluated relative to the location from 
     # which `sky` is called.
     #
-    # To exclude files from syncing, add them to a .skyignore file under your working directory.
-    # Details: https://skypilot.readthedocs.io/en/latest/examples/syncing-code-artifacts.html#uploading-code-and-project-files
+    # To exclude files from syncing, see 
+    # https://skypilot.readthedocs.io/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
     workdir: ~/my-task-code
 
     # Number of nodes (optional; defaults to 1) to launch including the head node.
