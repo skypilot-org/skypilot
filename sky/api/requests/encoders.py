@@ -53,7 +53,7 @@ def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return clusters
 
 
-@register_handler('launch', 'exec')
+@register_handler('launch', 'exec', 'jobs/launch')
 def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:
