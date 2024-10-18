@@ -3702,7 +3702,7 @@ def jobs_launch(
                                      need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
     if not async_call and not detach_run:
-        job_id = job_id_handle.job_id
+        job_id = job_id_handle[0]
         sdk.stream_and_get(
             managed_jobs.tail_logs(name=None,
                                    job_id=job_id,
