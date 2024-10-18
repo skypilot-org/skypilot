@@ -1,15 +1,19 @@
 """OCI Configuration.
 History:
- - Zhanghao Wu @ Oct 2023: Formatting and refactoring
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
+ - Zhanghao Wu @ Oct 2023: Formatting and refactoring
+ - Hysun He (hysun.he@oracle.com) @ Oct, 2024: Add default image OS
+   configuration.
 """
-import logging
 import os
+from typing import Dict, Optional
 
+from sky import sky_logging
 from sky import skypilot_config
+from sky import status_lib
 from sky.utils import resources_utils
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 class OCIConfig:
@@ -120,6 +124,37 @@ class OCIConfig:
     def get_profile(cls) -> str:
         return skypilot_config.get_nested(
             ('oci', 'default', 'oci_config_profile'), 'DEFAULT')
+
+    @classmethod
+    def get_default_image_os(cls) -> str:
+        # Get the default image OS. Instead of hardcoding, we give a choice to
+        # set the default image OS type in the sky's user-config file. (if not
+        # specified, use the hardcode one at last)
+        return skypilot_config.get_nested(('oci', 'default', 'image_os_type'),
+                                          'ubuntu')
+
+    @classmethod
+    def state_oci_to_sky(cls) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+        # Check the lifecycleState definition from the page
+        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+        return {
+            'PROVISIONING': status_lib.ClusterStatus.INIT,
+            'STARTING': status_lib.ClusterStatus.INIT,
+            'RUNNING': status_lib.ClusterStatus.UP,
+            'STOPPING': status_lib.ClusterStatus.STOPPED,
+            'STOPPED': status_lib.ClusterStatus.STOPPED,
+            'TERMINATED': None,
+            'TERMINATING': None,
+        }
+
+    @classmethod
+    def state_sky_to_oci(cls) -> Dict[status_lib.ClusterStatus, str]:
+        # Check the lifecycleState definition from the page
+        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+        return {
+            status_lib.ClusterStatus.UP: 'RUNNING',
+            status_lib.ClusterStatus.STOPPED: 'STOPPED',
+        }
 
 
 oci_config = OCIConfig()

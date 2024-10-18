@@ -354,6 +354,19 @@ def get_image_id_from_tag(tag: str,
     return _map_clouds_catalog(clouds, 'get_image_id_from_tag', tag, region)
 
 
+def get_image_os_from_tag(tag: str,
+                          region: Optional[str] = None,
+                          clouds: CloudFilter = None) -> Optional[str]:
+    """Returns the image OS type from the tag. OS type info would be useful
+    if different OS type is supported to provision VM, such as ssh username,
+    setup commands, etc.
+    """
+    try:
+        return _map_clouds_catalog(clouds, 'get_image_os_from_tag', tag, region)
+    except AttributeError:
+        return None
+
+
 def is_image_tag_valid(tag: str,
                        region: Optional[str],
                        clouds: CloudFilter = None) -> bool:
@@ -374,6 +387,7 @@ __all__ = [
     'get_tpus',
     # Images
     'get_image_id_from_tag',
+    'get_image_os_from_tag',
     'is_image_tag_valid',
     # Configuration
     'fallback_to_default_catalog',
