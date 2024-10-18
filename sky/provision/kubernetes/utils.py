@@ -1,5 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
+import functools
 import json
 import math
 import os
@@ -508,13 +509,54 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
+    def check_tpu_fits(candidate_instance_type: 'KubernetesInstanceType',
+                       node_list: List[Any]) -> Tuple[bool, Optional[str]]:
+        # check if the requested TPU type is in the cluster
+        # if exists, check if the requested TPU topology is available in the cluster.
+        node_list = gpu_nodes
+        acc_type = candidate_instance_type.accelerator_type
+        acc_count = candidate_instance_type.accelerator_count
+        tpu_list_in_cluster = []
+        for node in node_list:
+            if acc_type == node.metadata.labels[GKELabelFormatter.TPU_LABEL_KEY]:
+                topology_value = node.metadata.labels[GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY]
+                # node_tpu_chip_count represents the number of TPU chips
+                # available in this node. If the node is part of a node pool
+                # forming a multi-host TPU podslice, it only reflects the
+                # number of TPU chips in this individual node, not the entire
+                # multi-host TPU podslice.
+                node_tpu_chip_count = node.metadata.labels[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY]
+                chip_dimensions = [int(chip_count) for chip_count in topology_value.split("x")]
+                # topology_chip_count represents the total number of TPU chips
+                # in the entire podslice, whether it is a single-host or
+                # multi-host TPU podslice.
+                topology_chip_count = functools.reduce(lambda x, y: x * y, chip_dimensions)
+                # TODO(Doyoung): Update the naming scheme with multi-host TPU
+                # support.
+                tpu_type = f'{acc_type}:{node_tpu_chip_count}'
+                tpu_list_in_cluster.append(tpu_type)
+                # For multi-host TPU podslices, topology_chip_count and
+                # node_tpu_chip_count will differ, as topology_chip_count
+                # reflects the total across all hosts, while
+                # node_tpu_chip_count reflects only the chips in a single node.
+                # TODO(Doyoung): Remove the condition,
+                # node_tpu_chip_count == topology_chip_count, when adding
+                # multi-host TPU support.
+                if node_tpu_chip_count == topology_chip_count and topology_chip_count == acc_count:
+                    return True, None
+        tpu_list_in_cluster_str = ','.join(tpu_list_in_cluster)
+        return False, ('Requested TPU type was not found in the cluster. TPU '
+                       'types found in the cluster: '
+                       f'{tpu_list_in_cluster_str}.')
+
     nodes = get_kubernetes_nodes()
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
     if acc_type is not None:
-        # If GPUs are requested, check if GPU type is available, and if so,
-        # check if CPU and memory requirements on the specific node are met.
+        # If GPU/TPUs are requested, check if GPU/TPU type is available, and
+        # if so, check if CPU and memory requirements on the specific node are
+        # met.
         try:
             gpu_label_key, gpu_label_val = get_gpu_label_key_value(acc_type)
         except exceptions.ResourcesUnavailableError as e:
@@ -526,6 +568,13 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
             node.metadata.labels[gpu_label_key] == gpu_label_val
         ]
         assert len(gpu_nodes) > 0, 'GPU nodes not found'
+        if is_tpu_pod_slice(acc_type):
+            # If requested accelerator is a TPU type, check if the cluster
+            # has sufficient TPU resource to meet the requirement.
+            fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
+            if reason is not None:
+                return fits, reason
+
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type} do not have '
@@ -537,7 +586,7 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
                                  f'CPU (> {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
                                  f'(> {k8s_instance_type.memory} G). ')
-    # Check if  CPU and memory requirements are met on at least one
+    # Check if CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
     if not fits:
@@ -702,10 +751,11 @@ def get_tpu_topology_label_key_value(
     for labels in node_labels.values():
         labels_dict = dict(labels)
         if labels_dict.get(tpu_label_key) == accelerator:
-            tpu_chip_count = labels_dict.get(GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY)
-            #reduce topology and compare number with acc count
             topology_value = labels_dict.get(tpu_topology_label_key)
-            return tpu_topology_label_key, topology_value
+            chip_dimensions = [int(chip_count) for chip_count in topology_value.split("x")]
+            num_chips = functools.reduce(lambda x, y: x * y, chip_dimensions)
+            if num_chips == accelerator_count:
+                return tpu_topology_label_key, topology_value
 
     # If TPU labels are not detected, raise error
     with ux_utils.print_exception_no_traceback():
@@ -716,7 +766,8 @@ def get_tpu_topology_label_key_value(
         raise exceptions.ResourcesUnavailableError(
             f'Unable to find TPU topology for accelerator {accelerator!r}. '
             f'No node found with label `{tpu_label_key}={accelerator}` '
-            f'or missing {tpu_topology_label_key!r} label.{suffix}')
+            f'or missing {tpu_topology_label_key!r} label.{suffix}. Note '
+            'that multi-host TPU podslices are currently not unsupported.')
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str,

@@ -173,7 +173,21 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             # TODO(romilb): We may have additional node
                             #  affinity selectors in the future - in that
                             #  case we will need to update this logic.
-                            if (('Insufficient nvidia.com/gpu'
+                            # TODO(Doyoung): Update the error message raised
+                            # with the multi-host TPU support.
+                            if 'Insufficient google.com/tpu' in event_message:
+                                extra_msg = (
+                                    f'Verify if '
+                                    f'{pod.spec.node_selector[label_key]}'
+                                    ' is available in the cluster. Note '
+                                    'that multi-host TPU podslices are '
+                                    'currently not unsupported.')
+                                raise config_lib.KubernetesError(
+                                    _lack_resource_msg('TPU',
+                                                       pod,
+                                                       extra_msg,
+                                                       details=event_message))
+                            elif (('Insufficient nvidia.com/gpu'
                                  in event_message) or
                                 ('didn\'t match Pod\'s node affinity/selector'
                                  in event_message)):
@@ -585,10 +599,13 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             error_msg = str(e)
             # Unlike other errors from resource lackage on CPU/GPU/Memory, TPU
             # lackage error is raised when pod is attemtped to be created.
+            # TODO(Doyoung): Update the error message raised
+            # with the multi-host TPU support.
             if 'Invalid resource requests for google.com/tpu.' in error_msg:
                 extra_msg = ('Verify if the cluster has a TPU slice node with '
                              'a topology matching the number of TPU(s) '
-                             'requested.')
+                             'requested. Note that multi-host TPU podslices '
+                             'are currently not unsupported.')
                 raise config_lib.KubernetesError(
                     _lack_resource_msg('TPU',
                                        pod_spec,
