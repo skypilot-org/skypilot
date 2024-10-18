@@ -2688,10 +2688,11 @@ def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
     name = _get_cluster_name()
     test = Test(
-        'spot-pipeline',
+        'job_pipeline',
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
-            'sleep 5',
+            # Need to wait for setup and job initialization.
+            'sleep 30',
             f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
             # after it, i.e. the 4 tasks within the job.
