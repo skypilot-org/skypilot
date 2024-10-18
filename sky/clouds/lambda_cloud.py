@@ -169,11 +169,19 @@ class Lambda(clouds.Cloud):
         else:
             custom_resources = None
 
-        return {
+        resources_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
         }
+
+        if acc_dict is not None:
+            # Lambda cloud's docker runtime information does not contain
+            # 'nvidia-container-runtime', causing no GPU option is added to
+            # the docker run command. We patch this by adding it here.
+            resources_vars['docker_run_options'] = ['--gpus all']
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
