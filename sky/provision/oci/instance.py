@@ -25,6 +25,7 @@ logger = sky_logging.init_logger(__name__)
 
 # pylint: disable=line-too-long
 
+
 @query_utils.debug_enabled(logger)
 @common_utils.retry
 def query_instances(
@@ -58,9 +59,8 @@ def query_instances(
 
 
 @query_utils.debug_enabled(logger)
-def run_instances(
-    region: str, cluster_name_on_cloud: str, config: common.ProvisionConfig
-) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
 
@@ -68,8 +68,7 @@ def run_instances(
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     compute_client = oci_adaptor.get_core_client(
-        region, oci_utils.oci_config.get_profile()
-    )
+        region, oci_utils.oci_config.get_profile())
 
     # Starting stopped nodes if resume_stopped_nodes=True
     resume_instances = []
@@ -84,13 +83,11 @@ def run_instances(
                 f'cluster "{cluster_name_on_cloud}" is greater than the '
                 f'number requested by the user ({config.count}). '
                 'This is likely a resource leak. '
-                'Use "sky down" to terminate the cluster.'
-            )
+                'Use "sky down" to terminate the cluster.')
 
         logger.debug(
             f'run_instances: Found {[inst["name"] for inst in existing_instances]} '
-            'existing instances in cluster.'
-        )
+            'existing instances in cluster.')
         existing_instances.sort(key=lambda x: x['name'])
 
         stopped_instances = []
@@ -100,26 +97,24 @@ def run_instances(
                 stopped_instances.append(existing_node)
             elif existing_node['status'] == 'STOPPED':
                 stopped_instances.append(existing_node)
-            elif existing_node['status'] in ('PROVISIONING', 'STARTING', 'RUNNING'):
+            elif existing_node['status'] in ('PROVISIONING', 'STARTING',
+                                             'RUNNING'):
                 resume_instances.append(existing_node)
 
         for stopped_node in stopped_instances:
             stopped_node_id = stopped_node['inst_id']
             instance_action_response = compute_client.instance_action(
-                instance_id=stopped_node_id, action='START'
-            )
+                instance_id=stopped_node_id, action='START')
 
             starting_inst = instance_action_response.data
-            resume_instances.append(
-                {
-                    'inst_id': starting_inst.id,
-                    'name': starting_inst.display_name,
-                    'ad': starting_inst.availability_domain,
-                    'compartment': starting_inst.compartment_id,
-                    'status': starting_inst.lifecycle_state,
-                    'oci_tags': starting_inst.freeform_tags,
-                }
-            )
+            resume_instances.append({
+                'inst_id': starting_inst.id,
+                'name': starting_inst.display_name,
+                'ad': starting_inst.availability_domain,
+                'compartment': starting_inst.compartment_id,
+                'status': starting_inst.lifecycle_state,
+                'oci_tags': starting_inst.freeform_tags,
+            })
     # end if config.resume_stopped_nodes
 
     # Try get head id from the existing instances
@@ -139,7 +134,8 @@ def run_instances(
         instance_type_str = node_config['InstanceType']
 
         if vcpu_str is not None and vcpu_str != 'None':
-            if instance_type_str.startswith(f'{oci_utils.oci_config.VM_PREFIX}.A'):
+            if instance_type_str.startswith(
+                    f'{oci_utils.oci_config.VM_PREFIX}.A'):
                 # For ARM cpu, 1*ocpu = 1*vcpu
                 ocpu_count = round(float(vcpu_str))
             else:
@@ -151,27 +147,21 @@ def run_instances(
         if ocpu_count > 0:
             mem = node_config['MemoryInGbs']
             if mem is not None and mem != 'None':
-                machine_shape_config = (
-                    oci_adaptor.oci.core.models.LaunchInstanceShapeConfigDetails(
-                        ocpus=ocpu_count, memory_in_gbs=mem
-                    )
-                )
+                machine_shape_config = (oci_adaptor.oci.core.models.
+                                        LaunchInstanceShapeConfigDetails(
+                                            ocpus=ocpu_count,
+                                            memory_in_gbs=mem))
             else:
-                machine_shape_config = (
-                    oci_adaptor.oci.core.models.LaunchInstanceShapeConfigDetails(
-                        ocpus=ocpu_count
-                    )
-                )
+                machine_shape_config = (oci_adaptor.oci.core.models.
+                                        LaunchInstanceShapeConfigDetails(
+                                            ocpus=ocpu_count))
 
         preempitible_config = (
             oci_adaptor.oci.core.models.PreemptibleInstanceConfigDetails(
-                preemption_action=oci_adaptor.oci.core.models.TerminatePreemptionAction(
-                    type='TERMINATE', preserve_boot_volume=False
-                )
-            )
-            if node_config['Preemptible']
-            else None
-        )
+                preemption_action=oci_adaptor.oci.core.models.
+                TerminatePreemptionAction(type='TERMINATE',
+                                          preserve_boot_volume=False))
+            if node_config['Preemptible'] else None)
 
         batch_id = datetime.now().strftime('%Y%m%d%H%M%S')
         for seq in range(1, to_start_count + 1):
@@ -182,7 +172,8 @@ def run_instances(
                     constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
                     'sky_spot_flag': str(node_config['Preemptible']).lower(),
                 }
-                node_type = constants.HEAD_NODE_TAGS[constants.TAG_RAY_NODE_KIND]
+                node_type = constants.HEAD_NODE_TAGS[
+                    constants.TAG_RAY_NODE_KIND]
             else:
                 vm_tags = {
                     **tags,
@@ -190,46 +181,51 @@ def run_instances(
                     constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
                     'sky_spot_flag': str(node_config['Preemptible']).lower(),
                 }
-                node_type = constants.WORKER_NODE_TAGS[constants.TAG_RAY_NODE_KIND]
+                node_type = constants.WORKER_NODE_TAGS[
+                    constants.TAG_RAY_NODE_KIND]
 
             launch_instance_response = compute_client.launch_instance(
-                launch_instance_details=oci_adaptor.oci.core.models.LaunchInstanceDetails(
+                launch_instance_details=oci_adaptor.oci.core.models.
+                LaunchInstanceDetails(
                     availability_domain=node_config['AvailabilityDomain'],
                     compartment_id=compartment,
                     shape=instance_type_str,
-                    display_name=f'{cluster_name_on_cloud}_{node_type}_{batch_id}_{seq}',
+                    display_name=
+                    f'{cluster_name_on_cloud}_{node_type}_{batch_id}_{seq}',
                     freeform_tags=vm_tags,
-                    metadata={'ssh_authorized_keys': node_config['AuthorizedKey']},
-                    source_details=oci_adaptor.oci.core.models.InstanceSourceViaImageDetails(
+                    metadata={
+                        'ssh_authorized_keys': node_config['AuthorizedKey']
+                    },
+                    source_details=oci_adaptor.oci.core.models.
+                    InstanceSourceViaImageDetails(
                         source_type='image',
                         image_id=node_config['ImageId'],
                         boot_volume_size_in_gbs=node_config['BootVolumeSize'],
-                        boot_volume_vpus_per_gb=int(node_config['BootVolumePerf']),
+                        boot_volume_vpus_per_gb=int(
+                            node_config['BootVolumePerf']),
                     ),
-                    create_vnic_details=oci_adaptor.oci.core.models.CreateVnicDetails(
+                    create_vnic_details=oci_adaptor.oci.core.models.
+                    CreateVnicDetails(
                         assign_public_ip=True,
                         subnet_id=vcn,
                     ),
                     shape_config=machine_shape_config,
                     preemptible_instance_config=preempitible_config,
-                )
-            )
+                ))
 
             new_inst = launch_instance_response.data
             if not head_instance_id:
                 head_instance_id = new_inst.id
                 logger.debug(f'New head node: {head_instance_id}')
 
-            created_instances.append(
-                {
-                    'inst_id': new_inst.id,
-                    'name': new_inst.display_name,
-                    'ad': new_inst.availability_domain,
-                    'compartment': new_inst.compartment_id,
-                    'status': new_inst.lifecycle_state,
-                    'oci_tags': new_inst.freeform_tags,
-                }
-            )
+            created_instances.append({
+                'inst_id': new_inst.id,
+                'name': new_inst.display_name,
+                'ad': new_inst.availability_domain,
+                'compartment': new_inst.compartment_id,
+                'status': new_inst.lifecycle_state,
+                'oci_tags': new_inst.freeform_tags,
+            })
         # end for loop
     # end if to_start_count > 0:...
 
@@ -237,7 +233,6 @@ def run_instances(
         logger.debug(f'Provisioning for node {inst["name"]}')
         _wait_until_status(region, inst['inst_id'], 'RUNNING')
         logger.debug(f'Instance {inst["name"]} is RUNNING.')
-
 
     total_time = round(time.time() * 1000) - start_time
     logger.debug('Total time elapsed: {0} milli-seconds.'.format(total_time))
@@ -272,8 +267,8 @@ def stop_instances(
     nodes = _get_filtered_nodes(region, tag_filters)
     for node in nodes:
         oci_adaptor.get_core_client(
-            region, oci_utils.oci_config.get_profile()
-        ).instance_action(instance_id=node['inst_id'], action='STOP')
+            region, oci_utils.oci_config.get_profile()).instance_action(
+                instance_id=node['inst_id'], action='STOP')
 
 
 @query_utils.debug_enabled(logger)
@@ -320,9 +315,8 @@ def cleanup_ports(
 
 
 @query_utils.debug_enabled(logger)
-def wait_instances(
-    region: str, cluster_name_on_cloud: str, state: Optional[status_lib.ClusterStatus]
-) -> None:
+def wait_instances(region: str, cluster_name_on_cloud: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
     del region, cluster_name_on_cloud, state
     # We already wait for the instances to be running in run_instances.
     # We can not implement the wait logic here because the provisioning
@@ -375,44 +369,38 @@ def _get_filtered_nodes(region, tag_filters):
             raise exceptions.ClusterStatusFetchingError(
                 f'Failed to query status for OCI cluster {tag_filters}.'
                 'Details: '
-                f'{common_utils.format_exception(e, use_bracket=True)}'
-            )
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
     for inst in insts:
         inst_id = inst.identifier
-        return_nodes.append(
-            {
-                'inst_id': inst_id,
-                'name': inst.display_name,
-                'ad': inst.availability_domain,
-                'compartment': inst.compartment_id,
-                'status': inst.lifecycle_state,
-                'oci_tags': inst.freeform_tags,
-            }
-        )
+        return_nodes.append({
+            'inst_id': inst_id,
+            'name': inst.display_name,
+            'ad': inst.availability_domain,
+            'compartment': inst.compartment_id,
+            'status': inst.lifecycle_state,
+            'oci_tags': inst.freeform_tags,
+        })
 
     return [
-        v
-        for v in return_nodes
-        if v['status'] in ('PROVISIONING', 'STARTING', 'RUNNING', 'STOPPED', 'STOPPING')
+        v for v in return_nodes
+        if v['status'] in ('PROVISIONING', 'STARTING', 'RUNNING', 'STOPPED',
+                           'STOPPING')
     ]
 
 
 def _get_inst_obj_with_ip(region, inst_info):
     list_vnic_attachments_response = oci_adaptor.get_core_client(
-        region, oci_utils.oci_config.get_profile()
-    ).list_vnic_attachments(
-        availability_domain=inst_info['ad'],
-        compartment_id=inst_info['compartment'],
-        instance_id=inst_info['inst_id'],
-    )
+        region, oci_utils.oci_config.get_profile()).list_vnic_attachments(
+            availability_domain=inst_info['ad'],
+            compartment_id=inst_info['compartment'],
+            instance_id=inst_info['inst_id'],
+        )
 
     vnic = list_vnic_attachments_response.data[0]
-    get_vnic_response = (
-        oci_adaptor.get_net_client(region, oci_utils.oci_config.get_profile())
-        .get_vnic(vnic_id=vnic.vnic_id)
-        .data
-    )
+    get_vnic_response = (oci_adaptor.get_net_client(
+        region,
+        oci_utils.oci_config.get_profile()).get_vnic(vnic_id=vnic.vnic_id).data)
 
     internal_ip = get_vnic_response.private_ip
     external_ip = get_vnic_response.public_ip
@@ -431,8 +419,7 @@ def _get_inst_obj_with_ip(region, inst_info):
 
 def _wait_until_status(region, node_id, status):
     compute_client = oci_adaptor.get_core_client(
-        region, oci_utils.oci_config.get_profile()
-    )
+        region, oci_utils.oci_config.get_profile())
 
     get_instance_response = compute_client.get_instance(instance_id=node_id)
     oci_adaptor.oci.wait_until(
@@ -458,8 +445,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
                     'There are multiple head nodes in the cluster '
                     f'(current head instance id: {head_instance_id}, '
                     f'newly discovered id: {inst["inst_id"]}. It is likely '
-                    f'that something goes wrong.'
-                )
+                    f'that something goes wrong.')
                 # Don't break here so that we can continue to check and
                 # warn user about duplicate head instance issue so that
                 # user can take further action on the abnormal cluster.

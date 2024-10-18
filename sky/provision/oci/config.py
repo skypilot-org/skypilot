@@ -15,14 +15,14 @@ from sky.provision.oci.query_utils import query_helper
 
 logger = sky_logging.init_logger(__name__)
 
+
 @common.log_function_start_end
 def bootstrap_instances(
         region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
     # OCI module import and oci client
-    oci_adaptor.get_core_client(region,
-        oci_utils.oci_config.get_profile())
+    oci_adaptor.get_core_client(region, oci_utils.oci_config.get_profile())
 
     # Find / create a compartment for creating instances.
     compartment = query_helper.find_compartment(region)
