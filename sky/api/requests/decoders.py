@@ -55,7 +55,7 @@ def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return clusters
 
 
-@register_handler('launch', 'exec')
+@register_handler('launch', 'exec', 'jobs/launch')
 def decode_launch(
     return_value: Dict[str, Any]
 ) -> Tuple[str, 'backends.CloudVmRayResourceHandle']:
