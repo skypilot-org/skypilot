@@ -427,6 +427,15 @@ Available fields and semantics:
     # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
 
+    # Enable gVNIC (optional).
+    #
+    # Set to true to use gVNIC on GCP instances. gVNIC offers higher performance
+    # for multi-node clusters, but costs more.
+    # Reference: https://cloud.google.com/compute/docs/networking/using-gvnic
+    #
+    # Default: false.
+    enable_gvnic: false
+
   # Advanced Azure configurations (optional).
   # Apply to all new instances but not existing ones.
   azure:

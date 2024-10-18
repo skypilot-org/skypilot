@@ -4,6 +4,19 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
+ - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
+   get_credential_file_mounts(): bug fix for sky config
+   file path resolution (by os.path.expanduser) when construct the file
+   mounts. This bug will cause the created workder nodes located in different
+   compartment and VCN than the header node if user specifies compartment_id
+   in the sky config file, because the ~/.sky/config is not sync-ed to the
+   remote machine.
+   The workaround is set the sky config file path using ENV before running
+   the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
+ - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
+   make_deploy_resources_variables(): Bug fix for specify the image_id as
+   the ocid of the image in the task.yaml file, in this case the image_id
+   for the node config should be set to the ocid instead of a dict.
 """
 import json
 import logging
@@ -212,7 +225,9 @@ class OCI(clouds.Cloud):
             listing_id = image_cols[1]
             res_ver = image_cols[2]
         else:
-            image_id = resources.image_id
+            # Oct.12,2024 by HysunHe: Bug fix - resources.image_id is an
+            # dict. The image_id here should be the ocid format.
+            image_id = image_str
             listing_id = None
             res_ver = None
 
@@ -448,7 +463,7 @@ class OCI(clouds.Cloud):
         credential_files = [oci_cfg_file, api_key_file]
 
         # Sky config file is optional
-        if os.path.exists(sky_cfg_file):
+        if os.path.exists(os.path.expanduser(sky_cfg_file)):
             credential_files.append(sky_cfg_file)
 
         file_mounts = {

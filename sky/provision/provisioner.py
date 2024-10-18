@@ -572,7 +572,10 @@ def post_provision_runtime_setup(
                                          provision_record=provision_record,
                                          custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
-            logger.error('*** Failed setting up cluster. ***')
+            logger.error(
+                ux_utils.error_message(
+                    'Failed to set up SkyPilot runtime on cluster.',
+                    provision_logging.config.log_path))
             logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
             with ux_utils.print_exception_no_traceback():
                 raise

@@ -15,6 +15,9 @@ from sky.utils import status_lib
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
 
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import utils as kubernetes_utils
+
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
 
@@ -310,7 +313,7 @@ def _get_estimated_cost_for_cost_report(
 
 
 def show_kubernetes_cluster_status_table(
-        clusters: List['kubernetes_utils.KubernetesClusterInfo'],
+        clusters: List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
         show_all: bool) -> None:
     """Compute cluster table values and display for Kubernetes clusters."""
     status_columns = [
