@@ -5,10 +5,12 @@ import os
 import re
 import shlex
 import subprocess
+import tempfile
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
+import uuid
 
 import colorama
 
@@ -848,7 +850,8 @@ class Storage(object):
 
     def add_store(self,
                   store_type: Union[str, StoreType],
-                  region: Optional[str] = None) -> AbstractStore:
+                  region: Optional[str] = None,
+                  compress_local: bool = False) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -858,6 +861,8 @@ class Storage(object):
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
           region: str; Region to place the bucket in. Caller must ensure that
             the region is valid for the chosen store_type.
+          compress_local: boolean; Decides whether we want to compress the
+            filemount before uploaidng to the bucket.
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -922,7 +927,10 @@ class Storage(object):
         self._add_store(store)
 
         # Upload source to store
-        self._sync_store(store)
+        if compress_local:
+            self._maybe_compress_sync_store(store)
+        else:
+            self._sync_store(store)
 
         return store
 
@@ -985,6 +993,63 @@ class Storage(object):
         """Syncs the source and destinations of all stores in the Storage"""
         for _, store in self.stores.items():
             self._sync_store(store)
+
+    def _maybe_compress_sync_store(self, store: AbstractStore):
+        """Same as sync_store, but compresses before uploading"""
+        # Only supports workdir, self.source should be type str
+        if self.source is None or not isinstance(self.source, str):
+            self._sync_store(store)
+            return
+
+        def num_files(source, excluded_list):
+            count = 0
+            find_cmd = [
+                'find', source, '-type', 'd', '-name', '.git', '-prune', '-o',
+                '-print'
+            ]
+            grep_cmd = ['cat']
+            if len(excluded_list) > 0:
+                grep_cmd = ['grep', '-vE', f'"({"|".join(excluded_list)})"']
+            all_files = subprocess.Popen(find_cmd, stdout=subprocess.PIPE)
+            relevant_files = subprocess.Popen(grep_cmd,
+                                              stdin=all_files.stdout,
+                                              stdout=subprocess.PIPE)
+            all_files.stdout.close()
+            num_files = subprocess.Popen(['wc', '-l'],
+                                         stdin=relevant_files.stdout,
+                                         stdout=subprocess.PIPE)
+            relevant_files.stdout.close()
+            count += int(num_files.communicate()[0])
+            num_files.stdout.close()
+            return count
+
+        excluded_list = storage_utils.\
+            get_excluded_files_from_gitignore(self.source)
+        excluded_list.append('.git')
+
+        if num_files(self.source, excluded_list) <= 10:
+            self._sync_store(store)
+            return
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                # uuid used to avoid collisions if compressing multiple sources
+                file_name = f'skypilot-filemounts-{uuid.uuid1()}.zip'
+                tmp_path = os.path.join(tmpdirname, file_name)
+                command = ['tar', '-czf', tmp_path]
+                for ignored_file in excluded_list:
+                    command.append(f'--exclude=./{ignored_file}')
+                # TODO(warrickhe): Possibly extend compression to all filemounts
+                # Currently only supports workdirs
+                command.extend(['-C', self.source, '.'])
+                subprocess.Popen(command)
+                original_source = store.source
+                store.source = tmpdirname
+                self._sync_store(store)
+                store.source = original_source
+        except exceptions.StorageUploadError:
+            logger.error('Problem when trying to upload compressed file')
+            raise
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
