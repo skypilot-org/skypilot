@@ -2502,7 +2502,7 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
         [
             f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} -y -d',
             # Wait the setup and initialize before the GPU process starts.
-            'sleep 180',
+            'sleep 240',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
