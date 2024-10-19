@@ -176,8 +176,8 @@ Using Custom Images
 -------------------
 By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
 
-1. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`_).
-2. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`_).
+1. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`__).
+2. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`__).
 
 These images are pre-installed with SkyPilot dependencies for fast startup.
 
