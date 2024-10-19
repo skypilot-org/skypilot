@@ -532,7 +532,6 @@ def check_instance_fits(context: Optional[str],
                        node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         # check if the requested TPU type is in the cluster
         # if exists, check if the requested TPU topology is available in the cluster.
-        node_list = gpu_nodes
         acc_type = candidate_instance_type.accelerator_type
         acc_count = candidate_instance_type.accelerator_count
         tpu_list_in_cluster = []
@@ -544,7 +543,7 @@ def check_instance_fits(context: Optional[str],
                 # forming a multi-host TPU podslice, it only reflects the
                 # number of TPU chips in this individual node, not the entire
                 # multi-host TPU podslice.
-                node_tpu_chip_count = node.metadata.labels[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY]
+                node_tpu_chip_count = int(node.metadata.labels[GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY])
                 chip_dimensions = [int(chip_count) for chip_count in topology_value.split("x")]
                 # topology_chip_count represents the total number of TPU chips
                 # in the entire podslice, whether it is a single-host or
@@ -748,7 +747,7 @@ def get_gpu_label_key_value(context: Optional[str],
 
 
 def get_tpu_topology_label_key_value(
-        accelerator: str, accelerator_count: int) -> Tuple[str, Optional[str]]:
+        context: Optional[str], accelerator: str, accelerator_count: int) -> Tuple[str, Optional[str]]:
     """Returns the TPU topology label key and value for given accelerator type.
 
     Args:
@@ -764,7 +763,7 @@ def get_tpu_topology_label_key_value(
               accelerator type.
             - The TPU topology label is missing for the specified accelerator.
     """
-    label_formatter, node_labels = detect_gpu_label_formatter()
+    label_formatter, node_labels = detect_gpu_label_formatter(context)
     assert isinstance(label_formatter, GKELabelFormatter)
 
     tpu_label_key = label_formatter.TPU_LABEL_KEY
