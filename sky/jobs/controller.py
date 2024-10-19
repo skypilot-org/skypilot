@@ -363,18 +363,7 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
         finally:
-            # This will set all unfinished tasks to CANCELLING, and will not
-            # affect the jobs in terminal states.
-            # We need to call set_cancelling before set_cancelled to make sure
-            # the table entries are correctly set.
-            callback_func = managed_job_utils.event_callback_func(
-                job_id=self._job_id,
-                task_id=task_id,
-                task=self._dag.tasks[task_id])
-            managed_job_state.set_cancelling(job_id=self._job_id,
-                                             callback_func=callback_func)
-            managed_job_state.set_cancelled(job_id=self._job_id,
-                                            callback_func=callback_func)
+            self._cancel_all_unfinished_tasks(task_id)
 
     def _update_failed_task_state(
             self, task_id: int,
@@ -390,6 +379,19 @@ class JobsController:
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id]))
+
+    def _cancel_all_unfinished_tasks(self, task_id: int):
+        """Cancel all unfinished tasks.
+        Will not affect the jobs in terminal states.
+        """
+        callback_func = managed_job_utils.event_callback_func(
+            job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id])
+        # Call set_cancelling before set_cancelled to make sure the table
+        # entries are correctly set.
+        managed_job_state.set_cancelling(job_id=self._job_id,
+                                         callback_func=callback_func)
+        managed_job_state.set_cancelled(job_id=self._job_id,
+                                        callback_func=callback_func)
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
