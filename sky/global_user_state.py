@@ -187,7 +187,7 @@ def add_or_update_cluster(cluster_name: str,
     transaction_id = get_transaction_id(cluster_name)
     if (expected_transaction_id is not None and
             expected_transaction_id != transaction_id):
-        logger.warning(f'Cluster {cluster_name} has been updated by another '
+        logger.debug(f'Cluster {cluster_name} has been updated by another '
                        'transaction. Skipping update.')
         return
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -431,7 +431,7 @@ def set_cluster_autostop_value(
     transaction_id = get_transaction_id(cluster_name)
     if (expected_transaction_id is not None and
             expected_transaction_id != transaction_id):
-        logger.warning(f'Cluster {cluster_name} has been updated by another '
+        logger.debug(f'Cluster {cluster_name} has been updated by another '
                        'transaction. Skipping update.')
         return
 
