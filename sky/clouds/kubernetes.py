@@ -371,13 +371,11 @@ class Kubernetes(clouds.Cloud):
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
         if acc_count > 0 and acc_type is not None:
-            k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(context, acc_type)
+            k8s_acc_label_key, k8s_acc_label_value, k8s_tpu_topology_label_key, k8s_tpu_topology_label_value = (
+                kubernetes_utils.get_accelerator_label_key_value(context, acc_type, acc_count))
             if (k8s_acc_label_key ==
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
-                k8s_tpu_topology_label_key, k8s_tpu_topology_label_value = (
-                    kubernetes_utils.get_tpu_topology_label_key_value(context, acc_type, acc_count))
 
         port_mode = network_utils.get_port_mode(None)
 

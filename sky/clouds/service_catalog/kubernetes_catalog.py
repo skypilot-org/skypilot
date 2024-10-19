@@ -84,7 +84,7 @@ def list_accelerators_realtime(
     ) or not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
-    has_gpu = kubernetes_utils.detect_gpu_resource(context)
+    has_gpu = kubernetes_utils.detect_accelerator_resource(context)
     if not has_gpu:
         return {}, {}, {}
 

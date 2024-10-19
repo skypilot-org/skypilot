@@ -420,8 +420,8 @@ def detect_gpu_label_formatter(
 
 
 @functools.lru_cache(maxsize=10)
-def detect_gpu_resource(context: Optional[str]) -> Tuple[bool, Set[str]]:
-    """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
+def detect_accelerator_resource(context: Optional[str]) -> Tuple[bool, Set[str]]:
+    """Checks if the Kubernetes cluster has GPU/TPU resource.
 
     Two types of accelerator resources are available which are each checked
     with nvidia.com/gpu and google.com/tpu. If nvidia.com/gpu resource is
@@ -574,13 +574,14 @@ def check_instance_fits(context: Optional[str],
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
+    acc_count = k8s_instance_type.accelerator_count
     if acc_type is not None:
         # If GPU/TPUs are requested, check if GPU/TPU type is available, and
         # if so, check if CPU and memory requirements on the specific node are
         # met.
         try:
-            gpu_label_key, gpu_label_val = get_gpu_label_key_value(
-                context, acc_type)
+            gpu_label_key, gpu_label_val, _, _ = get_accelerator_label_key_value(
+                context, acc_type, acc_count)
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -619,25 +620,31 @@ def check_instance_fits(context: Optional[str],
         return fits, reason
 
 
-def get_gpu_label_key_value(context: Optional[str],
-                            acc_type: str,
-                            check_mode=False) -> Tuple[str, str]:
-    """Returns the label key and value for the given GPU type.
+def get_accelerator_label_key_value(context: Optional[str],
+                                    acc_type: str,
+                                    acc_count: int,
+                                    check_mode=False
+                                    ) -> Tuple[str, str, str, str]:
+    """Returns the label key and value for the given GPU/TPU type.
 
     Args:
-        acc_type: The GPU type required by the task.
-        check_mode: If True, only checks if the cluster has GPU resources and
-            labels are setup on the cluster. acc_type is ignore does not return
-            the label key and value. Useful for checking if GPUs are configured
-            correctly on the cluster without explicitly requesting a acc_type.
+        acc_type: The GPU/TPU type required by the task.
+        acc_count: Number of GPU/TPUs required by the task.
+        check_mode: If True, only checks if the cluster has GPU/TPU resources
+            and labels are setup on the cluster. acc_type is ignore does not
+            return the label key and value. Useful for checking if GPUs are
+            configured correctly on the cluster without explicitly requesting
+            a acc_type.
     Returns:
-        A tuple of the label key and value. Returns empty strings if check_mode
-        is True.
+        A tuple of the accelerator label key, value, topology label key, and
+        topology value. The topology label key and value are populated only if
+        the requested accelerator type is TPU. Returns empty strings if
+        check_mode is True.
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
-            - The cluster does not have GPU resources (nvidia.com/gpu)
-            - The cluster does not have GPU labels setup correctly
-            - The cluster doesn't have any nodes with acc_type GPU
+            - The cluster does not have GPU/TPU resources (nvidia.com/gpu, google.com/tpu)
+            - The cluster does not have GPU/TPU labels setup correctly
+            - The cluster doesn't have any nodes with acc_type GPU/TPU
     """
     # Check if the cluster has GPU resources
     # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
@@ -656,14 +663,14 @@ def get_gpu_label_key_value(context: Optional[str],
             # If check mode is enabled and autoscaler is set, we can return
             # early since we assume the cluster autoscaler will handle GPU
             # node provisioning.
-            return '', ''
+            return '', '', '', ''
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
         assert formatter is not None, ('Unsupported autoscaler type:'
                                        f' {autoscaler_type}')
         return formatter.get_label_key(acc_type), formatter.get_label_value(
-            acc_type)
+            acc_type), '', ''
 
-    has_gpus, cluster_resources = detect_gpu_resource(context)
+    has_gpus, cluster_resources = detect_accelerator_resource(context)
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
         label_formatter, node_labels = \
@@ -701,7 +708,7 @@ def get_gpu_label_key_value(context: Optional[str],
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
-                return '', ''
+                return '', '', '', ''
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -713,7 +720,20 @@ def get_gpu_label_key_value(context: Optional[str],
                     if (label_formatter.match_label_key(label) and
                             label_formatter.get_accelerator_from_label_value(
                                 value) == acc_type):
-                        return label, value
+                        if is_tpu_pod_slice(acc_type):
+                            assert isinstance(label_formatter, GKELabelFormatter)
+                            topology_label_key = label_formatter.TPU_TOPOLOGY_LABEL_KEY
+                            labels_dict = dict(node_labels[node_name])
+                            if labels_dict.get(label_formatter.TPU_LABEL_KEY) == acc_type:
+                                topology_value = labels_dict.get(topology_label_key)
+                                chip_dimensions = [int(chip_count) for chip_count in topology_value.split("x")]
+                                num_chips = functools.reduce(lambda x, y: x * y, chip_dimensions)
+                                if num_chips == acc_count:
+                                    return label, value, topology_label_key, topology_value
+                                else:
+                                    continue
+                        else:
+                            return label, value, '', ''
 
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
@@ -722,15 +742,19 @@ def get_gpu_label_key_value(context: Optional[str],
                     all_labels = []
                     for node_name, label_list in node_labels.items():
                         all_labels.extend(label_list)
-                    gpus_available = set(v for k, v in all_labels
+                    acc_available = set(v for k, v in all_labels
                                          if label_formatter.match_label_key(k))
-                    suffix = f' Available GPUs on the cluster: {gpus_available}'
+                    suffix = f' Available GPU/TPUs on the cluster: {acc_available}'
+                # TODO(Doyoung): Update the error message raised with the multi-host
+                # TPU support.
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
                     f'with {acc_type}. Please ensure at least one node in the '
                     f'cluster has {acc_type} and node labels are setup '
                     'correctly. '
-                    f'Please refer to the documentation for more. {suffix}')
+                    f'Please refer to the documentation for more. {suffix}. '
+                    'Note that multi-host TPU podslices are currently not '
+                    'unsupported.')
     else:
         # If GPU resources are not detected, raise error
         with ux_utils.print_exception_no_traceback():
@@ -747,51 +771,6 @@ def get_gpu_label_key_value(context: Optional[str],
                 f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
                 'Please refer to the documentation on how to set up GPUs.'
                 f'{suffix}')
-
-
-def get_tpu_topology_label_key_value(
-        context: Optional[str], accelerator: str, accelerator_count: int) -> Tuple[str, Optional[str]]:
-    """Returns the TPU topology label key and value for given accelerator type.
-
-    Args:
-        accelerator: The TPU accelerator type required by the task.
-
-    Returns:
-        A tuple of the TPU topology label key and value.
-
-    Raises:
-        ResourcesUnavailableError: Can be raised from the following conditions:
-            - The cluster does not have TPU labels set up correctly.
-            - The cluster doesn't have any nodes with the specified TPU
-              accelerator type.
-            - The TPU topology label is missing for the specified accelerator.
-    """
-    label_formatter, node_labels = detect_gpu_label_formatter(context)
-    assert isinstance(label_formatter, GKELabelFormatter)
-
-    tpu_label_key = label_formatter.TPU_LABEL_KEY
-    tpu_topology_label_key = label_formatter.TPU_TOPOLOGY_LABEL_KEY
-
-    for labels in node_labels.values():
-        labels_dict = dict(labels)
-        if labels_dict.get(tpu_label_key) == accelerator:
-            topology_value = labels_dict.get(tpu_topology_label_key)
-            chip_dimensions = [int(chip_count) for chip_count in topology_value.split("x")]
-            num_chips = functools.reduce(lambda x, y: x * y, chip_dimensions)
-            if num_chips == accelerator_count:
-                return tpu_topology_label_key, topology_value
-
-    # If TPU labels are not detected, raise error
-    with ux_utils.print_exception_no_traceback():
-        suffix = ''
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            suffix = (' Available node labels on the cluster: '
-                      f'{node_labels}')
-        raise exceptions.ResourcesUnavailableError(
-            f'Unable to find TPU topology for accelerator {accelerator!r}. '
-            f'No node found with label `{tpu_label_key}={accelerator}` '
-            f'or missing {tpu_topology_label_key!r} label.{suffix}. Note '
-            'that multi-host TPU podslices are currently not unsupported.')
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
@@ -886,7 +865,7 @@ def check_credentials(context: Optional[str],
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
     try:
-        _, _ = get_gpu_label_key_value(context, acc_type='', check_mode=True)
+        _, _, _, _ = get_accelerator_label_key_value(context, acc_type='', acc_count=0, check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
