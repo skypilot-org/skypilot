@@ -43,9 +43,9 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
-from sky.clouds.utils import lambda_utils
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
@@ -378,11 +378,16 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    namespace = config['provider'].get(
-        'namespace',
-        kubernetes_utils.get_current_kube_config_context_namespace())
     context = config['provider'].get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
+    if context == kubernetes_utils.IN_CLUSTER_REGION:
+        # If the context is set to IN_CLUSTER_REGION, we are running in a pod
+        # with in-cluster configuration. We need to set the context to None
+        # to use the mounted service account.
+        context = None
+    namespace = config['provider'].get(
+        'namespace',
+        kubernetes_utils.get_kube_config_context_namespace(context))
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()
@@ -425,8 +430,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             ssh_jump_name,
             nodeport_mode,
             private_key_path=private_key_path,
-            namespace=namespace,
-            context=context)
+            context=context,
+            namespace=namespace)
     elif network_mode == port_forward_mode:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
         # does not require a ssh jump pod.
@@ -441,7 +446,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   on GKE.
         ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target, port_forward_mode, private_key_path=private_key_path)
+            ssh_target,
+            port_forward_mode,
+            private_key_path=private_key_path,
+            context=context,
+            namespace=namespace)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')

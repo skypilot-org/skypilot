@@ -6,6 +6,8 @@ import re
 import typing
 from typing import List, Optional, Set
 
+from sky import skypilot_config
+from sky.clouds import cloud_registry
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -177,3 +179,24 @@ class FeasibleResources:
     resources_list: List['resources_lib.Resources']
     fuzzy_candidate_list: List[str]
     hint: Optional[str]
+
+
+def need_to_query_reservations() -> bool:
+    """Checks if we need to query reservations from cloud APIs.
+
+    We need to query reservations if:
+    - The cloud has specific reservations.
+    - The cloud prioritizes reservations over on-demand instances.
+
+    This is useful to skip the potentially expensive reservation query for
+    clouds that do not use reservations.
+    """
+    for cloud_str in cloud_registry.CLOUD_REGISTRY.keys():
+        cloud_specific_reservations = skypilot_config.get_nested(
+            (cloud_str, 'specific_reservations'), None)
+        cloud_prioritize_reservations = skypilot_config.get_nested(
+            (cloud_str, 'prioritize_reservations'), False)
+        if (cloud_specific_reservations is not None or
+                cloud_prioritize_reservations):
+            return True
+    return False

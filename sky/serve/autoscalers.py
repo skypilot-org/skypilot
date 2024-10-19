@@ -131,6 +131,10 @@ class Autoscaler:
         """Load dynamic states to autoscaler."""
         raise NotImplementedError
 
+    def get_decision_interval(self) -> int:
+        """Get the decision interval for the autoscaler."""
+        raise NotImplementedError
+
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
         self.latest_version_ever_ready = dynamic_states.pop(

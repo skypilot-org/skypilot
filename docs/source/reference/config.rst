@@ -419,6 +419,15 @@ Available fields and semantics:
     # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
 
+    # Enable gVNIC (optional).
+    #
+    # Set to true to use gVNIC on GCP instances. gVNIC offers higher performance
+    # for multi-node clusters, but costs more.
+    # Reference: https://cloud.google.com/compute/docs/networking/using-gvnic
+    #
+    # Default: false.
+    enable_gvnic: false
+
   # Advanced Azure configurations (optional).
   # Apply to all new instances but not existing ones.
   azure:
@@ -494,6 +503,19 @@ Available fields and semantics:
     #
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
+
+    # Allowed context names to use for Kubernetes clusters (optional).
+    #
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
+    #
+    # If not specified, only the current active context is used for launching
+    # new clusters.
+    allowed_contexts:
+      - context1
+      - context2
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #

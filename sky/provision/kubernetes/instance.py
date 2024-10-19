@@ -336,7 +336,8 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
+def _set_env_vars_in_pods(namespace: str, context: Optional[str],
+                          new_pods: List):
     """Setting environment variables in pods.
 
     Once all containers are ready, we can exec into them and set env vars.
@@ -364,7 +365,7 @@ def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
                                      new_pod.metadata.name, rc, stdout)
 
 
-def _check_user_privilege(namespace: str, context: str,
+def _check_user_privilege(namespace: str, context: Optional[str],
                           new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
     # the kubernetes instance pod.
@@ -400,7 +401,8 @@ def _check_user_privilege(namespace: str, context: str,
                 'from the image.')
 
 
-def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
+def _setup_ssh_in_pods(namespace: str, context: Optional[str],
+                       new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
     set_k8s_ssh_cmd = (
@@ -444,7 +446,7 @@ def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
 
-def _label_pod(namespace: str, context: str, pod_name: str,
+def _label_pod(namespace: str, context: Optional[str], pod_name: str,
                label: Dict[str, str]) -> None:
     """Label a pod."""
     kubernetes.core_api(context).patch_namespaced_pod(
@@ -698,7 +700,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        logger.warning(f'run_instances: Error occurred when creating pods: {e}')
+        e_msg = common_utils.format_exception(e).replace('\n', ' ')
+        logger.warning('run_instances: Error occurred when creating pods: '
+                       f'{e_msg}')
         raise
 
 
@@ -715,7 +719,8 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _terminate_node(namespace: str, context: str, pod_name: str) -> None:
+def _terminate_node(namespace: str, context: Optional[str],
+                    pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
