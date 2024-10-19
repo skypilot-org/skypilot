@@ -3,15 +3,19 @@ import contextlib
 import enum
 import logging
 import threading
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import rich.console as rich_console
 
 from sky.utils import message_utils
 
 console = rich_console.Console(soft_wrap=True)
-_status: Optional['EncodedStatus'] = None
-_rich_status = None
+_statuses: Dict[str, Optional[Union['EncodedStatus',
+                                    'rich_console.Status']]] = {
+                                        'server': None,
+                                        'client': None,
+                                    }
+_decoding_status: Optional['_RevertibleStatus'] = None
 _status_nesting_level = 0
 
 _logging_lock = threading.RLock()
@@ -22,6 +26,7 @@ class Control(enum.Enum):
     INIT = 'rich_init'
     START = 'rich_start'
     STOP = 'rich_stop'
+    EXIT = 'rich_exit'
     UPDATE = 'rich_update'
 
     def encode(self, msg: str) -> str:
@@ -55,7 +60,7 @@ class EncodedStatusMessage:
         return message_utils.encode_payload(Control.START.encode(self.msg))
 
     def exit(self) -> str:
-        return message_utils.encode_payload(Control.STOP.encode(''))
+        return message_utils.encode_payload(Control.EXIT.encode(''))
 
     def update(self, msg: str) -> str:
         return message_utils.encode_payload(Control.UPDATE.encode(msg))
@@ -116,38 +121,40 @@ class _NoOpConsoleStatus:
 class _RevertibleStatus:
     """A wrapper for status that can revert to previous message after exit."""
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, status_type: str):
         self.previous_message = None
-        if _status is not None:
-            self.previous_message = _status.status
+        self.status_type = status_type
+        status = _statuses[status_type]
+        if status is not None:
+            self.previous_message = status.status
         self.message = message
 
     def __enter__(self):
         global _status_nesting_level
-        _status.update(self.message)
+        _statuses[self.status_type].update(self.message)
         _status_nesting_level += 1
-        _status.__enter__()
-        return _status
+        _statuses[self.status_type].__enter__()
+        return _statuses[self.status_type]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global _status_nesting_level, _status
         _status_nesting_level -= 1
         if _status_nesting_level <= 0:
             _status_nesting_level = 0
-            if _status is not None:
-                _status.__exit__(exc_type, exc_val, exc_tb)
-                _status = None
+            if _statuses[self.status_type] is not None:
+                _statuses[self.status_type].__exit__(exc_type, exc_val, exc_tb)
+                _statuses[self.status_type] = None
         else:
-            _status.update(self.previous_message)
+            _statuses[self.status_type].update(self.previous_message)
 
     def update(self, *args, **kwargs):
-        _status.update(*args, **kwargs)
+        _statuses[self.status_type].update(*args, **kwargs)
 
     def stop(self):
-        _status.stop()
+        _statuses[self.status_type].stop()
 
     def start(self):
-        _status.start()
+        _statuses[self.status_type].start()
 
 
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
@@ -156,9 +163,9 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     global _status
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
-        if _status is None:
-            _status = EncodedStatus(msg)
-        return _RevertibleStatus(msg)
+        if _statuses['server'] is None:
+            _statuses['server'] = EncodedStatus(msg)
+        return _RevertibleStatus(msg, 'server')
     return _NoOpConsoleStatus()
 
 
@@ -170,28 +177,28 @@ def stop_safe_status():
     spinner display.
     """
     if (threading.current_thread() is threading.main_thread() and
-            _status is not None):
-        _status.stop()
+            _statuses['server'] is not None):
+        _statuses['server'].stop()
 
 
 def force_update_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
     if (threading.current_thread() is threading.main_thread() and
-            _status is not None):
-        _status.update(msg)
+            _statuses['server'] is not None):
+        _statuses['server'].update(msg)
 
 
 @contextlib.contextmanager
 def safe_logger():
-    logged = False
     with _logging_lock:
-        if _rich_status is not None and _rich_status._live.is_started:  # pylint: disable=protected-access
-            _rich_status.stop()
-            yield
-            logged = True
-            _rich_status.start()
-    if not logged:
+        client_status = _statuses['client']
+
+        client_status_live = client_status is not None and client_status._live.is_started  # pylint: disable=protected-access
+        if client_status_live:
+            client_status.stop()
         yield
+        if client_status_live:
+            client_status.start()
 
 
 class RichSafeStreamHandler(logging.StreamHandler):
@@ -206,11 +213,10 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
-        global _rich_status
-        if _rich_status is None:
-            _rich_status = console.status(msg)
-        _rich_status.update(msg)
-        return _rich_status
+        global _statuses
+        if _statuses['client'] is None:
+            _statuses['client'] = console.status(msg)
+        return _RevertibleStatus(msg, 'client')
     return _NoOpConsoleStatus()
 
 
@@ -218,21 +224,31 @@ def decode_rich_status(encoded_msg: str) -> Optional[str]:
     """Decode the rich status message."""
     encoded_msg = message_utils.decode_payload(encoded_msg,
                                                raise_for_mismatch=False)
+    # print(f'encoded_msg: {encoded_msg}', flush=True)
     control, encoded_status = Control.decode(encoded_msg)
-    global _rich_status
+    global _decoding_status
     if control is None:
         return encoded_msg
-    if control == Control.INIT:
-        if _rich_status is not None:
-            _rich_status.update(encoded_status)
+
+    if threading.current_thread() is not threading.main_thread():
+        if control is not None:
+            return
         else:
-            _rich_status = console.status(encoded_status)
+            return encoded_msg
+
+    if control == Control.INIT:
+        if _statuses['client'] is None:
+            _statuses['client'] = console.status(encoded_status)
+        _decoding_status = _RevertibleStatus(encoded_status, 'client')
     else:
-        assert _rich_status, f'Rich status not initialized: {encoded_msg}'
+        assert _decoding_status is not None, f'Rich status not initialized: {encoded_msg}'
         if control == Control.UPDATE:
-            _rich_status.update(encoded_status)
+            _decoding_status.update(encoded_status)
         elif control == Control.STOP:
-            _rich_status.stop()
+            _decoding_status.stop()
+        elif control == Control.EXIT:
+            _decoding_status.__exit__(None, None, None)
+            _decoding_status = None
         elif control == Control.START:
-            _rich_status.start()
+            _decoding_status.start()
     return None
