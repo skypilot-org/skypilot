@@ -8,7 +8,7 @@ resources:
 import time
 import traceback
 import typing
-from typing import Optional
+from typing import cast, List, Optional
 
 import sky
 from sky import backends
@@ -24,6 +24,7 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -319,8 +320,9 @@ class StrategyExecutor:
                     # Failing directly avoids the infinite loop of retrying
                     # the launch when, e.g., an invalid cluster name is used
                     # and --retry-until-up is specified.
-                    reasons = (e.failover_history
-                               if e.failover_history else [e])
+                    reasons = cast(
+                        List[Exception],
+                        e.failover_history if e.failover_history else [e])
                     reasons_str = '; '.join(
                         common_utils.format_exception(err) for err in reasons)
                     logger.error(
@@ -382,7 +384,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
         # preempted.)
-        self._launched_resources: Optional['sky.resources.Resources'] = None
+        self._launched_resources: Optional['resources.Resources'] = None
 
     def _launch(self,
                 max_retry: Optional[int] = 3,

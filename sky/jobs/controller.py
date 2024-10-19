@@ -55,10 +55,10 @@ class JobsController:
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
+        # Example value:
+        #   sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
         job_id_env_vars = []
         for i, task in enumerate(self._dag.tasks):
             if len(self._dag.tasks) <= 1:
@@ -480,6 +480,7 @@ def start(job_id, dag_yaml, retry_until_up):
     except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
         task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
+        assert task_id is not None, task_id
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
         managed_job_state.set_cancelling(

@@ -169,6 +169,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     stopped_message = ''
     if not refresh:
         stopped_message = 'No in-progress managed jobs.'
+    controller_status: Optional[status_lib.ClusterStatus] = None
     try:
         handle = backend_utils.is_controller_accessible(
             controller=jobs_controller_type, stopped_message=stopped_message)

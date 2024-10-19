@@ -157,6 +157,7 @@ def _with_docker_login_config(
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
         # Already checked in extract_docker_image
+        assert resources.image_id is not None, resources.image_id
         assert len(resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
         return resources.copy(image_id={region: 'docker:' + docker_image},
