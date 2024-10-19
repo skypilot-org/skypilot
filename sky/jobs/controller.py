@@ -1,14 +1,16 @@
 """Controller: handles the life cycle of a managed job."""
 import argparse
+from concurrent import futures
 import multiprocessing
 import os
 import pathlib
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 import filelock
+import networkx as nx
 
 from sky import exceptions
 from sky import sky_logging
@@ -55,6 +57,9 @@ class JobsController:
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
+        self._dag_graph = self._dag.get_graph()
+        self._parallel_groups = self._identify_parallel_groups()
+
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
         # Example value:
@@ -85,6 +90,13 @@ class JobsController:
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
             task.update_envs(task_envs)
+
+    def _identify_parallel_groups(self) -> List[List[int]]:
+        """Identify groups of tasks that can be executed in parallel."""
+        parallel_groups = list(nx.topological_generations(self._dag_graph))
+        return [[self._dag.tasks.index(task)
+                 for task in group]
+                for group in parallel_groups]
 
     def _download_log_and_stream(
             self,
@@ -323,16 +335,48 @@ class JobsController:
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
 
+    def _run_parallel_tasks(self, task_group: List[int]) -> Optional[int]:
+        """Run a group of tasks in parallel.
+
+        Returns:
+            The ID of the first failed task if any task fails, None otherwise.
+        """
+        with futures.ThreadPoolExecutor(
+                max_workers=len(task_group)) as executor:
+            future_to_task = {
+                executor.submit(self._run_one_task, task_id,
+                                self._dag.tasks[task_id]): task_id
+                for task_id in task_group
+            }
+            # TODO(andy): Only unstarted futures are cancelled. We should
+            # also cancel futures that are already running when we encounter
+            # a failure or exception.
+            cancel_running_futures = lambda: [
+                future.cancel() for future in future_to_task.keys()
+            ]
+            for future in futures.as_completed(future_to_task):
+                task_id = future_to_task[future]
+                try:
+                    succeeded = future.result()
+                    if not succeeded:
+                        logger.error(f'Task {task_id} failed')
+                        cancel_running_futures()
+                        return task_id
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.exception(f'Task {task_id} raised an exception: {e}')
+                    cancel_running_futures()
+                    return task_id
+        return None
+
     def run(self):
         """Run controller logic and handle exceptions."""
-        task_id = 0
+        failed_task_id = None
         try:
-            succeeded = True
-            # We support chain DAGs only for now.
-            for task_id, task in enumerate(self._dag.tasks):
-                succeeded = self._run_one_task(task_id, task)
-                if not succeeded:
-                    break
+            parallel_groups = map(self._run_parallel_tasks,
+                                  self._parallel_groups)
+            failed_parallel_groups = filter(lambda x: x is not None,
+                                            parallel_groups)
+            failed_task_id = next(failed_parallel_groups, None)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -341,7 +385,8 @@ class JobsController:
                 for reason in e.reasons))
             logger.error(failure_reason)
             self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+                failed_task_id,
+                managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
                 failure_reason)
         except exceptions.ManagedJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
@@ -351,7 +396,8 @@ class JobsController:
             # The managed job should be marked as FAILED_NO_RESOURCE, as the
             # managed job may be able to launch next time.
             self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                failed_task_id,
+                managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
@@ -360,16 +406,18 @@ class JobsController:
                    f'{common_utils.format_exception(e, use_bracket=True)}')
             logger.error(msg)
             self._update_failed_task_state(
-                task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
-                msg)
+                failed_task_id,
+                managed_job_state.ManagedJobStatus.FAILED_CONTROLLER, msg)
         finally:
-            self._cancel_all_unfinished_tasks(task_id)
+            self._cancel_all_unfinished_tasks(failed_task_id)
 
     def _update_failed_task_state(
-            self, task_id: int,
+            self, task_id: Optional[int],
             failure_type: managed_job_state.ManagedJobStatus,
             failure_reason: str):
         """Update the state of the failed task."""
+        if task_id is None:
+            return
         managed_job_state.set_failed(
             self._job_id,
             task_id=task_id,
@@ -380,10 +428,12 @@ class JobsController:
                 task_id=task_id,
                 task=self._dag.tasks[task_id]))
 
-    def _cancel_all_unfinished_tasks(self, task_id: int):
+    def _cancel_all_unfinished_tasks(self, task_id: Optional[int]):
         """Cancel all unfinished tasks.
         Will not affect the jobs in terminal states.
         """
+        if task_id is None:
+            return
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id])
         # Call set_cancelling before set_cancelled to make sure the table
