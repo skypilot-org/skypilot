@@ -57,9 +57,9 @@ TPU_RESOURCE_KEY = 'google.com/tpu'
 
 NO_GPU_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
-    f'{GPU_RESOURCE_KEY} or {TPU_RESOURCE_KEY} resource is available'
-    ' on the nodes and the node labels for identifying '
-    'GPUs/TPUs (e.g., skypilot.co/accelerator) are setup correctly. ')
+    f'{GPU_RESOURCE_KEY} or {TPU_RESOURCE_KEY} resource is available '
+    'on the nodes and the node labels for identifying GPUs/TPUs '
+    '(e.g., skypilot.co/accelerator) are setup correctly. ')
 
 KUBERNETES_AUTOSCALER_NOTE = (
     'Note: Kubernetes cluster autoscaling is enabled. '
