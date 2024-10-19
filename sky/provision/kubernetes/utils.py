@@ -563,9 +563,12 @@ def check_instance_fits(context: Optional[str],
                 if node_tpu_chip_count == topology_chip_count and topology_chip_count == acc_count:
                     return True, None
         tpu_list_in_cluster_str = ','.join(tpu_list_in_cluster)
+        # TODO(Doyoung): Update the error message raised with the multi-host
+        # TPU support.
         return False, ('Requested TPU type was not found in the cluster. TPU '
                        'types found in the cluster: '
-                       f'{tpu_list_in_cluster_str}.')
+                       f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
+                       'podslices are currently not unsupported.')
 
     nodes = get_kubernetes_nodes(context)
     k8s_instance_type = KubernetesInstanceType.\
