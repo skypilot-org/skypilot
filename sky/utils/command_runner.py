@@ -502,6 +502,8 @@ class SSHCommandRunner(CommandRunner):
         if self.ssh_control_name is not None:
             control_path = _ssh_control_path(self.ssh_control_name)
             if control_path is not None:
+                # Suppress the `Exit request sent.` output for this comamnd
+                # which would interrupt the CLI spinner.
                 cmd = (f'ssh -O exit -S {control_path}/%C '
                        f'{self.ssh_user}@{self.ip} > /dev/null 2>&1')
                 logger.debug(f'Closing cached connection {control_path!r} with '
