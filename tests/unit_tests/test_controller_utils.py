@@ -105,7 +105,9 @@ def test_get_controller_resources_with_task_resources(
         assert config == default_controller_resources, config
     assert not all_cloud_names
 
-    # 2. Some resources cannot host controllers.
+    # 2. All resources has cloud specified. Some of them
+    # could NOT host controllers. Return a set, only
+    # containing those could host controllers.
     all_clouds = {
         sky.AWS(),
         sky.GCP(),
@@ -139,7 +141,8 @@ def test_get_controller_resources_with_task_resources(
         assert config == default_controller_resources, config
     assert not all_cloud_names_expected
 
-    # 3. Some resources do not have cloud specified.
+    # 3. Some resources does not have cloud specified.
+    # Return the default resources.
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
@@ -151,6 +154,9 @@ def test_get_controller_resources_with_task_resources(
     assert config == default_controller_resources, config
 
     # 4. All resources have clouds, regions, and zones specified.
+    # Return a set of controller resources for all combinations of clouds,
+    # regions, and zones. Each combination should contain the default resources
+    # along with the cloud, region, and zone.
     all_cloud_regions_zones = [
         sky.Resources(cloud=sky.AWS(), region='us-east-1', zone='us-east-1a'),
         sky.Resources(cloud=sky.AWS(), region='ap-south-1', zone='ap-south-1b'),
@@ -171,7 +177,10 @@ def test_get_controller_resources_with_task_resources(
     _check_controller_resources(controller_resources, expected_combinations,
                                 default_controller_resources)
 
-    # 5. Clouds and regions specified but zones partially specified.
+    # 5. Clouds and regions are specified, but zones are partially specified.
+    # Return a set containing combinations where the zone is None
+    # when not all zones are specified in the input for the given region. The default
+    # resources should be returned along with the cloud and region, and the zone (if specified).
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
@@ -189,6 +198,9 @@ def test_get_controller_resources_with_task_resources(
                                 default_controller_resources)
 
     # 6. Mixed case: Some resources have clouds and regions or zones, others do not.
+    # For clouds where regions or zones are not specified in the input, return None
+    # for those fields. The default resources should be returned along with the cloud,
+    # region (if specified), and zone (if specified).
     controller_resources = controller_utils.get_controller_resources(
         controller=controller_utils.Controllers.from_type(controller_type),
         task_resources=[
