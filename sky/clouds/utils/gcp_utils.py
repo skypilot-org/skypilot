@@ -36,7 +36,7 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu(resources):
         return False
-    assert resources is not None
+    assert (resources is not None and len(resources.accelerators) == 1)
     acc, _ = list(resources.accelerators.items())[0]
     if kubernetes_utils.is_tpu_pod_slice(acc):
         return False
