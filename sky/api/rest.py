@@ -436,7 +436,7 @@ async def download_logs(request: fastapi.Request,
 
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_logs_dir_prefix(user_hash)
-    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
+    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     print('zhwu DEBUG: logs_dir_on_api_server', logs_dir_on_api_server)
     cluster_job_download_logs_body = payloads.ClusterJobsDownloadLogsBody(
         cluster_name=cluster_jobs_body.cluster_name,
