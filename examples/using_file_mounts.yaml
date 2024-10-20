@@ -125,7 +125,6 @@ run: |
   cd ~/sky_workdir
   ! ls sky.egg-info/
 
-  # Symlinks should be copied, but they will be broken
+  # Symlinks will not be uploaded for safety reason (by zip).
   # Assumes symlink named circle-link in /tmp/workdir (created by test_smoke.py)
-  ls /tmp/workdir/circle-link
-  ! readlink -e /tmp/workdir/circle-link
+  ! ls /tmp/workdir/circle-link

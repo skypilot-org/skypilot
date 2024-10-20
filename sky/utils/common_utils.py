@@ -14,6 +14,7 @@ import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
+import warnings
 import zipfile
 
 import jinja2
@@ -639,16 +640,18 @@ def deprecated_function(
 
 
 def zip_files_and_folders(items: List[str], output_file):
-    with zipfile.ZipFile(output_file, 'w') as zipf:
-        for item in items:
-            if os.path.isfile(item):
-                zipf.write(item)
-            elif os.path.isdir(item):
-                for root, _, files in os.walk(item):
-                    for file in files:
-                        zipf.write(os.path.join(root, file))
-            else:
-                raise ValueError(f'{item} does not exist.')
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning, message='Duplicate name:')
+        with zipfile.ZipFile(output_file, 'w') as zipf:
+            for item in items:
+                if os.path.isfile(item):
+                    zipf.write(item)
+                elif os.path.isdir(item):
+                    for root, _, files in os.walk(item):
+                        for file in files:
+                            zipf.write(os.path.join(root, file))
+                else:
+                    raise ValueError(f'{item} does not exist.')
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
