@@ -9,7 +9,6 @@
 service:
   readiness_probe: /v1/models
   replicas: 2
-  load_balancing_policy: round_robin
 
 resources:
   ports: 8087

@@ -13,7 +13,6 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
-  load_balancing_policy: round_robin
   replica_policy:
     min_replicas: 0
     max_replicas: 2

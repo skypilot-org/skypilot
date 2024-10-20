@@ -6,7 +6,6 @@
 service:
   readiness_probe: /
   replicas: 1
-  load_balancing_policy: round_robin
 
 resources:
   ports: 8000
