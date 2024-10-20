@@ -1079,7 +1079,8 @@ class ServeCodeGen:
             f'{replica_id}, {purge}), end="", flush=True) '
             'if getattr(constants, "SERVE_VERSION", 0) >= 2 else '
             f'exec("raise RuntimeError('
-            f'{constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})"))()'
+            f'{serve_constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})\
+            ")()'
         ]
         return cls._build(code)
 
