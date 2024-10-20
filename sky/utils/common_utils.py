@@ -232,11 +232,10 @@ def get_global_job_id(job_timestamp: str,
     return global_job_id
 
 
-def get_unique_task_name(_: 'task_lib.Task') -> str:
-    timestamp = int(time.time())
+def get_unique_task_name(task: 'task_lib.Task') -> str:
+    name = task.name or f'task_{int(time.time())}'
     unique_suffix = uuid.uuid4().hex[:6]
-    name = f'task_{timestamp}_{unique_suffix}'
-    return name
+    return f'{name}_{unique_suffix}'
 
 
 class Backoff:

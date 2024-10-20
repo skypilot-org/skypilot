@@ -37,7 +37,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import fastapi
 
-    from sky import task as task_lib
     from sky.serve import replica_managers
 
 SKY_SERVE_CONTROLLER_NAME: str = (
