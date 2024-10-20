@@ -36,7 +36,6 @@ class Dag:
         """
         self.name = name
         self._task_name_lookup: Dict[str, 'task.Task'] = {}
-        self.edges: Dict['task.Task', Set['task.Task']] = {}
         self.graph = nx.DiGraph()
 
     @property
@@ -109,7 +108,6 @@ class Dag:
         for downstream in downstreams:
             self.remove_edge(task, downstream)
 
-        self.edges.pop(task, None)
         self.graph.remove_node(task)
         assert task.name is not None
         self._task_name_lookup.pop(task.name, None)
@@ -139,9 +137,6 @@ class Dag:
                                  'in the DAG.')
 
         self.graph.add_edge(source, target)
-        if source not in self.edges:
-            self.edges[source] = set()
-        self.edges[source].add(target)
 
     def add_downstream(self, source: TaskOrName, target: TaskOrName) -> None:
         """Add downstream tasks for a source task.
@@ -178,10 +173,12 @@ class Dag:
         """
         source = self._get_task(source)
         target = self._get_task(target)
-
-        if source in self.edges and target in self.edges[source]:
-            self.edges[source].remove(target)
+        try:
             self.graph.remove_edge(source, target)
+        except nx.NetworkXError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Edge {source.name} -> {target.name} not found') from None
 
     def remove_all_downstream(self, task: TaskOrName) -> None:
         """Remove all downstream tasks for a given task.
@@ -190,10 +187,8 @@ class Dag:
             task: The task to remove all downstream tasks from.
         """
         task = self._get_task(task)
-        if task in self.edges:
-            for target in list(self.edges[task]):
-                self.graph.remove_edge(task, target)
-            self.edges[task].clear()
+        for target in self.graph.successors(task):
+            self.graph.remove_edge(task, target)
 
     def get_downstream(self, task: TaskOrName) -> Set['task.Task']:
         """Get all downstream tasks for a given task.
@@ -205,7 +200,7 @@ class Dag:
             A set of downstream tasks.
         """
         task = self._get_task(task)
-        return self.edges.get(task, set())
+        return set(self.graph.successors(task))
 
     def __len__(self) -> int:
         """Return the number of tasks in the DAG."""
