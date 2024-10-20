@@ -174,7 +174,12 @@ You can also inspect the real-time GPU usage on the cluster with :code:`sky show
 
 Using Custom Images
 -------------------
-By default, we use and maintain a SkyPilot container image that has conda and a few other basic tools installed.
+By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
+
+1. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`__).
+2. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`__).
+
+These images are pre-installed with SkyPilot dependencies for fast startup.
 
 To use your own image, add :code:`image_id: docker:<your image tag>` to the :code:`resources` section of your task YAML.
 
