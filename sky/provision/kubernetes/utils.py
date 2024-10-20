@@ -113,7 +113,7 @@ class GPULabelFormatter:
     """
 
     @classmethod
-    def get_label_key(cls, accelerator: str = '') -> str:
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
         """Returns the label key for GPU type used by the Kubernetes cluster"""
         raise NotImplementedError
 
@@ -182,8 +182,7 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
     LABEL_KEY = 'skypilot.co/accelerator'
 
     @classmethod
-    def get_label_key(cls, accelerator: str = '') -> str:
-        del accelerator  # Unused
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
         return cls.LABEL_KEY
 
     @classmethod
@@ -223,8 +222,7 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
     LABEL_KEY = 'gpu.nvidia.com/class'
 
     @classmethod
-    def get_label_key(cls, accelerator: str = '') -> str:
-        del accelerator  # Unused
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
         return cls.LABEL_KEY
 
     @classmethod
@@ -257,8 +255,8 @@ class GKELabelFormatter(GPULabelFormatter):
     TPU_TOPOLOGY_LABEL_KEY = 'cloud.google.com/gke-tpu-topology'
 
     @classmethod
-    def get_label_key(cls, accelerator: str = '') -> str:
-        if accelerator.startswith('tpu-'):
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        if isinstance(accelerator, str) and accelerator.startswith('tpu-'):
             return cls.TPU_LABEL_KEY
         return cls.GPU_LABEL_KEY
 
@@ -315,8 +313,7 @@ class GFDLabelFormatter(GPULabelFormatter):
     LABEL_KEY = 'nvidia.com/gpu.product'
 
     @classmethod
-    def get_label_key(cls, accelerator: str = '') -> str:
-        del accelerator  # Unused
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
         return cls.LABEL_KEY
 
     @classmethod
