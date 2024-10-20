@@ -188,9 +188,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                                        extra_msg,
                                                        details=event_message))
                             elif (('Insufficient nvidia.com/gpu'
-                                 in event_message) or
-                                ('didn\'t match Pod\'s node affinity/selector'
-                                 in event_message)):
+                                   in event_message) or
+                                  ('didn\'t match Pod\'s node affinity/selector'
+                                   in event_message)):
                                 extra_msg = (
                                     f'Verify if '
                                     f'{pod.spec.node_selector[label_key]}'
