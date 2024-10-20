@@ -803,7 +803,7 @@ def test_gcp_mig():
             f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
             f'sky autostop -i 0 --down -y {name}',
             'sleep 120',
-            f'sky status -r {name}; sky status {name} | grep "{name} not found"',
+            f'sky status -r {name}; sky status {name} | grep "No existing clusters."',
             f'gcloud compute instance-templates list | grep "sky-it-{name}"',
             # Launch again with the same region. The original instance template
             # should be removed.
