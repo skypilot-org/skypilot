@@ -110,21 +110,18 @@ def load_dag_from_yaml(
     if not configs:
         configs = [{'name': dag.name}]
 
-    tasks = []
-
     # Create tasks
-    for config in configs:
-        if not isinstance(config, dict):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid task configuration: {config}')
-
-        task = task_lib.Task.from_yaml_config(config, env_overrides)
-        tasks.append(task)
-        dag.add(task)
+    tasks = [
+        task_lib.Task.from_yaml_config(config, env_overrides)
+        for config in configs
+    ]
 
     if not tasks:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('No tasks defined in the YAML file')
+
+    for task in tasks:
+        dag.add(task)
 
     # Handle dependencies
     if downstream:
