@@ -308,7 +308,17 @@ def list_accelerators(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+    global _image_df
+
+    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_id is None:
+        # Refresh the image catalog and try again, if the image tag is not
+        # found.
+        logger.debug('Refreshing the image catalog and trying again.')
+        _image_df = common.read_catalog('aws/images.csv',
+                                        pull_frequency_hours=0)
+        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    return image_id
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:

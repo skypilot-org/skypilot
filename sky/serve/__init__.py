@@ -9,6 +9,7 @@ from sky.serve.core import down
 from sky.serve.core import status
 from sky.serve.core import sync_down_logs
 from sky.serve.core import tail_logs
+from sky.serve.core import terminate_replica
 from sky.serve.core import up
 from sky.serve.core import update
 from sky.serve.serve_state import ReplicaStatus
@@ -44,6 +45,7 @@ __all__ = [
     'SKYSERVE_METADATA_DIR',
     'status',
     'sync_down_logs',
+    'terminate_replica',
     'tail_logs',
     'up',
     'update',
