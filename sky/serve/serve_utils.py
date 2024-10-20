@@ -566,12 +566,10 @@ def load_service_initialization_result(payload: str) -> int:
 def check_service_status_healthy(service_name: str) -> Optional[str]:
     service_record = serve_state.get_service_from_name(service_name)
     if service_record is None:
-        with ux_utils.print_exception_no_traceback():
-            return f'Service {service_name!r} does not exist.'
+        return f'Service {service_name!r} does not exist.'
     if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT:
-        with ux_utils.print_exception_no_traceback():
-            return (f'Service {service_name!r} is still initializing its '
-                    'controller. Please try again later.')
+        return (f'Service {service_name!r} is still initializing its '
+                'controller. Please try again later.')
     return None
 
 
@@ -674,9 +672,8 @@ def stream_replica_logs(service_name: str, replica_id: int,
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
-        with ux_utils.print_exception_no_traceback():
-            return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
-                    f'{colorama.Style.RESET_ALL}')
+        return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
+                f'{colorama.Style.RESET_ALL}')
 
     replica_cluster_name = generate_replica_cluster_name(
         service_name, replica_id)
