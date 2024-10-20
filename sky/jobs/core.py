@@ -57,10 +57,6 @@ def launch(
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
-    if not dag.is_chain():
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task or chain DAG is '
-                             f'allowed for job_launch. Dag: {dag}')
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
