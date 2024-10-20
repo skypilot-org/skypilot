@@ -90,7 +90,7 @@ class Dag:
             task: The Task object or name of the task to remove.
 
         Raises:
-            ValueError: If the task is still being used as a downstream task by
+            ValueError: If the task is still being used as a upstream task by
             other tasks.
         """
         task = self._get_task(task)
