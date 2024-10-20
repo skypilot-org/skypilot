@@ -3106,7 +3106,8 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg +
+                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):

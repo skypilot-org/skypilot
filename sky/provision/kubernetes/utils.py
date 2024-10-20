@@ -55,7 +55,7 @@ MEMORY_SIZE_UNITS = {
 GPU_RESOURCE_KEY = 'nvidia.com/gpu'
 TPU_RESOURCE_KEY = 'google.com/tpu'
 
-NO_GPU_HELP_MESSAGE = (
+NO_ACCELERATOR_HELP_MESSAGE = (
     'If your cluster contains GPUs or TPUs, make sure '
     f'{GPU_RESOURCE_KEY} or {TPU_RESOURCE_KEY} resource is available '
     'on the nodes and the node labels for identifying GPUs/TPUs '
@@ -153,10 +153,11 @@ class GPULabelFormatter:
 
 
 def get_gke_accelerator_name(accelerator: str) -> str:
-    """Returns the accelerator name for GKE clusters
+    """Returns the accelerator name for GKE clusters.
 
     Uses the format - nvidia-tesla-<accelerator>.
-    A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
+    A100-80GB, H100-80GB, L4 are an exception. They use nvidia-<accelerator>.
+    TPU types are an exception as well keeping the given name.
     """
     if accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
@@ -751,10 +752,9 @@ def get_accelerator_label_key_value(context: Optional[str],
                     'Could not find any node in the Kubernetes cluster '
                     f'with {acc_type}. Please ensure at least one node in the '
                     f'cluster has {acc_type} and node labels are setup '
-                    'correctly. '
-                    f'Please refer to the documentation for more. {suffix}. '
-                    'Note that multi-host TPU podslices are currently not '
-                    'unsupported.')
+                    'correctly. Please refer to the documentration for more. '
+                    f'{suffix}. Note that multi-host TPU podslices are '
+                    'currently not unsupported.')
     else:
         # If GPU resources are not detected, raise error
         with ux_utils.print_exception_no_traceback():
@@ -1942,7 +1942,7 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
 class KubernetesNodeInfo:
     """Dataclass to store Kubernetes node information."""
     name: str
-    gpu_type: Optional[str]
+    accelerator_type: Optional[str]
     # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
     total: Dict[str, int]
     free: Dict[str, int]
@@ -2011,7 +2011,7 @@ def get_kubernetes_node_info(
 
             node_info_dict[node.metadata.name] = KubernetesNodeInfo(
                 name=node.metadata.name,
-                gpu_type=accelerator_name,
+                accelerator_type=accelerator_name,
                 total={'accelerator_count': int(accelerator_count)},
                 free={'accelerators_available': int(accelerators_available)})
 

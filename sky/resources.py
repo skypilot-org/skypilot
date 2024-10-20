@@ -599,9 +599,8 @@ class Resources:
                         if self.instance_type != 'TPU-VM':
                             with ux_utils.print_exception_no_traceback():
                                 raise ValueError(
-                                    'Cannot specify instance type'
-                                    f' (got "{self.instance_type}") for TPU VM.'
-                                )
+                                    'Cannot specify instance type (got '
+                                    f'{self.instance_type!r}) for TPU VM.')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
