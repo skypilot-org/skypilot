@@ -79,8 +79,8 @@ class Dag:
         if task.name in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Task {task.name!r} already exists in the DAG.'
-                    f' Or the task name is already used by another task.')
+                    f'Task {task.name!r} already exists in the DAG, '
+                    f'or the task name is already used by another task.')
         self.graph.add_node(task)
         self._task_name_lookup[task.name] = task
 
@@ -104,7 +104,7 @@ class Dag:
         #                          f'by tasks {dependent_names!r}. Try to '
         #                          'remove the dependencies first.')
         # Here's a workaround, proactively remove all downstream edges.
-        dependents = self.get_downstream(task)
+        downstreams = self.get_downstream(task)
         for dependent in dependents:
             self.remove_edge(task, dependent)
 
