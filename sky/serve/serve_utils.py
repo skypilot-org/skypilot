@@ -677,8 +677,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
-        with ux_utils.print_exception_no_traceback():
-            return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
+        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     # Notify user here to make sure user won't think the log is finished.
