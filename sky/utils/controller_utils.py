@@ -529,7 +529,8 @@ def get_controller_resources(
     # Filter regions and zones and construct the result
     result = set()
     for cloud_name in filtered_clouds:
-        regions = requested_clouds_with_region_zone.get(cloud_name, {})
+        regions = requested_clouds_with_region_zone.get(cloud_name,
+                                                        {None: {None}})
 
         # Filter regions if controller_resources_to_use.region is specified
         filtered_regions = ({controller_region}
