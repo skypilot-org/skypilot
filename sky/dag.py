@@ -95,16 +95,16 @@ class Dag:
         """
         task = self._get_task(task)
 
+        downstreams = self.get_downstream(task)
         # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
         # and sink nodes.
-        downstreams = self.get_downstream(task)
-        if downstreams:
-            downstream_names = ', '.join(
-                cast(str, downstream.name) for downstream in downstreams)
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Task {task.name} is still being used as a '
-                                 f'downstream task by {downstream_names!r}. '
-                                 'Try to remove the downstream tasks first.')
+        # if downstreams:
+        #     downstream_names = ', '.join(
+        #         cast(str, downstream.name) for downstream in downstreams)
+        #     with ux_utils.print_exception_no_traceback():
+        #         raise ValueError(f'Task {task.name} is still being used as a '
+        #                          f'downstream task by {downstream_names!r}. '
+        #                          'Try to remove the downstream tasks first.')
         # Here's a workaround, proactively remove all downstream edges.
         for downstream in downstreams:
             self.remove_edge(task, downstream)
