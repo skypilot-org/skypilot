@@ -116,16 +116,10 @@ def list_accelerators_realtime(
                         name_filter, accelerator_name, flags=regex_flags):
                     continue
 
-                accelerator_count = 0
-                if kubernetes_utils.GPU_RESOURCE_KEY in node.status.allocatable:
-                    accelerator_count = int(node.status.allocatable[
-                        kubernetes_utils.GPU_RESOURCE_KEY])
-                elif (kubernetes_utils.TPU_RESOURCE_KEY
-                      in node.status.allocatable):
-                    accelerator_count = int(node.status.allocatable[
-                        kubernetes_utils.TPU_RESOURCE_KEY])
-
                 # Generate the GPU quantities for the accelerators
+                accelerator_count = (
+                    kubernetes_utils.get_node_accelerator_count(
+                        node.status.allocatable))
                 if accelerator_name and accelerator_count > 0:
                     for count in range(1, accelerator_count + 1):
                         accelerators_qtys.add((accelerator_name, count))
@@ -134,16 +128,13 @@ def list_accelerators_realtime(
                     # Get all the pods running on the node
                     if (pod.spec.node_name == node.metadata.name and
                             pod.status.phase in ['Running', 'Pending']):
-                        # Iterate over all the containers in the pod and sum the
-                        # GPU requests
+                        # Iterate over all the containers in the pod and sum
+                        # the GPU requests
                         for container in pod.spec.containers:
                             if container.resources.requests:
-                                allocated_qty += int(
-                                    container.resources.requests.get(
-                                        kubernetes_utils.GPU_RESOURCE_KEY, 0))
-                                allocated_qty += int(
-                                    container.resources.requests.get(
-                                        kubernetes_utils.TPU_RESOURCE_KEY, 0))
+                                allocated_qty += (
+                                    kubernetes_utils.get_node_accelerator_count(
+                                        container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
 

@@ -2007,13 +2007,8 @@ def get_kubernetes_node_info(
             else:
                 accelerator_name = None
 
-            accelerator_count = 0
-            if GPU_RESOURCE_KEY in node.status.allocatable:
-                accelerator_count = int(
-                    node.status.allocatable[GPU_RESOURCE_KEY])
-            elif TPU_RESOURCE_KEY in node.status.allocatable:
-                accelerator_count = int(
-                    node.status.allocatable[TPU_RESOURCE_KEY])
+            accelerator_count = get_node_accelerator_count(
+                node.status.allocatable)
 
             for pod in pods:
                 # Get all the pods running on the node
@@ -2023,15 +2018,8 @@ def get_kubernetes_node_info(
                     # GPU requests
                     for container in pod.spec.containers:
                         if container.resources.requests:
-                            if GPU_RESOURCE_KEY in container.resources.requests:
-                                allocated_qty += int(
-                                    container.resources.requests.get(
-                                        GPU_RESOURCE_KEY, 0))
-                            elif (TPU_RESOURCE_KEY
-                                  in container.resources.requests):
-                                allocated_qty += int(
-                                    container.resources.requests.get(
-                                        TPU_RESOURCE_KEY, 0))
+                            allocated_qty += get_node_accelerator_count(
+                                container.resources.requests)
 
             accelerators_available = accelerator_count - allocated_qty
 
@@ -2333,3 +2321,25 @@ def process_skypilot_pods(
         num_pods = len(cluster.pods)
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
+
+
+def get_node_accelerator_count(attribute_dict: dict) -> int:
+    """Retrieves the count of accelerators from a node's resource dictionary.
+
+    This method checks the node's allocatable resources or the accelerators
+    already deployed on the node, using pod objects that describe resource
+    requests.
+
+    Args:
+        attribute_dict): Containing resource information from a node, such as
+            allocatable or requested resources.
+
+    Returns:
+        Number of accelerators allocated or available from the node. If no
+            resource is found, it returns 0.
+    """
+    if GPU_RESOURCE_KEY in attribute_dict:
+        return int(attribute_dict[GPU_RESOURCE_KEY])
+    elif TPU_RESOURCE_KEY in attribute_dict:
+        return int(attribute_dict[TPU_RESOURCE_KEY])
+    return 0
