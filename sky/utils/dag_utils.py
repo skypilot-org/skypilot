@@ -71,9 +71,10 @@ def load_dag_from_yaml(
     """Loads a DAG from a YAML file.
 
     Supports various formats:
-    1. Single task without separators
-    2. Multiple tasks with separators (linear dependency by default)
-    3. DAG with explicit 'dependencies' field
+    1. Tasks without explicit dependencies:
+       - Single task
+       - Multiple tasks separated, with implicit linear dependency
+    2. DAG with explicit 'dependencies' field
 
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
@@ -102,12 +103,6 @@ def load_dag_from_yaml(
         dag.name = header.get('name')
         downstream = header.get('downstream', {})
     else:
-        multi_tasks = len(configs) > 1
-        if multi_tasks:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Multiple task definitions without a valid'
-                                 'header.')
-        # Single task without header
         dag.name = configs[0].get('name')
         downstream = {}
 
@@ -127,6 +122,10 @@ def load_dag_from_yaml(
         tasks.append(task)
         dag.add(task)
 
+    if not tasks:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('No tasks defined in the YAML file')
+
     # Handle dependencies
     if downstream:
         # Explicit dependencies
@@ -134,14 +133,10 @@ def load_dag_from_yaml(
             downs = [downs] if not isinstance(downs, list) else downs
             for down in downs:
                 dag.add_edge(upstream, down)
-    elif len(tasks) > 1:
-        # Implicit linear dependency
+    else:
+        # Implicit dependency
         for i in range(len(tasks) - 1):
             dag.add_edge(tasks[i], tasks[i + 1])
-
-    if not tasks:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('No tasks defined in the YAML file')
 
     return dag
 
