@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import dataclasses
 import enum
 import os
 import pathlib
@@ -84,6 +85,19 @@ class UpdateMode(enum.Enum):
     """Update mode for updating a service."""
     ROLLING = 'rolling'
     BLUE_GREEN = 'blue_green'
+
+
+@dataclasses.dataclass
+class TLSCredential:
+    """TLS credential for the service."""
+    keyfile: str
+    certfile: str
+
+    def dump_uvicorn_kwargs(self) -> Dict[str, str]:
+        return {
+            'ssl_keyfile': os.path.expanduser(self.keyfile),
+            'ssl_certfile': os.path.expanduser(self.certfile),
+        }
 
 
 DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
@@ -235,6 +249,18 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
     return os.path.join(dir_name, f'replica_{replica_id}.log')
+
+
+def generate_remote_tls_keyfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'tls_keyfile')
+
+
+def generate_remote_tls_certfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'tls_certfile')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -783,7 +809,8 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if endpoint is None:
         return '-'
     assert isinstance(endpoint, str), endpoint
-    return endpoint
+    schema = 'https' if service_record['tls_encrypted'] else 'http'
+    return f'{schema}://{endpoint}'
 
 
 def format_service_table(service_records: List[Dict[str, Any]],
@@ -792,7 +819,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT',
+        'TLS_ENCRYPTED'
     ]
     if show_all:
         service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
@@ -815,6 +843,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         replicas = _get_replicas(record)
         endpoint = get_endpoint(record)
         policy = record['policy']
+        tls_encrypted = record['tls_encrypted']
         # TODO(tian): Backward compatibility.
         # Remove `requested_resources` field after 2 minor release, 0.6.0.
         if record.get('requested_resources_str') is None:
@@ -829,6 +858,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             status_str,
             replicas,
             endpoint,
+            tls_encrypted,
         ]
         if show_all:
             service_values.extend([policy, requested_resources_str])
