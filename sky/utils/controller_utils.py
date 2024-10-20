@@ -467,7 +467,8 @@ def get_controller_resources(
 
     # If the controller and replicas are from the same cloud (and region/zone),
     # it should provide better connectivity. We will let the controller choose
-    # from the clouds of the resources if the controller does not exist.
+    # from the clouds (and regions/zones) of the resources if the user does not
+    # specify the cloud (and region/zone) for the controller.
 
     requested_clouds_with_region_zone: Dict[str, Dict[Optional[str],
                                                       Set[Optional[str]]]] = {}
@@ -484,12 +485,17 @@ def get_controller_resources(
                     continue
                 requested_clouds_with_region_zone[cloud_name] = {}
             if resource.region is None:
+                # If one of the resource.region is None, this could represent
+                # that the user is unsure about which region the resource is
+                # hosted in. In this case, we allow any region for this cloud.
                 requested_clouds_with_region_zone[cloud_name] = {None: {None}}
             elif None not in requested_clouds_with_region_zone[cloud_name]:
                 if resource.region not in requested_clouds_with_region_zone[
                         cloud_name]:
                     requested_clouds_with_region_zone[cloud_name][
                         resource.region] = set()
+                # If one of the resource.zone is None, allow any zone in the
+                # region.
                 if resource.zone is None:
                     requested_clouds_with_region_zone[cloud_name][
                         resource.region] = {None}
@@ -520,7 +526,7 @@ def get_controller_resources(
     filtered_clouds = ({controller_cloud} if controller_cloud else
                        requested_clouds_with_region_zone.keys())
 
-    # Step 3: Filter and construct the result
+    # Filter regions and zones and construct the result
     result = set()
     for cloud_name in filtered_clouds:
         regions = requested_clouds_with_region_zone.get(cloud_name, {})
