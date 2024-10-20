@@ -73,7 +73,8 @@ class Dag:
             ValueError: If the task already exists in the DAG or if its name
             is already used.
         """
-        task.name = common_utils.get_unique_task_name(task)
+        if task.name is None:
+            task.name = common_utils.get_unique_task_name(task)
         if task.name in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
