@@ -91,22 +91,24 @@ class Dag:
             task: The Task object or name of the task to remove.
 
         Raises:
-            ValueError: If the task is still being depended on by other tasks.
+            ValueError: If the task is still being used as a downstream task by
+            other tasks.
         """
         task = self._get_task(task)
 
         # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
         # and sink nodes.
-        # if dependents:
-        #     dependent_names = ', '.join([dep.name for dep in dependents])
-        #     with ux_utils.print_exception_no_traceback():
-        #         raise ValueError(f'Task {task.name} is still being depended '
-        #                          f'by tasks {dependent_names!r}. Try to '
-        #                          'remove the dependencies first.')
-        # Here's a workaround, proactively remove all downstream edges.
         downstreams = self.get_downstream(task)
-        for dependent in dependents:
-            self.remove_edge(task, dependent)
+        if downstreams:
+            downstream_names = ', '.join(
+                cast(str, downstream.name) for downstream in downstreams)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Task {task.name} is still being used as a '
+                                 f'downstream task by {downstream_names!r}. '
+                                 'Try to remove the downstream tasks first.')
+        # Here's a workaround, proactively remove all downstream edges.
+        for downstream in downstreams:
+            self.remove_edge(task, downstream)
 
         self.edges.pop(task, None)
         self.graph.remove_node(task)
@@ -117,19 +119,20 @@ class Dag:
         """Add an edge from source task to target task.
 
         Args:
-            source: The task that the target task depends on.
-            target: The task that depends on the source task.
+            source: The upstream task.
+            target: The downstream task to be added.
 
         Raises:
-            ValueError: If a task tries to depend on itself or if the
-            target task is not in the DAG.
+            ValueError: If a task is set as its own downstream task or if the
+            downstream task is not in the DAG.
         """
         source = self._get_task(source)
         target = self._get_task(target)
 
         if source.name == target.name:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Task {source.name} cannot depend on itself.')
+                raise ValueError(f'Task {source.name} should not be its own '
+                                 'downstream task.')
         assert target.name is not None
         if target.name not in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
@@ -145,8 +148,8 @@ class Dag:
         """Add downstream tasks for a source task.
 
         Args:
-            source: The task that the downstream tasks depend on.
-            target: The task(s) to add as downstream tasks.
+            source: The upstream task.
+            target: The downstream task to be added.
         """
         return self.add_edge(source, target)
 
@@ -157,8 +160,8 @@ class Dag:
         This replaces any existing downstream tasks for the given source.
 
         Args:
-            source: The task that the downstream tasks depend on.
-            targets: The task(s) that depend on the source task.
+            source: The upstream task.
+            targets: The downstream task(s) to be added.
         """
         source = self._get_task(source)
         if not isinstance(targets, list):
@@ -171,8 +174,8 @@ class Dag:
         """Remove an edge between two tasks.
 
         Args:
-            source: The source task to remove the edge from.
-            target: The target task to remove the edge to.
+            source: The upstream task.
+            target: The downstream task to remove the edge to.
         """
         source = self._get_task(source)
         target = self._get_task(target)
@@ -200,7 +203,7 @@ class Dag:
             task: The task to get downstream tasks for.
 
         Returns:
-            A set of tasks that depend on the given task.
+            A set of downstream tasks.
         """
         task = self._get_task(task)
         return self.edges.get(task, set())
