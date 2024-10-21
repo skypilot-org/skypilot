@@ -680,23 +680,24 @@ def sync_down_logs(service_name: str,
         RuntimeError: If there is an error during log sync process.
     """
 
-    if isinstance(service_component, str):
-        service_component = serve_utils.ServiceComponent(service_component)
-    if not isinstance(service_component, serve_utils.ServiceComponent):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'`service_component` must be a string or '
-                f'sky.serve.ServiceComponent, got {type(service_component)}.')
-    if service_component == serve_utils.ServiceComponent.REPLICA:
-        if replica_id is None:
+    if service_component is not None:
+        if isinstance(service_component, str):
+            service_component = serve_utils.ServiceComponent(service_component)
+        if not isinstance(service_component, serve_utils.ServiceComponent):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('`replica_id` must be specified when '
-                                 'using service_component=REPLICA.')
-    else:
-        if replica_id is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('`replica_id` must be None when using '
-                                 'service_component=CONTROLLER/LOAD_BALANCER.')
+                raise ValueError(
+                    f'`service_component` must be a string or '
+                    f'sky.serve.ServiceComponent, got {type(service_component)}.')
+        if service_component == serve_utils.ServiceComponent.REPLICA:
+            if replica_id is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('`replica_id` must be specified when '
+                                    'using service_component=REPLICA.')
+        else:
+            if replica_id is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('`replica_id` must be None when using '
+                                    'service_component=CONTROLLER/LOAD_BALANCER.')
 
     logger.info(f'Syncing down logs for {service_name}...')
     controller_handle = backend_utils.is_controller_accessible(
@@ -704,10 +705,6 @@ def sync_down_logs(service_name: str,
         stopped_message='No service is found.')
 
     # Prepare logs for download.
-    if service_component is None:
-        assert replica_id is None
-
-    # Get SSH credentials and initialize SSHCommandRunner.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         controller_handle.cluster_yaml, controller_handle.docker_user)
     runner = command_runner.SSHCommandRunner(
