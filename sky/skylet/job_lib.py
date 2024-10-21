@@ -576,6 +576,13 @@ def update_job_status(job_ids: List[int],
                     f'Job {job_id} is stale, setting to FAILED: '
                     f'created_time={pending_jobs[job_id]["created_time"]}, '
                     f'boot_time={psutil.boot_time()}')
+                # TODO(zhwu): for debugging. to remove.
+                with open('/tmp/sky_job.log', 'a') as f:
+                    import traceback
+                    f.write(traceback.format_stack() +
+                            f'zhwu DEBUG: Job {job_id} is stale, setting to FAILED: '
+                            f'created_time={pending_jobs[job_id]["created_time"]}, '
+                            f'boot_time={psutil.boot_time()}\n')
                 # The job is stale as it is created before the instance
                 # is booted, e.g. the instance is rebooted.
                 job_statuses[i] = JobStatus.FAILED
@@ -599,6 +606,20 @@ def update_job_status(job_ids: List[int],
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
+        # TODO(zhwu): a potential race:
+        # 1. add_job is called, and the job is added to job table with
+        #    status INIT.
+        # 2. update_job_status is called before the actual job is added
+        #    to the pending table, and get here.
+        # 3. The job is then added to the pending table with the status set to
+        #    PENDING, but since we checked pending table earlier, and job was not
+        #    in the pending table, `status` below will be None, so the job status
+        #    will be set to FAILED after the job is just added to the pending table.
+        # 4. With the job status being FAILED, the scheduler will not pick it
+        #    up, and remove it from the pending table, causing the job never being
+        #    scheduled.
+        # We should add per-job lock for the whole update_job_status() function
+        # to avoid this race.
         with filelock.FileLock(_get_lock_path(job_id)):
             original_status = get_status_no_lock(job_id)
             assert original_status is not None, (job_id, status)
@@ -608,6 +629,15 @@ def update_job_status(job_ids: List[int],
                         not original_status.is_terminal()):
                     logger.info(f'Ray job status for job {job_id} is None, '
                                 'setting it to FAILED.')
+                    # TODO(zhwu): for debugging. to remove.
+                    with open('/tmp/sky_job.log', 'a') as f:
+                        import traceback
+                        f.write(traceback.format_stack() +
+                                f'zhwu DEBUG: Ray job status for job {job_id} '
+                                'is None, setting it to FAILED. This can be '
+                                'triggered by the race condition, where the job'
+                                ' has not been added to pending table when '
+                                'checking that table above.')
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
