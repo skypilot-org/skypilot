@@ -303,8 +303,9 @@ class OCI(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel
         from sky.clouds.service_catalog import oci_catalog
-        os_type = oci_catalog.get_image_os_from_tag(tag=image_tag, region=region.name)
-        logger.debug(f'OS type for the image {image_tag} is {os_type}')
+        os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
+                                                    region=region.name)
+        logger.debug(f'OS type for the image {image_str} is {os_type}')
 
         return {
             'instance_type': instance_type,
@@ -534,7 +535,7 @@ class OCI(clouds.Cloud):
     def _get_image_str(self, image_id: Optional[Dict[Optional[str], str]],
                        instance_type: str, region: str):
         if image_id is None:
-            image_str = self._get_default_image_id(instance_type)
+            image_str = self._get_default_image_tag(instance_type)
         elif None in image_id:
             image_str = image_id[None]
         else:
