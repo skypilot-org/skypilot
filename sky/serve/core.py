@@ -713,12 +713,16 @@ def sync_down_logs(service_name: str,
     # Prepare and download replica logs (single/all components).
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.REPLICA):
+        logger.info(
+            'Starting the process to prepare and download replica logs...')
         prepare_code = (
             serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
                 service_name, run_timestamp, replica_id))
+
         backend = backend_utils.get_backend_from_handle(controller_handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
+
         logger.info('Preparing replica logs for download on controller...')
         prepare_returncode = backend.run_on_head(controller_handle,
                                                  prepare_code,
@@ -730,7 +734,10 @@ def sync_down_logs(service_name: str,
                 'Failed to prepare replica logs to sync down. '
                 'Sky serve controller may be older and not support sync '
                 'down for replica logs.')
+            logger.info('Replica logs prepared successfully.')
         except exceptions.CommandError as e:
+            logger.error('Error occurred while preparing replica logs: %s',
+                         e.error_msg)
             raise RuntimeError(e.error_msg) from e
 
         # Define remote directory for logs and download them.
@@ -738,26 +745,35 @@ def sync_down_logs(service_name: str,
         remote_service_dir_name = (
             serve_utils.generate_remote_service_dir_name(service_name))
         dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
-        logger.info('Downloading the replica logs...')
+        logger.info('Downloading the replica logs from %s to %s...',
+                    remote_service_dir_name, sky_logs_directory)
         runner.rsync(source=dir_for_download,
                      target=sky_logs_directory,
                      up=False,
                      stream_logs=False)
 
         # Remove the logs from the remote server after downloading.
+        logger.info('Preparing to remove replica logs from remote server...')
         remove_code = (
             serve_utils.ServeCodeGen.remove_replica_logs_for_download(
                 service_name, run_timestamp))
+        logger.debug('Generated remove code: %s', remove_code)
         remove_returncode = backend.run_on_head(controller_handle,
                                                 remove_code,
                                                 require_outputs=False,
                                                 stream_logs=False)
+        logger.debug('Remove command return code: %s', remove_returncode)
+
         try:
             subprocess_utils.handle_returncode(
                 remove_returncode, remove_code,
                 'Failed to remove the replica logs for '
                 'download on the controller.')
+            logger.info('Replica logs removed successfully'
+                        ' from remote server.')
         except exceptions.CommandError as e:
+            logger.error('Error occurred while '
+                         'removing replica logs: %s', e.error_msg)
             raise RuntimeError(e.error_msg) from e
 
     # We download the replica logs first because that download creates
@@ -771,6 +787,8 @@ def sync_down_logs(service_name: str,
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.CONTROLLER):
+        logger.info(
+            'Starting the process to prepare and download controller logs...')
         runner = controller_handle.get_command_runners()
         controller_log_file_name = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
@@ -788,6 +806,8 @@ def sync_down_logs(service_name: str,
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
+        logger.info(
+            'Starting the process to prepare and download load balancer logs...')
         runner = controller_handle.get_command_runners()
         load_balancer_log_file_name = (
             serve_utils.generate_remote_load_balancer_log_file_name(
