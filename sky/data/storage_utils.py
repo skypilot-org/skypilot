@@ -12,7 +12,6 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.utils.cli_utils import status_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -21,6 +20,8 @@ _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     'specified in .gitignore will be uploaded '
     'to the cloud storage for {path!r}'
     'due to the following error: {error_msg!r}')
+
+_LAST_USE_TRUNC_LENGTH = 25
 
 
 def format_storage_table(storages: List[Dict[str, Any]],
@@ -46,8 +47,8 @@ def format_storage_table(storages: List[Dict[str, Any]],
         if show_all:
             command = row['last_use']
         else:
-            command = status_utils.truncate_long_string(
-                row['last_use'], status_utils.COMMAND_TRUNC_LENGTH)
+            command = common_utils.truncate_long_string(row['last_use'],
+                                                        _LAST_USE_TRUNC_LENGTH)
         storage_table.add_row([
             # NAME
             row['name'],
@@ -212,9 +213,13 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
     if os.path.exists(skyignore_path):
-        logger.info(f'Exclude files to sync to cluster based on '
-                    f'{constants.SKY_IGNORE_FILE}.')
+        logger.info(f'  {colorama.Style.DIM}'
+                    f'Excluded files to sync to cluster based on '
+                    f'{constants.SKY_IGNORE_FILE}.'
+                    f'{colorama.Style.RESET_ALL}')
         return get_excluded_files_from_skyignore(src_dir_path)
-    logger.info(f'Exclude files to sync to cluster based on '
-                f'{constants.GIT_IGNORE_FILE}.')
+    logger.info(f'  {colorama.Style.DIM}'
+                f'Excluded files to sync to cluster based on '
+                f'{constants.GIT_IGNORE_FILE}.'
+                f'{colorama.Style.RESET_ALL}')
     return get_excluded_files_from_gitignore(src_dir_path)
