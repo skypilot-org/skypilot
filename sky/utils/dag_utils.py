@@ -64,6 +64,7 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
     return converted_dag
 
 
+# TODO(andy): We should migrate the function into sky.Dag.from_yaml()
 def load_dag_from_yaml(
     path: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
@@ -138,6 +139,7 @@ def load_dag_from_yaml(
     return dag
 
 
+# TODO(andy): We should migrate the function into sky.Dag.to_yaml()
 def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     """Dumps a DAG to a YAML file.
 
