@@ -1157,7 +1157,13 @@ class Task:
         return required_features
 
     def __rshift__(self, b):
-        sky.dag.get_current_dag().add_edge(self, b)
+        current_dag = sky.dag.get_current_dag()
+        if current_dag is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('No current DAG context found. '
+                                 'Use `with sky.Dag() as dag: ...` '
+                                 'to define a DAG.')
+        current_dag.add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):

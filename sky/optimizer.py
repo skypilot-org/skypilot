@@ -189,6 +189,7 @@ class Optimizer:
         if len(source) == len(sink) == 0:
             return
         assert len(source) == len(sink) == 1, dag.tasks
+
         dag.remove(source[0])
         dag.remove(sink[0])
 

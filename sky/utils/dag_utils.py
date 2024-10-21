@@ -64,53 +64,107 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
     return converted_dag
 
 
-def load_chain_dag_from_yaml(
+# TODO(andy): We should migrate the function into sky.Dag.from_yaml()
+def load_dag_from_yaml(
     path: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
 ) -> dag_lib.Dag:
-    """Loads a chain DAG from a YAML file.
+    """Loads a DAG from a YAML file.
+
+    Supports various formats:
+    1. Tasks without explicit flow definition:
+       - Single task
+       - Multiple tasks separated, with implicit linear dependency
+    2. DAG with explicit 'downstream' field
 
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
 
     'env_overrides' is a list of (key, value) pairs that will be used to update
-    the task's 'envs' section. If it is a chain dag, the envs will be updated
-    for all tasks in the chain.
+    the task's 'envs' section. For multi-task DAGs, the envs will be updated
+    for all tasks.
 
     Returns:
-      A chain Dag with 1 or more tasks (an empty entrypoint would create a
+      A Dag with 1 or more tasks (an empty entrypoint will create a
       trivial task).
+
+    Raises:
+      ValueError: If the YAML structure is invalid or inconsistent.
     """
     configs = common_utils.read_yaml_all(path)
-    dag_name = None
-    if set(configs[0].keys()) == {'name'}:
-        dag_name = configs[0]['name']
-        configs = configs[1:]
-    elif len(configs) == 1:
-        dag_name = configs[0].get('name')
+    dag = dag_lib.Dag()
 
-    if len(configs) == 0:
-        # YAML has only `name: xxx`. Still instantiate a task.
-        configs = [{'name': dag_name}]
+    if not configs:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Empty YAML file.')
 
-    current_task = None
-    with dag_lib.Dag() as dag:
-        for task_config in configs:
-            if task_config is None:
-                continue
-            task = task_lib.Task.from_yaml_config(task_config, env_overrides)
-            if current_task is not None:
-                current_task >> task  # pylint: disable=pointless-statement
-            current_task = task
-    dag.name = dag_name
+    has_header = set(configs[0].keys()) <= {'name', 'downstream'}
+    if has_header:
+        header = configs.pop(0)
+        dag.name = header.get('name')
+        downstream = header.get('downstream', {})
+    else:
+        dag.name = configs[0].get('name')
+        downstream = {}
+
+    # Handle YAML with only 'name'
+    if not configs:
+        configs = [{'name': dag.name}]
+
+    # Create tasks
+    tasks = [
+        task_lib.Task.from_yaml_config(config, env_overrides)
+        for config in configs
+    ]
+
+    if not tasks:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('No tasks defined in the YAML file')
+
+    for task in tasks:
+        dag.add(task)
+
+    # Handle dependencies
+    if downstream:
+        # Explicit dependencies
+        for upstream, downs in downstream.items():
+            downs = [downs] if not isinstance(downs, list) else downs
+            for down in downs:
+                dag.add_edge(upstream, down)
+    else:
+        # Implicit dependency
+        for i in range(len(tasks) - 1):
+            dag.add_edge(tasks[i], tasks[i + 1])
+
     return dag
 
 
-def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
-    assert dag.is_chain(), dag
-    configs = [{'name': dag.name}]
-    for task in dag.tasks:
-        configs.append(task.to_yaml_config())
+# TODO(andy): We should migrate the function into sky.Dag.to_yaml()
+def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
+    """Dumps a DAG to a YAML file.
+
+    This function supports both chain DAGs and DAGs with more complex dependency
+    structures.
+
+    Args:
+        dag: The DAG object to be dumped.
+        path: The file path where the YAML will be written.
+    """
+    header: Dict[str, Any] = {'name': dag.name}
+
+    if not dag.is_chain():
+        downstream = {}
+        for task in dag.tasks:
+            downs = list(dag.get_downstream(task))
+            if downs:
+                downstream[task.name] = [down.name for down in downs]
+        if downstream:
+            header['downstream'] = downstream
+
+    task_configs = [task.to_yaml_config() for task in dag.tasks]
+
+    configs = [header] + task_configs
+
     common_utils.dump_yaml(path, configs)
 
 
