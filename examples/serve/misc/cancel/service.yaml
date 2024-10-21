@@ -4,7 +4,6 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 120
-  replicas: 2
 
 resources:
   ports: 9000

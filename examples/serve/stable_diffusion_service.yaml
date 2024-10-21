@@ -13,6 +13,7 @@ service:
 resources:
   ports: 7860
   accelerators: V100:1
+
 file_mounts:
   /stable_diffusion: examples/stable_diffusion
 

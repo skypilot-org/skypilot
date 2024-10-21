@@ -13,6 +13,7 @@ envs:
 service:
   readiness_probe: /health
   replicas: 2
+
 resources:
   ports: 8080
   accelerators: A100:1
