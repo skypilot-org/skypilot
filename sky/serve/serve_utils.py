@@ -28,12 +28,12 @@ from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
-from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
