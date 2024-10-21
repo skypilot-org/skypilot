@@ -738,11 +738,26 @@ def has_valid_replica_id(file_name: str,
     return replica_id == target_replica_id
 
 
+def append_job_logs_to_replica_log(new_replica_log_file: str,
+                                   job_log_file_name: Optional[str],
+                                   replica_id: int) -> None:
+
+    if job_log_file_name is not None:
+        logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
+        with open(new_replica_log_file, 'a',
+                  encoding='utf-8') as replica_log_file, open(
+                      job_log_file_name, 'r', encoding='utf-8') as job_file:
+            replica_log_file.write(job_file.read())
+        os.remove(job_log_file_name)
+    else:
+        with open(new_replica_log_file, 'a',
+                  encoding='utf-8') as replica_log_file:
+            replica_log_file.write('Failed to sync down job logs from replica '
+                                   f'{replica_id}.\n')
+
+
 def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                       target_replica_id: Optional[int]) -> None:
-    # pylint: disable=import-outside-toplevel
-    from sky.serve.replica_managers import append_job_logs_to_replica_log
-
     logger.info('Preparing replica logs for download...')
     remote_service_dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(remote_service_dir_name)
