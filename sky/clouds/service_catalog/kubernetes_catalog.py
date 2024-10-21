@@ -110,6 +110,12 @@ def list_accelerators_realtime(
                 accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(key))
 
+                # Exclude multi-host TPUs from being processed.
+                # TODO(Doyoung): Remove the logic when adding support for
+                # multi-host TPUs.
+                if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
+                    continue
+
                 # Check if name_filter regex matches the accelerator_name
                 regex_flags = 0 if case_sensitive else re.IGNORECASE
                 if name_filter and not re.match(

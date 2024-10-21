@@ -543,36 +543,15 @@ def check_instance_fits(context: Optional[str],
         for node in node_list:
             if acc_type == node.metadata.labels[
                     GKELabelFormatter.TPU_LABEL_KEY]:
-                topology_value = node.metadata.labels[
-                    GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY]
-                # node_tpu_chip_count represents the number of TPU chips
-                # available in this node. If the node is part of a node pool
-                # forming a multi-host TPU podslice, it only reflects the
-                # number of TPU chips in this individual node, not the entire
-                # multi-host TPU podslice.
+                # TODO(Doyoung): Update the logic when adding support for
+                # multi-host TPUs.
+                if is_multi_host_tpu(node.metadata.labels):
+                    continue
                 node_tpu_chip_count = int(node.metadata.labels[
                     GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY])
-                chip_dimensions = [
-                    int(chip_count) for chip_count in topology_value.split('x')
-                ]
-                # topology_chip_count represents the total number of TPU chips
-                # in the entire podslice, whether it is a single-host or
-                # multi-host TPU podslice.
-                topology_chip_count = functools.reduce(lambda x, y: x * y,
-                                                       chip_dimensions)
-                # TODO(Doyoung): Update the naming scheme with multi-host TPU
-                # support.
                 tpu_type = f'{acc_type}:{node_tpu_chip_count}'
                 tpu_list_in_cluster.append(tpu_type)
-                # For multi-host TPU podslices, topology_chip_count and
-                # node_tpu_chip_count will differ, as topology_chip_count
-                # reflects the total across all hosts, while
-                # node_tpu_chip_count reflects only the chips in a single node.
-                # TODO(Doyoung): Remove the condition,
-                # node_tpu_chip_count == topology_chip_count, when adding
-                # multi-host TPU support.
-                if (node_tpu_chip_count == topology_chip_count and
-                        topology_chip_count == acc_count):
+                if node_tpu_chip_count == acc_count:
                     return True, None
         tpu_list_in_cluster_str = ','.join(tpu_list_in_cluster)
         # TODO(Doyoung): Update the error message raised with the multi-host
@@ -729,6 +708,11 @@ def get_accelerator_label_key_value(
             # quantity is available since that is dynamic and can change
             # during scheduling.
             for node_name, label_list in node_labels.items():
+                node_metadata_labels = dict(label_list)
+                # TODO(Doyoung): Update the logic when adding support for
+                # multi-host TPUs.
+                if is_multi_host_tpu(node_metadata_labels):
+                    continue
                 for label, value in label_list:
                     if (label_formatter.match_label_key(label) and
                             label_formatter.get_accelerator_from_label_value(
@@ -736,21 +720,16 @@ def get_accelerator_label_key_value(
                         if is_tpu_pod_slice(acc_type):
                             assert isinstance(label_formatter,
                                               GKELabelFormatter)
-                            topology_label_key = (
-                                label_formatter.TPU_TOPOLOGY_LABEL_KEY)
-                            labels_dict = dict(node_labels[node_name])
-                            if labels_dict.get(
+                            if node_metadata_labels.get(
                                     label_formatter.TPU_LABEL_KEY) == acc_type:
-                                topology_value = labels_dict.get(
+                                topology_label_key = (
+                                    label_formatter.TPU_TOPOLOGY_LABEL_KEY)
+                                topology_value = node_metadata_labels.get(
                                     topology_label_key)
                                 assert topology_value is not None
-                                chip_dimensions = [
-                                    int(chip_count)
-                                    for chip_count in topology_value.split('x')
-                                ]
-                                num_chips = functools.reduce(
-                                    lambda x, y: x * y, chip_dimensions)
-                                if num_chips == acc_count:
+                                tpu_topology_chip_count = reduce_tpu_topology(
+                                    topology_value)
+                                if tpu_topology_chip_count == acc_count:
                                     return (label, value, topology_label_key,
                                             topology_value)
                                 else:
@@ -2023,6 +2002,12 @@ def get_kubernetes_node_info(
 
             accelerators_available = accelerator_count - allocated_qty
 
+            # Exclude multi-host TPUs from being processed.
+            # TODO(Doyoung): Remove the logic when adding support for
+            # multi-host TPUs.
+            if is_multi_host_tpu(node.metadata.labels):
+                continue
+
             node_info_dict[node.metadata.name] = KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
@@ -2343,3 +2328,39 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
     elif TPU_RESOURCE_KEY in attribute_dict:
         return int(attribute_dict[TPU_RESOURCE_KEY])
     return 0
+
+
+def reduce_tpu_topology(topology: str):
+    """Computes the number of TPU chips from its topology string."""
+    chip_dimensions = [int(chip_count) for chip_count in topology.split('x')]
+    # tpu_topology_chip_count represents the total number of TPU chips in the
+    # entire podslice, whether it is a single-host or multi-host TPU podslice.
+    tpu_topology_chip_count = functools.reduce(
+        lambda x, y: x * y, chip_dimensions)
+    return tpu_topology_chip_count
+
+
+def is_multi_host_tpu(node_metadata_labels: dict):
+    """Determines whether the given node is a multi-host TPU configuration."""
+    if GKELabelFormatter.TPU_LABEL_KEY in node_metadata_labels:
+        assert GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY in node_metadata_labels
+        topology_value = (
+            node_metadata_labels[GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
+        accelerator_count_label_key = (
+            GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY)
+        assert accelerator_count_label_key in node_metadata_labels
+        # node_tpu_chip_count represents the number of TPU chips
+        # available in this node. If the node is part of a node pool
+        # forming a multi-host TPU podslice, it only reflects the
+        # number of TPU chips in this individual node, not the entire
+        # multi-host TPU podslice.
+        node_tpu_chip_count = int(
+            node_metadata_labels[accelerator_count_label_key])
+        topology_chip_count = reduce_tpu_topology(topology_value)
+        # For multi-host TPU podslices, topology_chip_count and
+        # node_tpu_chip_count will differ, as topology_chip_count
+        # reflects the total across all hosts, while
+        # node_tpu_chip_count reflects only the chips in a single node.
+        if node_tpu_chip_count != topology_chip_count:
+            return True
+    return False
