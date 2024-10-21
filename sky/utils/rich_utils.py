@@ -223,7 +223,7 @@ def decode_rich_status(encoded_msg: str) -> Optional[str]:
     """Decode the rich status message."""
     encoded_msg = message_utils.decode_payload(encoded_msg,
                                                raise_for_mismatch=False)
-    # print(f'encoded_msg: {encoded_msg}', flush=True)
+    print(f'encoded_msg: {encoded_msg}', flush=True)
     control, encoded_status = Control.decode(encoded_msg)
     global _decoding_status
     if control is None:

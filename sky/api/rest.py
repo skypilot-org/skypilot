@@ -556,16 +556,12 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
 
 async def log_streamer(request_id: str, log_path: pathlib.Path):
     request_task = requests_lib.get_request(request_id)
-    encoded_rich_status = rich_utils.EncodedStatusMessage(
-        f'Checking request: {request_id}')
-    yield encoded_rich_status.init()
-    while request_task.status < requests_lib.RequestStatus.RUNNING:
-        encoded_rich_status.update(
-            f'Waiting for request to start: {request_id}')
-        await asyncio.sleep(1)
-        request_task = requests_lib.get_request(request_id)
+    with rich_utils.safe_status(f'Checking request: {request_id}') as status:
+        while request_task.status < requests_lib.RequestStatus.RUNNING:
+            status.update(f'Waiting for request to start: {request_id}')
+            await asyncio.sleep(1)
+            request_task = requests_lib.get_request(request_id)
 
-    yield encoded_rich_status.stop()
     with log_path.open('rb') as f:
         while True:
             line = f.readline()
