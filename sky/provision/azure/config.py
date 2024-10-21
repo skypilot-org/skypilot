@@ -5,16 +5,18 @@ a cluster to be launched.
 """
 import hashlib
 import json
-import logging
 from pathlib import Path
 import random
 import time
 from typing import Any, Callable
 
+from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import azure
 from sky.provision import common
+from sky.utils import common_utils
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 UNIQUE_ID_LEN = 4
 _DEPLOYMENT_NAME = 'skypilot-config'
@@ -92,10 +94,19 @@ def bootstrap_instances(
                 retry += 1
                 continue
             raise
+        except azure.exceptions().ClientAuthenticationError as e:
+            message = (
+                'Failed to authenticate with Azure. Please check your Azure '
+                f'credentials. Error: {common_utils.format_exception(e)}'
+            ).replace('\n', ' ')
+            logger.error(message)
+            raise exceptions.NoClusterLaunchedError(message) from e
     else:
-        raise TimeoutError(
+        message = (
             f'Timed out waiting for resource group {resource_group} to be '
             'deleted.')
+        logger.error(message)
+        raise TimeoutError(message)
 
     # load the template file
     current_path = Path(__file__).parent

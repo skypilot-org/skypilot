@@ -171,7 +171,7 @@ class CommandRunner:
         cmd: Union[str, List[str]],
         process_stream: bool,
         separate_stderr: bool,
-        skip_lines: int,
+        skip_num_lines: int,
         source_bashrc: bool = False,
     ) -> str:
         """Returns the command to run."""
@@ -203,12 +203,12 @@ class CommandRunner:
             ]
         if not separate_stderr:
             command.append('2>&1')
-        if not process_stream and skip_lines:
+        if not process_stream and skip_num_lines:
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
                 #  bash: no job control in this shell
-                f'| stdbuf -o0 tail -n +{skip_lines}',
+                f'| stdbuf -o0 tail -n +{skip_num_lines}',
                 # This is required to make sure the executor of command can get
                 # correct returncode, since linux pipe is used.
                 '; exit ${PIPESTATUS[0]}'
@@ -320,7 +320,7 @@ class CommandRunner:
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
-            skip_lines: int = 0,
+            skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -335,7 +335,7 @@ class CommandRunner:
             connect_timeout: timeout in seconds for the ssh connection.
             source_bashrc: Whether to source the ~/.bashrc before running the
                 command.
-            skip_lines: The number of lines to skip at the beginning of the
+            skip_num_lines: The number of lines to skip at the beginning of the
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
@@ -529,7 +529,7 @@ class SSHCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
-            skip_lines: int = 0,
+            skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -550,7 +550,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: timeout in seconds for the ssh connection.
             source_bashrc: Whether to source the bashrc before running the
                 command.
-            skip_lines: The number of lines to skip at the beginning of the
+            skip_num_lines: The number of lines to skip at the beginning of the
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
@@ -573,7 +573,7 @@ class SSHCommandRunner(CommandRunner):
         command_str = self._get_command_to_run(cmd,
                                                process_stream,
                                                separate_stderr,
-                                               skip_lines=skip_lines,
+                                               skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
 
@@ -693,7 +693,7 @@ class KubernetesCommandRunner(CommandRunner):
             separate_stderr: bool = False,
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
-            skip_lines: int = 0,
+            skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
 
@@ -713,7 +713,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: timeout in seconds for the pod connection.
             source_bashrc: Whether to source the bashrc before running the
                 command.
-            skip_lines: The number of lines to skip at the beginning of the
+            skip_num_lines: The number of lines to skip at the beginning of the
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
@@ -751,7 +751,7 @@ class KubernetesCommandRunner(CommandRunner):
         command_str = self._get_command_to_run(cmd,
                                                process_stream,
                                                separate_stderr,
-                                               skip_lines=skip_lines,
+                                               skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
@@ -831,10 +831,17 @@ class KubernetesCommandRunner(CommandRunner):
         # Build command.
         helper_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),
                                    'kubernetes', 'rsync_helper.sh')
+        namespace_context = f'{self.namespace}+{self.context}'
+        # Avoid rsync interpreting :, /, and + in namespace_context as the
+        # default delimiter for options and arguments.
+        # rsync_helper.sh will parse the namespace_context by reverting the
+        # encoding and pass it to kubectl exec.
+        encoded_namespace_context = namespace_context.replace(
+            ':', '%3A').replace('/', '%2F').replace('+', '%2B')
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{self.namespace}+{self.context}',
+            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,
