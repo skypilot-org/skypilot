@@ -261,9 +261,10 @@ if __name__ == '__main__':
                         help='The port where the load balancer listens to.')
     parser.add_argument(
         '--load-balancing-policy',
-        choices=['round_robin'],
+        choices=list(lb_policies.LB_POLICIES.keys()),
         default='round_robin',
-        help='The load balancing policy to use. Available policy: round_robin.')
+        help=f'The load balancing policy to use. Available policies: '
+             f'{", ".join(lb_policies.LB_POLICIES.keys())}.')
     args = parser.parse_args()
     run_load_balancer(args.controller_addr, args.load_balancer_port,
                       args.load_balancing_policy)

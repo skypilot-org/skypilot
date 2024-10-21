@@ -1,0 +1,26 @@
+# SkyServe YAML to demonstrate multiple load balancing policies.
+#
+# Usage:
+#   sky serve up -n load_balancing_policy_test examples/serve/load_balancing_policies_example.yaml
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint load_balancing_policy_test
+
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 2
+    max_replicas: 4
+    target_qps_per_replica: 1
+  # Load balancing policy configuration
+  load_balancing_policy: round_robin  # Change this to test different policies...
+
+resources:
+  ports: 8080
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: python3 server.py
