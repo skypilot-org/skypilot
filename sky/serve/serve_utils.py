@@ -764,12 +764,13 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
     dir_for_download = os.path.join(dir_name, timestamp)
     os.makedirs(dir_for_download, exist_ok=True)
 
-    # get record from serve state
+    # Get record from serve state.
     service_record = serve_state.get_service_from_name(service_name)
     if service_record is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
 
-    # copy over log files of already-terminated replicas in this service
+    # Directly copy over log files of already-terminated
+    # replicas in this service.
     terminated_replicas = [
         info for info in service_record['replica_info']
         if info['status'] in serve_state.ReplicaStatus.terminal_statuses()
@@ -782,13 +783,15 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
             if os.path.exists(log_file_path):
                 shutil.copy(log_file_path, dir_for_download)
 
-    # manage log files of replicas with launch log files
+    # These copies of logs may still be continuously updating.
+    # We need to synchronize the latest log data from the remote server.
     log_files = os.listdir(dir_name)
     launch_log_files = [
         file for file in log_files if file.endswith('_launch.log') and
         has_valid_replica_id(file, target_replica_id)
     ]
     for launch_log_file in launch_log_files:
+        # Get replica id from launch log filename.
         match = re.search(serve_constants.REPLICA_ID_PATTERN, launch_log_file)
         if match is not None:
             replica_id = int(match.group(1))
@@ -796,15 +799,19 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
             raise ValueError(
                 f'Failed to get replica id from file name: {launch_log_file}')
 
+        # Get replica info from its id.
         replica_info = serve_state.get_replica_info_from_id(
             service_name, replica_id)
         if replica_info is None:
             raise ValueError(
                 _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
-
+        
+        # Copy launch log file into the download directory.
         new_replica_log_file = os.path.join(dir_for_download,
                                             f'replica_{replica_id}.log')
         shutil.copy(launch_log_file, new_replica_log_file)
+        
+        # Sync down job logs for replica.
         if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
         logger.info(f'Syncing down logs for replica {replica_id}...')
@@ -817,12 +824,14 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                          'Skipping syncing down job logs.')
             continue
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        
+        # Set up local directory for replica job logs.
         replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
                                             'replica_jobs')
-
         os.makedirs(replica_job_logs_dir, exist_ok=True)
         job_log_file_name = None
         try:
+            # Try to sync down the logs for the replica.
             log_dirs = backend.sync_down_logs(handle,
                                               job_ids=None,
                                               local_dir=replica_job_logs_dir)
@@ -830,6 +839,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
             logger.info(f'Failed to download the logs: '
                         f'{common_utils.format_exception(e)}')
         else:
+            # No error, then we need to consider where to store.
             if not log_dirs:
                 logger.error(
                     f'Failed to find the logs for replica {replica_id}.')
