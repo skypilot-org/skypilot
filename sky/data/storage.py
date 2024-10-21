@@ -62,6 +62,8 @@ STORE_ENABLED_CLOUDS: List[str] = [
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
 
+_MIN_FILES_TO_COMPRESS = 10
+
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     'Failed to access existing bucket {name!r}. '
     'This is likely because it is a private bucket you do not have access to.\n'
@@ -862,7 +864,7 @@ class Storage(object):
           region: str; Region to place the bucket in. Caller must ensure that
             the region is valid for the chosen store_type.
           compress_local: boolean; Decides whether we want to compress the
-            filemount before uploaidng to the bucket.
+            filemount before uploading to the bucket.
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -1023,11 +1025,14 @@ class Storage(object):
             num_files.stdout.close()
             return count
 
-        excluded_list = storage_utils.\
-            get_excluded_files_from_gitignore(self.source)
+        excluded_list = (storage_utils.get_excluded_files_from_gitignore(
+            self.source))
         excluded_list.append('.git')
 
-        if num_files(self.source, excluded_list) <= 10:
+        # Checks for total number of files before compressing
+        # Rsync main latency delay is in compressing a certain number of files.
+        # Testing shows that with 10+ files it's worth compressing.
+        if num_files(self.source, excluded_list) <= _MIN_FILES_TO_COMPRESS:
             self._sync_store(store)
             return
 

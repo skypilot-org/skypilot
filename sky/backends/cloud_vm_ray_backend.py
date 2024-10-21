@@ -4574,9 +4574,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'may already exist. Log: {log_path}')
 
             subprocess_utils.run_in_parallel(_symlink_node, runners)
-        # In case of compression, inflate all zip files
+        # (3) In case of compression, inflate all zip files
+        # TODO(warrickhe): track filenames for compression edgecase
         # Can optimize further by going to specific filemounts & workdir only
-        def _decompress_filemount_zips(runner: command_runner.CommandRunner):
+        def _decompress_filemount_zips(
+                runner: command_runner.CommandRunner) -> None:
             zip_filename = (f'{constants.SKY_REMOTE_WORKDIR}'
                             '/skypilot-filemounts*.zip')
             decompress_command = (
@@ -4587,7 +4589,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = runner.run(decompress_command, log_path=log_path)
             subprocess_utils.handle_returncode(
                 returncode, decompress_command,
-                'Failed to inflate or remove skypilot-filemounts.zip, '
+                'Failed to inflate or remove skypilot-filemounts-uuid.zip, '
                 f'check permissions. Log: {log_path}')
 
         subprocess_utils.run_in_parallel(_decompress_filemount_zips, runners)
