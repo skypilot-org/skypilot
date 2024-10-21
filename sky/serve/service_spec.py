@@ -81,7 +81,7 @@ class SkyServiceSpec:
 
         # Add the check for unknown load balancing policies
         if (load_balancing_policy is not None and
-            load_balancing_policy not in lb_policies.LB_POLICIES):
+                load_balancing_policy not in lb_policies.LB_POLICIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Unknown load balancing policy: {load_balancing_policy}')
