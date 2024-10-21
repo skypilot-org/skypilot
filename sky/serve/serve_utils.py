@@ -805,12 +805,12 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         if replica_info is None:
             raise ValueError(
                 _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
-        
+
         # Copy launch log file into the download directory.
         new_replica_log_file = os.path.join(dir_for_download,
                                             f'replica_{replica_id}.log')
         shutil.copy(launch_log_file, new_replica_log_file)
-        
+
         # Sync down job logs for replica.
         if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
             continue
@@ -824,7 +824,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                          'Skipping syncing down job logs.')
             continue
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        
+
         # Set up local directory for replica job logs.
         replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
                                             'replica_jobs')
