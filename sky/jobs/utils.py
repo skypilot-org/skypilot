@@ -776,13 +776,6 @@ class ManagedJobCodeGen:
             from sky.spot import spot_state as managed_job_state
             from sky.spot import spot_utils as utils
         """)
-    _PREFIX += '\n'.join([
-        'import os',
-        # Use the local user id to make sure the query goes to the correct user.
-        f'os.environ[{constants.USER_ID_ENV_VAR!r}] = '
-        f'{common_utils.get_user_hash()!r}',
-        'common.reload()'
-    ])
 
     @classmethod
     def get_job_table(cls) -> str:
@@ -861,5 +854,9 @@ class ManagedJobCodeGen:
     @classmethod
     def _build(cls, code: str) -> str:
         generated_code = cls._PREFIX + '\n' + code
-
-        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
+        # Use the local user id to make sure the operation goes to the correct
+        # user.
+        return (
+            f'export {constants.USER_ID_ENV_VAR}='
+            f'"{common_utils.get_user_hash()}"; '
+            f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')

@@ -916,12 +916,6 @@ class ServeCodeGen:
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
         'from sky.serve import constants',
-        'from sky.utils import common',
-        'import os',
-        # Use the local user id to make sure the query goes to the correct user.
-        f'os.environ[{skylet_constants.USER_ID_ENV_VAR!r}] = '
-        f'{common_utils.get_user_hash()!r}',
-        'common.reload()'
     ]
 
     @classmethod
@@ -980,7 +974,11 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return (f'{skylet_constants.SKY_PYTHON_CMD} '
+        # Use the local user id to make sure the operation goes to the correct
+        # user.
+        return (f'export {skylet_constants.USER_ID_ENV_VAR}='
+                f'"{common_utils.get_user_hash()}"; '
+                f'{skylet_constants.SKY_PYTHON_CMD} '
                 f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod
