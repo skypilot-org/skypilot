@@ -4,13 +4,13 @@ from concurrent import futures
 import multiprocessing
 import os
 import pathlib
+import queue
 import time
 import traceback
 import typing
-from typing import List, Optional, Tuple
+from typing import Optional, Set, Tuple
 
 import filelock
-import networkx as nx
 
 from sky import exceptions
 from sky import sky_logging
@@ -58,7 +58,9 @@ class JobsController:
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
         self._dag_graph = self._dag.get_graph()
-        self._parallel_groups = self._identify_parallel_groups()
+        self._task_queue = self._initialize_task_queue()
+        self._completed_tasks: Set[int] = set()
+        self._failed_tasks: Set[int] = set()
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
@@ -91,12 +93,13 @@ class JobsController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
-    def _identify_parallel_groups(self) -> List[List[int]]:
-        """Identify groups of tasks that can be executed in parallel."""
-        parallel_groups = list(nx.topological_generations(self._dag_graph))
-        return [[self._dag.tasks.index(task)
-                 for task in group]
-                for group in parallel_groups]
+    def _initialize_task_queue(self) -> queue.Queue[int]:
+        task_queue: queue.Queue[int] = queue.Queue()
+        for task in self._dag_graph.nodes():
+            if self._dag_graph.in_degree(task) == 0:
+                task_id = self._dag.tasks.index(task)
+                task_queue.put(task_id)
+        return task_queue
 
     def _download_log_and_stream(
             self,
@@ -335,48 +338,47 @@ class JobsController:
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
 
-    def _run_parallel_tasks(self, task_group: List[int]) -> Optional[int]:
-        """Run a group of tasks in parallel.
+    def _try_add_successors_to_queue(self, task_id):
+        is_task_runnable = lambda task: all(
+            self._dag.tasks.index(pred) in self._completed_tasks
+            for pred in self._dag_graph.predecessors(task))
+        task = self._dag.tasks[task_id]
+        for successor in self._dag_graph.successors(task):
+            successor_id = self._dag.tasks.index(successor)
+            if is_task_runnable(successor):
+                self._task_queue.put(successor_id)
 
-        Returns:
-            The ID of the first failed task if any task fails, None otherwise.
-        """
-        with futures.ThreadPoolExecutor(
-                max_workers=len(task_group)) as executor:
-            future_to_task = {
-                executor.submit(self._run_one_task, task_id,
-                                self._dag.tasks[task_id]): task_id
-                for task_id in task_group
-            }
-            # TODO(andy): Only unstarted futures are cancelled. We should
-            # also cancel futures that are already running when we encounter
-            # a failure or exception.
-            cancel_running_futures = lambda: [
-                future.cancel() for future in future_to_task.keys()
-            ]
-            for future in futures.as_completed(future_to_task):
-                task_id = future_to_task[future]
-                try:
-                    succeeded = future.result()
-                    if not succeeded:
-                        logger.error(f'Task {task_id} failed')
-                        cancel_running_futures()
-                        return task_id
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.exception(f'Task {task_id} raised an exception: {e}')
-                    cancel_running_futures()
-                    return task_id
-        return None
+    def _execute_task(self, task_id):
+        try:
+            succeeded = self._run_one_task(task_id, self._dag.tasks[task_id])
+            if succeeded:
+                self._completed_tasks.add(task_id)
+                self._try_add_successors_to_queue(task_id)
+            else:
+                self._failed_tasks.add(task_id)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception(f'Task {task_id} raised an exception: {e}')
+            self._failed_tasks.add(task_id)
+
+    def _all_tasks_completed(self):
+        return len(self._completed_tasks) + len(self._failed_tasks) == len(
+            self._dag.tasks)
 
     def run(self):
         """Run controller logic and handle exceptions."""
         failed_task_id = None
         try:
-            parallel_groups = map(self._run_parallel_tasks,
-                                  self._parallel_groups)
-            failed_parallel_groups = filter(lambda x: x is not None,
-                                            parallel_groups)
-            failed_task_id = next(failed_parallel_groups, None)
+            with futures.ThreadPoolExecutor(
+                    max_workers=len(self._dag.tasks)) as executor:
+                while True:
+                    try:
+                        task_id = self._task_queue.get(block=False)
+                    except queue.Empty:
+                        if self._all_tasks_completed():
+                            break
+                        continue
+
+                    executor.submit(self._execute_task, task_id)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
