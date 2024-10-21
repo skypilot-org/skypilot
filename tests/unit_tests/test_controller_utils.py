@@ -65,6 +65,20 @@ def test_get_controller_resources(
             controller_resources_config, k, v)
 
 
+def _check_controller_resources(controller_resources, expected_combinations,
+                                default_controller_resources):
+    """Helper function to check that the controller resources match the expected combinations."""
+    for r in controller_resources:
+        config = r.to_yaml_config()
+        cloud = config.pop('cloud')
+        region = config.pop('region', None)
+        zone = config.pop('zone', None)
+        assert (cloud, region, zone) in expected_combinations
+        expected_combinations.remove((cloud, region, zone))
+        assert config == default_controller_resources, config
+    assert not expected_combinations
+
+
 @pytest.mark.parametrize(('controller_type', 'default_controller_resources'), [
     ('jobs', managed_job_constants.CONTROLLER_RESOURCES),
     ('serve', serve_constants.CONTROLLER_RESOURCES),
@@ -138,3 +152,72 @@ def test_get_controller_resources_with_task_resources(
     assert len(controller_resources) == 1
     config = list(controller_resources)[0].to_yaml_config()
     assert config == default_controller_resources, config
+
+    # 4. All resources have clouds, regions, and zones specified.
+    # Return a set of controller resources for all combinations of clouds,
+    # regions, and zones. Each combination should contain the default resources
+    # along with the cloud, region, and zone.
+    all_cloud_regions_zones = [
+        sky.Resources(cloud=sky.AWS(), region='us-east-1', zone='us-east-1a'),
+        sky.Resources(cloud=sky.AWS(), region='ap-south-1', zone='ap-south-1b'),
+        sky.Resources(cloud=sky.GCP(),
+                      region='us-central1',
+                      zone='us-central1-a'),
+        sky.Resources(cloud=sky.GCP(),
+                      region='europe-west1',
+                      zone='europe-west1-b')
+    ]
+    expected_combinations = {('AWS', 'us-east-1', 'us-east-1a'),
+                             ('AWS', 'ap-south-1', 'ap-south-1b'),
+                             ('GCP', 'us-central1', 'us-central1-a'),
+                             ('GCP', 'europe-west1', 'europe-west1-b')}
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller_utils.Controllers.from_type(controller_type),
+        task_resources=all_cloud_regions_zones)
+    _check_controller_resources(controller_resources, expected_combinations,
+                                default_controller_resources)
+
+    # 5. Clouds and regions are specified, but zones are partially specified.
+    # Return a set containing combinations where the zone is None
+    # when not all zones are specified in the input for the given region. The default
+    # resources should be returned along with the cloud and region, and the zone (if specified).
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller_utils.Controllers.from_type(controller_type),
+        task_resources=[
+            sky.Resources(cloud=sky.AWS(), region='us-west-2'),
+            sky.Resources(cloud=sky.AWS(),
+                          region='us-west-2',
+                          zone='us-west-2b'),
+            sky.Resources(cloud=sky.GCP(),
+                          region='us-central1',
+                          zone='us-central1-a')
+        ])
+    expected_combinations = {('AWS', 'us-west-2', None),
+                             ('GCP', 'us-central1', 'us-central1-a')}
+    _check_controller_resources(controller_resources, expected_combinations,
+                                default_controller_resources)
+
+    # 6. Mixed case: Some resources have clouds and regions or zones, others do not.
+    # For clouds where regions or zones are not specified in the input, return None
+    # for those fields. The default resources should be returned along with the cloud,
+    # region (if specified), and zone (if specified).
+    controller_resources = controller_utils.get_controller_resources(
+        controller=controller_utils.Controllers.from_type(controller_type),
+        task_resources=[
+            sky.Resources(cloud=sky.GCP(), region='europe-west1'),
+            sky.Resources(cloud=sky.GCP()),
+            sky.Resources(cloud=sky.AWS(),
+                          region='eu-north-1',
+                          zone='eu-north-1a'),
+            sky.Resources(cloud=sky.AWS(), region='eu-north-1'),
+            sky.Resources(cloud=sky.AWS(), region='ap-south-1'),
+            sky.Resources(cloud=sky.Azure()),
+        ])
+    expected_combinations = {
+        ('AWS', 'eu-north-1', None),
+        ('AWS', 'ap-south-1', None),
+        ('GCP', None, None),
+        ('Azure', None, None),
+    }
+    _check_controller_resources(controller_resources, expected_combinations,
+                                default_controller_resources)
