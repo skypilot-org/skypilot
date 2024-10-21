@@ -83,7 +83,7 @@ class Dag:
         self.graph.add_node(task)
         self._task_name_lookup[task.name] = task
 
-    def remove(self, task: Union['task.Task', str]) -> None:
+    def remove(self, task: TaskOrName) -> None:
         """Remove a task from the DAG.
 
         Args:
@@ -131,11 +131,6 @@ class Dag:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Task {source.name} should not be its own '
                                  'downstream task.')
-        assert target.name is not None
-        if target.name not in self._task_name_lookup:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Target task {target.name} is not '
-                                 'in the DAG.')
 
         self.graph.add_edge(source, target)
 
