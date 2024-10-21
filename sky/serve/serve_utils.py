@@ -757,14 +757,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
     # copy over log files of already-terminated replicas in this service
     terminated_replicas = [
         info for info in service_record['replica_info']
-        if info['status'] == serve_state.ReplicaStatus.SHUTTING_DOWN or
-        info['status'] == serve_state.ReplicaStatus.PREEMPTED or
-        info['status'] == serve_state.ReplicaStatus.UNKNOWN or
-        info['status'] == serve_state.ReplicaStatus.FAILED or
-        info['status'] == serve_state.ReplicaStatus.FAILED_PROBING or
-        info['status'] == serve_state.ReplicaStatus.FAILED_PROVISION or
-        info['status'] == serve_state.ReplicaStatus.FAILED_CLEANUP or
-        info['status'] == serve_state.ReplicaStatus.FAILED_INITIAL_DELAY
+        if info['status'] in serve_state.ReplicaStatus.terminal_statuses()
     ]
     for replica in terminated_replicas:
         replica_id = replica['replica_id']

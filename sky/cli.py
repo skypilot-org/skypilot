@@ -4532,6 +4532,7 @@ def serve_logs(
         # applies for load balancer (single component)
         sky serve logs [SERVICE_NAME] --controller --sync-down
         \b
+        sky serve logs [SERVICE_NAME] --load-balancer --sync-down
         # Sync down logs only for a single replica
         # (single component)
         sky serve logs [SERVICE_NAME] 3 --sync-down
@@ -4539,7 +4540,7 @@ def serve_logs(
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)
     if num_flags > 1:
-        raise click.UsageError('When using -s / --sync-down, at most one of '
+        raise click.UsageError('At most one of '
                                '--controller, --load-balancer, or [REPLICA_ID] '
                                'can be specified.')
     if num_flags == 0 and not sync_down:
