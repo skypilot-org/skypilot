@@ -182,7 +182,7 @@ def append_job_logs_to_replica_log(new_replica_log_file: str,
     else:
         with open(new_replica_log_file, 'a',
                   encoding='utf-8') as replica_log_file:
-            replica_log_file.write(f'Failed to sync down job logs from replica '
+            replica_log_file.write('Failed to sync down job logs from replica '
                                    f'{replica_id}.\n')
 
 

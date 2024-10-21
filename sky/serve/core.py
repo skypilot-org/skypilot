@@ -807,7 +807,8 @@ def sync_down_logs(service_name: str,
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
         logger.info(
-            'Starting the process to prepare and download load balancer logs...')
+            'Starting the process to prepare and download load balancer logs...'
+        )
         runner = controller_handle.get_command_runners()
         load_balancer_log_file_name = (
             serve_utils.generate_remote_load_balancer_log_file_name(
@@ -825,9 +826,8 @@ def sync_down_logs(service_name: str,
                 target_directory, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
 
     # Final message indicating where the logs can be found.
-    log_message = (f'Synced down log{"s" if not single_file_synced else ""} '
-                   f'can be found at: {target_directory}')
-    logger.info(log_message)
+    logger.info(f'Synced down log{"s" if not single_file_synced else ""}'
+                f' can be found at: {target_directory}')
 
 
 @usage_lib.entrypoint
