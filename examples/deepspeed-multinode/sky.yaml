@@ -2,9 +2,15 @@
 #
 # This takes care constructing a "hostfile" to pass to DeepSpeed.
 #
+# If running on Kubernetes, use the nvidia/cuda:12.1.1-devel-ubuntu20.04 image
+# because DeepSpeed requires nvcc.
+#
 # Usage:
 #
 #   $ sky launch sky.yaml -r --down -c ds
+#
+#   If running on Kubernetes:
+#   $ sky launch sky.yaml -r --down -c ds --cloud kubernetes --image nvidia/cuda:12.1.1-devel-ubuntu20.04
 #
 #   # Optional: After the job starts running, you can log into the two nodes and
 #   # check gpustat:
@@ -18,6 +24,7 @@ resources:
   # accelerators: A100-80GB:1  # Azure, GCP, SCP
   # accelerators: A10G:1  # AWS. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
   # accelerators: T4:1  # AWS, Azure, GCP. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
+  # image_id: docker:nvidia/cuda:12.1.1-devel-ubuntu20.04  # Use this image if running on Kubernetes
 
 num_nodes: 2
 
@@ -28,6 +35,13 @@ envs:
   DEEPSPEED_ENVS: "MY_VAR_1,MY_VAR_2,SKYPILOT_NODE_RANK"
 
 setup: |
+  if ! command -v git &> /dev/null
+  then
+      echo "git is not installed. Installing git..."
+      sudo apt-get update
+      sudo apt-get install -y git
+  fi
+  
   git clone https://github.com/microsoft/DeepSpeedExamples.git || true
   cd DeepSpeedExamples
   git checkout d7c42b4f34df91035e7ed3e0c51500bb53d0bc71
@@ -39,16 +53,19 @@ setup: |
     conda create -n deepspeed python=3.8 -y
     conda activate deepspeed
 
-    pip install deepspeed
+    pip install deepspeed==0.14.4
 
     cd applications/DeepSpeed-Chat
     pip install -r requirements.txt
+  
+    pip install transformers==4.44.0
 
     # Required by DeepSpeed in multi-node settings.
     #
     # NOTE(skypilot): DeepSpeed uses `pdsh` to log into each node and calls
     # `ninja --version`; so it has to be installed system-wide rather than in
     # the above 'deepspeed' conda env.
+    sudo apt-get update
     sudo apt-get -y install pdsh ninja-build
   fi
 
