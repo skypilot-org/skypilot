@@ -94,8 +94,8 @@ class JobsController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
-    def _initialize_task_queue(self) -> queue.Queue[int]:
-        task_queue: queue.Queue[int] = queue.Queue()
+    def _initialize_task_queue(self) -> queue.Queue:
+        task_queue: queue.Queue = queue.Queue()
         for task in self._dag_graph.nodes():
             if self._dag_graph.in_degree(task) == 0:
                 task_id = self._dag.tasks.index(task)
@@ -350,7 +350,7 @@ class JobsController:
             if is_task_runnable(successor):
                 self._task_queue.put(successor_id)
 
-    def _handle_future_completion(self, future: futures.Future[bool],
+    def _handle_future_completion(self, future: futures.Future,
                                   task_id: int):
         try:
             succeeded = future.result()
