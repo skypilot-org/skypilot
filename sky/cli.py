@@ -3182,9 +3182,14 @@ def show_gpus(
                     yield '\n\n'
                     # TODO(Doyoung): Update the message with the multi-host TPU
                     # support.
+                    k8s_per_node_acc_message = (
+                        'Kubernetes per node accelerator availability ')
+                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
+                            context):
+                        k8s_per_node_acc_message += (
+                            '(Note: Multi-host TPUs are not supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node accelerator availability '
-                           '(Note: Multi-host TPUs are not supported.)'
+                           f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:

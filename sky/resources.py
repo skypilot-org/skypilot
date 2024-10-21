@@ -566,7 +566,7 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    if kubernetes_utils.is_tpu_pod_slice(acc):
+                    if kubernetes_utils.is_tpu_on_gke(acc):
                         self._cloud = clouds.Kubernetes()
                     else:
                         self._cloud = clouds.GCP()

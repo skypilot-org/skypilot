@@ -288,7 +288,7 @@ class GKELabelFormatter(GPULabelFormatter):
                 # to distinguish between a3-high and a3-mega instances
                 return 'H100'
             return acc
-        elif is_tpu_pod_slice(value):
+        elif is_tpu_on_gke(value):
             return value
         else:
             raise ValueError(
@@ -582,7 +582,7 @@ def check_instance_fits(context: Optional[str],
             node.metadata.labels[gpu_label_key] == gpu_label_val
         ]
         assert len(gpu_nodes) > 0, 'GPU nodes not found'
-        if is_tpu_pod_slice(acc_type):
+        if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
             fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
@@ -717,7 +717,7 @@ def get_accelerator_label_key_value(
                     if (label_formatter.match_label_key(label) and
                             label_formatter.get_accelerator_from_label_value(
                                 value) == acc_type):
-                        if is_tpu_pod_slice(acc_type):
+                        if is_tpu_on_gke(acc_type):
                             assert isinstance(label_formatter,
                                               GKELabelFormatter)
                             if node_metadata_labels.get(
@@ -2194,7 +2194,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
     return pods
 
 
-def is_tpu_pod_slice(accelerator: str) -> bool:
+def is_tpu_on_gke(accelerator: str) -> bool:
     """Determins if the given accelerator is a TPU supported on GKE."""
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
@@ -2255,6 +2255,16 @@ def is_multi_host_tpu(node_metadata_labels: dict):
         if node_tpu_chip_count != topology_chip_count:
             return True
     return False
+
+
+def multi_host_tpu_exists_in_cluster(context: Optional[str] = None):
+    """Checks if there exists a multi-host TPU within the cluster."""
+    multi_host_tpu_in_cluster = False
+    nodes = get_kubernetes_nodes(context)
+    for node in nodes:
+        if is_multi_host_tpu(node.metadata.labels):
+            multi_host_tpu_in_cluster = True
+    return multi_host_tpu_in_cluster
 
 
 @dataclasses.dataclass
