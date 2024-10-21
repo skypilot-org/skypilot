@@ -61,6 +61,7 @@ class JobsController:
         self._task_queue = self._initialize_task_queue()
         self._completed_tasks: Set[int] = set()
         self._failed_tasks: Set[int] = set()
+        self._block_tasks: Set[int] = set()
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
@@ -339,9 +340,10 @@ class JobsController:
                                             callback_func=callback_func)
 
     def _try_add_successors_to_queue(self, task_id):
-        is_task_runnable = lambda task: all(
+        is_task_runnable = lambda task: (all(
             self._dag.tasks.index(pred) in self._completed_tasks
-            for pred in self._dag_graph.predecessors(task))
+            for pred in self._dag_graph.predecessors(task)) and task_id not in
+                                         self._block_tasks)
         task = self._dag.tasks[task_id]
         for successor in self._dag_graph.successors(task):
             successor_id = self._dag.tasks.index(successor)
@@ -356,13 +358,22 @@ class JobsController:
                 self._try_add_successors_to_queue(task_id)
             else:
                 self._failed_tasks.add(task_id)
+                self._block_downstream_tasks(task_id)
         except Exception as e:  # pylint: disable=broad-except
             logger.exception(f'Task {task_id} raised an exception: {e}')
             self._failed_tasks.add(task_id)
+            self._block_downstream_tasks(task_id)
+
+    def _block_downstream_tasks(self, failed_task_id: int):
+        failed_task = self._dag.tasks[failed_task_id]
+        for downstream in self._dag_graph.successors(failed_task):
+            downstream_id = self._dag.tasks.index(downstream)
+            self._block_tasks.add(downstream_id)
 
     def _all_tasks_completed(self):
-        return len(self._completed_tasks) + len(self._failed_tasks) == len(
-            self._dag.tasks)
+        total_tasks = (len(self._completed_tasks) + len(self._failed_tasks) +
+                       len(self._block_tasks))
+        return total_tasks == len(self._dag.tasks)
 
     def run(self):
         """Run controller logic and handle exceptions."""
@@ -376,8 +387,10 @@ class JobsController:
                     except queue.Empty:
                         if self._all_tasks_completed():
                             break
+                        time.sleep(1)
                         continue
 
+                    logger.info(f'Submitting task {task_id} to executor.')
                     executor.submit(self._execute_task, task_id)
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
