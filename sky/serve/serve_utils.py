@@ -777,82 +777,78 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
     ]
     for replica in terminated_replicas:
         replica_id = replica['replica_id']
-        log_file_name = f'replica_{replica_id}.log'
+        log_file_name = generate_replica_log_file_name(service_name, replica_id)
         if has_valid_replica_id(log_file_name, target_replica_id):
-            log_file_path = os.path.join(dir_name, log_file_name)
-            if os.path.exists(log_file_path):
-                shutil.copy(log_file_path, dir_for_download)
-
+            if os.path.exists(log_file_name):
+                shutil.copy(log_file_name, dir_for_download)
+    
     # These copies of logs may still be continuously updating.
     # We need to synchronize the latest log data from the remote server.
-    log_files = os.listdir(dir_name)
-    launch_log_files = [
-        file for file in log_files if file.endswith('_launch.log') and
-        has_valid_replica_id(file, target_replica_id)
-    ]
-    for launch_log_file in launch_log_files:
-        # Get replica id from launch log filename.
-        match = re.search(serve_constants.REPLICA_ID_PATTERN, launch_log_file)
-        if match is not None:
-            replica_id = int(match.group(1))
-        else:
-            raise ValueError(
-                f'Failed to get replica id from file name: {launch_log_file}')
-
-        # Get replica info from its id.
-        replica_info = serve_state.get_replica_info_from_id(
-            service_name, replica_id)
-        if replica_info is None:
-            raise ValueError(
-                _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
+    for replica in service_record['replica_info']:
+        replica_id = replica['replica_id']
+        launch_log_file = generate_replica_launch_log_file_name(
+            service_name,
+            replica_id
+        )
+        
+        # Check if launch log file exists and has correct replica_id.
+        if not (os.path.exists(launch_log_file) 
+                and has_valid_replica_id(launch_log_file, target_replica_id)):
+            logger.error(
+                f'{colorama.Fore.RED}Path {launch_log_file} does not exist, '
+                f'or replica_id {replica_id} is invalid.{colorama.Style.RESET_ALL}'
+            )
+            continue
 
         # Copy launch log file into the download directory.
-        new_replica_log_file = os.path.join(dir_for_download,
-                                            f'replica_{replica_id}.log')
+        new_replica_log_file = os.path.join(
+                dir_for_download,
+                f'replica_{replica_id}.log'
+        )
         shutil.copy(launch_log_file, new_replica_log_file)
-
+        
         # Sync down job logs for replica.
-        if replica_info.status == serve_state.ReplicaStatus.PROVISIONING:
+        if replica['status'] == serve_state.ReplicaStatus.PROVISIONING:
             continue
         logger.info(f'Syncing down logs for replica {replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
-            replica_info.cluster_name)
+            replica['cluster_name'])
         if handle is None:
-            logger.error(f'Cannot find cluster {replica_info.cluster_name} for '
-                         f'replica {replica_id} in the cluster table. '
-                         'Skipping syncing down job logs.')
+            logger.error(f'Cannot find cluster {replica["cluster_name"]} for '
+                            f'replica {replica_id} in the cluster table. '
+                            'Skipping syncing down job logs.')
             continue
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-
+        
         # Set up local directory for replica job logs.
-        replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                            'replica_jobs')
+        replica_job_logs_dir = os.path.join(
+            skylet_constants.SKY_LOGS_DIRECTORY,
+            'replica_jobs'
+        )
         os.makedirs(replica_job_logs_dir, exist_ok=True)
         job_log_file_name = None
         try:
             # Try to sync down the logs for the replica.
-            log_dirs = backend.sync_down_logs(handle,
-                                              job_ids=None,
-                                              local_dir=replica_job_logs_dir)
+            log_dirs = backend.sync_down_logs(
+                handle, 
+                job_ids=None, 
+                local_dir=replica_job_logs_dir
+            )
         except exceptions.CommandError as e:
-            logger.info(f'Failed to download the logs: '
-                        f'{common_utils.format_exception(e)}')
+            logger.info(f'Failed to download the logs: {common_utils.format_exception(e)}')
         else:
-            # No error, then we need to consider where to store.
+            # No error, then consider where to store.
             if not log_dirs:
-                logger.error(
-                    f'Failed to find the logs for replica {replica_id}.')
+                logger.error(f'Failed to find the logs for replica {replica_id}.')
             else:
                 log_dir = list(log_dirs.values())[0]
                 candidate_log_file_name = os.path.join(log_dir, 'run.log')
                 if not os.path.exists(candidate_log_file_name):
-                    logger.error(f'Failed to the the replica logs at '
-                                 f'{candidate_log_file_name}')
+                    logger.error(f'Failed to find the replica logs at {candidate_log_file_name}')
                 job_log_file_name = candidate_log_file_name
 
-        append_job_logs_to_replica_log(new_replica_log_file, job_log_file_name,
-                                       replica_id)
+        append_job_logs_to_replica_log(new_replica_log_file, job_log_file_name, replica_id)
 
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
