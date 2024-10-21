@@ -1,4 +1,4 @@
-"""Handlers for the REST API return values."""
+"""Encoders for the REST API return values."""
 # TODO(zhwu): we should evaluate that if we can move our return values to
 # pydantic models, so we can take advantage of model_dump_json of pydantic,
 # instead of implementing our own handlers.

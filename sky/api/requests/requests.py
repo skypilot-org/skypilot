@@ -13,9 +13,9 @@ import filelock
 
 from sky import exceptions
 from sky.api import common
-from sky.api.requests import decoders
-from sky.api.requests import encoders
 from sky.api.requests import payloads
+from sky.api.requests.serializers import decoders
+from sky.api.requests.serializers import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
 

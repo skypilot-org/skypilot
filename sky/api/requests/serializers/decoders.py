@@ -1,4 +1,4 @@
-"""Handlers for the REST API return values."""
+"""Decoders for the REST API return values."""
 import base64
 import pickle
 import typing
