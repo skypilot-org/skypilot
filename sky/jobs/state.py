@@ -443,40 +443,44 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int, callback_func: CallbackType):
-    """Set tasks in the job as cancelling, if they are in non-terminal states.
-
-    task_id is not needed, because we expect the job should be cancelled
-    as a whole, and we should not cancel a single task.
-    """
+def set_cancelling(job_id: int,
+                   task_id: Optional[int] = None,
+                   callback_func: Optional[CallbackType] = None):
+    """Set the task to cancelling state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
+        task_str = '' if task_id is None else f' AND task_id={task_id}'
         rows = cursor.execute(
-            """\
+            f"""\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND end_at IS null""",
+            WHERE spot_job_id=(?){task_str} AND end_at IS null""",
             (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
-            callback_func('CANCELLING')
+            if callback_func is not None:
+                callback_func('CANCELLING')
 
 
-def set_cancelled(job_id: int, callback_func: CallbackType):
+def set_cancelled(job_id: int,
+                  task_id: Optional[int] = None,
+                  callback_func: Optional[CallbackType] = None):
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
     """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
+        task_str = '' if task_id is None else f' AND task_id={task_id}'
         rows = cursor.execute(
-            """\
+            f"""\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND status=(?)""",
+            WHERE spot_job_id=(?){task_str} AND status=(?)""",
             (ManagedJobStatus.CANCELLED.value, time.time(), job_id,
              ManagedJobStatus.CANCELLING.value))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
-            callback_func('CANCELLED')
+            if callback_func is not None:
+                callback_func('CANCELLED')
 
 
 # ======== utility functions ========
