@@ -1124,16 +1124,18 @@ class ServeCodeGen:
     def prepare_replica_logs_for_download(cls, service_name: str,
                                           timestamp: str,
                                           replica_id: Optional[int]) -> str:
+
+        # Backward compatibility is not a concern for this function:
+        # 1. The parameters `service_name`, `timestamp`, and `replica_id`
+        # were defined at the inception of the system and are not newly
+        # introduced in later version like `mode` in `update_service()`,
+        # meaning there are no expected differences between versions.
+        # 2. During system upgrades, all relevant systems have already
+        # synchronized updates for these parameters, so no parameter
+        # inconsistency will occur across versions.
         code = [
-            # Backward compatibility for older SkyPilot versions
-            # If the SkyPilot version on the remote machine
-            # is below a certain version,
-            # do not pass the `replica_id` parameter.
-            # TODO(bxhu): remove this in future release. (TBD)
-            f'replica_id_arg = {replica_id!r} if '
-            'getattr(constants, "SERVE_VERSION", 0) >= 1 else None',
             'msg = serve_utils.prepare_replica_logs_for_download('
-            f'{service_name!r}, {timestamp!r}, replica_id_arg)',
+            f'{service_name!r}, {timestamp!r}, {replica_id})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
