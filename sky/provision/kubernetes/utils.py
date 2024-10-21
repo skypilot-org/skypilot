@@ -2195,6 +2195,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 
 def is_tpu_pod_slice(accelerator: str) -> bool:
+    """Determins if the given accelerator is a TPU supported on GKE."""
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
