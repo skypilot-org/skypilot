@@ -42,6 +42,9 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       DiskSize: {{disk_size}}
+      {%- if image_id is not none %}
+      ImageId: {{image_id}}
+      {%- endif %}
 
 head_node_type: ray_head_default
 

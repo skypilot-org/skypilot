@@ -6,7 +6,6 @@ import uuid
 
 from sky import sky_logging
 from sky import status_lib
-from sky.adaptors import do
 from sky.provision import common
 from sky.provision.do import constants
 from sky.provision.do import utils
@@ -193,11 +192,7 @@ def terminate_instances(
         logger.debug(f'Terminating instance {instance_name}')
         if worker_only and instance_name.endswith('-head'):
             continue
-        try:
-            utils.down_instance(instance_meta)
-        except do.exceptions().HttpResponseError as err:
-            logger.warning(
-                f'Error: {err.status_code} {err.reason}: {err.error.message}')
+        utils.down_instance(instance_meta)
 
     for _ in range(MAX_POLLS_FOR_UP_OR_STOP):
         instances = utils.filter_instances(cluster_name_on_cloud,

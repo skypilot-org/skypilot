@@ -181,11 +181,21 @@ class DO(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-
+        image_id = None
+        if (resources.image_id is not None and
+                resources.extract_docker_image() is None):
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert region.name in resources.image_id
+                image_id = resources.image_id[region.name]
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            **({
+                'image_id': image_id
+            } if image_id else {})
         }
 
     def _get_feasible_launchable_resources(
@@ -265,6 +275,20 @@ class DO(clouds.Cloud):
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del region
+        try:
+            response = do_utils.client().images.get(image_id=image_id)
+            return response['image']['size_gigabytes']
+        except do.exceptions().HttpResponseError as err:
+            raise do_utils.DigitalOceanError(
+                'HTTP error while retrieving size of '
+                f'image_id {response}: {err.error.message}') from err
+        except KeyError as err:
+            raise do_utils.DigitalOceanError(
+                f'No image_id `{image_id}` found') from err
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return service_catalog.instance_type_exists(instance_type, 'DO')

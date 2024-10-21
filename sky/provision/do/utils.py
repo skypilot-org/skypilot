@@ -6,6 +6,7 @@ https://github.com/digitalocean/pydo/blob/main/examples/poc_droplets_volumes_ssh
 
 import copy
 import os
+import typing
 from typing import Any, Dict, List, Optional
 import urllib
 import uuid
@@ -16,6 +17,10 @@ from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.do import constants
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -93,7 +98,9 @@ def ssh_key_id(public_key: str):
                         _ssh_key_id = ssh_key
                         return _ssh_key_id
             except do.exceptions().HttpResponseError as err:
-                raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
+                raise DigitalOceanError(
+                    f'Error: {err.status_code} {err.reason}: '
+                    f'{err.error.message}') from err
 
             pages = resp['links']
             if 'pages' in pages and 'next' in pages['pages']:
@@ -116,7 +123,9 @@ def _create_volume(request: Dict[str, Any]) -> Dict[str, Any]:
         resp = client().volumes.create(body=request)
         volume = resp['volume']
     except do.exceptions().HttpResponseError as err:
-        raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
     else:
         return volume
 
@@ -129,7 +138,9 @@ def _create_droplet(request: Dict[str, Any]) -> Dict[str, Any]:
         get_resp = client().droplets.get(droplet_id)
         droplet = get_resp['droplet']
     except do.exceptions().HttpResponseError as err:
-        raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
     return droplet
 
 
@@ -155,17 +166,18 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     }
     tags = [f'{key}:{value}' for key, value in tags.items()]
     default_image = constants.GPU_IMAGES.get(
-            config.node_config['InstanceType'],
-            'ubuntu-22-04-x64',
-        )
-    import pdb; pdb.set_trace()
+        config.node_config['InstanceType'],
+        'ubuntu-22-04-x64',
+    )
+    image_id = config.node_config['ImageId']
+    image_id = image_id if image_id is not None else default_image
     instance_name = (f'{cluster_name_on_cloud}-'
                      f'{uuid.uuid4().hex[:4]}-{instance_type}')
     instance_request = {
         'name': instance_name,
         'region': region,
         'size': config.node_config['InstanceType'],
-        'image': default_image,
+        'image': image_id,
         'ssh_keys': [
             ssh_key_id(
                 config.authentication_config['ssh_public_key'])['fingerprint']
@@ -188,36 +200,58 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     try:
         client().volume_actions.post_by_id(volume['id'], attach_request)
     except do.exceptions().HttpResponseError as err:
-        raise DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
     logger.debug(f'{instance_name} created')
     return instance
 
 
 def start_instance(instance: Dict[str, Any]):
-    client().droplet_actions.post(droplet_id=instance['id'],
-                                  body={'type': 'power_on'})
+    try:
+        client().droplet_actions.post(droplet_id=instance['id'],
+                                      body={'type': 'power_on'})
+    except do.exceptions().HttpResponseError as err:
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
 
 
 def stop_instance(instance: Dict[str, Any]):
-    client().droplet_actions.post(
-        droplet_id=instance['id'],
-        body={'type': 'shutdown'},
-    )
+    try:
+        client().droplet_actions.post(
+            droplet_id=instance['id'],
+            body={'type': 'shutdown'},
+        )
+    except do.exceptions().HttpResponseError as err:
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
 
 
 def down_instance(instance: Dict[str, Any]):
     # We use dangerous destroy to atomically delete
     # block storage and instance for autodown
-    client().droplets.destroy_with_associated_resources_dangerous(
-        droplet_id=instance['id'], x_dangerous=True)
+    try:
+        client().droplets.destroy_with_associated_resources_dangerous(
+            droplet_id=instance['id'], x_dangerous=True)
+    except do.exceptions().HttpResponseError as err:
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
 
 
 def rename_instance(instance: Dict[str, Any], new_name: str):
-    client().droplet_actions.rename(droplet=instance['id'],
-                                    body={
-                                        'type': 'rename',
-                                        'name': new_name
-                                    })
+    try:
+        client().droplet_actions.rename(droplet=instance['id'],
+                                        body={
+                                            'type': 'rename',
+                                            'name': new_name
+                                        })
+    except do.exceptions().HttpResponseError as err:
+        raise DigitalOceanError(
+            f'Error: {err.status_code} {err.reason}: {err.error.message}'
+        ) from err
 
 
 def filter_instances(
@@ -232,15 +266,19 @@ def filter_instances(
     paginated = True
     while paginated:
         try:
-            resp = client().droplets.list(tag_name=cluster_name_on_cloud,
-                                          per_page=50,
-                                          page=page)
+            resp = client().droplets.list(
+                tag_name=f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}:'
+                f'{cluster_name_on_cloud}',
+                per_page=50,
+                page=page)
             for instance in resp['droplets']:
                 if status_filters is None or instance[
                         'status'] in status_filters:
                     filtered_instances[instance['name']] = instance
         except do.exceptions().HttpResponseError as err:
-            DigitalOceanError(f'Error: {err.status_code} {err.reason}: {err.error.message}')
+            raise DigitalOceanError(
+                f'Error: {err.status_code} {err.reason}: {err.error.message}'
+            ) from err
 
         pages = resp['links']
         if 'pages' in pages and 'next' in pages['pages']:
