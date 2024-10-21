@@ -685,32 +685,25 @@ def sync_down_logs(service_name: str,
             service_component = serve_utils.ServiceComponent(service_component)
         if not isinstance(service_component, serve_utils.ServiceComponent):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'`service_component` must be a string or '
-                    f'sky.serve.ServiceComponent, got {type(service_component)}.')
+                raise ValueError('`service_component` must be a string or '
+                                 'sky.serve.ServiceComponent, '
+                                 f'got {type(service_component)}.')
         if service_component == serve_utils.ServiceComponent.REPLICA:
             if replica_id is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('`replica_id` must be specified when '
-                                    'using service_component=REPLICA.')
+                                     'using service_component=REPLICA.')
         else:
             if replica_id is not None:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('`replica_id` must be None when using '
-                                    'service_component=CONTROLLER/LOAD_BALANCER.')
+                    raise ValueError(
+                        '`replica_id` must be None when using '
+                        'service_component=CONTROLLER/LOAD_BALANCER.')
 
     logger.info(f'Syncing down logs for {service_name}...')
     controller_handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
-
-    # Prepare logs for download.
-    ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        controller_handle.cluster_yaml, controller_handle.docker_user)
-    runner = command_runner.SSHCommandRunner(
-        node=(controller_handle.head_ip, controller_handle.head_ssh_port),
-        **ssh_credentials,
-    )
 
     # Define local directory for logs and get the current timestamp.
     sky_logs_directory = os.path.expanduser(skylet_constants.SKY_LOGS_DIRECTORY)
@@ -741,6 +734,7 @@ def sync_down_logs(service_name: str,
             raise RuntimeError(e.error_msg) from e
 
         # Define remote directory for logs and download them.
+        runner = controller_handle.get_command_runners()
         remote_service_dir_name = (
             serve_utils.generate_remote_service_dir_name(service_name))
         dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
@@ -777,6 +771,7 @@ def sync_down_logs(service_name: str,
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.CONTROLLER):
+        runner = controller_handle.get_command_runners()
         controller_log_file_name = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
         logger.info('Downloading the controller logs...')
@@ -793,6 +788,7 @@ def sync_down_logs(service_name: str,
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
+        runner = controller_handle.get_command_runners()
         load_balancer_log_file_name = (
             serve_utils.generate_remote_load_balancer_log_file_name(
                 service_name))
