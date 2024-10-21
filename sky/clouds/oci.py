@@ -302,8 +302,8 @@ class OCI(clouds.Cloud):
                                         region=region.name)
 
         # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog.oci_catalog import get_image_os_from_tag
-        os_type = get_image_os_from_tag(tag=image_tag, region=region.name)
+        from sky.clouds.service_catalog import oci_catalog
+        os_type = oci_catalog.get_image_os_from_tag(tag=image_tag, region=region.name)
         logger.debug(f'OS type for the image {image_tag} is {os_type}')
 
         return {
