@@ -297,7 +297,7 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
-        image_tag = self._get_image_str(image_id=resources.image_id,
+        image_str = self._get_image_str(image_id=resources.image_id,
                                         instance_type=resources.instance_type,
                                         region=region.name)
 
