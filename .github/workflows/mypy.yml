@@ -7,10 +7,12 @@ on:
     branches:
       - master
       - 'releases/**'
+      - advanced-dag
   pull_request:
     branches:
       - master
       - 'releases/**'
+      - advanced-dag
 jobs:
   mypy:
     runs-on: ubuntu-latest
