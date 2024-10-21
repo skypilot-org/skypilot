@@ -2198,6 +2198,64 @@ def is_tpu_pod_slice(accelerator: str) -> bool:
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
+def get_node_accelerator_count(attribute_dict: dict) -> int:
+    """Retrieves the count of accelerators from a node's resource dictionary.
+
+    This method checks the node's allocatable resources or the accelerators
+    already deployed on the node, using pod objects that describe resource
+    requests.
+
+    Args:
+        attribute_dict: Containing resource information from a node, such as
+            allocatable or requested resources.
+
+    Returns:
+        Number of accelerators allocated or available from the node. If no
+            resource is found, it returns 0.
+    """
+    if GPU_RESOURCE_KEY in attribute_dict:
+        return int(attribute_dict[GPU_RESOURCE_KEY])
+    elif TPU_RESOURCE_KEY in attribute_dict:
+        return int(attribute_dict[TPU_RESOURCE_KEY])
+    return 0
+
+
+def reduce_tpu_topology(topology: str):
+    """Computes the number of TPU chips from its topology string."""
+    chip_dimensions = [int(chip_count) for chip_count in topology.split('x')]
+    # tpu_topology_chip_count represents the total number of TPU chips in the
+    # entire podslice, whether it is a single-host or multi-host TPU podslice.
+    tpu_topology_chip_count = functools.reduce(lambda x, y: x * y,
+                                               chip_dimensions)
+    return tpu_topology_chip_count
+
+
+def is_multi_host_tpu(node_metadata_labels: dict):
+    """Determines whether the given node is a multi-host TPU configuration."""
+    if GKELabelFormatter.TPU_LABEL_KEY in node_metadata_labels:
+        assert GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY in node_metadata_labels
+        topology_value = (
+            node_metadata_labels[GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
+        accelerator_count_label_key = (
+            GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY)
+        assert accelerator_count_label_key in node_metadata_labels
+        # node_tpu_chip_count represents the number of TPU chips
+        # available in this node. If the node is part of a node pool
+        # forming a multi-host TPU podslice, it only reflects the
+        # number of TPU chips in this individual node, not the entire
+        # multi-host TPU podslice.
+        node_tpu_chip_count = int(
+            node_metadata_labels[accelerator_count_label_key])
+        topology_chip_count = reduce_tpu_topology(topology_value)
+        # For multi-host TPU podslices, topology_chip_count and
+        # node_tpu_chip_count will differ, as topology_chip_count
+        # reflects the total across all hosts, while
+        # node_tpu_chip_count reflects only the chips in a single node.
+        if node_tpu_chip_count != topology_chip_count:
+            return True
+    return False
+
+
 @dataclasses.dataclass
 class KubernetesSkyPilotClusterInfo:
     cluster_name_on_cloud: str
@@ -2306,61 +2364,3 @@ def process_skypilot_pods(
         num_pods = len(cluster.pods)
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
-
-
-def get_node_accelerator_count(attribute_dict: dict) -> int:
-    """Retrieves the count of accelerators from a node's resource dictionary.
-
-    This method checks the node's allocatable resources or the accelerators
-    already deployed on the node, using pod objects that describe resource
-    requests.
-
-    Args:
-        attribute_dict): Containing resource information from a node, such as
-            allocatable or requested resources.
-
-    Returns:
-        Number of accelerators allocated or available from the node. If no
-            resource is found, it returns 0.
-    """
-    if GPU_RESOURCE_KEY in attribute_dict:
-        return int(attribute_dict[GPU_RESOURCE_KEY])
-    elif TPU_RESOURCE_KEY in attribute_dict:
-        return int(attribute_dict[TPU_RESOURCE_KEY])
-    return 0
-
-
-def reduce_tpu_topology(topology: str):
-    """Computes the number of TPU chips from its topology string."""
-    chip_dimensions = [int(chip_count) for chip_count in topology.split('x')]
-    # tpu_topology_chip_count represents the total number of TPU chips in the
-    # entire podslice, whether it is a single-host or multi-host TPU podslice.
-    tpu_topology_chip_count = functools.reduce(
-        lambda x, y: x * y, chip_dimensions)
-    return tpu_topology_chip_count
-
-
-def is_multi_host_tpu(node_metadata_labels: dict):
-    """Determines whether the given node is a multi-host TPU configuration."""
-    if GKELabelFormatter.TPU_LABEL_KEY in node_metadata_labels:
-        assert GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY in node_metadata_labels
-        topology_value = (
-            node_metadata_labels[GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY])
-        accelerator_count_label_key = (
-            GKELabelFormatter.ACCELERATOR_COUNT_LABEL_KEY)
-        assert accelerator_count_label_key in node_metadata_labels
-        # node_tpu_chip_count represents the number of TPU chips
-        # available in this node. If the node is part of a node pool
-        # forming a multi-host TPU podslice, it only reflects the
-        # number of TPU chips in this individual node, not the entire
-        # multi-host TPU podslice.
-        node_tpu_chip_count = int(
-            node_metadata_labels[accelerator_count_label_key])
-        topology_chip_count = reduce_tpu_topology(topology_value)
-        # For multi-host TPU podslices, topology_chip_count and
-        # node_tpu_chip_count will differ, as topology_chip_count
-        # reflects the total across all hosts, while
-        # node_tpu_chip_count reflects only the chips in a single node.
-        if node_tpu_chip_count != topology_chip_count:
-            return True
-    return False
