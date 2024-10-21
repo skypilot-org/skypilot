@@ -147,5 +147,6 @@ def encode_storage_ls(
 @register_handler('job_status')
 def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
     for job_id in return_value.keys():
-        return_value[job_id] = return_value[job_id].value
+        if return_value[job_id] is not None:
+            return_value[job_id] = return_value[job_id].value
     return return_value
