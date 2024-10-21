@@ -36,7 +36,6 @@ class Dag:
         """
         self.name = name
         self._task_name_lookup: Dict[str, 'task.Task'] = {}
-        self.edges: Dict['task.Task', Set['task.Task']] = {}
         self.graph = nx.DiGraph()
 
     @property
@@ -79,8 +78,8 @@ class Dag:
         if task.name in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Task {task.name!r} already exists in the DAG.'
-                    f' Or the task name is already used by another task.')
+                    f'Task {task.name!r} already exists in the DAG, '
+                    f'or the task name is already used by another task.')
         self.graph.add_node(task)
         self._task_name_lookup[task.name] = task
 
@@ -91,24 +90,25 @@ class Dag:
             task: The Task object or name of the task to remove.
 
         Raises:
-            ValueError: If the task is still being depended on by other tasks.
+            ValueError: If the task is still being used as a upstream task by
+            other tasks.
         """
         task = self._get_task(task)
 
+        downstreams = self.get_downstream(task)
         # TODO(andy): Stuck by optimizer's wrong way to remove dummy sources
         # and sink nodes.
-        # if dependents:
-        #     dependent_names = ', '.join([dep.name for dep in dependents])
+        # if downstreams:
+        #     downstream_names = ', '.join(
+        #         cast(str, downstream.name) for downstream in downstreams)
         #     with ux_utils.print_exception_no_traceback():
-        #         raise ValueError(f'Task {task.name} is still being depended '
-        #                          f'by tasks {dependent_names!r}. Try to '
-        #                          'remove the dependencies first.')
+        #         raise ValueError(f'Task {task.name} is still being used as a '
+        #                          f'downstream task by {downstream_names!r}. '
+        #                          'Try to remove the downstream tasks first.')
         # Here's a workaround, proactively remove all downstream edges.
-        dependents = self.get_downstream(task)
-        for dependent in dependents:
-            self.remove_edge(task, dependent)
+        for downstream in downstreams:
+            self.remove_edge(task, downstream)
 
-        self.edges.pop(task, None)
         self.graph.remove_node(task)
         assert task.name is not None
         self._task_name_lookup.pop(task.name, None)
@@ -117,19 +117,20 @@ class Dag:
         """Add an edge from source task to target task.
 
         Args:
-            source: The task that the target task depends on.
-            target: The task that depends on the source task.
+            source: The upstream task.
+            target: The downstream task to be added.
 
         Raises:
-            ValueError: If a task tries to depend on itself or if the
-            target task is not in the DAG.
+            ValueError: If a task is set as its own downstream task or if the
+            downstream task is not in the DAG.
         """
         source = self._get_task(source)
         target = self._get_task(target)
 
         if source.name == target.name:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Task {source.name} cannot depend on itself.')
+                raise ValueError(f'Task {source.name} should not be its own '
+                                 'downstream task.')
         assert target.name is not None
         if target.name not in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
@@ -137,16 +138,13 @@ class Dag:
                                  'in the DAG.')
 
         self.graph.add_edge(source, target)
-        if source not in self.edges:
-            self.edges[source] = set()
-        self.edges[source].add(target)
 
     def add_downstream(self, source: TaskOrName, target: TaskOrName) -> None:
         """Add downstream tasks for a source task.
 
         Args:
-            source: The task that the downstream tasks depend on.
-            target: The task(s) to add as downstream tasks.
+            source: The upstream task.
+            target: The downstream task to be added.
         """
         return self.add_edge(source, target)
 
@@ -157,8 +155,8 @@ class Dag:
         This replaces any existing downstream tasks for the given source.
 
         Args:
-            source: The task that the downstream tasks depend on.
-            targets: The task(s) that depend on the source task.
+            source: The upstream task.
+            targets: The downstream task(s) to be added.
         """
         source = self._get_task(source)
         if not isinstance(targets, list):
@@ -171,15 +169,17 @@ class Dag:
         """Remove an edge between two tasks.
 
         Args:
-            source: The source task to remove the edge from.
-            target: The target task to remove the edge to.
+            source: The upstream task.
+            target: The downstream task to remove the edge to.
         """
         source = self._get_task(source)
         target = self._get_task(target)
-
-        if source in self.edges and target in self.edges[source]:
-            self.edges[source].remove(target)
+        try:
             self.graph.remove_edge(source, target)
+        except nx.NetworkXError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Edge {source.name} -> {target.name} not found') from None
 
     def remove_all_downstream(self, task: TaskOrName) -> None:
         """Remove all downstream tasks for a given task.
@@ -188,10 +188,8 @@ class Dag:
             task: The task to remove all downstream tasks from.
         """
         task = self._get_task(task)
-        if task in self.edges:
-            for target in list(self.edges[task]):
-                self.graph.remove_edge(task, target)
-            self.edges[task].clear()
+        for target in self.graph.successors(task):
+            self.graph.remove_edge(task, target)
 
     def get_downstream(self, task: TaskOrName) -> Set['task.Task']:
         """Get all downstream tasks for a given task.
@@ -200,10 +198,10 @@ class Dag:
             task: The task to get downstream tasks for.
 
         Returns:
-            A set of tasks that depend on the given task.
+            A set of downstream tasks.
         """
         task = self._get_task(task)
-        return self.edges.get(task, set())
+        return set(self.graph.successors(task))
 
     def __len__(self) -> int:
         """Return the number of tasks in the DAG."""

@@ -157,7 +157,6 @@ def _with_docker_login_config(
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
         # Already checked in extract_docker_image
-        assert resources.image_id is not None, resources.image_id
         assert len(resources.image_id) == 1, resources.image_id
         region = list(resources.image_id.keys())[0]
         return resources.copy(image_id={region: 'docker:' + docker_image},
@@ -1162,7 +1161,7 @@ class Task:
         if current_dag is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('No current DAG context found. '
-                                 'Use `with sky.dag() as dag: ...` '
+                                 'Use `with sky.Dag() as dag: ...` '
                                  'to define a DAG.')
         current_dag.add_edge(self, b)
 
