@@ -37,7 +37,7 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
-    dag = dag_utils.load_chain_dag_from_yaml(dag_yaml)
+    dag = dag_utils.load_dag_from_yaml(dag_yaml)
     dag_name = dag.name
     assert dag_name is not None, dag
     return dag, dag_name
