@@ -354,11 +354,14 @@ class JobsController:
                                   task_id: int):
         try:
             succeeded = future.result()
+            logger.info(f'Task {task_id} completed with result: {succeeded}')
             if succeeded:
                 self._completed_tasks.add(task_id)
                 self._try_add_successors_to_queue(task_id)
                 return
         except exceptions.ProvisionPrechecksError as e:
+            logger.info(f'Task {task_id} failed with ProvisionPrechecksError '
+                        f'{e}')
             # Please refer to the docstring of self._run for
             # the cases when this exception can occur.
             failure_reason = ('; '.join(
@@ -369,6 +372,8 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
                 failure_reason)
         except exceptions.ManagedJobReachedMaxRetriesError as e:
+            logger.info(f'Task {task_id} failed with '
+                        f'ManagedJobReachedMaxRetriesError {e}')
             # Please refer to the docstring of self._run for
             # the cases when this exception can occur.
             failure_reason = common_utils.format_exception(e)
@@ -380,6 +385,7 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            logger.info(f'Task {task_id} failed with Exception {e}')
             with ux_utils.enable_traceback():
                 logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: ' +
@@ -389,6 +395,7 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
         finally:
+            logger.info(f'Adding task {task_id} to failed tasks.')
             self._failed_tasks.add(task_id)
             self._cancel_downstream_tasks(task_id)
 
@@ -396,6 +403,7 @@ class JobsController:
         task = self._dag.tasks[task_id]
         for downstream in self._dag_graph.successors(task):
             downstream_id = self._dag.tasks.index(downstream)
+            logger.info(f'Adding task {downstream_id} to block tasks.')
             self._block_tasks.add(downstream_id)
 
             callback_func = managed_job_utils.event_callback_func(
