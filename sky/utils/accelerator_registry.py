@@ -8,7 +8,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import clouds
 
-# Canonicalized names of all accelerators (except TPUs) supported by SkyPilot.
+# Canonical names of all accelerators (except TPUs) supported by SkyPilot.
 # NOTE: Must include accelerators supported for local clusters.
 #
 # 1. What if a name is in this list, but not in any catalog?
@@ -31,7 +31,7 @@ if typing.TYPE_CHECKING:
 # Append its case-sensitive canonical name to this list. The name must match
 # `AcceleratorName` in the service catalog.
 
-_accelertor_df = service_catalog.common.read_catalog('common/accelerators.csv')
+_accelerator_df = service_catalog.common.read_catalog('common/accelerators.csv')
 
 # List of non-GPU accelerators that are supported by our backend for job queue
 # scheduling.
@@ -62,7 +62,7 @@ def canonicalize_accelerator_name(accelerator: str,
         return accelerator.lower()
 
     # Common case: do not read the catalog files.
-    df = _accelertor_df[_accelertor_df['AcceleratorName'].str.contains(
+    df = _accelerator_df[_accelerator_df['AcceleratorName'].str.contains(
         accelerator, case=False, regex=True)]
     names = []
     for name, clouds in df[['AcceleratorName', 'Clouds']].values:

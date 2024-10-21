@@ -641,7 +641,9 @@ def deprecated_function(
 
 def zip_files_and_folders(items: List[str], output_file):
     with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=UserWarning, message='Duplicate name:')
+        warnings.filterwarnings('ignore',
+                                category=UserWarning,
+                                message='Duplicate name:')
         with zipfile.ZipFile(output_file, 'w') as zipf:
             for item in items:
                 if os.path.isfile(item):

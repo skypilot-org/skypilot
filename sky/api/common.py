@@ -184,8 +184,8 @@ def upload_mounts_to_api_server(
 
     server_url = get_server_url()
     if upload_list:
-        with rich_utils.client_status(ux_utils.spinner_message(
-                'Uploading files to API server')):
+        with rich_utils.client_status(
+                ux_utils.spinner_message('Uploading files to API server')):
             with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
                 common_utils.zip_files_and_folders(upload_list, f)
                 f.seek(0)

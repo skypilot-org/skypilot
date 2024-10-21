@@ -148,7 +148,8 @@ class CommandError(Exception):
         if not command:
             message = error_msg
         else:
-            if len(command) > 100 and not env_options.Options.SHOW_DEBUG_INFO.get():
+            if (len(command) > 100 and
+                    not env_options.Options.SHOW_DEBUG_INFO.get()):
                 # Chunck the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '

@@ -188,7 +188,7 @@ def add_or_update_cluster(cluster_name: str,
     if (expected_transaction_id is not None and
             expected_transaction_id != transaction_id):
         logger.debug(f'Cluster {cluster_name} has been updated by another '
-                       'transaction. Skipping update.')
+                     'transaction. Skipping update.')
         return
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
@@ -432,7 +432,7 @@ def set_cluster_autostop_value(
     if (expected_transaction_id is not None and
             expected_transaction_id != transaction_id):
         logger.debug(f'Cluster {cluster_name} has been updated by another '
-                       'transaction. Skipping update.')
+                     'transaction. Skipping update.')
         return
 
     _DB.cursor.execute(
