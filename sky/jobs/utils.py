@@ -776,6 +776,13 @@ class ManagedJobCodeGen:
             from sky.spot import spot_state as managed_job_state
             from sky.spot import spot_utils as utils
         """)
+    _PREFIX += '\n'.join([
+        'import os',
+        # Use the local user id to make sure the query goes to the correct user.
+        f'os.environ[{constants.USER_ID_ENV_VAR!r}] = '
+        f'{common_utils.get_user_hash()!r}',
+        'common.reload()'
+    ])
 
     @classmethod
     def get_job_table(cls) -> str:

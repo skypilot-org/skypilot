@@ -546,6 +546,7 @@ def status(
             'version': (int) replica version,
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
+            'endpoint': (str) endpoint of the replica,
         }
 
     For possible service statuses and replica statuses, please refer to
