@@ -1,7 +1,7 @@
 """DAGs: user applications to be run."""
 import threading
 import typing
-from typing import cast, Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union
 
 import networkx as nx
 
@@ -74,7 +74,7 @@ class Dag:
             is already used.
         """
         if task.name is None:
-            task.name = common_utils.get_unique_task_name(task)
+            task.name = common_utils.get_unique_task_name()
         if task.name in self._task_name_lookup:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -217,7 +217,7 @@ class Dag:
         for task in self.tasks:
             downstream = self.get_downstream(task)
             downstream_names = ','.join(
-                cast(str, dep.name)
+                typing.cast(str, dep.name)
                 for dep in downstream) if downstream else '-'
             task_info.append(f'{task.name}'
                              f'({downstream_names})')
