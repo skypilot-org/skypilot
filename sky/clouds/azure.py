@@ -8,6 +8,8 @@ import textwrap
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+from azure.mgmt.compute.models import CommunityGalleryImage
+from azure.mgmt.compute.models import VirtualMachineImage
 import colorama
 
 from sky import clouds
@@ -138,29 +140,56 @@ class Azure(clouds.Cloud):
             # The region used here is only for where to send the query,
             # not the image location. Azure's image is globally available.
             region = 'eastus'
-        is_skypilot_image_tag = False
         if image_id.startswith('skypilot:'):
-            is_skypilot_image_tag = True
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
+        # Validate image exists.
+        compute_client = azure.get_client('compute', cls.get_project_id())
+        if image_id.startswith('/CommunityGalleries'):
+            image = cls.get_community_image(image_id, region, compute_client)
+            return cls.get_community_image_size(image_id, region,
+                                                compute_client)
+        else:
+            image = cls.get_marketplace_image(image_id, region, compute_client)
+            return cls.get_marketplace_image_size(image_id, image)
+
+    @classmethod
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
+                                                         clouds='azure')
+
+    @classmethod
+    def get_marketplace_image(cls, image_id, region,
+                              compute_client) -> VirtualMachineImage:
         image_id_splitted = image_id.split(':')
         if len(image_id_splitted) != 4:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid image id: {image_id}. Expected '
                                  'format: <publisher>:<offer>:<sku>:<version>')
         publisher, offer, sku, version = image_id_splitted
-        if is_skypilot_image_tag:
+        if image_id.startswith('skypilot:'):
             if offer == 'ubuntu-hpc':
                 return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
             else:
                 return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
-        compute_client = azure.get_client('compute', cls.get_project_id())
+
         try:
-            image = compute_client.virtual_machine_images.get(
+            return compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
         except azure.exceptions().ResourceNotFoundError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Image not found: {image_id}') from e
+
+    @classmethod
+    def get_marketplace_image_size(cls, image_id: str,
+                                   image: VirtualMachineImage) -> float:
         if image.os_disk_image is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Retrieve image size for {image_id} failed.')
@@ -177,16 +206,42 @@ class Azure(clouds.Cloud):
         return size_in_gb
 
     @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='azure')
+    def get_community_image(cls, image_id, region,
+                            compute_client) -> CommunityGalleryImage:
+        # Community gallery image id format:
+        # /CommunityGalleries/<gallery-name>/Images/<image-name>
+        try:
+            image_id_parts = image_id.split('/')
+            return compute_client.community_gallery_images.get(
+                location=region,
+                public_gallery_name=image_id_parts[2],
+                gallery_image_name=image_id_parts[-1])
+        except azure.exceptions().ResourceNotFoundError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Community image not found: {image_id}') from e
+
+    @classmethod
+    def get_community_image_size(cls, image_id, region,
+                                 compute_client) -> float:
+        image_id_parts = image_id.split('/')
+        gallery_name = image_id_parts[2]
+        image_name = image_id_parts[-1]
+
+        # Get the latest image version
+        image_versions = compute_client.community_gallery_image_versions.list(
+            location=region,  # For community images, resource group is None
+            public_gallery_name=gallery_name,
+            gallery_image_name=image_name,
+        )
+        latest_version = list(image_versions)[-1].name
+
+        image_details = compute_client.community_gallery_image_versions.get(
+            location=region,  # For community images, resource group is None
+            public_gallery_name=gallery_name,
+            gallery_image_name=image_name,
+            gallery_image_version_name=latest_version)
+        return image_details.storage_profile.os_disk_image.disk_size_gb
 
     def _get_default_image_tag(self, gen_version, instance_type) -> str:
         # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
@@ -306,13 +361,17 @@ class Azure(clouds.Cloud):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
         # Already checked in resources.py
-        publisher, offer, sku, version = image_id.split(':')
-        image_config = {
-            'image_publisher': publisher,
-            'image_offer': offer,
-            'image_sku': sku,
-            'image_version': version,
-        }
+
+        if image_id.startswith('/CommunityGalleries'):
+            image_config = {'community_gallery_image_id': image_id}
+        else:
+            publisher, offer, sku, version = image_id.split(':')
+            image_config = {
+                'image_publisher': publisher,
+                'image_offer': offer,
+                'image_sku': sku,
+                'image_version': version,
+            }
 
         # Setup the A10 nvidia driver.
         need_nvidia_driver_extension = (acc_dict is not None and
@@ -380,7 +439,6 @@ class Azure(clouds.Cloud):
         # Setting disk performance tier for high disk tier.
         if disk_tier == resources_utils.DiskTier.HIGH:
             resources_vars['disk_performance_tier'] = 'P50'
-
         return resources_vars
 
     def _get_feasible_launchable_resources(
