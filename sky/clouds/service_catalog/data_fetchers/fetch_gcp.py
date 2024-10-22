@@ -684,7 +684,8 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         # TODO(tian): Hack. Should investigate how to retrieve the price
         # for TPU-v6e.
         if not tpu_name.startswith('tpu-v6e'):
-            assert spot or tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
+            assert spot or tpu_price is not None, (row, hidden_tpu,
+                                                   HIDDEN_TPU_DF)
         else:
             tpu_price = 0.0
         return tpu_price
