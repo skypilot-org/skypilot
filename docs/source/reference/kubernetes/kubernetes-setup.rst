@@ -182,7 +182,7 @@ Manually Labelling Nodes
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
 
-For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
+For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`.
 
 Use the following command to label a node:
 
