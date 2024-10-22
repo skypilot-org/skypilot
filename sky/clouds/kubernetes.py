@@ -182,7 +182,8 @@ class Kubernetes(clouds.Cloud):
             if context is None:
                 # If running in-cluster, we allow the region to be set to the
                 # singleton region since there is no context name available.
-                in_cluster_region = kubernetes_utils.get_in_cluster_context_name()
+                in_cluster_region = (
+                    kubernetes_utils.get_in_cluster_context_name())
                 regions.append(clouds.Region(in_cluster_region))
             else:
                 regions.append(clouds.Region(context))
@@ -376,24 +377,29 @@ class Kubernetes(clouds.Cloud):
         remote_identity = skypilot_config.get_nested(
             ('kubernetes', 'remote_identity'),
             schemas.get_default_remote_identity('kubernetes'))
-        
+
         if isinstance(remote_identity, dict):
-            # If remote_identity is a dict, use the service account for the current context
+            # If remote_identity is a dict, use the service account for the
+            # current context
             k8s_service_account_name = remote_identity.get(context, None)
             if k8s_service_account_name is None:
-                err_msg = f'Context {context!r} not found in remote identities from config.yaml'
+                err_msg = (f'Context {context!r} not found in '
+                           'remote identities from config.yaml')
                 raise ValueError(err_msg)
         else:
-            # If remote_identity is not a dict, use 
+            # If remote_identity is not a dict, use
             k8s_service_account_name = remote_identity
 
-        if k8s_service_account_name == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
+        if (k8s_service_account_name ==
+                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
             # SA name doesn't matter since automounting credentials is disabled
             k8s_service_account_name = 'default'
             k8s_automount_sa_token = 'false'
-        elif k8s_service_account_name == schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value:
+        elif (k8s_service_account_name ==
+              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
             # Use the default service account
-            k8s_service_account_name = kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME
+            k8s_service_account_name = (
+                kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
             k8s_automount_sa_token = 'true'
         else:
             # User specified a custom service account
@@ -421,7 +427,9 @@ class Kubernetes(clouds.Cloud):
         # Set environment variables for the pod. Note that SkyPilot env vars
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
-        k8s_env_vars = {kubernetes_utils.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+        k8s_env_vars = {
+            kubernetes_utils.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context
+        }
 
         deploy_vars = {
             'instance_type': resources.instance_type,

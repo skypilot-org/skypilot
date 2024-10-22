@@ -2150,5 +2150,5 @@ def get_in_cluster_context_name() -> Optional[str]:
     If the environment variable is not set, returns the default in-cluster
     context name.
     """
-    return (os.environ.get(IN_CLUSTER_CONTEXT_NAME_ENV_VAR)
-            or DEFAULT_IN_CLUSTER_REGION)
+    return (os.environ.get(IN_CLUSTER_CONTEXT_NAME_ENV_VAR) or
+            DEFAULT_IN_CLUSTER_REGION)
