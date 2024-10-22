@@ -532,7 +532,8 @@ def write_cluster_config(
         excluded_clouds = [cloud]
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
-    auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
+    private_key_path, _ = auth.get_or_generate_keys()
+    auth_config = {'ssh_private_key': private_key_path}
     region_name = resources_vars.get('region')
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
@@ -2223,7 +2224,8 @@ def get_clusters(
                       encoding='utf-8') as f:
                 credentials['ssh_private_key_content'] = f.read()
         else:
-            with open(os.path.expanduser(auth.PRIVATE_SSH_KEY_PATH),
+            private_key_path, _ = auth.get_or_generate_keys()
+            with open(os.path.expanduser(private_key_path),
                       'r',
                       encoding='utf-8') as f:
                 credentials['ssh_private_key_content'] = f.read()

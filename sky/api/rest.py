@@ -556,9 +556,10 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
 
 async def log_streamer(request_id: str, log_path: pathlib.Path):
     request_task = requests_lib.get_request(request_id)
-    with rich_utils.safe_status(f'Checking request: {request_id}') as status:
+    with rich_utils.safe_status(
+            f'Checking request: {request_id}') as rich_status:
         while request_task.status < requests_lib.RequestStatus.RUNNING:
-            status.update(f'Waiting for request to start: {request_id}')
+            rich_status.update(f'Waiting for request to start: {request_id}')
             await asyncio.sleep(1)
             request_task = requests_lib.get_request(request_id)
 

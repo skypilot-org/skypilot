@@ -12,12 +12,11 @@ in ray yaml config as input,
 2. Setup the `authorized_keys` on the remote VM with the public key content,
    by cloud-init or directly using cloud provider's API.
 
-The local machine's public key should not be uploaded to the
-`~/.ssh/sky-key.pub` on the remote VM, because it will cause private/public
-key pair mismatch when the user tries to launch new VM from that remote VM
-using SkyPilot, e.g., the node is used as a jobs controller. (Lambda cloud
-is an exception, due to the limitation of the cloud provider. See the
-comments in setup_lambda_authentication)
+The local machine's public key should not be uploaded to the remote VM, because
+it will cause private/public key pair mismatch when the user tries to launch new
+VM from that remote VM using SkyPilot, e.g., the node is used as a jobs
+controller. (Lambda cloud is an exception, due to the limitation of the cloud
+provider. See the comments in setup_lambda_authentication)
 """
 import copy
 import functools
@@ -60,9 +59,20 @@ logger = sky_logging.init_logger(__name__)
 
 MAX_TRIALS = 64
 # TODO(zhwu): Support user specified key pair.
-PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
-PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
-_SSH_KEY_GENERATION_LOCK = '~/.sky/generated/ssh/.__internal-sky-key.lock'
+_SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
+
+
+def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
+    user_hash = common_utils.get_user_hash()
+    user_ssh_key_prefix = _SSH_KEY_PATH_PREFIX.format(user_hash=user_hash)
+
+    os.makedirs(os.path.expanduser(user_ssh_key_prefix),
+                exist_ok=True,
+                mode=0o700)
+    private_key_path = os.path.join(user_ssh_key_prefix, 'sky-key')
+    public_key_path = os.path.join(user_ssh_key_prefix, 'sky-key.pub')
+    lock_path = os.path.join(user_ssh_key_prefix, '.__internal-sky-key.lock')
+    return private_key_path, public_key_path, lock_path
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
@@ -105,16 +115,17 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
 
 def get_or_generate_keys() -> Tuple[str, str]:
     """Returns the aboslute private and public key paths."""
-    private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
-    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    private_key_path, public_key_path, lock_path = get_ssh_key_and_lock_path()
+    private_key_path = os.path.expanduser(private_key_path)
+    public_key_path = os.path.expanduser(public_key_path)
+    lock_path = os.path.expanduser(lock_path)
 
-    key_file_lock = os.path.expanduser(_SSH_KEY_GENERATION_LOCK)
-    lock_dir = os.path.dirname(key_file_lock)
+    lock_dir = os.path.dirname(lock_path)
     # We should have the folder ~/.sky/generated/ssh to have 0o700 permission,
     # as the ssh configs will be written to this folder as well in
     # backend_utils.SSHConfigHelper
     os.makedirs(lock_dir, exist_ok=True, mode=0o700)
-    with filelock.FileLock(key_file_lock, timeout=10):
+    with filelock.FileLock(lock_path, timeout=10):
         if not os.path.exists(private_key_path):
             public_key, private_key = _generate_rsa_key_pair()
             _save_key_pair(private_key_path, public_key_path, private_key,
@@ -275,7 +286,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Ensure ssh key is registered with Lambda Cloud
     lambda_client = lambda_utils.LambdaCloudClient()
-    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
@@ -283,26 +294,16 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     if not exists:
         lambda_client.register_ssh_key(name, public_key)
 
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
-
-    # TODO(zhwu): we need to avoid uploading the public ssh key to the
-    # nodes, as that will cause problem when the node is used as spot
-    # controller, i.e., the public and private key on the node may
-    # not match.
-    file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
-    config['file_mounts'] = file_mounts
-
+    config['auth']['remote_key_name'] = name
     return config
 
 
-def setup_ibm_authentication(config):
+def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """ registers keys if they do not exist in sky folder
     and updates config file.
     keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub'
     """
+    private_key_path, _ = get_or_generate_keys()
 
     def _get_unique_key_name():
         suffix_len = 10
@@ -342,7 +343,7 @@ def setup_ibm_authentication(config):
         else:
             raise Exception('Failed to register a key') from e
 
-    config['auth']['ssh_private_key'] = PRIVATE_SSH_KEY_PATH
+    config['auth']['ssh_private_key'] = private_key_path
 
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config'][
@@ -350,7 +351,8 @@ def setup_ibm_authentication(config):
 
     # Add public key path to file mounts
     file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    # TODO(zhwu): check if this is required.
+    file_mounts['~/.ssh/sky-key.pub'] = public_key_path
     config['file_mounts'] = file_mounts
 
     return config
@@ -372,10 +374,9 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
                 from None
-    get_or_generate_keys()
+    _, public_key_path = get_or_generate_keys()
 
     # Add the user's public key to the SkyPilot cluster.
-    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     context = config['provider'].get(
@@ -475,13 +476,12 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
-    get_or_generate_keys()
+    _, public_key_path = get_or_generate_keys()
 
     client = fluidstack_utils.FluidstackClient()
-    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     public_key = None
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()
     client.get_or_add_ssh_key(public_key)
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+    config['auth']['ssh_public_key'] = public_key_path
     return configure_ssh_info(config)

@@ -1,10 +1,8 @@
 """Vsphere instance provisioning."""
 import json
-import os
 import typing
 from typing import Any, Dict, List, Optional
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
@@ -30,7 +28,6 @@ TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 HEAD_NODE_VALUE = '1'
 WORKER_NODE_VALUE = '0'
-PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
 
 
 def run_instances(region: str, cluster_name: str,
@@ -303,13 +300,7 @@ def _create_instances(
 
     # Create the customization spec
     # Set up the VM's authorized_keys with customization spec
-    ssh_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    if not os.path.exists(ssh_key_path):
-        logger.error('SSH pubic key does not exist.')
-        raise exceptions.ResourcesUnavailableError(
-            'SSH pubic key does not exist.')
-    with open(ssh_key_path, 'r', encoding='utf-8') as f:
-        ssh_public_key = f.read()
+    ssh_public_key = config.authentication_config['ssh_public_key']
 
     # Create a custom script to inject the ssh public key into the instance
     vm_user = config.authentication_config['ssh_user']
