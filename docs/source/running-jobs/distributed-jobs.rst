@@ -33,7 +33,7 @@ For example, here is a simple PyTorch Distributed training example:
 
      MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
      torchrun \
-      --nnodes=$SKPILOT_NUM_NODES \
+      --nnodes=$SKYPILOT_NUM_NODES \
       --master_addr=$MASTER_ADDR \
       --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
       --node_rank=$SKYPILOT_NODE_RANK \
