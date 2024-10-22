@@ -182,8 +182,8 @@ class Kubernetes(clouds.Cloud):
             if context is None:
                 # If running in-cluster, we allow the region to be set to the
                 # singleton region since there is no context name available.
-                regions.append(clouds.Region(
-                    kubernetes_utils.IN_CLUSTER_REGION))
+                in_cluster_region = kubernetes_utils.get_in_cluster_context_name()
+                regions.append(clouds.Region(in_cluster_region))
             else:
                 regions.append(clouds.Region(context))
 
@@ -376,20 +376,27 @@ class Kubernetes(clouds.Cloud):
         remote_identity = skypilot_config.get_nested(
             ('kubernetes', 'remote_identity'),
             schemas.get_default_remote_identity('kubernetes'))
-        if (remote_identity ==
-                schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value):
+        
+        if isinstance(remote_identity, dict):
+            # If remote_identity is a dict, use the service account for the current context
+            k8s_service_account_name = remote_identity.get(context, None)
+            if k8s_service_account_name is None:
+                err_msg = f'Context {context!r} not found in remote identities from config.yaml'
+                raise ValueError(err_msg)
+        else:
+            # If remote_identity is not a dict, use 
+            k8s_service_account_name = remote_identity
+
+        if k8s_service_account_name == schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
             # SA name doesn't matter since automounting credentials is disabled
             k8s_service_account_name = 'default'
             k8s_automount_sa_token = 'false'
-        elif (remote_identity ==
-              schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value):
+        elif k8s_service_account_name == schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value:
             # Use the default service account
-            k8s_service_account_name = (
-                kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
+            k8s_service_account_name = kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME
             k8s_automount_sa_token = 'true'
         else:
             # User specified a custom service account
-            k8s_service_account_name = remote_identity
             k8s_automount_sa_token = 'true'
 
         fuse_device_required = bool(resources.requires_fuse)
@@ -410,6 +417,12 @@ class Kubernetes(clouds.Cloud):
             ('kubernetes', 'provision_timeout'),
             10,
             override_configs=resources.cluster_config_overrides)
+
+        # Set environment variables for the pod. Note that SkyPilot env vars
+        # are set separately when the task is run. These env vars are
+        # independent of the SkyPilot task to be run.
+        k8s_env_vars = {kubernetes_utils.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context}
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -431,6 +444,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
+            'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
         }
 
@@ -566,7 +580,7 @@ class Kubernetes(clouds.Cloud):
             # TODO: Remove this after 0.9.0.
             return region, zone
 
-        if region == kubernetes_utils.IN_CLUSTER_REGION:
+        if region == kubernetes_utils.get_in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
             # since there is no context name available.
             return region, zone
@@ -575,7 +589,7 @@ class Kubernetes(clouds.Cloud):
         if all_contexts == [None]:
             # If [None] context is returned, use the singleton region since we
             # are running in a pod with in-cluster auth.
-            all_contexts = [kubernetes_utils.IN_CLUSTER_REGION]
+            all_contexts = [kubernetes_utils.get_in_cluster_context_name()]
         if region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '

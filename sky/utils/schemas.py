@@ -668,7 +668,13 @@ _REMOTE_IDENTITY_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     'remote_identity': {
-        'type': 'string'
+        'anyOf': [
+            {'type': 'string'},
+            {
+                'type': 'object',
+                'additionalProperties': {'type': 'string'}
+            }
+        ]
     },
 }
 
