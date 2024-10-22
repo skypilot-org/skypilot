@@ -634,7 +634,6 @@ def update_job_status(job_ids: List[int],
                                 'setting it to FAILED.')
                     # TODO(zhwu): for debugging. to remove.
                     with open('/tmp/sky_job.log', 'a', encoding='utf-8') as f:
-                        import traceback
                         f.write(''.join(traceback.format_stack()) +
                                 f'zhwu DEBUG: Ray job status for job {job_id} '
                                 'is None, setting it to FAILED. This can be '
