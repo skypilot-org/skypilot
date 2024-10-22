@@ -836,8 +836,9 @@ class KubernetesCommandRunner(CommandRunner):
         # default delimiter for options and arguments.
         # rsync_helper.sh will parse the namespace_context by reverting the
         # encoding and pass it to kubectl exec.
-        encoded_namespace_context = namespace_context.replace(
-            ':', '%3A').replace('/', '%2F').replace('+', '%2B')
+        encoded_namespace_context = (namespace_context.replace(
+            '@', '%40').replace(':', '%3A').replace('/',
+                                                    '%2F').replace('+', '%2B'))
         self._rsync(
             source,
             target,
