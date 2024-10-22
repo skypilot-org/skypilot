@@ -14,9 +14,10 @@ spec:
       containers:
       - name: gpu-labeler
         image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:latest # Using this image also serves as a way to "pre-pull" the image onto nodes
-        command:
-          - "python"
-          - "/label_gpus.py"
+        command: ["/bin/bash", "-i", "-c"]
+        args:
+          - |
+            python /label_gpus.py
         env:
         - name: MY_NODE_NAME
           valueFrom:
