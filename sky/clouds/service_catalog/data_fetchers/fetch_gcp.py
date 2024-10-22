@@ -681,9 +681,11 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        if not spot and tpu_price is None:
-            # TODO(tian): Hack. Sometimes the price is not available.
-            # Should investigate why.
+        # TODO(tian): Hack. Should investigate how to retrieve the price
+        # for TPU-v6e.
+        if not tpu_name.startswith('tpu-v6e'):
+            assert spot or tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
+        else:
             tpu_price = 0.0
         return tpu_price
 
