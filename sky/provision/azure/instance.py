@@ -1,7 +1,5 @@
 """Azure instance provisioning."""
 import base64
-from concurrent.futures import as_completed
-from concurrent.futures import ThreadPoolExecutor
 import copy
 import enum
 import logging
@@ -10,29 +8,6 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
-
-from azure.mgmt.compute.models import DiskCreateOptionTypes
-from azure.mgmt.compute.models import HardwareProfile
-from azure.mgmt.compute.models import ImageReference
-from azure.mgmt.compute.models import LinuxConfiguration
-from azure.mgmt.compute.models import ManagedDiskParameters
-from azure.mgmt.compute.models import NetworkInterfaceReference
-from azure.mgmt.compute.models import NetworkProfile
-from azure.mgmt.compute.models import OSDisk
-from azure.mgmt.compute.models import OSProfile
-from azure.mgmt.compute.models import SshConfiguration
-from azure.mgmt.compute.models import SshPublicKey
-from azure.mgmt.compute.models import StorageProfile
-from azure.mgmt.compute.models import SubResource
-from azure.mgmt.compute.models import VirtualMachine
-from azure.mgmt.compute.models import VirtualMachineExtension
-from azure.mgmt.compute.models import VirtualMachineIdentity
-from azure.mgmt.network.models import IPAllocationMethod
-from azure.mgmt.network.models import IPConfiguration
-from azure.mgmt.network.models import NetworkInterface
-from azure.mgmt.network.models import NetworkSecurityGroup
-from azure.mgmt.network.models import PublicIPAddress
-from azure.mgmt.network.models import PublicIPAddressSku
 
 from sky import exceptions
 from sky import sky_logging
@@ -46,6 +21,8 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from azure.mgmt import compute as azure_compute
+    from azure.mgmt.compute import models as azure_compute_objs
+    from azure.mgmt.network import models as azure_network_objs
     from azure.mgmt.network import network as azure_network
 
 logger = sky_logging.init_logger(__name__)
@@ -207,99 +184,109 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def _create_network_interface(network_client, vm_name,
-                              provider_config) -> NetworkInterface:
+def _create_network_interface(
+        network_client: 'azure_network.NetworkManagementClient', vm_name: str,
+        provider_config: Dict[str,
+                              Any]) -> 'azure_network_objs.NetworkInterface':
+    network = azure.import_azure_modules('network_obj')
+    compute = azure.import_azure_modules('compute_obj')
     logger.info(f'Start creating network interface for {vm_name}...')
     if provider_config.get('use_internal_ips', False):
         name = f'{vm_name}-nic-private'
-        ip_config = IPConfiguration(
+        ip_config = network.IPConfiguration(
             name=f'ip-config-private-{vm_name}',
-            subnet=SubResource(id=provider_config['subnet']),
-            private_ip_allocation_method=IPAllocationMethod.DYNAMIC)
+            subnet=compute.SubResource(id=provider_config['subnet']),
+            private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC)
     else:
         name = f'{vm_name}-nic-public'
-        public_ip_address = PublicIPAddress(
+        public_ip_address = network.PublicIPAddress(
             location=provider_config['location'],
             public_ip_allocation_method='Static',
             public_ip_address_version='IPv4',
-            sku=PublicIPAddressSku(name='Basic', tier='Regional'))
+            sku=network.PublicIPAddressSku(name='Basic', tier='Regional'))
         ip_poller = network_client.public_ip_addresses.begin_create_or_update(
             resource_group_name=provider_config['resource_group'],
             public_ip_address_name=f'{vm_name}-ip',
             parameters=public_ip_address)
         logger.info(f'Created public IP address {ip_poller.result().name} '
                     f'with address {ip_poller.result().ip_address}.')
-        ip_config = IPConfiguration(
+        ip_config = network.IPConfiguration(
             name=f'ip-config-public-{vm_name}',
-            subnet=SubResource(id=provider_config['subnet']),
-            private_ip_allocation_method=IPAllocationMethod.DYNAMIC,
-            public_ip_address=PublicIPAddress(id=ip_poller.result().id))
+            subnet=compute.SubResource(id=provider_config['subnet']),
+            private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC,
+            public_ip_address=network.PublicIPAddress(id=ip_poller.result().id))
 
     ni_poller = network_client.network_interfaces.begin_create_or_update(
         resource_group_name=provider_config['resource_group'],
         network_interface_name=name,
-        parameters=NetworkInterface(location=provider_config['location'],
-                                    ip_configurations=[ip_config],
-                                    network_security_group=NetworkSecurityGroup(
-                                        id=provider_config['nsg'])))
+        parameters=network.NetworkInterface(
+            location=provider_config['location'],
+            ip_configurations=[ip_config],
+            network_security_group=network.NetworkSecurityGroup(
+                id=provider_config['nsg'])))
     logger.info(f'Created network interface {ni_poller.result().name}.')
     return ni_poller.result()
 
 
-def _create_vm(compute_client, vm_name, node_tags, provider_config, node_config,
-               network_interface_id) -> VirtualMachine:
+def _create_vm(
+        compute_client: 'azure_compute.ComputeManagementClient', vm_name: str,
+        node_tags: Dict[str, str], provider_config: Dict[str, Any],
+        node_config: Dict[str, Any],
+        network_interface_id: str) -> 'azure_compute_objs.VirtualMachine':
+    compute = azure.import_azure_modules('compute_obj')
     logger.info(f'Start creating VM {vm_name}...')
-    hardware_profile = HardwareProfile(
+    hardware_profile = compute.HardwareProfile(
         vm_size=node_config['azure_arm_parameters']['vmSize'])
-    network_profile = NetworkProfile(network_interfaces=[
-        NetworkInterfaceReference(id=network_interface_id, primary=True)
+    network_profile = compute.NetworkProfile(network_interfaces=[
+        compute.NetworkInterfaceReference(id=network_interface_id, primary=True)
     ])
     public_key = node_config['azure_arm_parameters']['publicKey']
     username = node_config['azure_arm_parameters']['adminUsername']
     os_linux_custom_data = base64.b64encode(
         node_config['azure_arm_parameters']['cloudInitSetupCommands'].encode(
             'utf-8')).decode('utf-8')
-    os_profile = OSProfile(
+    os_profile = compute.OSProfile(
         admin_username=username,
         computer_name=vm_name,
         admin_password=public_key,
-        linux_configuration=LinuxConfiguration(
+        linux_configuration=compute.LinuxConfiguration(
             disable_password_authentication=True,
-            ssh=SshConfiguration(public_keys=[
-                SshPublicKey(path=f'/home/{username}/.ssh/authorized_keys',
-                             key_data=public_key)
+            ssh=compute.SshConfiguration(public_keys=[
+                compute.SshPublicKey(
+                    path=f'/home/{username}/.ssh/authorized_keys',
+                    key_data=public_key)
             ])),
         custom_data=os_linux_custom_data)
     community_image_id = node_config['azure_arm_parameters'].get(
         'communityGalleryImageId', None)
     if community_image_id is not None:
         # Prioritize using community gallery image if specified.
-        image_reference = ImageReference(
+        image_reference = compute.ImageReference(
             community_gallery_image_id=community_image_id)
         logger.info(
             f'Used community_image_id: {community_image_id} for VM {vm_name}.')
     else:
-        image_reference = ImageReference(
+        image_reference = compute.ImageReference(
             publisher=node_config['azure_arm_parameters']['imagePublisher'],
             offer=node_config['azure_arm_parameters']['imageOffer'],
             sku=node_config['azure_arm_parameters']['imageSku'],
             version=node_config['azure_arm_parameters']['imageVersion'])
-    storage_profile = StorageProfile(
+    storage_profile = compute.StorageProfile(
         image_reference=image_reference,
-        os_disk=OSDisk(
-            create_option=DiskCreateOptionTypes.FROM_IMAGE,
-            managed_disk=ManagedDiskParameters(
+        os_disk=compute.OSDisk(
+            create_option=compute.DiskCreateOptionTypes.FROM_IMAGE,
+            managed_disk=compute.ManagedDiskParameters(
                 storage_account_type=node_config['azure_arm_parameters']
                 ['osDiskTier']),
             disk_size_gb=node_config['azure_arm_parameters']['osDiskSizeGB']))
-    vm_instance = VirtualMachine(
+    vm_instance = compute.VirtualMachine(
         location=provider_config['location'],
         tags=node_tags,
         hardware_profile=hardware_profile,
         os_profile=os_profile,
         storage_profile=storage_profile,
         network_profile=network_profile,
-        identity=VirtualMachineIdentity(
+        identity=compute.VirtualMachineIdentity(
             type='UserAssigned',
             user_assigned_identities={provider_config['msi']: {}}))
     vm_poller = compute_client.virtual_machines.begin_create_or_update(
@@ -312,13 +299,14 @@ def _create_vm(compute_client, vm_name, node_tags, provider_config, node_config,
     # special type of drivers which is available at Microsoft HPC
     # extension. Reference:
     # https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
+    # This can take more than 20mins for setting up the A10 GPUs
     if node_config.get('need_nvidia_driver_extension', False):
         ext_poller = compute_client.virtual_machine_extensions.\
             begin_create_or_update(
             resource_group_name=provider_config['resource_group'],
             vm_name=vm_name,
             vm_extension_name='NvidiaGpuDriverLinux',
-            extension_parameters=VirtualMachineExtension(
+            extension_parameters=compute.VirtualMachineExtension(
                 location=provider_config['location'],
                 publisher='Microsoft.HpcCompute',
                 type_properties_type='NvidiaGpuDriverLinux',
@@ -356,12 +344,7 @@ def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
         _create_vm(compute_client, vm_name, node_tags, provider_config,
                    node_config, network_interface.id)
 
-    with ThreadPoolExecutor(max_workers=min(count, 10)) as executor:
-        futures = [
-            executor.submit(create_single_instance, i) for i in range(count)
-        ]
-        for future in as_completed(futures):
-            future.result()
+    subprocess_utils.run_in_parallel(create_single_instance, range(count))
 
     # Update disk performance tier
     performance_tier = node_config.get('disk_performance_tier', None)

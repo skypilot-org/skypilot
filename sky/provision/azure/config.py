@@ -46,6 +46,7 @@ def bootstrap_instances(
         region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
+    # TODO: use new azure sdk instead of ARM deployment.
     del region  # unused
     provider_config = config.provider_config
     subscription_id = provider_config.get('subscription_id')
