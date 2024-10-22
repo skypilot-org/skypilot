@@ -23,8 +23,9 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 
     # Create the cluster.
     with sky.Dag() as dag:
-        cluster_resources = sky.Resources(
-            cloud, accelerators={'T4': 1}, use_spot=True)
+        cluster_resources = sky.Resources(cloud,
+                                          accelerators={'T4': 1},
+                                          use_spot=True)
         task = sky.Task(num_nodes=2).set_resources(cluster_resources)
     # `detach_run` will only detach the `run` command. The provision and
     # `setup` are still blocking.

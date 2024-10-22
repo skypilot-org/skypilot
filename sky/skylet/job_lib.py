@@ -11,6 +11,7 @@ import shlex
 import sqlite3
 import subprocess
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -577,12 +578,13 @@ def update_job_status(job_ids: List[int],
                     f'created_time={pending_jobs[job_id]["created_time"]}, '
                     f'boot_time={psutil.boot_time()}')
                 # TODO(zhwu): for debugging. to remove.
-                with open('/tmp/sky_job.log', 'a') as f:
-                    import traceback
-                    f.write(traceback.format_stack() +
-                            f'zhwu DEBUG: Job {job_id} is stale, setting to FAILED: '
-                            f'created_time={pending_jobs[job_id]["created_time"]}, '
-                            f'boot_time={psutil.boot_time()}\n')
+                with open('/tmp/sky_job.log', 'a', encoding='utf-8') as f:
+                    f.write(
+                        ''.join(traceback.format_stack()) +
+                        f'zhwu DEBUG: Job {job_id} is stale, setting to '
+                        'FAILED: '
+                        f'created_time={pending_jobs[job_id]["created_time"]}, '
+                        f'boot_time={psutil.boot_time()}\n')
                 # The job is stale as it is created before the instance
                 # is booted, e.g. the instance is rebooted.
                 job_statuses[i] = JobStatus.FAILED
@@ -612,12 +614,13 @@ def update_job_status(job_ids: List[int],
         # 2. update_job_status is called before the actual job is added
         #    to the pending table, and get here.
         # 3. The job is then added to the pending table with the status set to
-        #    PENDING, but since we checked pending table earlier, and job was not
-        #    in the pending table, `status` below will be None, so the job status
-        #    will be set to FAILED after the job is just added to the pending table.
+        #    PENDING, but since we checked pending table earlier, and job was
+        #    not in the pending table, `status` below will be None, so the job
+        #    status will be set to FAILED after the job is just added to the
+        #    pending table.
         # 4. With the job status being FAILED, the scheduler will not pick it
-        #    up, and remove it from the pending table, causing the job never being
-        #    scheduled.
+        #    up, and remove it from the pending table, causing the job never
+        #    being scheduled.
         # We should add per-job lock for the whole update_job_status() function
         # to avoid this race.
         with filelock.FileLock(_get_lock_path(job_id)):
@@ -630,9 +633,9 @@ def update_job_status(job_ids: List[int],
                     logger.info(f'Ray job status for job {job_id} is None, '
                                 'setting it to FAILED.')
                     # TODO(zhwu): for debugging. to remove.
-                    with open('/tmp/sky_job.log', 'a') as f:
+                    with open('/tmp/sky_job.log', 'a', encoding='utf-8') as f:
                         import traceback
-                        f.write(traceback.format_stack() +
+                        f.write(''.join(traceback.format_stack()) +
                                 f'zhwu DEBUG: Ray job status for job {job_id} '
                                 'is None, setting it to FAILED. This can be '
                                 'triggered by the race condition, where the job'

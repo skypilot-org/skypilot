@@ -168,9 +168,12 @@ def decode_storage_ls(
 
 @register_handler('job_status')
 def decode_job_status(
-        return_value: Dict[int, Optional[str]]) -> Dict[int, Optional['job_lib.JobStatus']]:
-    job_statuses = {}
+    return_value: Dict[int, Optional[str]]
+) -> Dict[int, Optional['job_lib.JobStatus']]:
+    job_statuses: Dict[int, Optional['job_lib.JobStatus']] = {}
     for job_id in return_value.keys():
         if return_value[job_id] is not None:
             job_statuses[job_id] = job_lib.JobStatus(return_value[job_id])
+        else:
+            job_statuses[job_id] = None
     return job_statuses
