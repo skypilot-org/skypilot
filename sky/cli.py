@@ -485,7 +485,8 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params[
+                'cloud'] = sky_clouds.CLOUD_REGISTRY.from_name_or_alias(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -3055,8 +3056,11 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_name_or_alias(cloud)
+    cloud_name = None
+    if cloud_obj is not None:
+        cloud_name = type(cloud_obj).__name__.lower()
+    service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -3142,8 +3146,8 @@ def show_gpus(
         # Optimization - do not poll for Kubernetes API for fetching
         # common GPUs because that will be fetched later for the table after
         # common GPUs.
-        clouds_to_list = cloud
-        if cloud is None:
+        clouds_to_list = cloud_name
+        if cloud_name is None:
             clouds_to_list = [
                 c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
             ]
@@ -3153,7 +3157,8 @@ def show_gpus(
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+            if kubernetes_is_enabled and (cloud_name is None or
+                                          cloud_is_kubernetes):
                 if region:
                     context = region
                 else:
@@ -3263,8 +3268,8 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and
-                not show_all):
+        if (kubernetes_is_enabled and
+            (cloud_name is None or cloud_is_kubernetes) and not show_all):
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
@@ -3336,7 +3341,7 @@ def show_gpus(
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
+            cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
             return

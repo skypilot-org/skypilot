@@ -20,7 +20,7 @@ def enable_all_clouds_in_monkeypatch(
     # when the optimizer tries calling it to update enabled_clouds, it does not
     # raise exceptions.
     if enabled_clouds is None:
-        enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
+        enabled_clouds = list(clouds.CLOUD_REGISTRY.clouds.values())
     monkeypatch.setattr(
         'sky.check.get_cached_enabled_clouds_or_refresh',
         lambda *_args, **_kwargs: enabled_clouds,

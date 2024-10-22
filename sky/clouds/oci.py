@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
-@clouds.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register()
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
 

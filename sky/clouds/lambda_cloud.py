@@ -21,7 +21,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register()
 class Lambda(clouds.Cloud):
     """Lambda Labs GPU Cloud."""
 

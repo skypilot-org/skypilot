@@ -16,7 +16,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register()
 class RunPod(clouds.Cloud):
     """ RunPod GPU Cloud
 

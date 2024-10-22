@@ -102,7 +102,7 @@ class AWSIdentityType(enum.Enum):
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
 
-@clouds.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register()
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
