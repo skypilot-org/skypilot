@@ -350,15 +350,10 @@ class JobsController:
             if is_task_runnable(successor):
                 self._task_queue.put(successor_id)
 
-    def _handle_future_completion(self, future: futures.Future,
-                                  task_id: int):
+    def _handle_future_completion(self, future: futures.Future, task_id: int):
+        succeeded = False
         try:
             succeeded = future.result()
-            logger.info(f'Task {task_id} completed with result: {succeeded}')
-            if succeeded:
-                self._completed_tasks.add(task_id)
-                self._try_add_successors_to_queue(task_id)
-                return
         except exceptions.ProvisionPrechecksError as e:
             logger.info(f'Task {task_id} failed with ProvisionPrechecksError '
                         f'{e}')
@@ -395,9 +390,15 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
         finally:
-            logger.info(f'Adding task {task_id} to failed tasks.')
-            self._failed_tasks.add(task_id)
-            self._cancel_downstream_tasks(task_id)
+            if succeeded:
+                logger.info(
+                    f'Task {task_id} completed with result: {succeeded}')
+                self._completed_tasks.add(task_id)
+                self._try_add_successors_to_queue(task_id)
+            else:
+                logger.info(f'Adding task {task_id} to failed tasks.')
+                self._failed_tasks.add(task_id)
+                self._cancel_downstream_tasks(task_id)
 
     def _cancel_downstream_tasks(self, task_id: int):
         task = self._dag.tasks[task_id]
