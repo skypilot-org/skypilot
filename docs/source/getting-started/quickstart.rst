@@ -124,9 +124,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       LAUNCHED     RESOURCES             COMMAND                            STATUS
-  mygcp      1 day ago    1x GCP(n1-highmem-8)  sky launch -c mygcp --cloud gcp    STOPPED
-  mycluster  4 mins ago   1x AWS(p4d.24xlarge)  sky exec mycluster hello_sky.yaml  UP
+  NAME       LAUNCHED     RESOURCES                          COMMAND                            STATUS
+  mygcp      1 day ago    1x GCP(n1-highmem-8)               sky launch -c mygcp --cloud gcp    STOPPED
+  mycluster  4 mins ago   1x AWS(p4d.24xlarge, {'A100': 8})  sky exec mycluster hello_sky.yaml  UP
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
