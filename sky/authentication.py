@@ -294,10 +294,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     if not exists:
         lambda_client.register_ssh_key(name, public_key)
 
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = public_key_path
-
+    config['auth']['remote_key_name'] = name
     return config
 
 

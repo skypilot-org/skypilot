@@ -53,17 +53,6 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def _get_ssh_key_name(prefix: str = '') -> str:
-    lambda_client = _get_lambda_client()
-    _, public_key_path = auth.get_or_generate_keys()
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read()
-    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
-    if not exists:
-        raise lambda_utils.LambdaCloudError('SSH key not found')
-    return name
-
-
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
@@ -100,7 +89,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         )
 
     created_instance_ids = []
-    ssh_key_name = _get_ssh_key_name()
+    remote_ssh_key_name = config.authentication_config['remote_key_name']
 
     def launch_nodes(node_type: str, quantity: int) -> List[str]:
         try:
@@ -109,7 +98,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 region=region,
                 name=f'{cluster_name_on_cloud}-{node_type}',
                 quantity=quantity,
-                ssh_key_name=ssh_key_name,
+                ssh_key_name=remote_ssh_key_name,
             )
             logger.info(f'Launched {len(instance_ids)} {node_type} node(s), '
                         f'instance_ids: {instance_ids}')
