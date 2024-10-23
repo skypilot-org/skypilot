@@ -3056,7 +3056,7 @@ def show_gpus(
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-    cloud_name = sky_clouds.CLOUD_REGISTRY.to_canonical_name(cloud_obj)
+    cloud_name = cloud_obj.canonical_name() if cloud_obj is not None else None
     service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:

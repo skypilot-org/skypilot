@@ -65,9 +65,8 @@ def check(
             return repr(cloud_obj), cloud_obj
 
     def get_all_clouds():
-        return tuple(
-            [repr(c) for c in sky_clouds.CLOUD_REGISTRY.clouds.values()] +
-            [cloudflare.SKY_CHECK_NAME])
+        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()] +
+                     [cloudflare.SKY_CHECK_NAME])
 
     if clouds is not None:
         cloud_list = clouds

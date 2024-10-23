@@ -9,35 +9,29 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 
-class _CloudRegistry:
+class _CloudRegistry(dict):
     """Registry of clouds."""
 
     def __init__(self) -> None:
-        self.clouds: Dict[str, 'cloud.Cloud'] = {}
+        super().__init__()
         self.aliases: Dict[str, str] = {}
 
     def from_str(self, name: Optional[str]) -> Optional['cloud.Cloud']:
+        """Returns the cloud instance from the canonical name or alias."""
         if name is None:
             return None
 
         search_name = name.lower()
 
-        if search_name in self.clouds:
-            return self.clouds[search_name]
+        if search_name in self:
+            return self[search_name]
 
         if search_name in self.aliases:
-            return self.clouds[self.aliases[search_name]]
+            return self[self.aliases[search_name]]
 
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Cloud {name!r} is not a valid cloud among '
-                             f'{[*self.clouds.keys(), *self.aliases.keys()]}')
-
-    @staticmethod
-    def to_canonical_name(cloud: Optional['cloud.Cloud']) -> Optional[str]:
-        if cloud is None:
-            return None
-
-        return cloud.canonical_name()
+                             f'{[*self.keys(), *self.aliases.keys()]}')
 
     @overload
     def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
@@ -60,10 +54,11 @@ class _CloudRegistry:
 
         def _register(cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
             name = cloud_cls.canonical_name()
-            assert name not in self.clouds, f'{name} already registered'
-            self.clouds[name] = cloud_cls()
+            assert name not in self, f'{name} already registered'
+            self[name] = cloud_cls()
 
             for alias in aliases or []:
+                alias = alias.lower()
                 assert alias not in self.aliases, (
                     f'alias {alias} already registered')
                 self.aliases[alias] = name

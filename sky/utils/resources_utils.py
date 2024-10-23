@@ -191,7 +191,7 @@ def need_to_query_reservations() -> bool:
     This is useful to skip the potentially expensive reservation query for
     clouds that do not use reservations.
     """
-    for cloud_str in cloud_registry.CLOUD_REGISTRY.clouds:
+    for cloud_str in cloud_registry.CLOUD_REGISTRY.keys():
         cloud_specific_reservations = skypilot_config.get_nested(
             (cloud_str, 'specific_reservations'), None)
         cloud_prioritize_reservations = skypilot_config.get_nested(
