@@ -3,7 +3,6 @@ import textwrap
 
 from click import testing as cli_testing
 
-import sky
 from sky import exceptions
 import sky.cli as cli
 
@@ -105,7 +104,7 @@ def test_show_gpus():
         assert isinstance(result.exception, SystemExit)
 
 
-def test_k8s_alias(enable_all_clouds):
+def test_k8s_alias_check():
     cli_runner = cli_testing.CliRunner()
 
     result = cli_runner.invoke(cli.check, ['k8s'])
@@ -116,6 +115,10 @@ def test_k8s_alias(enable_all_clouds):
 
     result = cli_runner.invoke(cli.check, ['notarealcloud'])
     assert isinstance(result.exception, ValueError)
+
+
+def test_k8s_alias(enable_all_clouds):
+    cli_runner = cli_testing.CliRunner()
 
     result = cli_runner.invoke(cli.launch, ['--cloud', 'k8s', '--dryrun'])
     assert not result.exit_code
