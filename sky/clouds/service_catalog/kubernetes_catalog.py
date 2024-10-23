@@ -127,8 +127,12 @@ def list_accelerators_realtime(
                     kubernetes_utils.get_node_accelerator_count(
                         node.status.allocatable))
                 if accelerator_name and accelerator_count > 0:
-                    for count in range(1, accelerator_count + 1):
-                        accelerators_qtys.add((accelerator_name, count))
+                    if kubernetes_utils.is_tpu_on_gke(accelerator_name):
+                        accelerators_qtys.add(
+                            (accelerator_name, accelerator_count))
+                    else:
+                        for count in range(1, accelerator_count + 1):
+                            accelerators_qtys.add((accelerator_name, count))
 
                 for pod in pods:
                     # Get all the pods running on the node
