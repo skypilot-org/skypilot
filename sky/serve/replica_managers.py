@@ -32,6 +32,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import resources_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
@@ -656,6 +657,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        resources_override = resources_override or {}
+        resources_override['cloud'] = [sky.clouds.GCP(), sky.clouds.AWS()][replica_id % 2]
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
@@ -1160,13 +1163,19 @@ class SkyPilotReplicaManager(ReplicaManager):
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
+        ready_replica_urls = {}
         active_versions = set(record['active_versions'])
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
                 assert info.url is not None, info
-                ready_replica_urls.append(info.url)
+                cluster_name = info.cluster_name
+                cluster_record = global_user_state.get_cluster_from_name(
+                    cluster_name)
+                handle = cluster_record['handle']
+                resource_str = resources_utils.get_readable_resources_repr(
+                    handle, simplify=True)
+                ready_replica_urls[info.url] = resource_str
         return ready_replica_urls
 
     ###########################################
