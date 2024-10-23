@@ -105,7 +105,7 @@ def test_show_gpus():
         assert isinstance(result.exception, SystemExit)
 
 
-def test_k8s_alias():
+def test_k8s_alias(enable_all_clouds):
     cli_runner = cli_testing.CliRunner()
 
     result = cli_runner.invoke(cli.check, ['k8s'])

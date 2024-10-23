@@ -8,7 +8,7 @@ def test_sky_launch(enable_all_clouds):
     assert job_id is None and handle is None
 
 
-def test_k8s_alias():
+def test_k8s_alias(enable_all_clouds):
 
     def dryrun_task_with_cloud(cloud: Cloud):
         task = sky.Task()
