@@ -877,11 +877,16 @@ class Resources:
         for region, image_id in self._image_id.items():
             if (image_id.startswith('skypilot:') and
                     not self._cloud.is_image_tag_valid(image_id, region)):
-                region_str = f' ({region})' if region else ''
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Image tag {image_id!r} is not valid, please make sure'
-                        f' the tag exists in {self._cloud}{region_str}.')
+                # fallback_image_id = self._cloud.get_fallback_image_tag()
+                # if (fallback_image_id is not None):
+                #     self._image_id[region] = fallback_image_id
+                #     raise ValueError(f'YIKADEBUG {fallback_image_id}')
+                # else:
+                    region_str = f' ({region})' if region else ''
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Image tag {image_id!r} is not valid, please make sure'
+                            f' the tag exists in {self._cloud}{region_str}.')
 
             if (self._cloud.is_same_cloud(clouds.AWS()) and
                     not image_id.startswith('skypilot:') and region is None):

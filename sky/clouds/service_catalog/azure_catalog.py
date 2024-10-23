@@ -176,13 +176,15 @@ def list_accelerators(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    # Azure images are not region-specific.
-    del region  # Unused.
-    return common.get_image_id_from_tag_impl(_image_df, tag, None)
+    # Marketplace images are global while community images are regional
+    if not tag.startswith('skypilot:custom'):
+        region = None
+    return common.get_image_id_from_tag_impl(_image_df, tag, region)
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
-    # Azure images are not region-specific.
-    del region  # Unused.
-    return common.is_image_tag_valid_impl(_image_df, tag, None)
+    # Marketplace images are global while community images are regional
+    if not tag.startswith('skypilot:custom'):
+        region = None
+    return common.is_image_tag_valid_impl(_image_df, tag, region)

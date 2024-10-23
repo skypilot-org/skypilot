@@ -39,6 +39,13 @@ _MAX_IDENTITY_FETCH_RETRY = 10
 _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
 _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
 
+# Images
+_FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
+#TODO: update these to use new custom images.
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
+_DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
+_DEFAULT_GPU_V1_IMAGE_ID = 'skypilot:v1-ubuntu-2004'
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -135,25 +142,6 @@ class Azure(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
-        if region is None:
-            # The region used here is only for where to send the query,
-            # not the image location. Azure's image is globally available.
-            region = 'eastus'
-        if image_id.startswith('skypilot:'):
-            image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                             clouds='azure')
-        # Validate image exists.
-        compute_client = azure.get_client('compute', cls.get_project_id())
-        if image_id.startswith('/CommunityGalleries'):
-            image = cls.get_community_image(image_id, region, compute_client)
-            return cls.get_community_image_size(image_id, region,
-                                                compute_client)
-        else:
-            image = cls.get_marketplace_image(image_id, region, compute_client)
-            return cls.get_marketplace_image_size(image_id, image)
-
-    @classmethod
     def get_default_instance_type(
             cls,
             cpus: Optional[str] = None,
@@ -164,6 +152,31 @@ class Azure(clouds.Cloud):
                                                          memory=memory,
                                                          disk_tier=disk_tier,
                                                          clouds='azure')
+
+    @classmethod
+    def get_fallback_image_tag(cls) -> Optional[str]:
+        return _FALLBACK_IMAGE_ID
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        logger.info(f'YIKADEBUG {region}')
+        if region is None:
+            # The region used here is only for where to send the query,
+            # not the image location. Azure's image is globally available.
+            region = 'eastus'
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             region=region,
+                                                             clouds='azure')
+        # Validate image exists.
+        compute_client = azure.get_client('compute', cls.get_project_id())
+        if image_id.startswith('/CommunityGalleries'):
+            image = cls.get_community_image(image_id, region, compute_client)
+            return cls.get_community_image_size(image_id, region,
+                                                compute_client)
+        else:
+            image = cls.get_marketplace_image(image_id, region, compute_client)
+            return cls.get_marketplace_image_size(image_id, image)
 
     @classmethod
     def get_marketplace_image(cls, image_id, region,
@@ -249,7 +262,7 @@ class Azure(clouds.Cloud):
         if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                return 'skypilot:k80-ubuntu-2004'
+                return _DEFAULT_GPU_K80_IMAGE_ID
 
         # ubuntu-2004 v21.11.04, the previous image we used in the past for
         # V1 HyperV instance before we change default image to ubuntu-hpc.
@@ -258,13 +271,13 @@ class Azure(clouds.Cloud):
         # (Basic_A, Standard_D, ...) are V1 instance. For these instances,
         # we use the previous image.
         if gen_version == 'V1':
-            return 'skypilot:v1-ubuntu-2004'
+            return _DEFAULT_GPU_V1_IMAGE_ID
 
         # nvidia-driver: 535.54.03, cuda: 12.2
         # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
         # All A100 instances is of gen2, so it will always use
         # the latest ubuntu-hpc:2204 image.
-        return 'skypilot:gpu-ubuntu-2204'
+        return _DEFAULT_GPU_IMAGE_ID
 
     @classmethod
     def regions_with_offering(cls, instance_type: str,
@@ -359,9 +372,10 @@ class Azure(clouds.Cloud):
                 image_id = resources.image_id[region_name]
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             region=region_name,
                                                              clouds='azure')
+            
         # Already checked in resources.py
-
         if image_id.startswith('/CommunityGalleries'):
             image_config = {'community_gallery_image_id': image_id}
         else:

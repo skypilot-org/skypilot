@@ -347,6 +347,11 @@ class Cloud:
                                                   clouds=cls._REPR.lower())
 
     @classmethod
+    def get_fallback_image_tag(cls) -> Optional[str]:
+        """If the default image tag is invalid, fallback to this image tag."""
+        return None
+
+    @classmethod
     def is_label_valid(cls, label_key: str,
                        label_value: str) -> Tuple[bool, Optional[str]]:
         """Validates that the label key and value are valid for this cloud.
