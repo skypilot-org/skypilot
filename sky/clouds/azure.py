@@ -329,7 +329,6 @@ class Azure(clouds.Cloud):
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
               - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/skypilot:ssh_user/.bashrc
-              - usermod -aG docker skypilot:ssh_user
             write_files:
               - path: /etc/apt/apt.conf.d/20auto-upgrades
                 content: |

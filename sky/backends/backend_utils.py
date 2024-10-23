@@ -56,7 +56,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
+    from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
@@ -751,7 +751,7 @@ def _replace_yaml_dicts(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources.Resources',
+        to_provision: 'resources_lib.Resources',
         num_nodes: int,
         cluster_config_template: str,
         cluster_name: str,
@@ -2772,6 +2772,10 @@ def get_endpoints(cluster: str,
     cluster_records = get_clusters(include_controller=True,
                                    refresh=False,
                                    cluster_names=[cluster])
+    if not cluster_records:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster!r} not found.', cluster_status=None)
     assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]
     if (not skip_status_check and

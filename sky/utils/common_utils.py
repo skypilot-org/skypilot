@@ -231,7 +231,7 @@ def get_global_job_id(job_timestamp: str,
     return global_job_id
 
 
-def get_unique_task_name(_: 'task_lib.Task') -> str:
+def get_unique_task_name() -> str:
     timestamp = int(time.time())
     unique_suffix = uuid.uuid4().hex[:6]
     name = f'task_{timestamp}_{unique_suffix}'

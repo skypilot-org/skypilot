@@ -182,7 +182,7 @@ Manually Labelling Nodes
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
 
-For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerator: v100`.
+For example, a node with H100 GPUs must have a label :code:`skypilot.co/accelerator: h100`.
 
 Use the following command to label a node:
 
@@ -261,9 +261,19 @@ You can also check the GPUs available on your nodes by running:
 .. code-block:: console
 
     $ sky show-gpus --cloud kubernetes
+    Kubernetes GPUs
     GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-    L4    1, 2, 3, 4    8           6
-    H100  1, 2          4           2
+    L4    1, 2, 4       12          12
+    H100  1, 2, 4, 8    16          16
+
+    Kubernetes per node GPU availability
+    NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+    my-cluster-0               L4        4           4
+    my-cluster-1               L4        4           4
+    my-cluster-2               L4        2           2
+    my-cluster-3               L4        2           2
+    my-cluster-4               H100      8           8
+    my-cluster-5               H100      8           8
 
 
 .. _kubernetes-observability:
@@ -274,8 +284,47 @@ All SkyPilot tasks are run in pods inside a Kubernetes cluster. As a cluster adm
 you can inspect running pods (e.g., with :code:`kubectl get pods -n namespace`) to check which
 tasks are running and how many resources they are consuming on the cluster.
 
-Additionally, you can also deploy tools such as the `Kubernetes dashboard <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_ for easily viewing and managing
-SkyPilot tasks running on your cluster.
+Below, we provide tips on how to monitor SkyPilot resources on your Kubernetes cluster.
+
+.. _kubernetes-observability-skystatus:
+
+List SkyPilot resources across all users
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+We provide a convenience command, :code:`sky status --k8s`, to view the status of all SkyPilot resources in the cluster.
+
+Unlike :code:`sky status` which lists only the SkyPilot resources launched by the current user,
+:code:`sky status --k8s` lists all SkyPilot resources in the cluster across all users.
+
+.. code-block:: console
+
+    $ sky status --k8s
+    Kubernetes cluster state (context: mycluster)
+    SkyPilot clusters
+    USER     NAME                           LAUNCHED    RESOURCES                                  STATUS
+    alice    infer-svc-1                    23 hrs ago  1x Kubernetes(cpus=1, mem=1, {'L4': 1})    UP
+    alice    sky-jobs-controller-80b50983   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
+    alice    sky-serve-controller-80b50983  23 hrs ago  1x Kubernetes(cpus=4, mem=4)               UP
+    bob      dev                            1 day ago   1x Kubernetes(cpus=2, mem=8, {'H100': 1})  UP
+    bob      multinode-dev                  1 day ago   2x Kubernetes(cpus=2, mem=2)               UP
+    bob      sky-jobs-controller-2ea485ea   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
+
+    Managed jobs
+    In progress tasks: 1 STARTING
+    USER     ID  TASK  NAME      RESOURCES   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+    alice    1   -     eval      1x[CPU:1+]  2 days ago  49s            8s            0            SUCCEEDED
+    bob      4   -     pretrain  1x[H100:4]  1 day ago   1h 1m 11s      1h 14s        0            SUCCEEDED
+    bob      3   -     bigjob    1x[CPU:16]  1 day ago   1d 21h 11m 4s  -             0            STARTING
+    bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
+    bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
+
+
+.. _kubernetes-observability-dashboard:
+
+Kubernetes Dashboard
+^^^^^^^^^^^^^^^^^^^^
+You can deploy tools such as the `Kubernetes dashboard <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_ to easily view and manage
+SkyPilot resources on your cluster.
 
 .. image:: ../../images/screenshots/kubernetes/kubernetes-dashboard.png
     :width: 80%

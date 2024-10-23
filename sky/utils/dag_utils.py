@@ -64,6 +64,7 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
     return converted_dag
 
 
+# TODO(andy): We should migrate the function into sky.Dag.from_yaml()
 def load_dag_from_yaml(
     path: str,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
@@ -71,10 +72,10 @@ def load_dag_from_yaml(
     """Loads a DAG from a YAML file.
 
     Supports various formats:
-    1. Tasks without explicit dependencies:
+    1. Tasks without explicit flow definition:
        - Single task
        - Multiple tasks separated, with implicit linear dependency
-    2. DAG with explicit 'dependencies' field
+    2. DAG with explicit 'downstream' field
 
     Has special handling for an initial section in YAML that contains only the
     'name' field, which is the DAG name.
@@ -138,6 +139,7 @@ def load_dag_from_yaml(
     return dag
 
 
+# TODO(andy): We should migrate the function into sky.Dag.to_yaml()
 def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     """Dumps a DAG to a YAML file.
 

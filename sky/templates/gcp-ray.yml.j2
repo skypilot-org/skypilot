@@ -64,6 +64,9 @@ provider:
   # leakage.
   disable_launch_config_check: true
   use_managed_instance_group: {{ gcp_use_managed_instance_group }}
+{%- if enable_gvnic %}
+  enable_gvnic: {{ enable_gvnic }}
+{%- endif %}
 
 auth:
   ssh_user: gcpuser
