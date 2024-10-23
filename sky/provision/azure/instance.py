@@ -21,9 +21,9 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from azure.mgmt import compute as azure_compute
-    from azure.mgmt.compute import models as azure_compute_objs
-    from azure.mgmt.network import models as azure_network_objs
-    from azure.mgmt.network import network as azure_network
+    from azure.mgmt import network as azure_network
+    from azure.mgmt.compute import models as azure_compute_models
+    from azure.mgmt.network import models as azure_network_models
 
 logger = sky_logging.init_logger(__name__)
 
@@ -187,9 +187,9 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def _create_network_interface(
         network_client: 'azure_network.NetworkManagementClient', vm_name: str,
         provider_config: Dict[str,
-                              Any]) -> 'azure_network_objs.NetworkInterface':
-    network = azure.import_azure_modules('network_obj')
-    compute = azure.import_azure_modules('compute_obj')
+                              Any]) -> 'azure_network_models.NetworkInterface':
+    network = azure.azure_mgmt_models('network')
+    compute = azure.azure_mgmt_models('compute')
     logger.info(f'Start creating network interface for {vm_name}...')
     if provider_config.get('use_internal_ips', False):
         name = f'{vm_name}-nic-private'
@@ -232,8 +232,8 @@ def _create_vm(
         compute_client: 'azure_compute.ComputeManagementClient', vm_name: str,
         node_tags: Dict[str, str], provider_config: Dict[str, Any],
         node_config: Dict[str, Any],
-        network_interface_id: str) -> 'azure_compute_objs.VirtualMachine':
-    compute = azure.import_azure_modules('compute_obj')
+        network_interface_id: str) -> 'azure_compute_models.VirtualMachine':
+    compute = azure.azure_mgmt_models('compute')
     logger.info(f'Start creating VM {vm_name}...')
     hardware_profile = compute.HardwareProfile(
         vm_size=node_config['azure_arm_parameters']['vmSize'])
@@ -294,6 +294,7 @@ def _create_vm(
         vm_name=vm_name,
         parameters=vm_instance,
     )
+    # poller.result() will block on async operation until it's done.
     logger.info(f'Created VM {vm_poller.result().name}.')
     # Configure driver extension for A10 GPUs. A10 GPUs requires a
     # special type of drivers which is available at Microsoft HPC

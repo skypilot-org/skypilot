@@ -71,11 +71,11 @@ def exceptions():
 
 @functools.lru_cache()
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-def import_azure_modules(name: str):
-    if name == 'compute_obj':
+def azure_mgmt_models(name: str):
+    if name == 'compute':
         from azure.mgmt.compute import models
         return models
-    elif name == 'network_obj':
+    elif name == 'network':
         from azure.mgmt.network import models
         return models
 
