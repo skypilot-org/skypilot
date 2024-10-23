@@ -133,7 +133,7 @@ class GCPIdentityType(enum.Enum):
     SHARED_CREDENTIALS_FILE = ''
 
 
-@clouds.CLOUD_REGISTRY.register()
+@clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 

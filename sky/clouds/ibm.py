@@ -22,7 +22,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-@clouds.CLOUD_REGISTRY.register()
+@clouds.CLOUD_REGISTRY.register
 class IBM(clouds.Cloud):
     """IBM Web Services."""
 

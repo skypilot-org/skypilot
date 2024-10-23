@@ -25,7 +25,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register()
+@clouds.CLOUD_REGISTRY.register
 class Vsphere(clouds.Cloud):
     """Vsphere cloud"""
 

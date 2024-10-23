@@ -1,7 +1,7 @@
 """Clouds need to be registered in CLOUD_REGISTRY to be discovered"""
 
 import typing
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Dict, List, Optional, overload, Type, Union
 
 from sky.utils import ux_utils
 
@@ -12,7 +12,7 @@ if typing.TYPE_CHECKING:
 class _CloudRegistry:
     """Registry of clouds."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.clouds: Dict[str, 'cloud.Cloud'] = {}
         self.aliases: Dict[str, str] = {}
 
@@ -39,10 +39,24 @@ class _CloudRegistry:
 
         return cloud.canonical_name()
 
+    @overload
+    def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
+        ...
+
+    @overload
     def register(
         self,
-        aliases: Optional[List[str]] = None
+        cloud_cls: None = None,
+        aliases: Optional[List[str]] = None,
     ) -> Callable[[Type['cloud.Cloud']], Type['cloud.Cloud']]:
+        ...
+
+    def register(
+        self,
+        cloud_cls: Optional[Type['cloud.Cloud']] = None,
+        aliases: Optional[List[str]] = None,
+    ) -> Union[Type['cloud.Cloud'], Callable[[Type['cloud.Cloud']],
+                                             Type['cloud.Cloud']]]:
 
         def _register(cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
             name = cloud_cls.canonical_name()
@@ -56,6 +70,11 @@ class _CloudRegistry:
 
             return cloud_cls
 
+        if cloud_cls is not None:
+            # invocation without parens (e.g. just `@register`)
+            return _register(cloud_cls)
+
+        # Invocation with parens (e.g. `@register(aliases=['alias'])`)
         return _register
 
 

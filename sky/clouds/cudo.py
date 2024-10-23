@@ -28,7 +28,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@clouds.CLOUD_REGISTRY.register()
+@clouds.CLOUD_REGISTRY.register
 class Cudo(clouds.Cloud):
     """Cudo Compute"""
     _REPR = 'Cudo'

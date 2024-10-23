@@ -30,7 +30,7 @@ _SCP_MIN_DISK_SIZE_GB = 100
 _SCP_MAX_DISK_SIZE_GB = 300
 
 
-@clouds.CLOUD_REGISTRY.register()
+@clouds.CLOUD_REGISTRY.register
 class SCP(clouds.Cloud):
     """SCP Cloud."""
 

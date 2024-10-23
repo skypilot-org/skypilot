@@ -22,7 +22,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-@clouds.CLOUD_REGISTRY.register()
+@clouds.CLOUD_REGISTRY.register
 class Fluidstack(clouds.Cloud):
     """FluidStack GPU Cloud."""
 
