@@ -19,16 +19,6 @@ class _CloudRegistry:
     def from_str(self, name: Optional[str]) -> Optional['cloud.Cloud']:
         if name is None:
             return None
-        if name.lower() not in self.clouds:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
-                                 f'{list(self.clouds.keys())}')
-        return self.clouds[name.lower()]
-
-    def from_name_or_alias(self,
-                           name: Optional[str]) -> Optional['cloud.Cloud']:
-        if name is None:
-            return None
 
         search_name = name.lower()
 
@@ -39,8 +29,15 @@ class _CloudRegistry:
             return self.clouds[self.aliases[search_name]]
 
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Cloud {name!r} is not a valid cloud name among '
+            raise ValueError(f'Cloud {name!r} is not a valid cloud among '
                              f'{[*self.clouds.keys(), *self.aliases.keys()]}')
+
+    @staticmethod
+    def to_canonical_name(cloud: Optional['cloud.Cloud']) -> Optional[str]:
+        if cloud is None:
+            return None
+
+        return cloud.canonical_name()
 
     def register(
         self,
@@ -48,7 +45,7 @@ class _CloudRegistry:
     ) -> Callable[[Type['cloud.Cloud']], Type['cloud.Cloud']]:
 
         def _register(cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
-            name = cloud_cls.__name__.lower()
+            name = cloud_cls.canonical_name()
             assert name not in self.clouds, f'{name} already registered'
             self.clouds[name] = cloud_cls()
 

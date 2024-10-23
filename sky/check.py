@@ -60,7 +60,7 @@ def check(
         if cloud_name.lower().startswith('cloudflare'):
             return cloudflare.SKY_CHECK_NAME, cloudflare
         else:
-            cloud_obj = sky_clouds.CLOUD_REGISTRY.from_name_or_alias(cloud_name)
+            cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud_name)
             assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
             return repr(cloud_obj), cloud_obj
 

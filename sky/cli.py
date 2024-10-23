@@ -485,8 +485,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params[
-                'cloud'] = sky_clouds.CLOUD_REGISTRY.from_name_or_alias(cloud)
+            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -3056,10 +3055,8 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_name_or_alias(cloud)
-    cloud_name = None
-    if cloud_obj is not None:
-        cloud_name = type(cloud_obj).__name__.lower()
+    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_name = sky_clouds.CLOUD_REGISTRY.to_canonical_name(cloud_obj)
     service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:
