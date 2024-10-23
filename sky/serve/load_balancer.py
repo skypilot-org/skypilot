@@ -259,12 +259,13 @@ if __name__ == '__main__':
                         required=True,
                         default=8890,
                         help='The port where the load balancer listens to.')
+    available_policies = list(lb_policies.LB_POLICIES.keys())
     parser.add_argument(
         '--load-balancing-policy',
-        choices=list(lb_policies.LB_POLICIES.keys()),
+        choices=available_policies,
         default='round_robin',
         help=f'The load balancing policy to use. Available policies: '
-        f'{", ".join(lb_policies.LB_POLICIES.keys())}.')
+        f'{", ".join(available_policies)}.')
     args = parser.parse_args()
     run_load_balancer(args.controller_addr, args.load_balancer_port,
                       args.load_balancing_policy)
