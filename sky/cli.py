@@ -377,6 +377,8 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         cmd = '_SKY_COMPLETE=fish_source sky > \
                 ~/.config/fish/completions/sky.fish'
 
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
         reload_cmd = None
 
     elif value == 'zsh':
@@ -431,6 +433,8 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
 
     elif value == 'fish':
         cmd = 'rm -f ~/.config/fish/completions/sky.fish'
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
         reload_cmd = None
 
     elif value == 'zsh':
