@@ -365,11 +365,19 @@ class Kubernetes(clouds.Cloud):
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
+        k8s_topology_label_key = None
+        k8s_topology_label_value = None
+        tpu_requested = False
 
-        # If GPUs are requested, set node label to match the GPU type.
+        # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
         if acc_count > 0 and acc_type is not None:
-            k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(context, acc_type)
+            (k8s_acc_label_key, k8s_acc_label_value, k8s_topology_label_key,
+             k8s_topology_label_value) = (
+                 kubernetes_utils.get_accelerator_label_key_value(
+                     context, acc_type, acc_count))
+            if (k8s_acc_label_key ==
+                    kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
+                tpu_requested = True
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -431,6 +439,9 @@ class Kubernetes(clouds.Cloud):
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
+            'tpu_requested': tpu_requested,
+            'k8s_topology_label_key': k8s_topology_label_key,
+            'k8s_topology_label_value': k8s_topology_label_value,
             'image_id': image_id,
         }
 
