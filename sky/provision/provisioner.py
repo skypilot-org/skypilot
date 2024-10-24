@@ -28,6 +28,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
@@ -366,7 +367,7 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     ips = collections.deque(ip_list)
     ssh_ports = collections.deque(port_list)
 
-    def _wait_retry_ssh(ip, ssh_port):
+    def _retry_ssh_thread(ip, ssh_port):
         while True:
             success, stderr = waiter(ip, ssh_port, **ssh_credentials)
             if not success and time.time() - start > timeout:
@@ -379,11 +380,10 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
 
     # try one node and multiprocess the rest
     if ips:
-        ip = ips.popleft()  
+        ip = ips.popleft()
         ssh_port = ssh_ports.popleft()
-        _wait_retry_ssh(ip, ssh_port)
-    subprocess_utils.run_in_parallel(_wait_retry_ssh, zip(ips, ssh_ports))
-
+        _retry_ssh_thread(ip, ssh_port)
+    subprocess_utils.run_in_parallel(_retry_ssh_thread, zip(ips, ssh_ports))
 
 
 def _post_provision_setup(
