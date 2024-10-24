@@ -101,7 +101,11 @@ def _get_single_resources_schema():
                     'additionalProperties': False,
                     'properties': {
                         'strategy': {
-                            'type': 'string',
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'null',
+                            }],
                         },
                         'max_retry_on_failure': {
                             'type': 'integer',

@@ -287,9 +287,9 @@ class JobsController:
                         self._strategy_executor.trigger_retry_on_failure())
                     if trigger_retry_on_failure:
                         logger.info(
-                            f'User program crashed ({managed_job_status.value}). '
-                            f'Retry the job as '
-                            f'max_retry_on_failure is set to '
+                            f'User program crashed '
+                            f'({managed_job_status.value}). '
+                            f'Retry the job as max_retry_on_failure is set to '
                             f'{self._strategy_executor.max_retry_on_failure}. '
                             f'[{self._strategy_executor.retry_cnt_on_failure}/'
                             f'{self._strategy_executor.max_retry_on_failure}]')
@@ -302,13 +302,14 @@ class JobsController:
                             end_time=end_time,
                             callback_func=callback_func)
                         return False
-                # Although the cluster is healthy, we fail to access the
-                # job status. Try to recover the job (will not restart the
-                # cluster, if the cluster is healthy).
-                assert job_status is None, job_status
-                logger.info('Failed to fetch the job status while the '
-                            'cluster is healthy. Try to recover the job '
-                            '(the cluster will not be restarted).')
+                else:
+                    # Although the cluster is healthy, we fail to access the
+                    # job status. Try to recover the job (will not restart the
+                    # cluster, if the cluster is healthy).
+                    assert job_status is None, job_status
+                    logger.info('Failed to fetch the job status while the '
+                                'cluster is healthy. Try to recover the job '
+                                '(the cluster will not be restarted).')
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources

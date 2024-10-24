@@ -825,7 +825,8 @@ class Resources:
         """
         if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
-        if self._job_recovery['strategy'] not in managed_jobs.RECOVERY_STRATEGIES:
+        if (self._job_recovery['strategy']
+                not in managed_jobs.RECOVERY_STRATEGIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Spot recovery strategy {self._job_recovery["strategy"]} '

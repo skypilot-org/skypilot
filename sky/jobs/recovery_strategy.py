@@ -141,10 +141,6 @@ class StrategyExecutor:
         assert job_submit_at is not None
         return job_submit_at
 
-    def _recover(self) -> float:
-        """Implementation of recover() for the strategy."""
-        raise NotImplementedError
-
     def recover(self) -> float:
         """Relaunch the cluster after failure and wait until job starts.
 
@@ -153,10 +149,7 @@ class StrategyExecutor:
 
         Returns: The timestamp job started.
         """
-        # Reset the retry counter, as after recovery, we should give the same
-        # amount of chance as the first launch.
-        self.retry_cnt_on_failure = 0
-        return self._recover()
+        raise NotImplementedError
 
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
@@ -427,7 +420,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             self._launched_resources = None
         return job_submitted_at
 
-    def _recover(self) -> float:
+    def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
         # 2. Tear down the cluster, if the step 1 failed to launch the cluster.
@@ -508,7 +501,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                                                   -> R1Z1 (success)
     """
 
-    def _recover(self) -> float:
+    def recover(self) -> float:
         # 1. Terminate the current cluster
         # 2. Launch again by explicitly blocking the previously launched region
         # (this will failover through the entire search space except the
