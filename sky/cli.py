@@ -549,6 +549,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    skip_setup: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -613,6 +614,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        skip_setup=skip_setup,
     )
 
 
@@ -1034,6 +1036,13 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--skip-setup',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('[Experimental] If the cluster is already up and available, skip'
+          'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1065,6 +1074,7 @@ def launch(
     yes: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
+    skip_setup: bool,
 ):
     """Launch a cluster or task.
 
@@ -1133,7 +1143,8 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         skip_setup=skip_setup)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
