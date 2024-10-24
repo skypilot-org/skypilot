@@ -790,6 +790,10 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         launch_log_file = generate_replica_launch_log_file_name(
             service_name, replica_id)
 
+        # Skip already-terminated replicas (processed above).
+        if replica in terminated_replicas:
+            continue
+
         # Check if launch log file exists and has correct replica_id.
         if not (os.path.exists(launch_log_file) and
                 has_valid_replica_id(launch_log_file, target_replica_id)):

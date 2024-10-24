@@ -784,6 +784,7 @@ def sync_down_logs(service_name: str,
     target_directory = os.path.join(sky_logs_directory, run_timestamp)
     os.makedirs(target_directory, exist_ok=True)
     single_file_synced = False
+    log_files_to_sync = []
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.CONTROLLER):
@@ -792,13 +793,8 @@ def sync_down_logs(service_name: str,
         runner = controller_handle.get_command_runners()
         controller_log_file_name = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        logger.info('Downloading the controller logs...')
-        runner.rsync(source=controller_log_file_name,
-                     target=os.path.join(
-                         target_directory,
-                         serve_constants.CONTROLLER_LOG_FILE_NAME),
-                     up=False,
-                     stream_logs=False)
+        log_files_to_sync.append((controller_log_file_name,
+                                  serve_constants.CONTROLLER_LOG_FILE_NAME))
         if not sync_down_all_components:
             single_file_synced = True
             target_directory = os.path.join(
@@ -813,17 +809,21 @@ def sync_down_logs(service_name: str,
         load_balancer_log_file_name = (
             serve_utils.generate_remote_load_balancer_log_file_name(
                 service_name))
-        logger.info('Downloading the load balancer logs...')
-        runner.rsync(source=load_balancer_log_file_name,
-                     target=os.path.join(
-                         target_directory,
-                         serve_constants.LOAD_BALANCER_LOG_FILE_NAME),
-                     up=False,
-                     stream_logs=False)
+        log_files_to_sync.append((load_balancer_log_file_name,
+                                  serve_constants.LOAD_BALANCER_LOG_FILE_NAME))
         if not sync_down_all_components:
             single_file_synced = True
             target_directory = os.path.join(
                 target_directory, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
+
+    # Sync controller / load balancer log files.
+    for src, tar in log_files_to_sync:
+        logger.info('Downloading the log file from '
+                    f'{src} to {tar}...')
+        runner.rsync(source=src,
+                     target=os.path.join(target_directory, tar),
+                     up=False,
+                     stream_logs=False)
 
     # Final message indicating where the logs can be found.
     logger.info(f'Synced down log{"s" if not single_file_synced else ""}'
