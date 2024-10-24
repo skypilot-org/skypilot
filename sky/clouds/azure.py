@@ -173,9 +173,11 @@ class Azure(clouds.Cloud):
         # Azure community gallery image passed in by the user.
         if image_id.startswith('/CommunityGalleries'):
             _, _, gallery_name, _, image_name = image_id.split('/')
-            with ux_utils.print_exception_no_traceback():
+            try:
                 return azure_utils.get_community_image_size(
                     compute_client, gallery_name, image_name, region)
+            except exceptions.ResourcesUnavailableError:
+                return 0.0
 
         # Azure marketplace image
         publisher, offer, sku, version = image_id.split(':')
@@ -320,23 +322,18 @@ class Azure(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
-            if image_id.startswith('/CommunityGalleries'):
-                # Fallback if image does not exist in the specified region.
-                # Putting fallback here instead of at image validation
-                # when creating the resource because community images are
-                # regional so we need the correct region when we check whether
-                # the image exists.
-                compute_client = azure.get_client('compute',
-                                                  self.get_project_id())
-                try:
-                    azure_utils.get_community_image(compute_client, image_id,
-                                                    region_name)
-                except azure.exceptions.ResourceNotFoundError:
-                    logger.info(
-                        f'Azure image {image_id} does not exist in region '
-                        f'{region_name} so use the fallback image instead.')
-                    image_id = service_catalog.get_image_id_from_tag(
-                        _FALLBACK_IMAGE_ID, clouds='azure')
+            # Fallback if image does not exist in the specified region.
+            # Putting fallback here instead of at image validation
+            # when creating the resource because community images are
+            # regional so we need the correct region when we check whether
+            # the image exists.
+            if image_id.startswith(
+                    '/CommunityGalleries'
+            ) and region_name not in azure_catalog.COMMUNITY_IMAGE_AVAILABLE_REGIONS:
+                logger.info(f'Azure image {image_id} does not exist in region '
+                            f'{region_name} so use the fallback image instead.')
+                image_id = service_catalog.get_image_id_from_tag(
+                    _FALLBACK_IMAGE_ID, clouds='azure')
 
         if image_id.startswith('/CommunityGalleries'):
             image_config = {'community_gallery_image_id': image_id}

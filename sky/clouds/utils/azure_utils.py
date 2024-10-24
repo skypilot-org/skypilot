@@ -2,6 +2,8 @@
 
 import typing
 
+from sky import exceptions
+from sky.adaptors import azure
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -42,13 +44,18 @@ def get_community_image(
     Args:
         image_id: /CommunityGalleries/<gallery-name>/Images/<image-name>
     Raises:
-        azure.core.exceptions.ResourceNotFoundError
+        ResourcesUnavailableError
     """
-    _, _, gallery_name, _, image_name = image_id.split('/')
-    return compute_client.community_gallery_images.get(
-        location=region,
-        public_gallery_name=gallery_name,
-        gallery_image_name=image_name)
+    try:
+        _, _, gallery_name, _, image_name = image_id.split('/')
+        return compute_client.community_gallery_images.get(
+            location=region,
+            public_gallery_name=gallery_name,
+            gallery_image_name=image_name)
+    except azure.exceptions().AzureError as e:
+        raise exceptions.ResourcesUnavailableError(
+            f'Community image {image_id} does not exist in region {region}.'
+        ) from e
 
 
 def get_community_image_size(
@@ -59,19 +66,26 @@ def get_community_image_size(
     Args:
         image_id: /CommunityGalleries/<gallery-name>/Images/<image-name>
     Raises:
-        azure.core.exceptions.ResourceNotFoundError
+        ResourcesUnavailableError
     """
-    image_versions = compute_client.community_gallery_image_versions.list(
-        location=region,
-        public_gallery_name=gallery_name,
-        gallery_image_name=image_name,
-    )
-    image_versions = list(image_versions)
-    latest_version = image_versions[-1].name
+    try:
+        image_versions = compute_client.community_gallery_image_versions.list(
+            location=region,
+            public_gallery_name=gallery_name,
+            gallery_image_name=image_name,
+        )
+        image_versions = list(image_versions)
+        if not image_versions:
+            raise exceptions.ResourcesUnavailableError(
+                f'No versions available for Azure community image {image_name}')
+        latest_version = image_versions[-1].name
 
-    image_details = compute_client.community_gallery_image_versions.get(
-        location=region,
-        public_gallery_name=gallery_name,
-        gallery_image_name=image_name,
-        gallery_image_version_name=latest_version)
-    return image_details.storage_profile.os_disk_image.disk_size_gb
+        image_details = compute_client.community_gallery_image_versions.get(
+            location=region,
+            public_gallery_name=gallery_name,
+            gallery_image_name=image_name,
+            gallery_image_version_name=latest_version)
+        return image_details.storage_profile.os_disk_image.disk_size_gb
+    except azure.exceptions().AzureError as e:
+        raise exceptions.ResourcesUnavailableError(
+            f'Failed to get community image size: {e}.') from e
