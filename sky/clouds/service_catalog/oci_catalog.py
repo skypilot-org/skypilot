@@ -66,7 +66,7 @@ def _get_df() -> 'pd.DataFrame':
             logger.debug(f'It is OK goes here when testing: {str(e)}')
             subscribed_regions = []
 
-        except oci_adaptor.service_exception() as e:
+        except oci_adaptor.oci.exceptions.ServiceError as e:
             # Should never expect going here. However, we still catch
             # it so that if any OCI call failed, the program can still
             # proceed with try-and-error way.
