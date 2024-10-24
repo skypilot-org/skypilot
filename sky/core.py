@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -11,16 +11,19 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
+from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -110,6 +113,79 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       cluster_names=cluster_names)
 
 
+def status_kubernetes(
+) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
+           List['kubernetes_utils.KubernetesSkyPilotClusterInfo'], List[Dict[
+               str, Any]], Optional[str]]:
+    """Get all SkyPilot clusters and jobs in the Kubernetes cluster.
+
+    Managed jobs and services are also included in the clusters returned.
+    The caller must parse the controllers to identify which clusters are run
+    as managed jobs or services.
+all_clusters, unmanaged_clusters, all_jobs, context
+    Returns:
+        A tuple containing:
+        - all_clusters: List of KubernetesSkyPilotClusterInfo with info for
+            all clusters, including managed jobs, services and controllers.
+        - unmanaged_clusters: List of KubernetesSkyPilotClusterInfo with info
+            for all clusters excluding managed jobs and services. Controllers
+            are included.
+        - all_jobs: List of managed jobs from all controllers. Each entry is a
+            dictionary job info, see jobs.queue_from_kubernetes_pod for details.
+        - context: Kubernetes context used to fetch the cluster information.
+    """
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    all_clusters, jobs_controllers, _ = (kubernetes_utils.process_skypilot_pods(
+        pods, context))
+    all_jobs = []
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                '[bold cyan]Checking in-progress managed jobs[/]')) as spinner:
+        for i, job_controller_info in enumerate(jobs_controllers):
+            user = job_controller_info.user
+            pod = job_controller_info.pods[0]
+            status_message = '[bold cyan]Checking managed jobs controller'
+            if len(jobs_controllers) > 1:
+                status_message += f's ({i + 1}/{len(jobs_controllers)})'
+            spinner.update(f'{status_message}[/]')
+            try:
+                job_list = managed_jobs.queue_from_kubernetes_pod(
+                    pod.metadata.name)
+            except RuntimeError as e:
+                logger.warning('Failed to get managed jobs from controller '
+                               f'{pod.metadata.name}: {str(e)}')
+                job_list = []
+            # Add user field to jobs
+            for job in job_list:
+                job['user'] = user
+            all_jobs.extend(job_list)
+    # Reconcile cluster state between managed jobs and clusters:
+    # To maintain a clear separation between regular SkyPilot clusters
+    # and those from managed jobs, we need to exclude the latter from
+    # the main cluster list.
+    # We do this by reconstructing managed job cluster names from each
+    # job's name and ID. We then use this set to filter out managed
+    # clusters from the main cluster list. This is necessary because there
+    # are no identifiers distinguishing clusters from managed jobs from
+    # regular clusters.
+    managed_job_cluster_names = set()
+    for job in all_jobs:
+        # Managed job cluster name is <job_name>-<job_id>
+        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+        managed_job_cluster_names.add(managed_cluster_name)
+    unmanaged_clusters = [
+        c for c in all_clusters
+        if c.cluster_name not in managed_job_cluster_names
+    ]
+    return all_clusters, unmanaged_clusters, all_jobs, context
+
+
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
@@ -127,8 +203,9 @@ def endpoints(cluster: str,
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
-    with rich_utils.safe_status('[bold cyan]Fetching endpoints for cluster '
-                                f'{cluster}...[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                f'Fetching endpoints for cluster {cluster}')):
         return backend_utils.get_endpoints(cluster=cluster, port=port)
 
 

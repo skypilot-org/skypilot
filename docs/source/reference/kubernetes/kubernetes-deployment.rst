@@ -114,9 +114,9 @@ Deploying on Google Cloud GKE
      # Example:
      # gcloud container clusters get-credentials testcluster --region us-central1-c
 
-3. [If using GPUs] If your GKE nodes have GPUs, you may need to to
-   `manually install <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_
-   nvidia drivers. You can do so by deploying the daemonset
+3. [If using GPUs] For GKE versions newer than 1.30.1-gke.115600, NVIDIA drivers are pre-installed and no additional setup is required. If you are using an older GKE version, you may need to
+   `manually install <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_
+   NVIDIA drivers for GPU support. You can do so by deploying the daemonset
    depending on the GPU and OS on your nodes:
 
    .. code-block:: console
@@ -133,7 +133,8 @@ Deploying on Google Cloud GKE
      # For Ubuntu based nodes with L4 GPUs:
      $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded-R525.yaml
 
-   To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
+   .. tip::
+      To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` resource is listed under the ``Capacity`` section.
 
 4. Verify your kubernetes cluster is correctly set up for SkyPilot by running :code:`sky check`:
 
@@ -146,10 +147,16 @@ Deploying on Google Cloud GKE
    .. code-block:: console
 
        $ sky show-gpus --cloud kubernetes
-       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       L4    1, 2, 3, 4    8           6
-       A100  1, 2          4           2
+       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       L4    1, 2, 4                   8           6
+       A100  1, 2                      4           2
 
+       Kubernetes per node GPU availability
+       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+       my-cluster-0               L4        4           4
+       my-cluster-1               L4        4           2
+       my-cluster-2               A100      2           2
+       my-cluster-3               A100      2           0
 
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
@@ -195,8 +202,12 @@ Deploying on Amazon EKS
    .. code-block:: console
 
        $ sky show-gpus --cloud kubernetes
-       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       A100  1, 2          4           2
+       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       A100  1, 2                      4           2
+
+       Kubernetes per node GPU availability
+       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+       my-cluster-0               A100      2           2
 
 .. _kubernetes-setup-onprem:
 
