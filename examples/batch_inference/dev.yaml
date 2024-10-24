@@ -1,0 +1,6 @@
+file_mounts:
+  /data:
+    name: skypilot-lmsys-chat-1m
+    store: r2
+    mode: MOUNT
+

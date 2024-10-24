@@ -483,3 +483,9 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
 
+
+Next Steps
+----------
+
+* :ref:`Many Parallel Jobs <many-jobs>`
+* :ref:`Offline Batch Inference <offline-batch-inference>`
