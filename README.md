@@ -18,6 +18,10 @@
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
 
+  <a href="https://gurubase.io/g/skypilot">
+    <img alt="SkyPilot Guru" src="https://img.shields.io/badge/Gurubase-Ask%20SkyPilot%20Guru-006BFF">
+  </a>
+
 </p>
 
 <h3 align="center">
