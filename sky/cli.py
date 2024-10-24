@@ -339,7 +339,6 @@ def _get_shell_complete_args(complete_fn):
 
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
-_RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
 
@@ -378,7 +377,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         cmd = '_SKY_COMPLETE=fish_source sky > \
                 ~/.config/fish/completions/sky.fish'
 
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
@@ -398,9 +399,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                        check=True,
                        executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
-        click.echo(
-            'Completion will take effect once you restart the terminal: ' +
-            click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Completion will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Installation failed with code {e.returncode}', fg='red')
     ctx.exit()
@@ -431,7 +433,9 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
 
     elif value == 'fish':
         cmd = 'rm -f ~/.config/fish/completions/sky.fish'
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.zshrc && \
@@ -447,8 +451,10 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion uninstalled for {value}', fg='green')
-        click.echo('Changes will take effect once you restart the terminal: ' +
-                   click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Changes will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Uninstallation failed with code {e.returncode}',
                     fg='red')
