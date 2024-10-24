@@ -384,7 +384,7 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     if ips:
         ip = ips.popleft()
         ssh_port = ssh_ports.popleft()
-        _retry_ssh_thread(ip, ssh_port)
+        _retry_ssh_thread((ip, ssh_port))
     subprocess_utils.run_in_parallel(_retry_ssh_thread, list(zip(ips, ssh_ports)))
 
 
