@@ -3085,7 +3085,7 @@ def show_gpus(
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
         else:
-            qty_header = 'QTY_PER_NODE'
+            qty_header = 'REQUESTABLE_QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
