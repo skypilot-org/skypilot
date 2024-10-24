@@ -8,7 +8,7 @@ resources:
 import time
 import traceback
 import typing
-from typing import cast, List, Optional
+from typing import Optional
 
 import sky
 from sky import backends
@@ -328,8 +328,7 @@ class StrategyExecutor:
                         'Failure happened before provisioning. Failover '
                         f'reasons: {reasons_str}')
                     if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(
-                            reasons=cast(List[Exception], reasons))
+                        raise exceptions.ProvisionPrechecksError(reasons)
                     return None
                 logger.info('Failed to launch a cluster with error: '
                             f'{common_utils.format_exception(e)})')
