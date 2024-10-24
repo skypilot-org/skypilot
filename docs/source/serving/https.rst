@@ -5,10 +5,14 @@ HTTPS Encryption
 
 SkyServe enables secure serving of models over HTTPS, which is essential for handling sensitive data or for models that require secure communication with other services. Currently, SkyServe supports HTTPS encrypted endpoint (for communication between the client and the load balancer); HTTPS between the load balancer and the service replicas is not yet supported.
 
+.. tip::
+
+  To learn more about TLS and HTTPS, see `here <https://fastapi.tiangolo.com/deployment/https/>`_.
+
 HTTPS Encrypted Endpoint
 ------------------------
 
-To create an HTTPS encrypted endpoint, you need to provide a certificate and a private key. Obtaining these from a trusted Certificate Authority (CA) is the most secure method. However, for development and testing purposes, you can generate a self-signed certificate and private key using the :code:`openssl` command-line tool. Here is an example of how to generate them:
+To create an HTTPS encrypted endpoint, you need to provide a certificate and a private key. Obtaining these from a trusted Certificate Authority (CA) is the most secure method. `Let's Encrypt <https://fastapi.tiangolo.com/deployment/https/#lets-encrypt>`_ is one of the most popular free solution. However, for development and testing purposes, you can generate a self-signed certificate and private key using the :code:`openssl` command-line tool. Here is an example of how to generate them:
 
 .. code-block:: bash
 
