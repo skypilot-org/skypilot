@@ -298,7 +298,7 @@ def query_instances(
         'pending': status_lib.ClusterStatus.INIT,
         'stopped': status_lib.ClusterStatus.STOPPED,
         'running': status_lib.ClusterStatus.UP,
-        'unhealthy': status_lib.ClusterStatus.INIT,
+        'failed': status_lib.ClusterStatus.INIT,
         'terminated': None,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
