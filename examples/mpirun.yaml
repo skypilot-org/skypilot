@@ -1,0 +1,24 @@
+workdir: .
+
+resources:
+  cloud: aws
+
+num_nodes: 2  # Total number of nodes (1 head + 1 worker)
+
+setup: |
+  echo "Running setup on node ${SKYPILOT_NODE_RANK}."
+  # Install MPI if not already present. This will vary based on your OS/distro.
+  sudo apt update
+  sudo apt install -y openmpi-bin openmpi-common libopenmpi-dev
+
+run: |
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "head node"
+    num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+    mpi_nodes=$(echo "$SKYPILOT_NODE_IPS" | tr '\n' ',')
+    mpi_nodes=${mpi_nodes::-1}
+    echo "$mpi_nodes"
+    mpirun -np $num_nodes -H $mpi_nodes bash -c 'echo "mpirun hello from IP $(hostname -I)"'
+  else
+    echo "worker nodes"
+  fi

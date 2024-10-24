@@ -286,3 +286,13 @@ class ServeUserTerminatedError(Exception):
 
 class PortDoesNotExistError(Exception):
     """Raised when the port does not exist."""
+
+
+class UserRequestRejectedByPolicy(Exception):
+    """Raised when a user request is rejected by an admin policy."""
+    pass
+
+
+class NoClusterLaunchedError(Exception):
+    """No cluster launched, so cleanup can be skipped during failover."""
+    pass

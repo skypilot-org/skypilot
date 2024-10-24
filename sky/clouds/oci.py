@@ -4,6 +4,21 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
+ - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
+   get_credential_file_mounts(): bug fix for sky config
+   file path resolution (by os.path.expanduser) when construct the file
+   mounts. This bug will cause the created workder nodes located in different
+   compartment and VCN than the header node if user specifies compartment_id
+   in the sky config file, because the ~/.sky/config is not sync-ed to the
+   remote machine.
+   The workaround is set the sky config file path using ENV before running
+   the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
+ - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
+   make_deploy_resources_variables(): Bug fix for specify the image_id as
+   the ocid of the image in the task.yaml file, in this case the image_id
+   for the node config should be set to the ocid instead of a dict.
+ - Hysun He (hysun.he@oracle.com) @ Oct 13, 2024:
+   Support more OS types additional to ubuntu for OCI resources.
 """
 import json
 import logging
@@ -211,7 +226,9 @@ class OCI(clouds.Cloud):
             listing_id = image_cols[1]
             res_ver = image_cols[2]
         else:
-            image_id = resources.image_id
+            # Oct.12,2024 by HysunHe: Bug fix - resources.image_id is an
+            # dict. The image_id here should be the ocid format.
+            image_id = image_str
             listing_id = None
             res_ver = None
 
@@ -280,10 +297,21 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
+        image_str = self._get_image_str(image_id=resources.image_id,
+                                        instance_type=resources.instance_type,
+                                        region=region.name)
+
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import oci_catalog
+        os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
+                                                    region=region.name)
+        logger.debug(f'OS type for the image {image_str} is {os_type}')
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'os_type': os_type,
             'cpus': str(cpus),
             'memory': resources.memory,
             'disk_size': resources.disk_size,
@@ -431,20 +459,23 @@ class OCI(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
-        oci_cfg_file = oci_adaptor.get_config_file()
-        # Pass-in a profile parameter so that multiple profile in oci
-        # config file is supported (2023/06/09).
-        oci_cfg = oci_adaptor.get_oci_config(
-            profile=oci_utils.oci_config.get_profile())
-        api_key_file = oci_cfg[
-            'key_file'] if 'key_file' in oci_cfg else 'BadConf'
-        sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        try:
+            oci_cfg_file = oci_adaptor.get_config_file()
+            # Pass-in a profile parameter so that multiple profile in oci
+            # config file is supported (2023/06/09).
+            oci_cfg = oci_adaptor.get_oci_config(
+                profile=oci_utils.oci_config.get_profile())
+            api_key_file = oci_cfg[
+                'key_file'] if 'key_file' in oci_cfg else 'BadConf'
+            sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        except ImportError:
+            return {}
 
         # OCI config and API key file are mandatory
         credential_files = [oci_cfg_file, api_key_file]
 
         # Sky config file is optional
-        if os.path.exists(sky_cfg_file):
+        if os.path.exists(os.path.expanduser(sky_cfg_file)):
             credential_files.append(sky_cfg_file)
 
         file_mounts = {
@@ -483,59 +514,45 @@ class OCI(clouds.Cloud):
         region_name: str,
         instance_type: str,
     ) -> str:
-        if image_id is None:
-            return self._get_default_image(region_name=region_name,
-                                           instance_type=instance_type)
-        if None in image_id:
-            image_id_str = image_id[None]
-        else:
-            assert region_name in image_id, image_id
-            image_id_str = image_id[region_name]
+        image_id_str = self._get_image_str(image_id=image_id,
+                                           instance_type=instance_type,
+                                           region=region_name)
+
         if image_id_str.startswith('skypilot:'):
             image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
                                                                  region_name,
                                                                  clouds='oci')
-            if image_id_str is None:
-                logger.critical(
-                    '! Real image_id not found! - {region_name}:{image_id}')
-                # Raise ResourcesUnavailableError to make sure the failover
-                # in CloudVMRayBackend will be correctly triggered.
-                # TODO(zhwu): This is a information leakage to the cloud
-                # implementor, we need to find a better way to handle this.
-                raise exceptions.ResourcesUnavailableError(
-                    '! ERR: No image found in catalog for region '
-                    f'{region_name}. Try setting a valid image_id.')
+
+        # Image_id should be impossible be None, except for the case when
+        # user specify an image tag which does not exist in the image.csv
+        # catalog file which only possible in "test" / "evaluation" phase.
+        # Therefore, we use assert here.
+        assert image_id_str is not None
 
         logger.debug(f'Got real image_id {image_id_str}')
         return image_id_str
 
-    def _get_default_image(self, region_name: str, instance_type: str) -> str:
+    def _get_image_str(self, image_id: Optional[Dict[Optional[str], str]],
+                       instance_type: str, region: str):
+        if image_id is None:
+            image_str = self._get_default_image_tag(instance_type)
+        elif None in image_id:
+            image_str = image_id[None]
+        else:
+            assert region in image_id, image_id
+            image_str = image_id[region]
+        return image_str
+
+    def _get_default_image_tag(self, instance_type: str) -> str:
         acc = self.get_accelerators_from_instance_type(instance_type)
 
         if acc is None:
             image_tag = oci_utils.oci_config.get_default_image_tag()
-            image_id_str = service_catalog.get_image_id_from_tag(image_tag,
-                                                                 region_name,
-                                                                 clouds='oci')
         else:
             assert len(acc) == 1, acc
             image_tag = oci_utils.oci_config.get_default_gpu_image_tag()
-            image_id_str = service_catalog.get_image_id_from_tag(image_tag,
-                                                                 region_name,
-                                                                 clouds='oci')
 
-        if image_id_str is not None:
-            logger.debug(
-                f'Got default image_id {image_id_str} from tag {image_tag}')
-            return image_id_str
-
-        # Raise ResourcesUnavailableError to make sure the failover in
-        # CloudVMRayBackend will be correctly triggered.
-        # TODO(zhwu): This is a information leakage to the cloud implementor,
-        # we need to find a better way to handle this.
-        raise exceptions.ResourcesUnavailableError(
-            'ERR: No image found in catalog for region '
-            f'{region_name}. Try update your default image_id settings.')
+        return image_tag
 
     def get_vpu_from_disktier(
             self, cpus: Optional[float],

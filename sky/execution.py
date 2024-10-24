@@ -3,12 +3,12 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
-import os
 from typing import List, Optional, Tuple, Union
 
 import colorama
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import global_user_state
@@ -16,12 +16,11 @@ from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import rich_utils
-from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -158,7 +157,16 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag, _ = admin_policy_utils.apply(
+        dag,
+        request_options=admin_policy.RequestOptions(
+            cluster_name=cluster_name,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            dryrun=dryrun,
+        ))
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -170,9 +178,8 @@ def _execute(
 
     cluster_exists = False
     if cluster_name is not None:
-        existing_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
-        cluster_exists = existing_handle is not None
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        cluster_exists = cluster_record is not None
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -283,11 +290,17 @@ def _execute(
             logger.info('Dryrun finished.')
             return None, None
 
-        if Stage.SYNC_WORKDIR in stages and not dryrun:
-            if task.workdir is not None:
-                backend.sync_workdir(handle, task.workdir)
+        do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
+                      task.workdir is not None)
+        do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
+                          task.file_mounts is not None)
+        if do_workdir or do_file_mounts:
+            logger.info(ux_utils.starting_message('Mounting files.'))
 
-        if Stage.SYNC_FILE_MOUNTS in stages and not dryrun:
+        if do_workdir:
+            backend.sync_workdir(handle, task.workdir)
+
+        if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
@@ -320,23 +333,6 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        controller = controller_utils.Controllers.from_name(cluster_name)
-        if controller is None and not _is_launched_by_sky_serve_controller:
-            # UX: print live clusters to make users aware (to save costs).
-            #
-            # Don't print if this job is launched by the jobs controller,
-            # because managed jobs are serverless, there can be many of them,
-            # and users tend to continuously monitor managed jobs using `sky
-            # job queue`. Also don't print if this job is a skyserve controller
-            # job or launched by a skyserve controller job, because the
-            # redirect for this subprocess.run won't success and it will
-            # pollute the controller logs.
-            #
-            # Disable the usage collection for this status command.
-            env = dict(os.environ,
-                       **{env_options.Options.DISABLE_LOGGING.value: '1'})
-            subprocess_utils.run(
-                'sky status --no-show-managed-jobs --no-show-services', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
     return job_id, handle

@@ -17,10 +17,18 @@ if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
-_DB_PATH = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
-_DB_PATH = _DB_PATH.expanduser().absolute()
-_DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
-_DB_PATH = str(_DB_PATH)
+
+def _get_db_path() -> str:
+    """Workaround to collapse multi-step Path ops for type checker.
+    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
+    """
+    path = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_PATH: str = _get_db_path()
 
 
 def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:

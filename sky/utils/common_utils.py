@@ -16,7 +16,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
-import colorama
 import jinja2
 import jsonschema
 import yaml
@@ -300,7 +299,7 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path) -> Dict[str, Any]:
+def read_yaml(path: str) -> Dict[str, Any]:
     with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
@@ -316,12 +315,13 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return configs
 
 
-def dump_yaml(path, config) -> None:
+def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
+                                       Dict[str, Any]]) -> None:
     with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
-def dump_yaml_str(config):
+def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -331,9 +331,9 @@ def dump_yaml_str(config):
                 super().write_line_break()
 
     if isinstance(config, list):
-        dump_func = yaml.dump_all
+        dump_func = yaml.dump_all  # type: ignore
     else:
-        dump_func = yaml.dump
+        dump_func = yaml.dump  # type: ignore
     return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
@@ -478,11 +478,9 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     Returns:
         A string that represents the exception.
     """
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
-    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+        return f'[{class_fullname(e.__class__)}] {e}'
+    return f'{class_fullname(e.__class__)}: {e}'
 
 
 def remove_color(s: str):
@@ -678,3 +676,23 @@ def deprecated_function(
         return func(*args, **kwargs)
 
     return new_func
+
+
+def truncate_long_string(s: str, max_length: int = 35) -> str:
+    """Truncate a string to a maximum length, preserving whole words."""
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'  # Use '…'?
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'
