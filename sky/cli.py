@@ -3997,25 +3997,6 @@ def jobs_dashboard(port: Optional[int]):
             click.echo('Exiting.')
 
 
-# TODO(zhwu): Backward compatibility for the old `sky spot launch` command.
-# It is now renamed to `sky jobs launch` and the old command is deprecated.
-# Remove in v0.8.0.
-@cli.group(cls=_NaturalOrderGroup)
-def spot():
-    """Alias for Managed Jobs CLI (default to managed spot jobs)."""
-    pass
-
-
-_add_command_alias(jobs,
-                   jobs_launch,
-                   new_group=spot,
-                   override_command_argument={'use_spot': True})
-_add_command_alias(jobs, jobs_queue, new_group=spot)
-_add_command_alias(jobs, jobs_logs, new_group=spot)
-_add_command_alias(jobs, jobs_cancel, new_group=spot)
-_add_command_alias(jobs, jobs_dashboard, new_group=spot)
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
     """SkyServe CLI (multi-region, multi-cloud serving)."""
