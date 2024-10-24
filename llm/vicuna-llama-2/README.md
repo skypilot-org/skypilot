@@ -122,7 +122,7 @@ sky launch --no-use-spot ...
 
 [SkyPilot Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html) is a library built on top of SkyPilot that helps users run jobs on spot instances without worrying about interruptions. That is the tool used by the LMSYS organization to train the first version of Vicuna (more details can be found in their [launch blog post](https://lmsys.org/blog/2023-03-30-vicuna/) and [example](https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna)). With this, the training cost can be reduced from $1000 to **\$300**.
 
-To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky spot launch` in the above command:
+To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky jobs launch` in the above command:
 
 ```bash
 sky spot launch -n vicuna train.yaml \
