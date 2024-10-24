@@ -955,11 +955,11 @@ class Task:
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
         """
-        for storage in self.storage_mounts.values():
+        for key, storage in self.storage_mounts.items():
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
-                is_workdir = storage.name.startswith('skypilot-workdir')
+                is_workdir = key == constants.SKY_REMOTE_WORKDIR
                 storage.add_store(store_type, store_region, is_workdir)
             else:
                 # We will download the first store that is added to remote.
