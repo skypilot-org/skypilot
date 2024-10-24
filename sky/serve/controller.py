@@ -7,7 +7,6 @@ import logging
 import threading
 import time
 import traceback
-from typing import Any, Dict, List
 
 import colorama
 import fastapi
@@ -18,6 +17,7 @@ from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import replica_managers
+from sky.serve import schemas
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
@@ -99,14 +99,16 @@ class SkyServeController:
 
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(
-                request: fastapi.Request) -> fastapi.Response:
-            request_data = await request.json()
-            # TODO(MaoZiming): Check aggregator type.
-            request_aggregator: Dict[str, Any] = request_data.get(
-                'request_aggregator', {})
-            timestamps: List[int] = request_aggregator.get('timestamps', [])
+                request: schemas.LoadBalancerRequest) -> fastapi.Response:
+            request_aggregator_info = request.request_aggregator_info
+            if not isinstance(request_aggregator_info,
+                              schemas.TimestampAggregator):
+                raise ValueError(f'Unsupported request aggregator type: '
+                                 f'{type(request_aggregator_info)}')
+            timestamps = request_aggregator_info.timestamps
             logger.info(f'Received {len(timestamps)} inflight requests.')
-            self._autoscaler.collect_request_information(request_aggregator)
+            self._autoscaler.collect_request_information(
+                request_aggregator_info)
             return responses.JSONResponse(content={
                 'ready_replica_urls':
                     self._replica_manager.get_active_replica_urls()
@@ -114,49 +116,40 @@ class SkyServeController:
                                           status_code=200)
 
         @self._app.post('/controller/update_service')
-        async def update_service(request: fastapi.Request) -> fastapi.Response:
-            request_data = await request.json()
-            try:
-                version = request_data.get('version', None)
-                if version is None:
-                    return responses.JSONResponse(
-                        content={'message': 'Error: version is not specified.'},
-                        status_code=400)
-                update_mode_str = request_data.get(
-                    'mode', serve_utils.DEFAULT_UPDATE_MODE.value)
-                update_mode = serve_utils.UpdateMode(update_mode_str)
-                logger.info(f'Update to new version {version} with '
-                            f'update_mode {update_mode}.')
-                # The yaml with the name latest_task_yaml will be synced
-                # See sky/serve/core.py::update
-                latest_task_yaml = serve_utils.generate_task_yaml_file_name(
-                    self._service_name, version)
-                service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
-                logger.info(
-                    f'Update to new version version {version}: {service}')
+        async def update_service(
+                request: schemas.UpdateServiceRequest) -> fastapi.Response:
+            version = request.version
+            update_mode = request.mode
+            logger.info(f'Update to new version {version} '
+                        f'with update_mode {update_mode}.')
 
-                self._replica_manager.update_version(version,
-                                                     service,
-                                                     update_mode=update_mode)
-                new_autoscaler = autoscalers.Autoscaler.from_spec(
-                    self._service_name, service)
-                if not isinstance(self._autoscaler, type(new_autoscaler)):
-                    logger.info('Autoscaler type changed to '
-                                f'{type(new_autoscaler)}, updating autoscaler.')
-                    old_autoscaler = self._autoscaler
-                    self._autoscaler = new_autoscaler
-                    self._autoscaler.load_dynamic_states(
-                        old_autoscaler.dump_dynamic_states())
-                self._autoscaler.update_version(version,
-                                                service,
-                                                update_mode=update_mode)
-                return responses.JSONResponse(content={'message': 'Success'},
-                                              status_code=200)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in update_service: '
-                             f'{common_utils.format_exception(e)}')
-                return responses.JSONResponse(content={'message': 'Error'},
-                                              status_code=500)
+            # The yaml with the name latest_task_yaml will be synced
+            # See sky/serve/core.py::update
+            latest_task_yaml = serve_utils.generate_task_yaml_file_name(
+                self._service_name, version)
+            service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
+            logger.info(f'Update to new version {version}: {service}')
+
+            self._replica_manager.update_version(version,
+                                                 service,
+                                                 update_mode=update_mode)
+
+            new_autoscaler = autoscalers.Autoscaler.from_spec(
+                self._service_name, service)
+            if not isinstance(self._autoscaler, type(new_autoscaler)):
+                logger.info(
+                    f'Autoscaler type changed to {type(new_autoscaler)}, '
+                    f'updating autoscaler.')
+                old_autoscaler = self._autoscaler
+                self._autoscaler = new_autoscaler
+                self._autoscaler.load_dynamic_states(
+                    old_autoscaler.dump_dynamic_states())
+            self._autoscaler.update_version(version,
+                                            service,
+                                            update_mode=update_mode)
+
+            return responses.JSONResponse(content={'message': 'Success'},
+                                          status_code=200)
 
         @self._app.post('/controller/terminate_replica')
         async def terminate_replica(

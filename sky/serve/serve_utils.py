@@ -80,7 +80,7 @@ class UserSignal(enum.Enum):
         return _SIGNAL_TO_ERROR[self]
 
 
-class UpdateMode(enum.Enum):
+class UpdateMode(str, enum.Enum):
     """Update mode for updating a service."""
     ROLLING = 'rolling'
     BLUE_GREEN = 'blue_green'
@@ -135,51 +135,6 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
     def values(self):
         with self._lock:
             return self._dict.values()
-
-
-class RequestsAggregator:
-    """Base class for request aggregator."""
-
-    def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request aggregator."""
-        raise NotImplementedError
-
-    def clear(self) -> None:
-        """Clear all current request aggregator."""
-        raise NotImplementedError
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the aggregator to a dict."""
-        raise NotImplementedError
-
-    def __repr__(self) -> str:
-        raise NotImplementedError
-
-
-class RequestTimestamp(RequestsAggregator):
-    """RequestTimestamp: Aggregates request timestamps.
-
-    This is useful for QPS-based autoscaling.
-    """
-
-    def __init__(self) -> None:
-        self.timestamps: List[float] = []
-
-    def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request aggregator."""
-        del request  # unused
-        self.timestamps.append(time.time())
-
-    def clear(self) -> None:
-        """Clear all current request aggregator."""
-        self.timestamps = []
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert the aggregator to a dict."""
-        return {'timestamps': self.timestamps}
-
-    def __repr__(self) -> str:
-        return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
 def generate_service_name():
@@ -294,12 +249,20 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist.')
     controller_port = service_status['controller_port']
+
+    try:
+        update_mode = UpdateMode(mode)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Invalid update mode: {mode}. '
+                             f'Please specify one of {UpdateMode}.') from None
+
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/update_service',
         json={
             'version': version,
-            'mode': mode,
+            'mode': update_mode.value,
         })
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
