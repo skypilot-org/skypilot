@@ -78,7 +78,7 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              f'TEXT DEFAULT {json.dumps([])!r}')
 # Whether the service's load balancer is encrypted with TLS.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'tls_encrypted',
-                             'INTEGER DEFAULT NULL')
+                             'INTEGER DEFAULT 0')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 

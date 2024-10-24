@@ -91,8 +91,8 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     'Please specify the same port instead.')
 
 
-def _rewrite_tls_credential_paths(service_name: str,
-                                  task: 'sky.Task') -> Dict[str, Any]:
+def _rewrite_tls_credential_paths_and_get_tls_env_vars(
+        service_name: str, task: 'sky.Task') -> Dict[str, Any]:
     """Rewrite the paths of TLS credentials in the task.
 
     Args:
@@ -166,7 +166,8 @@ def up(
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
             task, path='serve')
 
-    tls_template_vars = _rewrite_tls_credential_paths(service_name, task)
+    tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
+        service_name, task)
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
@@ -309,8 +310,9 @@ def up(
                 'Did not get endpoint for controller.')
             # Already checked by _validate_service_task
             assert task.service is not None
-            schema = 'http' if task.service.tls_credential is None else 'https'
-            endpoint = f'{schema}://{socket_endpoint}'
+            protocol = ('http'
+                        if task.service.tls_credential is None else 'https')
+            endpoint = f'{protocol}://{socket_endpoint}'
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '

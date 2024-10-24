@@ -224,10 +224,10 @@ class SkyServeLoadBalancer:
         uvicorn_tls_kwargs = ({} if self._tls_credential is None else
                               self._tls_credential.dump_uvicorn_kwargs())
 
-        schema = 'https' if self._tls_credential is not None else 'http'
+        protocol = 'https' if self._tls_credential is not None else 'http'
 
         logger.info('SkyServe Load Balancer started on '
-                    f'{schema}://0.0.0.0:{self._load_balancer_port}')
+                    f'{protocol}://0.0.0.0:{self._load_balancer_port}')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',
