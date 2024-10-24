@@ -215,10 +215,10 @@ def get_cluster_info(
     running_instances = utils.filter_instances(cluster_name_on_cloud,
                                                ['active'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
-    head_instance: Optional[Dict[str, Any]] = None
+    head_instance: Optional[str] = None
     for instance_name, instance_meta in running_instances.items():
         if instance_name.endswith('-head'):
-            head_instance = instance_meta
+            head_instance = instance_name
         for net in instance_meta['networks']['v4']:
             if net['type'] == 'public':
                 instance_ip = net['ip_address']
@@ -236,7 +236,7 @@ def get_cluster_info(
     assert head_instance is not None, 'no head instance found'
     return common.ClusterInfo(
         instances=instances,
-        head_instance_id=head_instance['name'],
+        head_instance_id=head_instance,
         provider_name='do',
         provider_config=provider_config,
     )
