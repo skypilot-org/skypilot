@@ -117,6 +117,7 @@ class SSHConfigHelper(object):
             username = docker_user
 
         key_content = auth_config.pop('ssh_private_key_content', None)
+        original_private_key_path = auth_config.get('ssh_private_key', None)
         if key_content is not None:
             cluster_private_key_path = cls.ssh_cluster_key_path.format(
                 cluster_name)
@@ -183,6 +184,8 @@ class SSHConfigHelper(object):
                 f.write('\n' * 2)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+        if proxy_command is not None and original_private_key_path is not None:
+            proxy_command = proxy_command.replace(original_private_key_path, key_path)
 
         docker_proxy_command_generator = None
         if docker_user is not None:

@@ -2217,7 +2217,7 @@ def get_clusters(
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
-        ssh_private_key_path = credentials.pop('ssh_private_key', None)
+        ssh_private_key_path = credentials.get('ssh_private_key', None)
         if ssh_private_key_path is not None:
             with open(os.path.expanduser(ssh_private_key_path),
                       'r',

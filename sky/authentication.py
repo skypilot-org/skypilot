@@ -456,6 +456,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
+    config['auth']['ssh_private_key'] = private_key_path
 
     return config
 
