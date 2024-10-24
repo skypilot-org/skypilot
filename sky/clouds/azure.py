@@ -15,13 +15,12 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.clouds.utils import azure_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from azure.mgmt.compute import models as azure_compute_models
-
     from sky import resources
 
 logger = sky_logging.init_logger(__name__)
@@ -38,6 +37,7 @@ _MAX_IDENTITY_FETCH_RETRY = 10
 
 _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
 _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
+_DEFAULT_SKYPILOT_IMAGE_GB = 30
 
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
@@ -163,31 +163,22 @@ class Azure(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
+            if image_id.startswith('/CommunityGalleries'):
+                # Avoid querying the image size from Azure as
+                # all skypilot custom images have the same size.
+                return _DEFAULT_SKYPILOT_IMAGE_GB
 
-        # Validate image ID format
-        image_id_colon_splitted = image_id.split(':')
-        image_id_slash_splitted = image_id.split('/')
-        if (len(image_id_slash_splitted) != 5 and len(image_id_colon_splitted)
-                != 4) | (len(image_id_slash_splitted) == 5 and
-                         image_id_slash_splitted[1] != 'CommunityGalleries'):
+        azure_utils.validate_image_id(image_id)
+
+        # Azure community gallery image passed in by the user.
+        if image_id.startswith('/CommunityGalleries'):
+            _, _, gallery_name, _, image_name = image_id.split('/')
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Invalid image id for Azure: {image_id}. Expected '
-                    'format: \n'
-                    '  * Marketplace image ID: <publisher>:<offer>:<sku>:<version>\n'
-                    '  * Community image ID: /CommunityGalleries/<gallery-name>/Images/<image-name>'
-                )
-        # Azure community gallery image
-        if image_id_slash_splitted[1] != 'CommunityGalleries':
-            try:
-                image = cls.get_community_image(image_id, region)
-                return cls.get_community_image_size(image_id, region)
-            except ValueError as e:
-                logger.debug(f'Retrieve image size for {image_id} failed: {e}.')
-                return 0.0
+                return azure_utils.get_community_image_size(
+                    compute_client, gallery_name, image_name, region)
 
         # Azure marketplace image
-        publisher, offer, sku, version = image_id_colon_splitted
+        publisher, offer, sku, version = image_id.split(':')
         if is_skypilot_image_tag:
             if offer == 'ubuntu-hpc':
                 return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
@@ -214,67 +205,6 @@ class Azure(clouds.Cloud):
                                  f'Got additional_properties: {ap}')
         size_in_gb = size_in_bytes / (1024**3)
         return size_in_gb
-
-    @classmethod
-    def get_community_image(
-            cls, image_id,
-            region) -> 'azure_compute_models.CommunityGalleryImage':
-        """Get community image from cloud.
-
-        Args:
-            image_id: must be in format /CommunityGalleries/<gallery-name>/Images/<image-name>
-        Raises:
-            ValueError: if image not found.
-        """
-        compute_client = azure.get_client('compute', cls.get_project_id())
-        try:
-            image_id_parts = image_id.split('/')
-            return compute_client.community_gallery_images.get(
-                location=region,
-                public_gallery_name=image_id_parts[2],
-                gallery_image_name=image_id_parts[-1])
-        except azure.exceptions().AzureError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to get community image {image_id} due to') from e
-
-    @classmethod
-    def get_community_image_size(cls, image_id, region) -> float:
-        """Get the size of the community image from cloud.
-
-        Args:
-            image_id: must be in format /CommunityGalleries/<gallery-name>/Images/<image-name>
-        Raises:
-            ValueError: if image not found.
-        """
-        compute_client = azure.get_client('compute', cls.get_project_id())
-        image_id_parts = image_id.split('/')
-        gallery_name = image_id_parts[2]
-        image_name = image_id_parts[-1]
-
-        try:
-            image_versions = compute_client.community_gallery_image_versions.list(
-                location=region,  # For community images, resource group is None
-                public_gallery_name=gallery_name,
-                gallery_image_name=image_name,
-            )
-            image_versions = list(image_versions)
-            if len(image_versions) == 0:
-                raise ValueError(
-                    f'Failed to get community image size for {image_id} because image has no versions in gallery {gallery_name} region {region}'
-                )
-            latest_version = image_versions[-1].name
-
-            image_details = compute_client.community_gallery_image_versions.get(
-                location=region,  # For community images, resource group is None
-                public_gallery_name=gallery_name,
-                gallery_image_name=image_name,
-                gallery_image_version_name=latest_version)
-            return image_details.storage_profile.os_disk_image.disk_size_gb
-        except azure.exceptions().AzureError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to get community image {image_id} due to') from e
 
     def _get_default_image_tag(self, gen_version, instance_type) -> str:
         # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
@@ -387,27 +317,30 @@ class Azure(clouds.Cloud):
                 image_id = resources.image_id[region_name]
 
         # Checked basic image syntax in resources.py
-        image_config = None
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
             if image_id.startswith('/CommunityGalleries'):
-                image = self.get_community_image(image_id, region_name)
-                if image is not None:
-                    image_config = {'community_gallery_image_id': image_id}
-                else:
-                    # Community image doesn't exist in this region need to
-                    # fallback to marketplace image. Putting fallback here
-                    # instead of at image validation when creating the resource
-                    # because community images are regional so we need the correct
-                    # region when we check whether the image exists.
+                # Fallback if image does not exist in the specified region.
+                # Putting fallback here instead of at image validation
+                # when creating the resource because community images are
+                # regional so we need the correct region when we check whether
+                # the image exists.
+                compute_client = azure.get_client('compute',
+                                                  self.get_project_id())
+                try:
+                    azure_utils.get_community_image(compute_client, image_id,
+                                                    region_name)
+                except azure.exceptions.ResourceNotFoundError:
                     logger.info(
-                        f'Azure image {image_id} does not exist so use the fallback image instead.'
-                    )
+                        f'Azure image {image_id} does not exist in region '
+                        f'{region_name} so use the fallback image instead.')
                     image_id = service_catalog.get_image_id_from_tag(
                         _FALLBACK_IMAGE_ID, clouds='azure')
 
-        if image_config is None:
+        if image_id.startswith('/CommunityGalleries'):
+            image_config = {'community_gallery_image_id': image_id}
+        else:
             publisher, offer, sku, version = image_id.split(':')
             image_config = {
                 'image_publisher': publisher,
