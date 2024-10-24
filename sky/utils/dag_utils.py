@@ -148,6 +148,10 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
             if resources.job_recovery is None:
                 change_default_value[
                     'job_recovery'] = jobs.DEFAULT_RECOVERY_STRATEGY
+            elif (isinstance(resources.job_recovery, dict) and
+                  resources.job_recovery.get('strategy', None) is None):
+                resources.job_recovery[
+                    'strategy'] = jobs.DEFAULT_RECOVERY_STRATEGY
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)

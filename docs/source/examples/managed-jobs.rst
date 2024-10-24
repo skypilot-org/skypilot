@@ -282,6 +282,29 @@ candidate resources for a job. See documentation :ref:`here
 In this example, SkyPilot will perform cost optimizations to select the resource to use, which almost certainly
 will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand instances.
 
+
+Advanced Strategies for Recovery
+-------------------------------
+
+Recovery on User Code Crash/Failure
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, SkyPilot will try to recover the job when the cluster is preempted or failed. In some cases, you may want to
+retry the job on it's own failure, e.g., when a training job crashes due to a Nvidia driver issue. To specify this, you
+can further set :code:`max_retry_on_failure` in :code:`resources.job_recovery` in the job YAML file.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      max_retry_on_failure: 3
+
+SkyPilot also makes it possible to 
+
+Recovery Policies
+~~~~~~~~~~~~~~~~~
+
 More advanced policies for resource selection, such as the `Can't Be Late
 <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
 paper, may be supported in the future.
