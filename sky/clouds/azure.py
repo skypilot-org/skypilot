@@ -20,7 +20,7 @@ from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from azure.mgmt.compute import models as azure_compute_objs
+    from azure.mgmt.compute import models as azure_compute_models
 
     from sky import resources
 
@@ -163,8 +163,22 @@ class Azure(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
+
+        # Validate image ID format
+        image_id_colon_splitted = image_id.split(':')
+        image_id_slash_splitted = image_id.split('/')
+        if (len(image_id_slash_splitted) != 5 and len(image_id_colon_splitted)
+                != 4) | (len(image_id_slash_splitted) == 5 and
+                         image_id_slash_splitted[1] != 'CommunityGalleries'):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid image id for Azure: {image_id}. Expected '
+                    'format: \n'
+                    '  * Marketplace image ID: <publisher>:<offer>:<sku>:<version>\n'
+                    '  * Community image ID: /CommunityGalleries/<gallery-name>/Images/<image-name>'
+                )
         # Azure community gallery image
-        if image_id.startswith('/CommunityGalleries'):
+        if image_id_slash_splitted[1] != 'CommunityGalleries':
             try:
                 image = cls.get_community_image(image_id, region)
                 return cls.get_community_image_size(image_id, region)
@@ -173,12 +187,7 @@ class Azure(clouds.Cloud):
                 return 0.0
 
         # Azure marketplace image
-        image_id_splitted = image_id.split(':')
-        if len(image_id_splitted) != 4:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid image id: {image_id}. Expected '
-                                 'format: <publisher>:<offer>:<sku>:<version>')
-        publisher, offer, sku, version = image_id_splitted
+        publisher, offer, sku, version = image_id_colon_splitted
         if is_skypilot_image_tag:
             if offer == 'ubuntu-hpc':
                 return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
@@ -209,7 +218,7 @@ class Azure(clouds.Cloud):
     @classmethod
     def get_community_image(
             cls, image_id,
-            region) -> 'azure_compute_objs.CommunityGalleryImage':
+            region) -> 'azure_compute_models.CommunityGalleryImage':
         """Get community image from cloud.
 
         Args:
@@ -376,26 +385,27 @@ class Azure(clouds.Cloud):
             else:
                 assert region_name in resources.image_id, resources.image_id
                 image_id = resources.image_id[region_name]
+
+        # Checked basic image syntax in resources.py
+        image_config = None
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
-        # Checked basic image syntax in resources.py
-        image_config = None
-        logger.info(f'YIKADEBUG checking {image_id}')
-        if image_id.startswith('/CommunityGalleries'):
-            image = self.get_community_image(image_id, region_name)
-            if image is None:
-                # Community image doesn't exist in this region need to
-                # fallback to marketplace image. Putting fallback here
-                # instead of at image validation when creating the resource
-                # because community images are regional so we need the correct
-                # region when we check whether the image exists.
-                image_id = service_catalog.get_image_id_from_tag(
-                    _FALLBACK_IMAGE_ID, clouds='azure')
-                logger.info(f'YIKADEBUG fallback to {image_id}')
-            else:
-                image_config = {'community_gallery_image_id': image_id}
-                logger.info(f'YIKADEBUG using {image_id}')
+            if image_id.startswith('/CommunityGalleries'):
+                image = self.get_community_image(image_id, region_name)
+                if image is not None:
+                    image_config = {'community_gallery_image_id': image_id}
+                else:
+                    # Community image doesn't exist in this region need to
+                    # fallback to marketplace image. Putting fallback here
+                    # instead of at image validation when creating the resource
+                    # because community images are regional so we need the correct
+                    # region when we check whether the image exists.
+                    logger.info(
+                        f'Azure image {image_id} does not exist so use the fallback image instead.'
+                    )
+                    image_id = service_catalog.get_image_id_from_tag(
+                        _FALLBACK_IMAGE_ID, clouds='azure')
 
         if image_config is None:
             publisher, offer, sku, version = image_id.split(':')
