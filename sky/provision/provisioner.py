@@ -367,8 +367,10 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     ips = collections.deque(ip_list)
     ssh_ports = collections.deque(port_list)
 
-    def _retry_ssh_thread(ip, ssh_port):
-        while True:
+    def _retry_ssh_thread(ip_ssh_port: Tuple[str, int]):
+        ip, ssh_port = ip_ssh_port
+        success = False
+        while not success:
             success, stderr = waiter(ip, ssh_port, **ssh_credentials)
             if not success and time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
@@ -383,7 +385,7 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
         ip = ips.popleft()
         ssh_port = ssh_ports.popleft()
         _retry_ssh_thread(ip, ssh_port)
-    subprocess_utils.run_in_parallel(_retry_ssh_thread, zip(ips, ssh_ports))
+    subprocess_utils.run_in_parallel(_retry_ssh_thread, list(zip(ips, ssh_ports)))
 
 
 def _post_provision_setup(
