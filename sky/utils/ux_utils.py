@@ -2,9 +2,10 @@
 import contextlib
 import os
 import sys
+import threading
 import traceback
 import typing
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, TextIO, Union
 
 import colorama
 import rich.console as rich_console
@@ -15,6 +16,7 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import logging
     import pathlib
 
 console = rich_console.Console()
@@ -119,6 +121,81 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+class RedirectOutputForThread:
+    """Redirects stdout and stderr to thread-specific files.
+
+    This class enables output redirection for threading.Thread.
+    Example usage:
+    with RedirectOutputForThread() as redirector:
+        with ThreadPoolExecutor() as executor:
+            executor.submit(redirector.wrap(task_func, 'task1.log'), *args)
+    """
+
+    def __init__(self) -> None:
+        self._original_stdout: TextIO = sys.stdout
+        self._original_stderr: TextIO = sys.stderr
+
+    class _ThreadAwareOutput:
+        """A thread-aware output class that replaces sys.stdout/stderr."""
+
+        def __init__(self, original_output: TextIO) -> None:
+            self._original_output: TextIO = original_output
+            self._thread_local: Optional[threading.local] = None
+
+        def resolve_output(self) -> TextIO:
+            if self._thread_local and hasattr(self._thread_local, 'file'):
+                return typing.cast(TextIO, self._thread_local.file)
+            return self._original_output
+
+        def write(self, data: str):
+            output = self.resolve_output()
+            output.write(data)
+
+        def flush(self):
+            output = self.resolve_output()
+            output.flush()
+
+        def set_thread_local(self, thread_local: Optional[threading.local]):
+            self._thread_local = thread_local
+
+    def __enter__(self):
+        """Replaces global stdout/stderr with our thread-aware versions."""
+        self._thread_aware_stdout, self._thread_aware_stderr = (
+            self._ThreadAwareOutput(self._original_stdout),
+            self._ThreadAwareOutput(self._original_stderr))
+        sys.stdout, sys.stderr = (self._thread_aware_stdout,
+                                  self._thread_aware_stderr)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Restores original stdout/stderr."""
+        sys.stdout, sys.stderr = (self._thread_aware_stdout,
+                                  self._thread_aware_stderr)
+
+    def wrap(self, func: Callable, filepath: str, mode: str = 'w'):
+        """Wraps a function to redirect its output to a specific file."""
+
+        def wrapped(*args, **kwargs) -> Any:
+            thread_local = threading.local()
+            self._thread_aware_stdout.set_thread_local(thread_local)
+            self._thread_aware_stderr.set_thread_local(thread_local)
+
+            with open(filepath, mode, encoding='utf-8') as f:
+                thread_local.file = f
+                sky_logging.reload_logger()
+                logger: 'logging.Logger' = sky_logging.init_logger(__name__)
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    logger.error(f'Failed to run {func.__name__}. '
+                                 f'Details: {common_utils.format_exception(e)}')
+                    with ux_utils.enable_traceback():
+                        logger.error(f'  Traceback:\n{traceback.format_exc()}')
+                    raise
+
+        return wrapped
 
 
 def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:

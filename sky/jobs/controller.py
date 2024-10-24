@@ -430,8 +430,13 @@ class JobsController:
                 while not self._task_queue.empty():
                     task_id = self._task_queue.get()
                     logger.info(f'Submitting task {task_id} to executor.')
-                    future = executor.submit(self._run_one_task, task_id,
-                                             self._dag.tasks[task_id])
+                    log_file_name = os.path.join(
+                        constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
+                        f'replica_{task_id}_launch.log')
+                    with ux_utils.RedirectOutputForThread() as redirector:
+                        future = executor.submit(
+                            redirector.wrap(self._run_one_task, log_file_name),
+                            task_id, self._dag.tasks[task_id])
                     future_to_task[future] = task_id
 
                 done, _ = futures.wait(future_to_task.keys(),
