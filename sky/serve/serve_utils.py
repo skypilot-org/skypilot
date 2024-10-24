@@ -767,7 +767,8 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
     # Get record from serve state.
     service_record = serve_state.get_service_from_name(service_name)
     if service_record is None:
-        raise ValueError(f'Service {service_name!r} does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
 
     # Directly copy over log files of already-terminated
     # replicas in this service.
@@ -828,8 +829,10 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                               job_ids=None,
                                               local_dir=replica_job_logs_dir)
         except exceptions.CommandError as e:
-            logger.info('Failed to download the logs: '
-                        f'{common_utils.format_exception(e)}')
+            # If this error occurs, we need to shut down at once
+            # instead of just logging and continue.
+            raise RuntimeError('Failed to download the logs: '
+                               f'{common_utils.format_exception(e)}') from e
         else:
             # No error, then consider where to store.
             if not log_dirs:
