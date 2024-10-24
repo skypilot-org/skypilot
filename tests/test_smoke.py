@@ -4339,19 +4339,12 @@ def test_skyserve_https(generic_cloud: str):
         subprocess_utils.run_no_outputs(
             f'openssl req -x509 -newkey rsa:2048 -days 36500 -nodes '
             f'-subj "/" -keyout {keyfile} -out {certfile}')
-        service_yaml_path = os.path.join(tempdir, 'service.yaml')
-        template_str = pathlib.Path(
-            f'tests/skyserve/https/service.yaml.j2').read_text()
-        template = jinja2.Template(template_str)
-        content = template.render(keyfile=keyfile, certfile=certfile)
-        with open(service_yaml_path, 'w') as f:
-            f.write(content)
-            f.flush()
 
         test = Test(
             f'test-skyserve-https',
             [
-                f'sky serve up -n {name} --cloud {generic_cloud} -y {service_yaml_path}',
+                f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/https/service.yaml '
+                f'--env TLS_KEYFILE_ENV_VAR={keyfile} --env TLS_CERTFILE_ENV_VAR={certfile}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'curl $endpoint -k | grep "Hi, SkyPilot here"',

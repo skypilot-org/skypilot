@@ -1,9 +1,13 @@
+envs:
+  TLS_KEYFILE_ENV_VAR:
+  TLS_CERTFILE_ENV_VAR:
+
 service:
   readiness_probe: /health
   replicas: 1
   tls:
-    keyfile: {{keyfile}}
-    certfile: {{certfile}}
+    keyfile: $TLS_KEYFILE_ENV_VAR
+    certfile: $TLS_CERTFILE_ENV_VAR
 
 resources:
   ports: 8081
