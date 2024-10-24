@@ -436,6 +436,7 @@ class Task:
             assert mount_path, 'Storage mount path cannot be empty.'
             try:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
                 e.args = (e.args[0].replace('<destination_path>',
@@ -962,6 +963,13 @@ class Task:
                 storage.add_store(store_type, store_region)
             else:
                 # We will download the first store that is added to remote.
+                for store_type, store in storage.stores.items():
+                    if store_type != storage_lib.StoreType.AZURE:
+                        s_type, s_region = self._get_preferred_store()
+                        if store_type == s_type:
+                            store.sync_bucket(s_region)
+                        else:
+                            store.sync_bucket()
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
         storage_mounts = self.storage_mounts
