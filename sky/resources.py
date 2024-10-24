@@ -163,8 +163,18 @@ class Resources:
         self._use_spot = use_spot if use_spot is not None else False
         self._job_recovery = None
         if job_recovery is not None:
-            if job_recovery.strip().lower() != 'none':
-                self._job_recovery = job_recovery.upper()
+            if isinstance(job_recovery, str):
+                job_recovery = {'strategy': job_recovery}
+            if 'strategy' not in job_recovery:
+                job_recovery['strategy'] = None
+
+            strategy_name = job_recovery['strategy']
+            if strategy_name == 'none':
+                self._job_recovery = None
+            else:
+                if strategy_name is not None:
+                    job_recovery['strategy'] = strategy_name.upper()
+                self._job_recovery = job_recovery
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -418,7 +428,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[str]:
+    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
         return self._job_recovery
 
     @property
@@ -813,12 +823,12 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._job_recovery is None:
+        if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
-        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
+        if self._job_recovery['strategy'] not in managed_jobs.RECOVERY_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery} '
+                    f'Spot recovery strategy {self._job_recovery["strategy"]} '
                     'is not supported. The strategy should be among '
                     f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
 

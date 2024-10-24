@@ -65,7 +65,8 @@ class StrategyExecutor:
     RETRY_INIT_GAP_SECONDS = 60
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool) -> None:
+                 task: 'task_lib.Task', retry_until_up: bool,
+                 max_retry_on_failure: int) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -81,6 +82,8 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.retry_until_up = retry_until_up
+        self.max_retry_on_failure = max_retry_on_failure
+        self.retry_cnt_on_failure = 0
 
     def __init_subclass__(cls, name: str, default: bool = False):
         RECOVERY_STRATEGIES[name] = cls
@@ -108,8 +111,16 @@ class StrategyExecutor:
         # set the new_task_resources to be the same type (list or set) as the
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
-        return RECOVERY_STRATEGIES[job_recovery](cluster_name, backend, task,
-                                                 retry_until_up)
+        if isinstance(job_recovery, dict):
+            job_recovery_name = job_recovery.pop('strategy',
+                                                 DEFAULT_RECOVERY_STRATEGY)
+            max_retry_on_failure = job_recovery.pop('max_retry_on_failure', 0)
+        else:
+            job_recovery_name = job_recovery
+            max_retry_on_failure = 0
+        return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
+                                                      task, retry_until_up,
+                                                      max_retry_on_failure)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -130,6 +141,10 @@ class StrategyExecutor:
         assert job_submit_at is not None
         return job_submit_at
 
+    def _recover(self) -> float:
+        """Implementation of recover() for the strategy."""
+        raise NotImplementedError
+
     def recover(self) -> float:
         """Relaunch the cluster after failure and wait until job starts.
 
@@ -138,7 +153,10 @@ class StrategyExecutor:
 
         Returns: The timestamp job started.
         """
-        raise NotImplementedError
+        # Reset the retry counter, as after recovery, we should give the same
+        # amount of chance as the first launch.
+        self.retry_cnt_on_failure = 0
+        return self._recover()
 
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
@@ -368,6 +386,13 @@ class StrategyExecutor:
                         f'{gap_seconds:.1f} seconds.')
             time.sleep(gap_seconds)
 
+    def trigger_retry_on_failure(self) -> bool:
+        """Trigger a retry on failure."""
+        self.retry_cnt_on_failure += 1
+        if self.retry_cnt_on_failure >= self.max_retry_on_failure:
+            return False
+        return True
+
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                                default=False):
@@ -376,8 +401,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool) -> None:
-        super().__init__(cluster_name, backend, task, retry_until_up)
+                 task: 'task_lib.Task', retry_until_up: bool,
+                 max_retry_on_failure: int) -> None:
+        super().__init__(cluster_name, backend, task, retry_until_up,
+                         max_retry_on_failure)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
@@ -400,7 +427,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             self._launched_resources = None
         return job_submitted_at
 
-    def recover(self) -> float:
+    def _recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
         # 2. Tear down the cluster, if the step 1 failed to launch the cluster.
@@ -481,7 +508,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                                                   -> R1Z1 (success)
     """
 
-    def recover(self) -> float:
+    def _recover(self) -> float:
         # 1. Terminate the current cluster
         # 2. Launch again by explicitly blocking the previously launched region
         # (this will failover through the entire search space except the

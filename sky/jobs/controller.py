@@ -283,15 +283,25 @@ class JobsController:
                     failure_reason = (
                         'To see the details, run: '
                         f'sky jobs logs --controller {self._job_id}')
-
-                    managed_job_state.set_failed(
-                        self._job_id,
-                        task_id,
-                        failure_type=managed_job_status,
-                        failure_reason=failure_reason,
-                        end_time=end_time,
-                        callback_func=callback_func)
-                    return False
+                    trigger_retry_on_failure = (
+                        self._strategy_executor.trigger_retry_on_failure())
+                    if trigger_retry_on_failure:
+                        logger.info(
+                            f'User program crashed ({managed_job_status.value}). '
+                            f'Retry the job as '
+                            f'max_retry_on_failure is set to '
+                            f'{self._strategy_executor.max_retry_on_failure}. '
+                            f'[{self._strategy_executor.retry_cnt_on_failure}/'
+                            f'{self._strategy_executor.max_retry_on_failure}]')
+                    else:
+                        managed_job_state.set_failed(
+                            self._job_id,
+                            task_id,
+                            failure_type=managed_job_status,
+                            failure_reason=failure_reason,
+                            end_time=end_time,
+                            callback_func=callback_func)
+                        return False
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
                 # cluster, if the cluster is healthy).
@@ -299,7 +309,6 @@ class JobsController:
                 logger.info('Failed to fetch the job status while the '
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
-
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources
@@ -317,6 +326,7 @@ class JobsController:
             managed_job_state.set_recovering(job_id=self._job_id,
                                              task_id=task_id,
                                              callback_func=callback_func)
+            logger.info('Recovering triggered by ')
             recovered_time = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,

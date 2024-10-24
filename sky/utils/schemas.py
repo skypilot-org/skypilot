@@ -92,7 +92,22 @@ def _get_single_resources_schema():
                 'type': 'string',
             },
             'job_recovery': {
-                'type': 'string',
+                # Either a string or a dict.
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'strategy': {
+                            'type': 'string',
+                        },
+                        'max_retry_on_failure': {
+                            'type': 'integer',
+                        },
+                    }
+                }],
             },
             'disk_size': {
                 'type': 'integer',
