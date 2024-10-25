@@ -612,11 +612,11 @@ def check_instance_fits(context: Optional[str],
 
 
 def get_accelerator_label_key_value(
-        context: Optional[str],
-        acc_type: str,
-        acc_count: Optional[int],
-        check_mode=False
-        ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    context: Optional[str],
+    acc_type: str,
+    acc_count: Optional[int],
+    check_mode=False
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Returns the label key and value for the given GPU/TPU type.
 
     Args:
