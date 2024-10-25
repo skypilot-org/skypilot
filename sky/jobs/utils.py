@@ -70,7 +70,7 @@ _JOB_CANCELLED_MESSAGE = (
 # state, after the job finished. This is a safeguard to avoid the case where
 # the managed job status fails to be updated and keep the `sky jobs logs`
 # blocking for a long time.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 20
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 25
 
 
 class UserSignal(enum.Enum):
@@ -392,6 +392,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             f'INFO: Log for the current task ({task_id}) '
                             'is finished. Waiting for the next task\'s log '
                             'to be started.')
+                        print()
                         status_display.update(
                             ux_utils.spinner_message(
                                 f'Waiting for the next task: {task_id + 1}'))
@@ -413,6 +414,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             # update, as the job is guaranteed to be in terminal
                             # state afterwards.
                             break
+                        print()
                         status_display.update(
                             ux_utils.spinner_message(
                                 'Waiting for next retry for the failed task'))
