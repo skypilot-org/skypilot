@@ -468,14 +468,10 @@ class OCI(clouds.Cloud):
             api_key_file = oci_cfg[
                 'key_file'] if 'key_file' in oci_cfg else 'BadConf'
             sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        # Must catch ImportError before any oci_adaptor.oci.exceptions
+        # because oci_adaptor.oci.exceptions can throw ImportError.
         except ImportError:
             return {}
-        # This exception is explicitly separated from the line above, as this function
-        # can be called by `check.get_credential_file_mounts` even without oci
-        # dependencies installed. Having this exception in the same line as
-        # ImportError above can cause another error being raised, due to
-        # oci_adaptor.oci.exceptions.ConfigFileNotFound trying to import the oci
-        # dependencies again.
         except oci_adaptor.oci.exceptions.ConfigFileNotFound:
             return {}
 
