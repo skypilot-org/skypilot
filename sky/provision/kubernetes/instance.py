@@ -1,5 +1,6 @@
 """Kubernetes instance provisioning."""
 import copy
+import json
 import time
 from typing import Any, Dict, List, Optional
 import uuid
@@ -425,6 +426,64 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
+def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
+                                        context: Optional[str]) -> Any:
+    """Attempts to create a Kubernetes Pod and handle any errors.
+
+    Currently, we handle errors due to the AppArmor annotation and retry if
+    it fails due to the `FieldValueForbidden` error.
+    See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+
+    Returns: The created Pod object.
+    """
+    try:
+        # Attempt to create the Pod with the AppArmor annotation
+        pod = kubernetes.core_api(context).create_namespaced_pod(
+            namespace, pod_spec)
+        return pod
+    except kubernetes.api_exception() as e:
+        try:
+            error_body = json.loads(e.body)
+            error_message = error_body.get('message', '')
+        except json.JSONDecodeError:
+            error_message = str(e.body)
+        # Check if the error is due to the AppArmor annotation and retry
+        if (e.status == 422 and 'FieldValueForbidden' in error_message and
+                'AppArmorProfile: nil' in error_message):
+            logger.warning('AppArmor annotation caused pod creation to fail. '
+                           'Retrying without the annotation. '
+                           'Note: this may cause bucket mounting to fail.')
+
+            # Remove the AppArmor annotation
+            annotations = pod_spec.get('metadata', {}).get('annotations', {})
+            if ('container.apparmor.security.beta.kubernetes.io/ray-node'
+                    in annotations):
+                del annotations[
+                    'container.apparmor.security.beta.kubernetes.io/ray-node']
+                pod_spec['metadata']['annotations'] = annotations
+                logger.info('AppArmor annotation removed from Pod spec.')
+            else:
+                logger.warning('AppArmor annotation not found in pod spec, '
+                               'retrying will not help. '
+                               f'Current annotations: {annotations}')
+                raise e
+
+            # Retry Pod creation without the AppArmor annotation
+            try:
+                pod = kubernetes.core_api(context).create_namespaced_pod(
+                    namespace, pod_spec)
+                logger.info(f'Pod {pod.metadata.name} created successfully '
+                            'without AppArmor annotation.')
+                return pod
+            except kubernetes.api_exception() as retry_exception:
+                logger.info('Failed to create Pod without AppArmor annotation: '
+                            f'{retry_exception}')
+                raise retry_exception
+        else:
+            # Re-raise the exception if it's a different error
+            raise e
+
+
 def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
@@ -546,8 +605,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 }
             }
 
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
