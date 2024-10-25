@@ -572,8 +572,6 @@ def status(
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
             'policy': (Optional[str]) load balancer policy description,
-            'requested_resources': (sky.Resources) requested resources
-              for replica (deprecated),
             'requested_resources_str': (str) str representation of
               requested resources,
             'replica_info': (List[Dict[str, Any]]) replica information,

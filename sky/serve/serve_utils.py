@@ -825,12 +825,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         replicas = _get_replicas(record)
         endpoint = get_endpoint(record)
         policy = record['policy']
-        # TODO(tian): Backward compatibility.
-        # Remove `requested_resources` field after 2 minor release, 0.6.0.
-        if record.get('requested_resources_str') is None:
-            requested_resources_str = str(record['requested_resources'])
-        else:
-            requested_resources_str = record['requested_resources_str']
+        requested_resources_str = record['requested_resources_str']
 
         service_values = [
             service_name,
