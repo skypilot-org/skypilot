@@ -369,6 +369,69 @@ def test_minimal(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Test fast launch ----------
+def test_launch_fast(generic_cloud: str):
+    name = _get_cluster_name()
+
+    test = Test(
+        'test_launch_fast',
+        [
+            # First launch to create the cluster
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+
+            # Second launch to test fast launch - should not reprovision
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            ' echo "$s" && '
+            # Validate that cluster was not re-launched.
+            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+            # Validate that setup was not re-run.
+            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that the task ran and finished.
+            'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
+            f'sky logs {name} 2 --status',
+            f'sky status -r {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=_get_timeout(generic_cloud),
+    )
+    run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+def test_launch_fast_with_autostop(generic_cloud: str):
+    name = _get_cluster_name()
+    # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
+    # the VM is stopped.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    test = Test(
+        'test_launch_fast_with_autostop',
+        [
+            # First launch to create the cluster with a short autostop
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+            f'sleep {autostop_timeout}',
+
+            # Ensure cluster is stopped
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+
+            # Launch again. Do full output validation - we expect the cluster to re-launch
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 2 --status',
+            f'sky status -r {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=_get_timeout(generic_cloud) + autostop_timeout,
+    )
+    run_one_test(test)
+
+
 # ---------- Test region ----------
 @pytest.mark.aws
 def test_aws_region():
