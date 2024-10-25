@@ -331,7 +331,6 @@ class JobsController:
             managed_job_state.set_recovering(job_id=self._job_id,
                                              task_id=task_id,
                                              callback_func=callback_func)
-            logger.info('Recovering triggered by ')
             recovered_time = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
