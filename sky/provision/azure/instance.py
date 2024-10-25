@@ -43,6 +43,8 @@ _WAIT_CREATION_TIMEOUT_SECONDS = 600
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
+# TODO(Doyoung): _LEGACY_NSG_NAME can be remove this after 0.8.0 to ignore
+# legacy nsg names.
 _LEGACY_NSG_NAME = 'ray-{cluster_name_on_cloud}-nsg'
 _SECOND_LEGACY_NSG_NAME = 'sky-{cluster_name_on_cloud}-nsg'
 
@@ -721,6 +723,8 @@ def query_instances(
     return statuses
 
 
+# TODO(Doyoung): _get_cluster_nsg can be remove this after 0.8.0 to ignore
+# legacy nsg names.
 def _get_cluster_nsg(network_client: Client, resource_group: str,
                      cluster_name_on_cloud: str) -> NetworkSecurityGroup:
     """Retrieve the NSG associated with the given name of the cluster."""
