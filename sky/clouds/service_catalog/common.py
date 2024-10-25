@@ -529,8 +529,8 @@ def get_instance_type_for_accelerator_impl(
         if len(fuzzy_result) > 0:
             for _, row in fuzzy_result.iterrows():
                 acc_cnt = float(row['AcceleratorCount'])
-                acc_count_display = (int(acc_cnt)
-                                     if acc_cnt.is_integer() else f'{acc_cnt:.2f}')
+                acc_count_display = (int(acc_cnt) if acc_cnt.is_integer() else
+                                     f'{acc_cnt:.2f}')
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
                                             f'{acc_count_display}')
         return (None, fuzzy_candidate_list)
