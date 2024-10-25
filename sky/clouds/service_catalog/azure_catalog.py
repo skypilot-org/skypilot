@@ -6,7 +6,8 @@ instance types and pricing information for Azure.
 import re
 from typing import Dict, List, Optional, Tuple
 
-from sky import clouds as cloud_lib, sky_logging
+from sky import clouds as cloud_lib
+from sky import sky_logging
 from sky.clouds import Azure
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
