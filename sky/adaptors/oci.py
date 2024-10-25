@@ -11,6 +11,7 @@ oci = common.LazyImport(
     'oci',
     import_error_message='Failed to import dependencies for OCI. '
     'Try running: pip install "skypilot[oci]"')
+_LAZY_MODULES = (oci,)
 
 
 def get_config_file() -> str:
@@ -21,6 +22,7 @@ def get_config_file() -> str:
     return conf_file_path
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_oci_config(region=None, profile='DEFAULT'):
     conf_file_path = get_config_file()
     oci_config = oci.config.from_file(file_location=conf_file_path,
@@ -30,23 +32,28 @@ def get_oci_config(region=None, profile='DEFAULT'):
     return oci_config
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_core_client(region=None, profile='DEFAULT'):
     return oci.core.ComputeClient(get_oci_config(region, profile))
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_net_client(region=None, profile='DEFAULT'):
     return oci.core.VirtualNetworkClient(get_oci_config(region, profile))
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_search_client(region=None, profile='DEFAULT'):
     return oci.resource_search.ResourceSearchClient(
         get_oci_config(region, profile))
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_identity_client(region=None, profile='DEFAULT'):
     return oci.identity.IdentityClient(get_oci_config(region, profile))
 
 
+@common.load_lazy_modules(modules=_LAZY_MODULES)
 def service_exception():
     """OCI service exception."""
     return oci.exceptions.ServiceError
