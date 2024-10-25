@@ -236,6 +236,8 @@ def down_instance(instance: Dict[str, Any]):
         client().droplets.destroy_with_associated_resources_dangerous(
             droplet_id=instance['id'], x_dangerous=True)
     except do.exceptions().HttpResponseError as err:
+        if 'a destroy is already in progress' in err.error.message:
+            return
         raise DigitalOceanError(
             f'Error: {err.status_code} {err.reason}: {err.error.message}'
         ) from err

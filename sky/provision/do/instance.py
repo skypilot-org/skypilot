@@ -125,8 +125,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         time.sleep(constants.POLL_INTERVAL)
     else:
         # Failed to launch config.count of instances after max retries
-        msg = ('run_instances: Failed to create the'
-               'instances due to capacity issue.')
+        msg = 'run_instances: Failed to create the instances'
         logger.warning(msg)
         raise RuntimeError(msg)
     assert head_instance is not None, 'head_instance should not be None'
