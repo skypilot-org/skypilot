@@ -55,7 +55,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[str] = None,
+        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
@@ -111,6 +111,9 @@ class Resources:
             job to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
+            When a dict is provided, it can have the following fields:
+            - strategy: the recovery strategy to use.
+            - max_restarts_on_failure: the max number of restarts on failure.
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
