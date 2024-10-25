@@ -342,7 +342,7 @@ class DockerInitializer:
             'sudo usermod -aG docker $USER > /dev/null 2>&1;'
             f'command -v {self.docker_cmd} || echo {no_exist!r}')
         cleaned_output = self._run(docker_cmd)
-        timeout = 60 * 5 # 5 minute timeout
+        timeout = 60 * 10 # 10 minute timeout
         start = time.time()
         while no_exist in cleaned_output or 'docker' not in cleaned_output:
             if time.time() - start > timeout:
