@@ -16,7 +16,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
-import colorama
 import jinja2
 import jsonschema
 import yaml
@@ -363,7 +362,6 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
 
             @functools.wraps(f)
             def _record(*args, **kwargs):
-                nonlocal name_or_fn
                 with cls(name_or_fn, **ctx_kwargs):
                     return f(*args, **kwargs)
 
@@ -377,7 +375,6 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
 
         @functools.wraps(name_or_fn)
         def _record(*args, **kwargs):
-            nonlocal name_or_fn
             f = name_or_fn
             func_name = getattr(f, '__qualname__', f.__name__)
             module_name = getattr(f, '__module__', '')
@@ -479,11 +476,9 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     Returns:
         A string that represents the exception.
     """
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
-    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+        return f'[{class_fullname(e.__class__)}] {e}'
+    return f'{class_fullname(e.__class__)}: {e}'
 
 
 def remove_color(s: str):
@@ -582,7 +577,10 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            e.message)
             else:
                 err_msg = err_msg_prefix
+                assert isinstance(e.schema, dict), 'Schema must be a dictionary'
                 known_fields = set(e.schema.get('properties', {}).keys())
+                assert isinstance(e.instance,
+                                  dict), 'Instance must be a dictionary'
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(

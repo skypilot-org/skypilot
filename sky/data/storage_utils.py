@@ -213,9 +213,13 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
     if os.path.exists(skyignore_path):
-        logger.info(f'Exclude files to sync to cluster based on '
-                    f'{constants.SKY_IGNORE_FILE}.')
+        logger.info(f'  {colorama.Style.DIM}'
+                    f'Excluded files to sync to cluster based on '
+                    f'{constants.SKY_IGNORE_FILE}.'
+                    f'{colorama.Style.RESET_ALL}')
         return get_excluded_files_from_skyignore(src_dir_path)
-    logger.info(f'Exclude files to sync to cluster based on '
-                f'{constants.GIT_IGNORE_FILE}.')
+    logger.info(f'  {colorama.Style.DIM}'
+                f'Excluded files to sync to cluster based on '
+                f'{constants.GIT_IGNORE_FILE}.'
+                f'{colorama.Style.RESET_ALL}')
     return get_excluded_files_from_gitignore(src_dir_path)

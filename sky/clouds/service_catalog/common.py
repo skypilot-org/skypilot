@@ -198,9 +198,10 @@ def read_catalog(filename: str,
                 if pull_frequency_hours is not None:
                     update_frequency_str = (
                         f' (every {pull_frequency_hours} hours)')
-                with rich_utils.safe_status((f'Updating {cloud} catalog: '
-                                             f'{filename}'
-                                             f'{update_frequency_str}')):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message(
+                            f'Updating {cloud} catalog: {filename}') +
+                        f'{update_frequency_str}'):
                     try:
                         r = requests.get(url)
                         r.raise_for_status()

@@ -57,14 +57,14 @@ First, create a :code:`cluster.yaml` to specify the desired cluster:
 
   num_nodes: 4
   resources:
-    accelerators: V100:8
+    accelerators: H100:8
 
   workdir: ...
   setup: |
     # Install dependencies.
     ...
 
-Use :code:`sky launch -c mycluster cluster.yaml` to provision a 4-node (each having 8 V100 GPUs) cluster.
+Use :code:`sky launch -c mycluster cluster.yaml` to provision a 4-node (each having 8 H100 GPUs) cluster.
 The :code:`num_nodes` field is used to specify how many nodes are required.
 
 Next, create a :code:`task.yaml` to specify each task:
@@ -73,13 +73,13 @@ Next, create a :code:`task.yaml` to specify each task:
 
   num_nodes: 2
   resources:
-    accelerators: V100:4
+    accelerators: H100:4
 
   run: |
     # Run training script.
     ...
 
-This specifies a task that needs to be run on 2 nodes, each of which must have 4 free V100s.
+This specifies a task that needs to be run on 2 nodes, each of which must have 4 free H100s.
 
 Use :code:`sky exec mycluster task.yaml` to submit this task, which will be scheduled correctly by the job queue.
 
@@ -107,18 +107,18 @@ To submit multiple trials with different hyperparameters to a cluster:
 
 .. code-block:: bash
 
-  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-3
-  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 3e-3
-  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-4
-  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-2
-  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-6
+  $ sky exec mycluster --gpus H100:1 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus H100:1 -d -- python train.py --lr 3e-3
+  $ sky exec mycluster --gpus H100:1 -d -- python train.py --lr 1e-4
+  $ sky exec mycluster --gpus H100:1 -d -- python train.py --lr 1e-2
+  $ sky exec mycluster --gpus H100:1 -d -- python train.py --lr 1e-6
 
 Options used:
 
 - :code:`--gpus`: specify the resource requirement for each job.
 - :code:`-d` / :code:`--detach`: detach the run and logging from the terminal, allowing multiple trials to run concurrently.
 
-If there are only 4 V100 GPUs on the cluster, SkyPilot will queue 1 job while the
+If there are only 4 H100 GPUs on the cluster, SkyPilot will queue 1 job while the
 other 4 run in parallel. Once a job finishes, the next job will begin executing
 immediately.
 See :ref:`below <scheduling-behavior>` for more details on SkyPilot's scheduling behavior.
@@ -131,12 +131,12 @@ Example: Fractional GPUs
 -------------------------
 
 To run multiple trials per GPU, use *fractional GPUs* in the resource requirement.
-For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:
+For example, use :code:`--gpus H100:0.5` to make 2 trials share 1 GPU:
 
 .. code-block:: bash
 
-  $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 1e-3
-  $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 3e-3
+  $ sky exec mycluster --gpus H100:0.5 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus H100:0.5 -d -- python train.py --lr 3e-3
   ...
 
 When sharing a GPU, ensure that the GPU's memory is not oversubscribed
@@ -168,12 +168,12 @@ In that tutorial, we have a task YAML that specifies these resource requirements
   # dnn.yaml
   ...
   resources:
-    accelerators: V100:4
+    accelerators: H100:4
   ...
 
 Since a new cluster was created when we ran :code:`sky launch -c lm-cluster
 dnn.yaml`, SkyPilot provisioned the cluster with exactly the same resources as those
-required for the task.  Thus, :code:`lm-cluster` has 4 V100 GPUs.
+required for the task.  Thus, :code:`lm-cluster` has 4 H100 GPUs.
 
 While this initial job is running, let us submit more tasks:
 
@@ -182,12 +182,12 @@ While this initial job is running, let us submit more tasks:
   $ # Launch 4 jobs, perhaps with different hyperparameters.
   $ # You can override the task name with `-n` (optional) and
   $ # the resource requirement with `--gpus` (optional).
-  $ sky exec lm-cluster dnn.yaml -d -n job2 --gpus=V100:1
-  $ sky exec lm-cluster dnn.yaml -d -n job3 --gpus=V100:1
-  $ sky exec lm-cluster dnn.yaml -d -n job4 --gpus=V100:4
-  $ sky exec lm-cluster dnn.yaml -d -n job5 --gpus=V100:2
+  $ sky exec lm-cluster dnn.yaml -d -n job2 --gpus=H100:1
+  $ sky exec lm-cluster dnn.yaml -d -n job3 --gpus=H100:1
+  $ sky exec lm-cluster dnn.yaml -d -n job4 --gpus=H100:4
+  $ sky exec lm-cluster dnn.yaml -d -n job5 --gpus=H100:2
 
-Because the cluster has only 4 V100 GPUs, we will see the following sequence of events:
+Because the cluster has only 4 H100 GPUs, we will see the following sequence of events:
 
 - The initial :code:`sky launch` job is running and occupies 4 GPUs; all other jobs are pending (no free GPUs).
 - The first two :code:`sky exec` jobs (job2, job3) then start running and occupy 1 GPU each.

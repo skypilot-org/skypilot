@@ -98,6 +98,9 @@ _ACC_INSTANCE_TYPE_DICTS = {
     },
     'H100': {
         8: ['a3-highgpu-8g'],
+    },
+    'H100-MEGA': {
+        8: ['a3-megagpu-8g'],
     }
 }
 

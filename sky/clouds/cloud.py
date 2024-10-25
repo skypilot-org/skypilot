@@ -823,6 +823,10 @@ class Cloud:
 
     # === End of image related methods ===
 
+    @classmethod
+    def canonical_name(cls) -> str:
+        return cls.__name__.lower()
+
     def __repr__(self):
         return self._REPR
 

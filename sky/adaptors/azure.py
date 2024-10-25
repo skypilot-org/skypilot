@@ -20,7 +20,9 @@ from sky.utils import ux_utils
 azure = common.LazyImport(
     'azure',
     import_error_message=('Failed to import dependencies for Azure.'
-                          'Try pip install "skypilot[azure]"'))
+                          'Try pip install "skypilot[azure]"'),
+    set_loggers=lambda: logging.getLogger('azure.identity').setLevel(logging.
+                                                                     ERROR))
 Client = Any
 sky_logger = sky_logging.init_logger(__name__)
 
@@ -65,6 +67,17 @@ def exceptions():
     """Azure exceptions."""
     from azure.core import exceptions as azure_exceptions
     return azure_exceptions
+
+
+@functools.lru_cache()
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def azure_mgmt_models(name: str):
+    if name == 'compute':
+        from azure.mgmt.compute import models
+        return models
+    elif name == 'network':
+        from azure.mgmt.network import models
+        return models
 
 
 # We should keep the order of the decorators having 'lru_cache' followed
