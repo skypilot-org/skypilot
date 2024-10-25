@@ -160,6 +160,11 @@ class JobsController:
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
                 self._backend.run_timestamp)
+        assert task.name is not None, task
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, self._job_id)
+        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+            cluster_name, self._backend, task, self._retry_until_up)
         managed_job_state.set_submitted(
             self._job_id,
             task_id,
@@ -167,15 +172,14 @@ class JobsController:
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(
                 task, is_managed_job=True),
+            specs={
+                'max_retry_on_failure':
+                    self._strategy_executor.max_retry_on_failure
+            },
             callback_func=callback_func)
         logger.info(
             f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
-        assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
-        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
         managed_job_state.set_starting(job_id=self._job_id,

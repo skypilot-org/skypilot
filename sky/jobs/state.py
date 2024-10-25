@@ -2,6 +2,7 @@
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import enum
+import json
 import pathlib
 import sqlite3
 import time
@@ -65,7 +66,8 @@ _CURSOR.execute("""\
     failure_reason TEXT,
     spot_job_id INTEGER,
     task_id INTEGER DEFAULT 0,
-    task_name TEXT)""")
+    task_name TEXT,
+    specs TEXT)""")
 _CONN.commit()
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
@@ -91,6 +93,17 @@ db_utils.add_column_to_table(_CURSOR,
                              'task_name',
                              'TEXT',
                              copy_from='job_name')
+
+# Specs is some useful information about the task, e.g., the
+# max_retry_on_failure value. It is stored in JSON format.
+db_utils.add_column_to_table(_CURSOR,
+                             _CONN,
+                             'spot',
+                             'specs',
+                             'TEXT',
+                             value_to_replace_existing_entries=json.dumps({
+                                 'max_retry_on_failure': 0,
+                             }))
 
 # `job_info` contains the mapping from job_id to the job_name.
 # In the future, it may contain more information about each job.
@@ -130,7 +143,8 @@ columns = [
     'task_name',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
-    'job_name'
+    'job_name',
+    'specs',
 ]
 
 
@@ -283,7 +297,8 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
                   submit_time: float, resources_str: str,
-                  callback_func: CallbackType):
+                  specs: Dict[str, Union[str,
+                                         int]], callback_func: CallbackType):
     """Set the task to submitted.
 
     Args:
@@ -293,6 +308,8 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             determine the log directory of the managed task.
         submit_time: The time when the managed task is submitted.
         resources_str: The resources string of the managed task.
+        specs: The specs of the managed task.
+        callback_func: The callback function.
     """
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
     # the log directory and submission time align with each other, so as to
@@ -306,11 +323,12 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             resources=(?),
             submitted_at=(?),
             status=(?),
-            run_timestamp=(?)
+            run_timestamp=(?),
+            specs=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
-             run_timestamp, job_id, task_id))
+             run_timestamp, json.dumps(specs), job_id, task_id))
     callback_func('SUBMITTED')
 
 
@@ -619,3 +637,13 @@ def get_latest_job_id() -> Optional[int]:
         for (job_id,) in rows:
             return job_id
         return None
+
+
+def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        task_specs = cursor.execute(
+            """\
+            SELECT specs FROM spot
+            WHERE spot_job_id=(?) AND task_id=(?)""",
+            (job_id, task_id)).fetchone()
+        return json.loads(task_specs[0])

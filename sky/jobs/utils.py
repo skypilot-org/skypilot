@@ -62,7 +62,7 @@ _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
     '{status_str}. It may take a few minutes.\n'
     '  [dim]View controller logs: sky jobs logs --controller {job_id}')
-_JOB_CANCELLED_MESSAGE = (
+_JOB_WAIT_STATUS_UPDATE_MESSAGE = (
     ux_utils.spinner_message('Waiting for task status to be updated.') +
     ' It may take a minute.')
 
@@ -392,8 +392,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             f'INFO: Log for the current task ({task_id}) '
                             'is finished. Waiting for the next task\'s log '
                             'to be started.')
-                        status_display.update('Waiting for the next task: '
-                                              f'{task_id + 1}.')
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                f'Waiting for the next task: {task_id + 1}'))
                         status_display.start()
                         original_task_id = task_id
                         while True:
@@ -405,7 +406,23 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         continue
                     else:
-                        break
+                        task_specs = managed_job_state.get_task_specs(
+                            job_id, task_id)
+                        if task_specs.get('max_retry_on_failure', 0) == 0:
+                            break
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                'Waiting for next retry for the failed task'))
+                        status_display.start()
+                        while True:
+                            _, managed_job_status = (
+                                managed_job_state.get_latest_task_id_status(
+                                    job_id))
+                            if (managed_job_status !=
+                                    managed_job_state.ManagedJobStatus.RUNNING):
+                                break
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
                 logger.debug(
@@ -423,7 +440,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 break
             logger.info(f'{colorama.Fore.YELLOW}The job cluster is preempted '
                         f'or failed.{colorama.Style.RESET_ALL}')
-            msg = _JOB_CANCELLED_MESSAGE
+            msg = _JOB_WAIT_STATUS_UPDATE_MESSAGE
             status_display.update(msg)
             prev_msg = msg
             status_display.start()
