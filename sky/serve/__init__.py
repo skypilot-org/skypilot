@@ -1,7 +1,6 @@
 """Modules for SkyServe services."""
 import os
 
-from sky.serve.load_balancing_policies import LB_POLICIES
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import INITIAL_VERSION
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
@@ -12,6 +11,7 @@ from sky.serve.core import tail_logs
 from sky.serve.core import terminate_replica
 from sky.serve.core import up
 from sky.serve.core import update
+from sky.serve.load_balancing_policies import LB_POLICIES
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import DEFAULT_UPDATE_MODE

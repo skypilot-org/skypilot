@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from sky.serve import constants
 from sky import serve
+from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
