@@ -284,7 +284,7 @@ will be spot instances. If spot instances are not available, SkyPilot will fall 
 
 
 Advanced Strategies for Recovery
--------------------------------
+---------------------------------
 
 Recovery on User Code Crash/Failure
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
