@@ -211,9 +211,10 @@ def get_cloud_credential_file_mounts(
                 sky_clouds.cloud_in_iterable(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
-        for path in cloud_file_mounts.values():
-            if os.path.exists(os.path.expanduser(path)):
-                file_mounts.update(cloud_file_mounts)
+        for remote_path in cloud_file_mounts:
+            local_path = cloud_file_mounts[remote_path]
+            if os.path.exists(os.path.expanduser(local_path)):
+                file_mounts[remote_path] = local_path
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.
