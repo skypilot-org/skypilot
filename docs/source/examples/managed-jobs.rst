@@ -8,14 +8,14 @@ Managed Jobs
   This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
 
 SkyPilot supports **managed jobs** (:code:`sky jobs`), where "managed" means
-any spot preemptions or hardware failures are auto-recovered by SkyPilot.
-Users can launch:
+if a job's underlying compute experienced any spot preemptions or hardware failures,
+SkyPilot will automatically recover the job.
 
-.. It can be used in three modes:
+Managed jobs can be used in three modes:
 
 #. :ref:`Managed spot jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This **saves significant costs** (e.g., ~70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
-#. :ref:`On-demand or reserved jobs <on-demand>`: Jobs run on auto-recovering on-demand or reserved instances. Useful for jobs that require guaranteed resources.
-#. :ref:`Pipelines <pipeline>`: Run pipelines that contain multiple tasks (which
+#. :ref:`Managed on-demand/reserved jobs <on-demand>`: Jobs run on auto-recovering on-demand or reserved instances. Useful for jobs that require guaranteed resources.
+#. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks (which
    can have different resource requirements and ``setup``/``run`` commands).
    Useful for running a sequence of tasks that depend on each other, e.g., data
    processing, training a model, and then running inference on it.
@@ -254,8 +254,8 @@ Real-World Examples
 
 .. _on-demand:
 
-On-Demand or Reserved Instances
---------------------------------
+Managed On-Demand/Reserved Jobs
+-------------------------------
 
 The same ``sky jobs launch`` and YAML interfaces can run jobs on auto-recovering
 on-demand or reserved instances. This is useful to have SkyPilot monitor any underlying
@@ -339,8 +339,8 @@ Cancel a managed job:
 
 .. _pipeline:
 
-Job Pipelines
--------------
+Managed Pipelines
+-----------------
 
 A pipeline is a managed job that contains a sequence of tasks running one after another.
 
