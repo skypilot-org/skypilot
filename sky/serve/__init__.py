@@ -1,6 +1,7 @@
 """Modules for SkyServe services."""
 import os
 
+from sky.serve import load_balancing_policies as lb_policies
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import INITIAL_VERSION
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
@@ -35,6 +36,7 @@ __all__ = [
     'get_endpoint',
     'INITIAL_VERSION',
     'LB_CONTROLLER_SYNC_INTERVAL_SECONDS',
+    'lb_policies',
     'ReplicaStatus',
     'ServiceComponent',
     'ServiceStatus',
