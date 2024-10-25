@@ -238,7 +238,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
 
 def get_accelerators_from_instance_type(
         instance_type: str,
-        clouds: CloudFilter = None) -> Optional[Dict[str, int]]:
+        clouds: CloudFilter = None) -> Optional[Dict[str, Union[int, float]]]:
     """Returns the accelerators from a instance type."""
     return _map_clouds_catalog(clouds, 'get_accelerators_from_instance_type',
                                instance_type)
