@@ -62,7 +62,7 @@ _JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
     'Waiting for task to start[/]'
     '{status_str}. It may take a few minutes.\n'
     '  [dim]View controller logs: sky jobs logs --controller {job_id}')
-_JOB_WAIT_STATUS_UPDATE_MESSAGE = (
+_JOB_CANCELLED_MESSAGE = (
     ux_utils.spinner_message('Waiting for task status to be updated.') +
     ' It may take a minute.')
 
@@ -440,7 +440,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 break
             logger.info(f'{colorama.Fore.YELLOW}The job cluster is preempted '
                         f'or failed.{colorama.Style.RESET_ALL}')
-            msg = _JOB_WAIT_STATUS_UPDATE_MESSAGE
+            msg = _JOB_CANCELLED_MESSAGE
             status_display.update(msg)
             prev_msg = msg
             status_display.start()
