@@ -55,7 +55,7 @@ Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use publi
 ```bash
 export SECRET=xxxxxx  # Update this
 ```
-2. Build and copy images for all regions
+2. Build and copy images for all regions and both VM generations (1 and 2).
 ```bash
 export VM_GENERATION=2  # Update this
 packer build -force --var vm_generation=${VM_GENERATION} --var client_secret=${SECRET} skypilot-azure-cpu-ubuntu.pkr.hcl
