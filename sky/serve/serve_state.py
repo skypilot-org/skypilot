@@ -34,7 +34,7 @@ _DB_PATH: str = _get_db_path()
 def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     """Creates the service and replica tables if they do not exist."""
 
-    # auto_restart adn requested_resources column is deprecated.
+    # auto_restart and requested_resources column is deprecated.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
