@@ -817,6 +817,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             ux_utils.spinner_message('Uploading local sources to storage[/]  '
                                      '[dim]View storages: sky storage ls'))
     try:
+        # Optimize filemount translation
         task.sync_storage_mounts()
     except ValueError as e:
         if 'No enabled cloud for storage' in str(e):
