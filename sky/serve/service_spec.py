@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from sky.serve import constants
-from sky.serve.load_balancing_policies import LB_POLICIES
+from sky import serve
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -81,7 +81,7 @@ class SkyServiceSpec:
 
         # Add the check for unknown load balancing policies
         if (load_balancing_policy is not None and
-                load_balancing_policy not in LB_POLICIES):
+                load_balancing_policy not in serve.LB_POLICIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Unknown load balancing policy: {load_balancing_policy}')
