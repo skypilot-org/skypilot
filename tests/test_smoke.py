@@ -1911,7 +1911,7 @@ def test_huggingface(generic_cloud: str):
 def test_do_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
-        'huggingface_glue_imdb_app',
+        'do_huggingface_glue_imdb_app',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --gpus H100 examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
