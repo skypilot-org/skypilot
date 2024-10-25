@@ -290,7 +290,7 @@ Recovery on User Code Crash/Failure
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 By default, SkyPilot will try to recover the job when the cluster is preempted or failed. In some cases, you may want to
-retry the job on it's own failure, e.g., when a training job crashes due to a Nvidia driver issue. To specify this, you
+retry the job on its own failure, e.g., when a training job crashes due to a Nvidia driver issue or NCCL timeouts. To specify this, you
 can further set :code:`max_retry_on_failure` in :code:`resources.job_recovery` in the job YAML file.
 
 .. code-block:: yaml
