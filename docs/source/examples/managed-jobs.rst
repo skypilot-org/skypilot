@@ -300,7 +300,6 @@ can further set :code:`max_retry_on_failure` in :code:`resources.job_recovery` i
     job_recovery:
       max_retry_on_failure: 3
 
-SkyPilot also makes it possible to 
 
 Recovery Policies
 ~~~~~~~~~~~~~~~~~
