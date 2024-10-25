@@ -28,6 +28,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
@@ -365,20 +366,27 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     # use a queue for SSH querying
     ips = collections.deque(ip_list)
     ssh_ports = collections.deque(port_list)
-    while ips:
-        ip = ips.popleft()
-        ssh_port = ssh_ports.popleft()
-        success, stderr = waiter(ip, ssh_port, **ssh_credentials)
-        if not success:
-            ips.append(ip)
-            ssh_ports.append(ssh_port)
-            if time.time() - start > timeout:
+
+    def _retry_ssh_thread(ip_ssh_port: Tuple[str, int]):
+        ip, ssh_port = ip_ssh_port
+        success = False
+        while not success:
+            success, stderr = waiter(ip, ssh_port, **ssh_credentials)
+            if not success and time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'Failed to SSH to {ip} after timeout {timeout}s, with '
                         f'{stderr}')
             logger.debug('Retrying in 1 second...')
             time.sleep(1)
+
+    # try one node and multiprocess the rest
+    if ips:
+        ip = ips.popleft()
+        ssh_port = ssh_ports.popleft()
+        _retry_ssh_thread((ip, ssh_port))
+    subprocess_utils.run_in_parallel(_retry_ssh_thread,
+                                     list(zip(ips, ssh_ports)))
 
 
 def _post_provision_setup(
