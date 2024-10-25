@@ -2051,7 +2051,7 @@ def test_runpod_http_server_with_custom_ports():
     run_one_test(test)
 
 
-# ---------- Labels from task on AWS (instance_tags) ----------
+# ---------- Labels from task on AWS ----------
 @pytest.mark.aws
 def test_task_labels_aws():
     name = _get_cluster_name()
