@@ -999,15 +999,8 @@ class ServeCodeGen:
     @classmethod
     def update_service(cls, service_name: str, version: int, mode: str) -> str:
         code = [
-            # Backward compatibility for old serve version on the remote
-            # machine. The `mode` argument was added in #3249, and if the remote
-            # machine has an old SkyPilot version before that, we need to avoid
-            # passing the `mode` argument to the job_lib functions.
-            # TODO(zhwu): Remove this in 0.7.0 release.
-            f'mode_kwargs = {{"mode": {mode!r}}} '
-            'if getattr(constants, "SERVE_VERSION", 0) >= 1 else {}',
             f'msg = serve_utils.update_service_encoded({service_name!r}, '
-            f'{version}, **mode_kwargs)',
+            f'{version}, mode={mode!r})',
             'print(msg, end="", flush=True)',
         ]
         return cls._build(code)
