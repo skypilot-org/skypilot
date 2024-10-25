@@ -7,10 +7,28 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
+from sky import sky_logging
 from sky.clouds import Azure
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
+
+# This list should match the list of regions in
+# skypilot image generation Packer script's replication_regions
+# sky/clouds/service_catalog/images/skypilot-azure-cpu-ubuntu.pkr.hcl
+COMMUNITY_IMAGE_AVAILABLE_REGIONS = {
+    'centralus',
+    'eastus',
+    'eastus2',
+    'northcentralus',
+    'southcentralus',
+    'westcentralus',
+    'westus',
+    'westus2',
+    'westus3',
+}
 
 # The frequency of pulling the latest catalog from the cloud provider.
 # Though the catalog update is manual in our skypilot-catalog repo, we
@@ -176,9 +194,16 @@ def list_accelerators(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    # Azure images are not region-specific.
-    del region  # Unused.
-    return common.get_image_id_from_tag_impl(_image_df, tag, None)
+    global _image_df
+    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_id is None:
+        # Refresh the image catalog and try again, if the image tag is not
+        # found.
+        logger.debug('Refreshing the image catalog and trying again.')
+        _image_df = common.read_catalog('azure/images.csv',
+                                        pull_frequency_hours=0)
+        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    return image_id
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
