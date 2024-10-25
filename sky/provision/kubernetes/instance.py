@@ -447,7 +447,13 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             error_message = error_body.get('message', '')
         except json.JSONDecodeError:
             error_message = str(e.body)
-        # Check if the error is due to the AppArmor annotation and retry
+        # Check if the error is due to the AppArmor annotation and retry.
+        # We add an AppArmor annotation to set it as unconfined in our
+        # base template in kubernetes-ray.yml.j2. This is required for
+        # FUSE to work in the pod on most Kubernetes distributions.
+        # However, some distributions do not support the AppArmor annotation
+        # and will fail to create the pod. In this case, we retry without
+        # the annotation.
         if (e.status == 422 and 'FieldValueForbidden' in error_message and
                 'AppArmorProfile: nil' in error_message):
             logger.warning('AppArmor annotation caused pod creation to fail. '
