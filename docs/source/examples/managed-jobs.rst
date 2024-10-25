@@ -296,7 +296,7 @@ More advanced policies for resource selection, such as the `Can't Be Late
 paper, may be supported in the future.
 
 Running Many Parallel Jobs
--------------------------
+--------------------------
 
 For batch jobs such as **data processing** or **hyperparameter sweeps**, you can launch many jobs in parallel. See :ref:`many-jobs`.
 
