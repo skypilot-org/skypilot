@@ -15,6 +15,7 @@ from sky import status_lib
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
+from sky.provision.azure import config as config_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -31,6 +32,8 @@ logger = sky_logging.init_logger(__name__)
 # https://github.com/Azure/azure-sdk-for-python/issues/9422
 azure_logger = logging.getLogger('azure')
 azure_logger.setLevel(logging.WARNING)
+Client = Any
+NetworkSecurityGroup = Any
 
 _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
@@ -40,6 +43,10 @@ _WAIT_CREATION_TIMEOUT_SECONDS = 600
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
+# TODO(Doyoung): _LEGACY_NSG_NAME can be remove this after 0.8.0 to ignore
+# legacy nsg names.
+_LEGACY_NSG_NAME = 'ray-{cluster_name_on_cloud}-nsg'
+_SECOND_LEGACY_NSG_NAME = 'sky-{cluster_name_on_cloud}-nsg'
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -795,6 +802,32 @@ def query_instances(
     return statuses
 
 
+# TODO(Doyoung): _get_cluster_nsg can be remove this after 0.8.0 to ignore
+# legacy nsg names.
+def _get_cluster_nsg(network_client: Client, resource_group: str,
+                     cluster_name_on_cloud: str) -> NetworkSecurityGroup:
+    """Retrieve the NSG associated with the given name of the cluster."""
+    list_network_security_groups = _get_azure_sdk_function(
+        client=network_client.network_security_groups, function_name='list')
+    legacy_nsg_name = _LEGACY_NSG_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    second_legacy_nsg_name = _SECOND_LEGACY_NSG_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    _, nsg_name = config_lib.get_cluster_id_and_nsg_name(
+        resource_group=resource_group,
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    possible_nsg_names = [nsg_name, legacy_nsg_name, second_legacy_nsg_name]
+    for nsg in list_network_security_groups(resource_group):
+        if nsg.name in possible_nsg_names:
+            return nsg
+
+    # Raise an error if no matching NSG is found
+    raise ValueError('Failed to find a matching NSG for cluster '
+                     f'{cluster_name_on_cloud!r} in resource group '
+                     f'{resource_group!r}. Expected NSG names were: '
+                     f'{possible_nsg_names}.')
+
+
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
@@ -809,58 +842,66 @@ def open_ports(
     update_network_security_groups = _get_azure_sdk_function(
         client=network_client.network_security_groups,
         function_name='create_or_update')
-    list_network_security_groups = _get_azure_sdk_function(
-        client=network_client.network_security_groups, function_name='list')
-    for nsg in list_network_security_groups(resource_group):
-        try:
-            # Wait the NSG creation to be finished before opening a port. The
-            # cluster provisioning triggers the NSG creation, but it may not be
-            # finished yet.
-            backoff = common_utils.Backoff(max_backoff_factor=1)
-            start_time = time.time()
-            while True:
-                if nsg.provisioning_state not in ['Creating', 'Updating']:
-                    break
-                if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
-                    logger.warning(
-                        f'Fails to wait for the creation of NSG {nsg.name} in '
-                        f'{resource_group} within '
-                        f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
-                        'Skip this NSG.')
-                backoff_time = backoff.current_backoff()
-                logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
-                            f'{backoff_time} seconds before checking again.')
-                time.sleep(backoff_time)
 
-            # Azure NSG rules have a priority field that determines the order
-            # in which they are applied. The priority must be unique across
-            # all inbound rules in one NSG.
-            priority = max(rule.priority
-                           for rule in nsg.security_rules
-                           if rule.direction == 'Inbound') + 1
-            nsg.security_rules.append(
-                azure.create_security_rule(
-                    name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
-                    priority=priority,
-                    protocol='Tcp',
-                    access='Allow',
-                    direction='Inbound',
-                    source_address_prefix='*',
-                    source_port_range='*',
-                    destination_address_prefix='*',
-                    destination_port_ranges=ports,
-                ))
-            poller = update_network_security_groups(resource_group, nsg.name,
-                                                    nsg)
-            poller.wait()
-            if poller.status() != 'Succeeded':
+    try:
+        # Wait for the NSG creation to be finished before opening a port. The
+        # cluster provisioning triggers the NSG creation, but it may not be
+        # finished yet.
+        backoff = common_utils.Backoff(max_backoff_factor=1)
+        start_time = time.time()
+        while True:
+            nsg = _get_cluster_nsg(network_client, resource_group,
+                                   cluster_name_on_cloud)
+            if nsg.provisioning_state not in ['Creating', 'Updating']:
+                break
+            if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Failed to open ports {ports} in NSG '
-                                     f'{nsg.name}: {poller.status()}')
-        except azure.exceptions().HttpResponseError as e:
+                    raise TimeoutError(
+                        f'Timed out while waiting for the Network '
+                        f'Security Group {nsg.name!r} to be ready for '
+                        f'cluster {cluster_name_on_cloud!r} in '
+                        f'resource group {resource_group!r}. The NSG '
+                        f'did not reach a stable state '
+                        '(Creating/Updating) within the allocated '
+                        f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
+                        'Consequently, the operation to open ports '
+                        f'{ports} failed.')
+
+            backoff_time = backoff.current_backoff()
+            logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
+                        f'{backoff_time} seconds before checking again.')
+            time.sleep(backoff_time)
+
+        # Azure NSG rules have a priority field that determines the order
+        # in which they are applied. The priority must be unique across
+        # all inbound rules in one NSG.
+        priority = max(rule.priority
+                       for rule in nsg.security_rules
+                       if rule.direction == 'Inbound') + 1
+        nsg.security_rules.append(
+            azure.create_security_rule(
+                name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
+                priority=priority,
+                protocol='Tcp',
+                access='Allow',
+                direction='Inbound',
+                source_address_prefix='*',
+                source_port_range='*',
+                destination_address_prefix='*',
+                destination_port_ranges=ports,
+            ))
+        poller = update_network_security_groups(resource_group, nsg.name, nsg)
+        poller.wait()
+        if poller.status() != 'Succeeded':
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to open ports {ports} in NSG {nsg.name}.') from e
+                raise ValueError(f'Failed to open ports {ports} in NSG '
+                                 f'{nsg.name}: {poller.status()}')
+
+    except azure.exceptions().HttpResponseError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to open ports {ports} in NSG for cluster '
+                             f'{cluster_name_on_cloud!r} within resource group '
+                             f'{resource_group!r}.') from e
 
 
 def cleanup_ports(

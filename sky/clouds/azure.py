@@ -15,6 +15,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.clouds.utils import azure_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -36,6 +37,15 @@ _MAX_IDENTITY_FETCH_RETRY = 10
 
 _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
 _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
+_DEFAULT_SKYPILOT_IMAGE_GB = 30
+
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-v2'
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
+_DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
+_DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
+_FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
+
+_COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
 
 
 def _run_output(cmd):
@@ -133,28 +143,55 @@ class Azure(clouds.Cloud):
         return cost
 
     @classmethod
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
+                                                         clouds='azure')
+
+    @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
-        if region is None:
-            # The region used here is only for where to send the query,
-            # not the image location. Azure's image is globally available.
-            region = 'eastus'
-        is_skypilot_image_tag = False
+        # Process skypilot images.
         if image_id.startswith('skypilot:'):
-            is_skypilot_image_tag = True
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
-        image_id_splitted = image_id.split(':')
-        if len(image_id_splitted) != 4:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid image id: {image_id}. Expected '
-                                 'format: <publisher>:<offer>:<sku>:<version>')
-        publisher, offer, sku, version = image_id_splitted
-        if is_skypilot_image_tag:
-            if offer == 'ubuntu-hpc':
-                return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
+            if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
+                # Avoid querying the image size from Azure as
+                # all skypilot custom images have the same size.
+                return _DEFAULT_SKYPILOT_IMAGE_GB
             else:
-                return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
+                publisher, offer, sku, version = image_id.split(':')
+                if offer == 'ubuntu-hpc':
+                    return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
+                else:
+                    return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
+
+        # Process user-specified images.
+        azure_utils.validate_image_id(image_id)
         compute_client = azure.get_client('compute', cls.get_project_id())
+
+        # Community gallery image.
+        if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
+            if region is None:
+                return 0.0
+            _, _, gallery_name, _, image_name = image_id.split('/')
+            try:
+                return azure_utils.get_community_image_size(
+                    compute_client, gallery_name, image_name, region)
+            except exceptions.ResourcesUnavailableError:
+                return 0.0
+
+        # Marketplace image
+        if region is None:
+            # The region used here is only for where to send the query,
+            # not the image location. Marketplace image is globally available.
+            region = 'eastus'
+        publisher, offer, sku, version = image_id.split(':')
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
@@ -176,40 +213,23 @@ class Azure(clouds.Cloud):
         size_in_gb = size_in_bytes / (1024**3)
         return size_in_gb
 
-    @classmethod
-    def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
-    ) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         memory=memory,
-                                                         disk_tier=disk_tier,
-                                                         clouds='azure')
-
     def _get_default_image_tag(self, gen_version, instance_type) -> str:
         # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
         acc = self.get_accelerators_from_instance_type(instance_type)
         if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                return 'skypilot:k80-ubuntu-2004'
-
-        # ubuntu-2004 v21.11.04, the previous image we used in the past for
-        # V1 HyperV instance before we change default image to ubuntu-hpc.
+                return _DEFAULT_GPU_K80_IMAGE_ID
+        # About Gen V1 vs V2:
         # In Azure, all instances with K80 (Standard_NC series), some
         # instances with M60 (Standard_NV series) and some cpu instances
-        # (Basic_A, Standard_D, ...) are V1 instance. For these instances,
-        # we use the previous image.
+        # (Basic_A, Standard_D, ...) are V1 instance.
+        # All A100 instances are V2.
         if gen_version == 'V1':
-            return 'skypilot:v1-ubuntu-2004'
-
-        # nvidia-driver: 535.54.03, cuda: 12.2
-        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
-        # All A100 instances is of gen2, so it will always use
-        # the latest ubuntu-hpc:2204 image.
-        return 'skypilot:gpu-ubuntu-2204'
+            return _DEFAULT_V1_IMAGE_ID
+        if acc is None:
+            return _DEFAULT_CPU_IMAGE_ID
+        return _DEFAULT_GPU_IMAGE_ID
 
     @classmethod
     def regions_with_offering(cls, instance_type: str,
@@ -302,17 +322,34 @@ class Azure(clouds.Cloud):
             else:
                 assert region_name in resources.image_id, resources.image_id
                 image_id = resources.image_id[region_name]
+
+        # Checked basic image syntax in resources.py
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
-        # Already checked in resources.py
-        publisher, offer, sku, version = image_id.split(':')
-        image_config = {
-            'image_publisher': publisher,
-            'image_offer': offer,
-            'image_sku': sku,
-            'image_version': version,
-        }
+            # Fallback if image does not exist in the specified region.
+            # Putting fallback here instead of at image validation
+            # when creating the resource because community images are
+            # regional so we need the correct region when we check whether
+            # the image exists.
+            if image_id.startswith(
+                    _COMMUNITY_IMAGE_PREFIX
+            ) and region_name not in azure_catalog.COMMUNITY_IMAGE_AVAILABLE_REGIONS:
+                logger.info(f'Azure image {image_id} does not exist in region '
+                            f'{region_name} so use the fallback image instead.')
+                image_id = service_catalog.get_image_id_from_tag(
+                    _FALLBACK_IMAGE_ID, clouds='azure')
+
+        if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
+            image_config = {'community_gallery_image_id': image_id}
+        else:
+            publisher, offer, sku, version = image_id.split(':')
+            image_config = {
+                'image_publisher': publisher,
+                'image_offer': offer,
+                'image_sku': sku,
+                'image_version': version,
+            }
 
         # Setup the A10 nvidia driver.
         need_nvidia_driver_extension = (acc_dict is not None and
@@ -380,7 +417,6 @@ class Azure(clouds.Cloud):
         # Setting disk performance tier for high disk tier.
         if disk_tier == resources_utils.DiskTier.HIGH:
             resources_vars['disk_performance_tier'] = 'P50'
-
         return resources_vars
 
     def _get_feasible_launchable_resources(

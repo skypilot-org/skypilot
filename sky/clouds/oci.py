@@ -468,7 +468,11 @@ class OCI(clouds.Cloud):
             api_key_file = oci_cfg[
                 'key_file'] if 'key_file' in oci_cfg else 'BadConf'
             sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        # Must catch ImportError before any oci_adaptor.oci.exceptions
+        # because oci_adaptor.oci.exceptions can throw ImportError.
         except ImportError:
+            return {}
+        except oci_adaptor.oci.exceptions.ConfigFileNotFound:
             return {}
 
         # OCI config and API key file are mandatory
