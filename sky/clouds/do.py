@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILE = 'config.yaml'
 
 
-@clouds.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register(aliases=['digitalocean'])
 class DO(clouds.Cloud):
     """Digital Ocean Cloud"""
 
