@@ -582,7 +582,7 @@ _NETWORK_CONFIG_SCHEMA = {
 
 _LABELS_SCHEMA = {
     # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.7.0.
+    # compatibility. Will be removed after 0.8.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
