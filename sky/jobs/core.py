@@ -79,9 +79,11 @@ def launch(
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    for task_ in dag.tasks:
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='jobs')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing managed job')):
+        for task_ in dag.tasks:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task_, path='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -129,7 +131,6 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky_logging.print('Launching jobs controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
@@ -262,11 +263,12 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                           f'{colorama.Style.RESET_ALL}')
 
         rich_utils.force_update_status(
-            '[cyan] Checking managed jobs - restarting '
-            'controller[/]')
+            ux_utils.spinner_message('Checking managed jobs - restarting '
+                                     'controller'))
         handle = sky.start(jobs_controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
-        rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Checking managed jobs'))
 
     assert handle is not None, (controller_status, refresh)
 

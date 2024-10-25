@@ -9,6 +9,7 @@ import time
 import traceback
 from typing import Any, Dict, List
 
+import colorama
 import fastapi
 from fastapi import responses
 import uvicorn
@@ -158,6 +159,75 @@ class SkyServeController:
                              f'{common_utils.format_exception(e)}')
                 return responses.JSONResponse(content={'message': 'Error'},
                                               status_code=500)
+
+        @self._app.post('/controller/terminate_replica')
+        async def terminate_replica(
+                request: fastapi.Request) -> fastapi.Response:
+            request_data = await request.json()
+            replica_id = request_data['replica_id']
+            assert isinstance(replica_id,
+                              int), 'Error: replica ID must be an integer.'
+            purge = request_data['purge']
+            assert isinstance(purge, bool), 'Error: purge must be a boolean.'
+            replica_info = serve_state.get_replica_info_from_id(
+                self._service_name, replica_id)
+            assert replica_info is not None, (f'Error: replica '
+                                              f'{replica_id} does not exist.')
+            replica_status = replica_info.status
+
+            if replica_status == serve_state.ReplicaStatus.SHUTTING_DOWN:
+                return responses.JSONResponse(
+                    status_code=409,
+                    content={
+                        'message':
+                            f'Replica {replica_id} of service '
+                            f'{self._service_name!r} is already in the process '
+                            f'of terminating. Skip terminating now.'
+                    })
+
+            if (replica_status in serve_state.ReplicaStatus.failed_statuses()
+                    and not purge):
+                return responses.JSONResponse(
+                    status_code=409,
+                    content={
+                        'message': f'{colorama.Fore.YELLOW}Replica '
+                                   f'{replica_id} of service '
+                                   f'{self._service_name!r} is in failed '
+                                   f'status ({replica_info.status}). '
+                                   f'Skipping its termination as it could '
+                                   f'lead to a resource leak. '
+                                   f'(Use `sky serve down '
+                                   f'{self._service_name!r} --replica-id '
+                                   f'{replica_id} --purge` to '
+                                   'forcefully terminate the replica.)'
+                                   f'{colorama.Style.RESET_ALL}'
+                    })
+
+            self._replica_manager.scale_down(replica_id, purge=purge)
+
+            action = 'terminated' if not purge else 'purged'
+            message = (f'{colorama.Fore.GREEN}Replica {replica_id} of service '
+                       f'{self._service_name!r} is scheduled to be '
+                       f'{action}.{colorama.Style.RESET_ALL}\n'
+                       f'Please use {ux_utils.BOLD}sky serve status '
+                       f'{self._service_name}{ux_utils.RESET_BOLD} '
+                       f'to check the latest status.')
+            return responses.JSONResponse(status_code=200,
+                                          content={'message': message})
+
+        @self._app.exception_handler(Exception)
+        async def validation_exception_handler(
+                request: fastapi.Request, exc: Exception) -> fastapi.Response:
+            with ux_utils.enable_traceback():
+                logger.error(f'Error in controller: {exc!r}')
+            return responses.JSONResponse(
+                status_code=500,
+                content={
+                    'message':
+                        (f'Failed method {request.method} at URL {request.url}.'
+                         f' Exception message is {exc!r}.')
+                },
+            )
 
         threading.Thread(target=self._run_autoscaler).start()
 

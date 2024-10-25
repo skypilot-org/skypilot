@@ -2,10 +2,8 @@
 import base64
 import copy
 import enum
-import json
 import logging
 from multiprocessing import pool
-import pathlib
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -23,7 +21,9 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from azure.mgmt import compute as azure_compute
-    from azure.mgmt import resource as azure_resource
+    from azure.mgmt import network as azure_network
+    from azure.mgmt.compute import models as azure_compute_models
+    from azure.mgmt.network import models as azure_network_models
 
 logger = sky_logging.init_logger(__name__)
 
@@ -184,14 +184,150 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def _create_instances(
-        compute_client: 'azure_compute.ComputeManagementClient',
-        resource_client: 'azure_resource.ResourceManagementClient',
-        cluster_name_on_cloud: str, resource_group: str,
-        provider_config: Dict[str, Any], node_config: Dict[str, Any],
-        tags: Dict[str, str], count: int) -> List:
+def _create_network_interface(
+        network_client: 'azure_network.NetworkManagementClient', vm_name: str,
+        provider_config: Dict[str,
+                              Any]) -> 'azure_network_models.NetworkInterface':
+    network = azure.azure_mgmt_models('network')
+    compute = azure.azure_mgmt_models('compute')
+    logger.info(f'Start creating network interface for {vm_name}...')
+    if provider_config.get('use_internal_ips', False):
+        name = f'{vm_name}-nic-private'
+        ip_config = network.IPConfiguration(
+            name=f'ip-config-private-{vm_name}',
+            subnet=compute.SubResource(id=provider_config['subnet']),
+            private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC)
+    else:
+        name = f'{vm_name}-nic-public'
+        public_ip_address = network.PublicIPAddress(
+            location=provider_config['location'],
+            public_ip_allocation_method='Static',
+            public_ip_address_version='IPv4',
+            sku=network.PublicIPAddressSku(name='Basic', tier='Regional'))
+        ip_poller = network_client.public_ip_addresses.begin_create_or_update(
+            resource_group_name=provider_config['resource_group'],
+            public_ip_address_name=f'{vm_name}-ip',
+            parameters=public_ip_address)
+        logger.info(f'Created public IP address {ip_poller.result().name} '
+                    f'with address {ip_poller.result().ip_address}.')
+        ip_config = network.IPConfiguration(
+            name=f'ip-config-public-{vm_name}',
+            subnet=compute.SubResource(id=provider_config['subnet']),
+            private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC,
+            public_ip_address=network.PublicIPAddress(id=ip_poller.result().id))
+
+    ni_poller = network_client.network_interfaces.begin_create_or_update(
+        resource_group_name=provider_config['resource_group'],
+        network_interface_name=name,
+        parameters=network.NetworkInterface(
+            location=provider_config['location'],
+            ip_configurations=[ip_config],
+            network_security_group=network.NetworkSecurityGroup(
+                id=provider_config['nsg'])))
+    logger.info(f'Created network interface {ni_poller.result().name}.')
+    return ni_poller.result()
+
+
+def _create_vm(
+        compute_client: 'azure_compute.ComputeManagementClient', vm_name: str,
+        node_tags: Dict[str, str], provider_config: Dict[str, Any],
+        node_config: Dict[str, Any],
+        network_interface_id: str) -> 'azure_compute_models.VirtualMachine':
+    compute = azure.azure_mgmt_models('compute')
+    logger.info(f'Start creating VM {vm_name}...')
+    hardware_profile = compute.HardwareProfile(
+        vm_size=node_config['azure_arm_parameters']['vmSize'])
+    network_profile = compute.NetworkProfile(network_interfaces=[
+        compute.NetworkInterfaceReference(id=network_interface_id, primary=True)
+    ])
+    public_key = node_config['azure_arm_parameters']['publicKey']
+    username = node_config['azure_arm_parameters']['adminUsername']
+    os_linux_custom_data = base64.b64encode(
+        node_config['azure_arm_parameters']['cloudInitSetupCommands'].encode(
+            'utf-8')).decode('utf-8')
+    os_profile = compute.OSProfile(
+        admin_username=username,
+        computer_name=vm_name,
+        admin_password=public_key,
+        linux_configuration=compute.LinuxConfiguration(
+            disable_password_authentication=True,
+            ssh=compute.SshConfiguration(public_keys=[
+                compute.SshPublicKey(
+                    path=f'/home/{username}/.ssh/authorized_keys',
+                    key_data=public_key)
+            ])),
+        custom_data=os_linux_custom_data)
+    community_image_id = node_config['azure_arm_parameters'].get(
+        'communityGalleryImageId', None)
+    if community_image_id is not None:
+        # Prioritize using community gallery image if specified.
+        image_reference = compute.ImageReference(
+            community_gallery_image_id=community_image_id)
+        logger.info(
+            f'Used community_image_id: {community_image_id} for VM {vm_name}.')
+    else:
+        image_reference = compute.ImageReference(
+            publisher=node_config['azure_arm_parameters']['imagePublisher'],
+            offer=node_config['azure_arm_parameters']['imageOffer'],
+            sku=node_config['azure_arm_parameters']['imageSku'],
+            version=node_config['azure_arm_parameters']['imageVersion'])
+    storage_profile = compute.StorageProfile(
+        image_reference=image_reference,
+        os_disk=compute.OSDisk(
+            create_option=compute.DiskCreateOptionTypes.FROM_IMAGE,
+            managed_disk=compute.ManagedDiskParameters(
+                storage_account_type=node_config['azure_arm_parameters']
+                ['osDiskTier']),
+            disk_size_gb=node_config['azure_arm_parameters']['osDiskSizeGB']))
+    vm_instance = compute.VirtualMachine(
+        location=provider_config['location'],
+        tags=node_tags,
+        hardware_profile=hardware_profile,
+        os_profile=os_profile,
+        storage_profile=storage_profile,
+        network_profile=network_profile,
+        identity=compute.VirtualMachineIdentity(
+            type='UserAssigned',
+            user_assigned_identities={provider_config['msi']: {}}))
+    vm_poller = compute_client.virtual_machines.begin_create_or_update(
+        resource_group_name=provider_config['resource_group'],
+        vm_name=vm_name,
+        parameters=vm_instance,
+    )
+    # poller.result() will block on async operation until it's done.
+    logger.info(f'Created VM {vm_poller.result().name}.')
+    # Configure driver extension for A10 GPUs. A10 GPUs requires a
+    # special type of drivers which is available at Microsoft HPC
+    # extension. Reference:
+    # https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
+    # This can take more than 20mins for setting up the A10 GPUs
+    if node_config.get('need_nvidia_driver_extension', False):
+        ext_poller = compute_client.virtual_machine_extensions.\
+            begin_create_or_update(
+            resource_group_name=provider_config['resource_group'],
+            vm_name=vm_name,
+            vm_extension_name='NvidiaGpuDriverLinux',
+            extension_parameters=compute.VirtualMachineExtension(
+                location=provider_config['location'],
+                publisher='Microsoft.HpcCompute',
+                type_properties_type='NvidiaGpuDriverLinux',
+                type_handler_version='1.9',
+                auto_upgrade_minor_version=True,
+                settings='{}'))
+        logger.info(
+            f'Created VM extension {ext_poller.result().name} for VM {vm_name}.'
+        )
+    return vm_poller.result()
+
+
+def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
+                      network_client: 'azure_network.NetworkManagementClient',
+                      cluster_name_on_cloud: str, resource_group: str,
+                      provider_config: Dict[str, Any], node_config: Dict[str,
+                                                                         Any],
+                      tags: Dict[str, str], count: int) -> List:
     vm_id = uuid4().hex[:UNIQUE_ID_LEN]
-    tags = {
+    all_tags = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
         **constants.WORKER_NODE_TAGS,
@@ -199,83 +335,19 @@ def _create_instances(
         **tags,
     }
     node_tags = node_config['tags'].copy()
-    node_tags.update(tags)
+    node_tags.update(all_tags)
 
-    # load the template file
-    current_path = pathlib.Path(__file__).parent
-    template_path = current_path.joinpath('azure-vm-template.json')
-    with open(template_path, 'r', encoding='utf-8') as template_fp:
-        template = json.load(template_fp)
+    # Create VM instances in parallel.
+    def create_single_instance(vm_i):
+        vm_name = f'{cluster_name_on_cloud}-{vm_id}-{vm_i}'
+        network_interface = _create_network_interface(network_client, vm_name,
+                                                      provider_config)
+        _create_vm(compute_client, vm_name, node_tags, provider_config,
+                   node_config, network_interface.id)
 
-    vm_name = f'{cluster_name_on_cloud}-{vm_id}'
-    use_internal_ips = provider_config.get('use_internal_ips', False)
+    subprocess_utils.run_in_parallel(create_single_instance, range(count))
 
-    template_params = node_config['azure_arm_parameters'].copy()
-    # We don't include 'head' or 'worker' in the VM name as on Azure the VM
-    # name is immutable and we may change the node type for existing VM in the
-    # multi-node cluster, due to manual termination of the head node.
-    template_params['vmName'] = vm_name
-    template_params['provisionPublicIp'] = not use_internal_ips
-    template_params['vmTags'] = node_tags
-    template_params['vmCount'] = count
-    template_params['msi'] = provider_config['msi']
-    template_params['nsg'] = provider_config['nsg']
-    template_params['subnet'] = provider_config['subnet']
-    # In Azure, cloud-init script must be encoded in base64. For more
-    # information, see:
-    # https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
-    template_params['cloudInitSetupCommands'] = (base64.b64encode(
-        template_params['cloudInitSetupCommands'].encode('utf-8')).decode(
-            'utf-8'))
-
-    if node_config.get('need_nvidia_driver_extension', False):
-        # pylint: disable=line-too-long
-        # Configure driver extension for A10 GPUs. A10 GPUs requires a
-        # special type of drivers which is available at Microsoft HPC
-        # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
-        for r in template['resources']:
-            if r['type'] == 'Microsoft.Compute/virtualMachines':
-                # Add a nested extension resource for A10 GPUs
-                r['resources'] = [
-                    {
-                        'type': 'extensions',
-                        'apiVersion': '2015-06-15',
-                        'location': '[variables(\'location\')]',
-                        'dependsOn': [
-                            '[concat(\'Microsoft.Compute/virtualMachines/\', parameters(\'vmName\'), copyIndex())]'
-                        ],
-                        'name': 'NvidiaGpuDriverLinux',
-                        'properties': {
-                            'publisher': 'Microsoft.HpcCompute',
-                            'type': 'NvidiaGpuDriverLinux',
-                            'typeHandlerVersion': '1.9',
-                            'autoUpgradeMinorVersion': True,
-                            'settings': {},
-                        },
-                    },
-                ]
-                break
-
-    parameters = {
-        'properties': {
-            'mode': azure.deployment_mode().incremental,
-            'template': template,
-            'parameters': {
-                key: {
-                    'value': value
-                } for key, value in template_params.items()
-            },
-        }
-    }
-
-    create_or_update = _get_azure_sdk_function(
-        client=resource_client.deployments, function_name='create_or_update')
-    create_or_update(
-        resource_group_name=resource_group,
-        deployment_name=vm_name,
-        parameters=parameters,
-    ).wait()
-
+    # Update disk performance tier
     performance_tier = node_config.get('disk_performance_tier', None)
     if performance_tier is not None:
         disks = compute_client.disks.list_by_resource_group(resource_group)
@@ -286,12 +358,14 @@ def _create_instances(
                 f'az disk update -n {name} -g {resource_group} '
                 f'--set tier={performance_tier}')
 
+    # Validation
     filters = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         _TAG_SKYPILOT_VM_ID: vm_id
     }
     instances = _filter_instances(compute_client, resource_group, filters)
     assert len(instances) == count, (len(instances), count)
+
     return instances
 
 
@@ -303,7 +377,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resource_group = provider_config['resource_group']
     subscription_id = provider_config['subscription_id']
     compute_client = azure.get_client('compute', subscription_id)
-
+    network_client = azure.get_client('network', subscription_id)
     instances_to_resume = []
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
@@ -439,17 +513,22 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     to_start_count -= len(resumed_instance_ids)
 
     if to_start_count > 0:
-        resource_client = azure.get_client('resource', subscription_id)
         logger.debug(f'run_instances: Creating {to_start_count} instances.')
-        created_instances = _create_instances(
-            compute_client=compute_client,
-            resource_client=resource_client,
-            cluster_name_on_cloud=cluster_name_on_cloud,
-            resource_group=resource_group,
-            provider_config=provider_config,
-            node_config=config.node_config,
-            tags=tags,
-            count=to_start_count)
+        try:
+            created_instances = _create_instances(
+                compute_client=compute_client,
+                network_client=network_client,
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                resource_group=resource_group,
+                provider_config=provider_config,
+                node_config=config.node_config,
+                tags=tags,
+                count=to_start_count)
+        except Exception as e:
+            err_message = common_utils.format_exception(
+                e, use_bracket=True).replace('\n', ' ')
+            logger.error(f'Failed to create instances: {err_message}')
+            raise
         created_instance_ids = [inst.name for inst in created_instances]
 
     non_running_instance_statuses = list(

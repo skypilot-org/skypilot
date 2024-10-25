@@ -339,7 +339,6 @@ def _get_shell_complete_args(complete_fn):
 
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
-_RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
 
@@ -378,7 +377,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         cmd = '_SKY_COMPLETE=fish_source sky > \
                 ~/.config/fish/completions/sky.fish'
 
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
@@ -398,9 +399,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                        check=True,
                        executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
-        click.echo(
-            'Completion will take effect once you restart the terminal: ' +
-            click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Completion will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Installation failed with code {e.returncode}', fg='red')
     ctx.exit()
@@ -431,7 +433,9 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
 
     elif value == 'fish':
         cmd = 'rm -f ~/.config/fish/completions/sky.fish'
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.zshrc && \
@@ -447,8 +451,10 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion uninstalled for {value}', fg='green')
-        click.echo('Changes will take effect once you restart the terminal: ' +
-                   click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Changes will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Uninstallation failed with code {e.returncode}',
                     fg='red')
@@ -1464,54 +1470,8 @@ def _status_kubernetes(show_all: bool):
     Args:
         show_all (bool): Show all job information (e.g., start time, failures).
     """
-    context = kubernetes_utils.get_current_kube_config_context_name()
-    try:
-        pods = kubernetes_utils.get_skypilot_pods(context)
-    except exceptions.ResourcesUnavailableError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Failed to get SkyPilot pods from '
-                             f'Kubernetes: {str(e)}') from e
-    all_clusters, jobs_controllers, serve_controllers = (
-        status_utils.process_skypilot_pods(pods, context))
-    all_jobs = []
-    with rich_utils.safe_status(
-            '[bold cyan]Checking in-progress managed jobs[/]') as spinner:
-        for i, (_, job_controller_info) in enumerate(jobs_controllers.items()):
-            user = job_controller_info['user']
-            pod = job_controller_info['pods'][0]
-            status_message = ('[bold cyan]Checking managed jobs controller')
-            if len(jobs_controllers) > 1:
-                status_message += f's ({i+1}/{len(jobs_controllers)})'
-            spinner.update(f'{status_message}[/]')
-            try:
-                job_list = managed_jobs.queue_from_kubernetes_pod(
-                    pod.metadata.name)
-            except RuntimeError as e:
-                logger.warning('Failed to get managed jobs from controller '
-                               f'{pod.metadata.name}: {str(e)}')
-                job_list = []
-            # Add user field to jobs
-            for job in job_list:
-                job['user'] = user
-            all_jobs.extend(job_list)
-    # Reconcile cluster state between managed jobs and clusters:
-    # To maintain a clear separation between regular SkyPilot clusters
-    # and those from managed jobs, we need to exclude the latter from
-    # the main cluster list.
-    # We do this by reconstructing managed job cluster names from each
-    # job's name and ID. We then use this set to filter out managed
-    # clusters from the main cluster list. This is necessary because there
-    # are no identifiers distinguishing clusters from managed jobs from
-    # regular clusters.
-    managed_job_cluster_names = set()
-    for job in all_jobs:
-        # Managed job cluster name is <job_name>-<job_id>
-        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
-        managed_job_cluster_names.add(managed_cluster_name)
-    unmanaged_clusters = [
-        c for c in all_clusters
-        if c['cluster_name'] not in managed_job_cluster_names
-    ]
+    all_clusters, unmanaged_clusters, all_jobs, context = (
+        core.status_kubernetes())
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
@@ -1523,7 +1483,7 @@ def _status_kubernetes(show_all: bool):
                    f'{colorama.Style.RESET_ALL}')
         msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
         click.echo(msg)
-    if serve_controllers:
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
         #  Currently we show a hint that services are shown as clusters.
         click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
@@ -1814,7 +1774,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if show_managed_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed jobs{colorama.Style.RESET_ALL}')
-            with rich_utils.safe_status('[cyan]Checking managed jobs[/]'):
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message('Checking managed jobs')):
                 managed_jobs_query_interrupted, result = _try_get_future_result(
                     managed_jobs_future)
                 if managed_jobs_query_interrupted:
@@ -1855,7 +1816,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
             else:
-                with rich_utils.safe_status('[cyan]Checking services[/]'):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message('Checking services')):
                     interrupted, result = _try_get_future_result(
                         services_future)
                     if interrupted:
@@ -2551,8 +2513,8 @@ def start(
                                'is currently not supported.\n'
                                'Please start the former independently.')
     if controllers:
-        bold = backend_utils.BOLD
-        reset_bold = backend_utils.RESET_BOLD
+        bold = ux_utils.BOLD
+        reset_bold = ux_utils.RESET_BOLD
         if len(controllers) != 1:
             raise click.UsageError(
                 'Starting multiple controllers is currently not supported.\n'
@@ -2673,7 +2635,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     assert controller is not None, controller_name
 
     with rich_utils.safe_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            ux_utils.spinner_message('Checking for in-progress managed jobs')):
         try:
             managed_jobs_ = managed_jobs.queue(refresh=False,
                                                skip_finished=True)
@@ -2725,7 +2687,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking for live services')):
         try:
             services = serve_lib.status()
         except exceptions.ClusterNotUpError as e:
@@ -2909,9 +2872,9 @@ def _down_or_stop_clusters(
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
-        total=len(clusters))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'{operation} {len(clusters)} cluster{plural}'),
+                             total=len(clusters))
 
     def _down_or_stop(name: str):
         success_progress = False
@@ -3099,7 +3062,8 @@ def show_gpus(
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    cloud_name = cloud_obj.canonical_name() if cloud_obj is not None else None
+    service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -3121,7 +3085,7 @@ def show_gpus(
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
         else:
-            qty_header = 'QTY_PER_NODE'
+            qty_header = 'REQUESTABLE_QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
@@ -3185,8 +3149,8 @@ def show_gpus(
         # Optimization - do not poll for Kubernetes API for fetching
         # common GPUs because that will be fetched later for the table after
         # common GPUs.
-        clouds_to_list = cloud
-        if cloud is None:
+        clouds_to_list = cloud_name
+        if cloud_name is None:
             clouds_to_list = [
                 c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
             ]
@@ -3196,7 +3160,8 @@ def show_gpus(
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+            if kubernetes_is_enabled and (cloud_name is None or
+                                          cloud_is_kubernetes):
                 if region:
                     context = region
                 else:
@@ -3306,8 +3271,8 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and
-                not show_all):
+        if (kubernetes_is_enabled and
+            (cloud_name is None or cloud_is_kubernetes) and not show_all):
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
@@ -3379,7 +3344,7 @@ def show_gpus(
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
+            cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
@@ -3680,7 +3645,7 @@ def jobs_launch(
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
+                fg='cyan')
     dag = sky.optimize(dag)
 
     if not yes:
@@ -3774,7 +3739,8 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
 
     """
     click.secho('Fetching managed job statuses...', fg='yellow')
-    with rich_utils.safe_status('[cyan]Checking managed jobs[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
         _, msg = _get_managed_jobs(refresh=refresh,
                                    skip_finished=skip_finished,
                                    show_all=all,
@@ -3825,10 +3791,12 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message='All managed jobs should have finished.',
-        exit_if_not_accessible=True)
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
+        backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            stopped_message='All managed jobs should have finished.',
+            exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
@@ -4390,7 +4358,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       sky serve status my-service
     """
     # This won't pollute the output of --endpoint.
-    with rich_utils.safe_status('[cyan]Checking services[/]'):
+    with rich_utils.safe_status(ux_utils.spinner_message('Checking services')):
         _, msg = _get_services(service_names,
                                show_all=all,
                                show_endpoint=endpoint,
@@ -4420,9 +4388,14 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--replica-id',
+              default=None,
+              type=int,
+              help='Tear down a given replica')
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
-    """Teardown service(s).
+def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
+               replica_id: Optional[int]):
+    """Teardown service(s) or a replica.
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
@@ -4448,6 +4421,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         \b
         # Forcefully tear down a service in failed status.
         sky serve down failed-service --purge
+        \b
+        # Tear down a specific replica
+        sky serve down my-service --replica-id 1
+        \b
+        # Forcefully tear down a specific replica, even in failed status.
+        sky serve down my-service --replica-id 1 --purge
     """
     if sum([len(service_names) > 0, all]) != 1:
         argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
@@ -4457,22 +4436,45 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
 
+    replica_id_is_defined = replica_id is not None
+    if replica_id_is_defined:
+        if len(service_names) != 1:
+            service_names_str = ', '.join(service_names)
+            raise click.UsageError(f'The --replica-id option can only be used '
+                                   f'with a single service name. Got: '
+                                   f'{service_names_str}.')
+        if all:
+            raise click.UsageError('The --replica-id option cannot be used '
+                                   'with the --all option.')
+
     backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have been terminated.',
         exit_if_not_accessible=True)
 
     if not yes:
-        quoted_service_names = [f'{name!r}' for name in service_names]
-        service_identity_str = f'service(s) {", ".join(quoted_service_names)}'
-        if all:
-            service_identity_str = 'all services'
-        click.confirm(f'Terminating {service_identity_str}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
+        if replica_id_is_defined:
+            click.confirm(
+                f'Terminating replica ID {replica_id} in '
+                f'{service_names[0]!r}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+        else:
+            quoted_service_names = [f'{name!r}' for name in service_names]
+            service_identity_str = (f'service(s) '
+                                    f'{", ".join(quoted_service_names)}')
+            if all:
+                service_identity_str = 'all services'
+            click.confirm(f'Terminating {service_identity_str}. Proceed?',
+                          default=True,
+                          abort=True,
+                          show_default=True)
 
-    serve_lib.down(service_names=service_names, all=all, purge=purge)
+    if replica_id_is_defined:
+        serve_lib.terminate_replica(service_names[0], replica_id, purge)
+    else:
+        serve_lib.down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4814,11 +4816,11 @@ def benchmark_launch(
             f'\n{colorama.Fore.CYAN}Benchmark name: '
             f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
             '\nTo see the benchmark results: '
-            f'{backend_utils.BOLD}sky bench show '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky bench show '
+            f'{benchmark}{ux_utils.RESET_BOLD}'
             '\nTo teardown the clusters: '
-            f'{backend_utils.BOLD}sky bench down '
-            f'{benchmark}{backend_utils.RESET_BOLD}')
+            f'{ux_utils.BOLD}sky bench down '
+            f'{benchmark}{ux_utils.RESET_BOLD}')
         subprocess_utils.run('sky bench ls')
     else:
         logger.error('No benchmarking clusters are created.')
@@ -5109,9 +5111,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
-        total=len(to_delete))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'Deleting {len(to_delete)} benchmark{plural}'),
+                             total=len(to_delete))
 
     def _delete_benchmark(benchmark: str) -> None:
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
@@ -5126,8 +5128,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
                        f'has {num_clusters} un-terminated cluster{plural}. '
                        f'Terminate the cluster{plural} with '
-                       f'{backend_utils.BOLD} sky bench down {benchmark} '
-                       f'{backend_utils.RESET_BOLD} '
+                       f'{ux_utils.BOLD} sky bench down {benchmark} '
+                       f'{ux_utils.RESET_BOLD} '
                        'before deleting the benchmark report.')
             success = False
         else:
@@ -5228,7 +5230,7 @@ def _deploy_local_cluster(gpus: bool):
                 f'Full log: {log_path}'
                 f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     # Run sky check
-    with rich_utils.safe_status('[bold cyan]Running sky check...'):
+    with rich_utils.safe_status(ux_utils.spinner_message('Running sky check')):
         sky_check.check(clouds=['kubernetes'], quiet=True)
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
@@ -5425,7 +5427,8 @@ def local_down():
                             'local_down.log')
     tail_cmd = 'tail -n100 -f ' + log_path
 
-    with rich_utils.safe_status('[bold cyan]Removing local cluster...'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Removing local cluster')):
         style = colorama.Style
         click.echo('To view detailed progress: '
                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -5448,7 +5451,8 @@ def local_down():
                     f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     if cluster_removed:
         # Run sky check
-        with rich_utils.safe_status('[bold cyan]Running sky check...'):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Running sky check')):
             sky_check.check(clouds=['kubernetes'], quiet=True)
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')

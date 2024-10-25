@@ -10,8 +10,6 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
-import colorama
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -21,6 +19,8 @@ from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -82,11 +82,10 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
         az_mappings = None
         if aws_user_hash != 'default':
             # Fetch az mapping from AWS.
-            print(
-                f'\r{colorama.Style.DIM}AWS: Fetching availability zones '
-                f'mapping...{colorama.Style.RESET_ALL}',
-                end='')
-            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message('AWS: Fetching availability '
+                                             'zones mapping')):
+                az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             return None
         az_mappings.to_csv(az_mapping_path, index=False)
@@ -309,7 +308,17 @@ def list_accelerators(
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+    global _image_df
+
+    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_id is None:
+        # Refresh the image catalog and try again, if the image tag is not
+        # found.
+        logger.debug('Refreshing the image catalog and trying again.')
+        _image_df = common.read_catalog('aws/images.csv',
+                                        pull_frequency_hours=0)
+        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    return image_id
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:

@@ -282,34 +282,49 @@ def test_example_app():
 
 _VALIDATE_LAUNCH_OUTPUT = (
     # Validate the output of the job submission:
-    # I 05-23 07:52:47 cloud_vm_ray_backend.py:3217] Running setup on 1 node.
+    # ⚙️ Launching on Kubernetes.
+    #   Pod is up.
+    # ✓ Cluster launched: test. View logs at: ~/sky_logs/sky-2024-10-07-19-44-18-177288/provision.log
+    # ⚙️ Running setup on 1 pod.
     # running setup
-    # I 05-23 07:52:49 cloud_vm_ray_backend.py:3230] Setup completed.
-    # I 05-23 07:52:55 cloud_vm_ray_backend.py:3319] Job submitted with Job ID: 1
-    # I 05-23 07:52:58 log_lib.py:408] Start streaming logs for job 1.
-    # INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).
-    # INFO: Waiting for task resources on 1 node. This will block if the cluster is full.
-    # INFO: All task resources reserved.
-    # INFO: Reserved IPs: ['10.128.0.127']
-    # (min, pid=4164) # conda environments:
-    # (min, pid=4164) #
-    # (min, pid=4164) base                  *  /opt/conda
-    # (min, pid=4164)
-    # (min, pid=4164) task run finish
-    # INFO: Job finished (status: SUCCEEDED).
+    # ✓ Setup completed.
+    # ⚙️ Job submitted, ID: 1.
+    # ├── Waiting for task resources on 1 node.
+    # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
+    # (min, pid=1277) # conda environments:
+    # (min, pid=1277) #
+    # (min, pid=1277) base                  *  /opt/conda
+    # (min, pid=1277)
+    # (min, pid=1277) task run finish
+    # ✓ Job finished (status: SUCCEEDED).
+
+    # 📋 Useful Commands
+    # Job ID: 1
+    # ├── To cancel the job:          sky cancel test 1
+    # ├── To stream job logs:         sky logs test 1
+    # └── To view job queue:          sky queue test
+
+    # Cluster name: test
+    # ├── To log into the head VM:    ssh test
+    # ├── To submit a job:            sky exec test yaml_file
+    # ├── To stop the cluster:        sky stop test
+    # └── To teardown the cluster:    sky down test
+    'echo "$s" && echo "==Validating launching==" && '
+    'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
-    'grep -A 1 "Job submitted with Job ID:" | '
-    'grep "Start streaming logs for job" && '
+    'grep -A 1 "Job submitted, ID:" | '
+    'grep "Waiting for task resources on " && '
     'echo "==Validating task output starting==" && echo "$s" | '
-    'grep -A 1 "INFO: Reserved IPs" | grep "(min, pid=" && '
+    'grep -A 1 "Job started. Streaming logs..." | grep "(min, pid=" && '
     'echo "==Validating task output ending==" && '
     'echo "$s" | grep -A 1 "task run finish" | '
-    'grep "INFO: Job finished (status: SUCCEEDED)" && '
+    'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
-    'echo "$s" | grep -A 1 "INFO: Job finished (status: SUCCEEDED)" | '
-    'grep "Job ID:"')
+    'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
+    'grep "Useful Commands" && '
+    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
 
 
 # ---------- A minimal task ----------
@@ -368,7 +383,7 @@ def test_aws_region():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -391,7 +406,7 @@ def test_gcp_region_and_service_account():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -431,7 +446,7 @@ def test_azure_region():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -849,14 +864,14 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky status -r {name} | grep "UP"',
         f'sky logs {name} 1 --status',
-        f'sky logs {name} 1 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
         'sleep 60',
         f'sky status -r {name} | grep "STOPPED"',
         f'sky start -y {name}',
-        f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')
@@ -2647,7 +2662,7 @@ def test_managed_jobs(generic_cloud: str):
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
-            f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Successfully provisioned cluster:"',
+            f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         # TODO(zhwu): Change to _JOB_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
