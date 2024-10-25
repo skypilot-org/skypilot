@@ -1298,8 +1298,7 @@ class S3Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
@@ -1318,8 +1317,8 @@ class S3Store(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f's3://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -1446,7 +1445,8 @@ class S3Store(AbstractStore):
                 }
             s3_client.create_bucket(**create_bucket_config)
             logger.info(
-                f'Created S3 bucket {bucket_name!r} in {region or "us-east-1"}')
+                f'  {colorama.Style.DIM}Created S3 bucket {bucket_name!r} in '
+                f'{region or "us-east-1"}{colorama.Style.RESET_ALL}')
 
             # Add AWS tags configured in config.yaml to the bucket.
             # This is useful for cost tracking and external cleanup.
@@ -1487,7 +1487,8 @@ class S3Store(AbstractStore):
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
+                    ux_utils.spinner_message(
+                        f'Deleting S3 bucket [green]{bucket_name}')):
                 subprocess.check_output(remove_command.split(' '),
                                         stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -1727,8 +1728,8 @@ class GcsStore(AbstractStore):
                         f'cp -e -n -r -I gs://{self.name}')
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f'gs://{self.name}/')):
             data_utils.run_upload_cli(sync_command,
                                       self._ACCESS_DENIED_MESSAGE,
                                       bucket_name=self.name)
@@ -1764,8 +1765,7 @@ class GcsStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             # we exclude .git directory from the sync
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
@@ -1783,8 +1783,8 @@ class GcsStore(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f'gs://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -1906,8 +1906,9 @@ class GcsStore(AbstractStore):
                     f'Attempted to create a bucket {self.name} but failed.'
                 ) from e
         logger.info(
-            f'Created GCS bucket {new_bucket.name} in {new_bucket.location} '
-            f'with storage class {new_bucket.storage_class}')
+            f'  {colorama.Style.DIM}Created GCS bucket {new_bucket.name!r} in '
+            f'{new_bucket.location} with storage class '
+            f'{new_bucket.storage_class}{colorama.Style.RESET_ALL}')
         return new_bucket
 
     def _delete_gcs_bucket(self, bucket_name: str) -> bool:
@@ -1921,7 +1922,8 @@ class GcsStore(AbstractStore):
         """
 
         with rich_utils.safe_status(
-                f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
+                ux_utils.spinner_message(
+                    f'Deleting GCS bucket [green]{bucket_name}')):
             try:
                 self.client.get_bucket(bucket_name)
             except gcp.forbidden_exception() as e:
@@ -2308,11 +2310,12 @@ class AzureBlobStore(AbstractStore):
                         resource_group_name)
                 except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                            '[bold cyan]Setting up resource group: '
-                            f'{resource_group_name}'):
+                            ux_utils.spinner_message(
+                                f'Setting up resource group: '
+                                f'{resource_group_name}')):
                         self.resource_client.resource_groups.create_or_update(
                             resource_group_name, {'location': self.region})
-                    logger.info('Created Azure resource group '
+                    logger.info('  Created Azure resource group '
                                 f'{resource_group_name!r}.')
                 # check if the storage account name already exists under the
                 # given resource group name.
@@ -2321,13 +2324,14 @@ class AzureBlobStore(AbstractStore):
                         resource_group_name, storage_account_name)
                 except azure.exceptions().ResourceNotFoundError:
                     with rich_utils.safe_status(
-                            '[bold cyan]Setting up storage account: '
-                            f'{storage_account_name}'):
+                            ux_utils.spinner_message(
+                                f'Setting up storage account: '
+                                f'{storage_account_name}')):
                         self._create_storage_account(resource_group_name,
                                                      storage_account_name)
                         # wait until new resource creation propagates to Azure.
                         time.sleep(1)
-                    logger.info('Created Azure storage account '
+                    logger.info('  Created Azure storage account '
                                 f'{storage_account_name!r}.')
 
         return storage_account_name, resource_group_name
@@ -2490,8 +2494,7 @@ class AzureBlobStore(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
             # we exclude .git directory from the sync
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/')
             excludes_list = ';'.join(
                 [file_name.rstrip('*') for file_name in excluded_list])
@@ -2517,9 +2520,9 @@ class AzureBlobStore(AbstractStore):
         container_endpoint = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=self.storage_account_name,
             container_name=self.name)
-        with rich_utils.safe_status(f'[bold cyan]Syncing '
-                                    f'[green]{source_message}[/] to '
-                                    f'[green]{container_endpoint}/[/]'):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(
+                    f'Syncing {source_message} -> {container_endpoint}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -2668,9 +2671,10 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name,
                 container_name,
                 blob_container={})
-            logger.info('Created AZ Container '
+            logger.info(f'  {colorama.Style.DIM}Created AZ Container '
                         f'{container_name!r} in {self.region!r} under storage '
-                        f'account {self.storage_account_name!r}.')
+                        f'account {self.storage_account_name!r}.'
+                        f'{colorama.Style.RESET_ALL}')
         except azure.exceptions().ResourceExistsError as e:
             if 'container is being deleted' in e.error.message:
                 with ux_utils.print_exception_no_traceback():
@@ -2703,7 +2707,8 @@ class AzureBlobStore(AbstractStore):
         """
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting Azure container {container_name}[/]'):
+                    ux_utils.spinner_message(
+                        f'Deleting Azure container {container_name}')):
                 # Check for the existance of the container before deletion.
                 self.storage_client.blob_containers.get(
                     self.resource_group_name,
@@ -2895,8 +2900,7 @@ class R2Store(AbstractStore):
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             # we exclude .git directory from the sync
-            excluded_list = storage_utils.get_excluded_files_from_gitignore(
-                src_dir_path)
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
@@ -2920,8 +2924,8 @@ class R2Store(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to [green]r2://{self.name}/[/]'):
+                ux_utils.spinner_message(
+                    f'Syncing {source_message} -> r2://{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -3059,7 +3063,9 @@ class R2Store(AbstractStore):
                 location = {'LocationConstraint': region}
                 r2_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
-                logger.info(f'Created R2 bucket {bucket_name} in {region}')
+                logger.info(f'  {colorama.Style.DIM}Created R2 bucket '
+                            f'{bucket_name!r} in {region}'
+                            f'{colorama.Style.RESET_ALL}')
         except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
@@ -3091,7 +3097,8 @@ class R2Store(AbstractStore):
             f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
             with rich_utils.safe_status(
-                    f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
+                    ux_utils.spinner_message(
+                        f'Deleting R2 bucket {bucket_name}')):
                 subprocess.check_output(remove_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True)
@@ -3358,9 +3365,8 @@ class IBMCosStore(AbstractStore):
             source_message = source_path_list[0]
 
         with rich_utils.safe_status(
-                f'[bold cyan]Syncing '
-                f'[green]{source_message}[/] to '
-                f'[green]cos://{self.region}/{self.name}/[/]'):
+                ux_utils.spinner_message(f'Syncing {source_message} -> '
+                                         f'cos://{self.region}/{self.name}/')):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
@@ -3494,8 +3500,10 @@ class IBMCosStore(AbstractStore):
                 CreateBucketConfiguration={
                     'LocationConstraint': f'{region}-smart'
                 })
-            logger.info(f'Created IBM COS bucket {bucket_name} in {region} '
-                        f'with storage class smart tier')
+            logger.info(f'  {colorama.Style.DIM}Created IBM COS bucket '
+                        f'{bucket_name!r} in {region} '
+                        'with storage class smart tier'
+                        f'{colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
         except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long

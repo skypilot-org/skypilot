@@ -16,7 +16,11 @@ provider:
   disable_launch_config_check: true
 
 auth:
+{% if os_type == "ubuntu" %}
   ssh_user: ubuntu
+{% else %}
+  ssh_user: opc
+{% endif %}
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
@@ -85,14 +89,20 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo systemctl stop unattended-upgrades || true;
+  - echo "setup commands runs at $(date)" > /tmp/provision.tmp.out || true;
+    {%- if os_type == "ubuntu" %}
+    sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
-    ([ `sudo lshw -class display | grep "NVIDIA Corporation" | wc -l` -gt 0 ]) && (sudo which nvidia-smi > /dev/null || ( sudo apt-get install nvidia-driver-530-open -y && sudo apt-get install nvidia-driver-525-server -y ) || true);
+    {%- else %}
+    sudo /usr/libexec/oci-growfs -y || true;
+    sudo systemctl stop firewalld || true;
+    sudo systemctl disable firewalld || true;
+    {%- endif %}
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ ray_skypilot_installation_commands }}
