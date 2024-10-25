@@ -356,7 +356,7 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
-    skip_setup: bool = False,
+    fast: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
@@ -411,7 +411,7 @@ def launch(
         clone_disk_from: [Experimental] if set, clone the disk from the
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
-        skip_setup: [Experimental] If the cluster is already up and available,
+        fast: [Experimental] If the cluster is already up and available,
             skip provisioning and setup steps.
 
     Example:
@@ -458,8 +458,8 @@ def launch(
 
     handle = None
     stages = None
-    # Check if cluster exists and we have skip_setup
-    if skip_setup and cluster_name is not None:
+    # Check if cluster exists and we are doing fast provisioning
+    if fast and cluster_name is not None:
         maybe_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         if maybe_handle is not None:
