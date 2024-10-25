@@ -110,7 +110,7 @@ Paste the following into a file `my_task.yaml`:
 
 ```yaml
 resources:
-  accelerators: V100:1  # 1x NVIDIA V100 GPU
+  accelerators: A100:8  # 8x NVIDIA A100 GPU
 
 num_nodes: 1  # Number of VMs to launch
 

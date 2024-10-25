@@ -71,6 +71,9 @@ def enable_all_clouds_in_monkeypatch(
                         lambda *_args, **_kwargs: [True, ''])
     monkeypatch.setattr('sky.provision.kubernetes.utils.get_spot_label',
                         lambda *_args, **_kwargs: [None, None])
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+        lambda *_args, **_kwargs: [False, None])
 
     # monkeypatch class Kubernetes.
     monkeypatch.setattr(

@@ -253,12 +253,13 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
-                '[ -f /etc/docker/daemon.json ] || '
+                '{ which jq || sudo apt update && sudo apt install -y jq; } && '
+                '{ [ -f /etc/docker/daemon.json ] || '
                 'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
-                'sudo systemctl restart docker')
+                'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
@@ -335,7 +336,11 @@ class DockerInitializer:
 
     def _check_docker_installed(self):
         no_exist = 'NoExist'
+        # SkyPilot: Add the current user to the docker group first (if needed),
+        # before checking if docker is installed to avoid permission issues.
         cleaned_output = self._run(
+            'id -nG $USER | grep -qw docker || '
+            'sudo usermod -aG docker $USER > /dev/null 2>&1;'
             f'command -v {self.docker_cmd} || echo {no_exist!r}')
         if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
@@ -424,8 +429,8 @@ class DockerInitializer:
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self._run(check_docker_running_cmd(self.container_name,
-                                                     self.docker_cmd),
-                            wait_for_docker_daemon=True))
-        return 'false' in output.lower(
-        ) and 'no such object' not in output.lower()
+        output = self._run(check_docker_running_cmd(self.container_name,
+                                                    self.docker_cmd),
+                           wait_for_docker_daemon=True)
+        return ('false' in output.lower() and
+                'no such object' not in output.lower())

@@ -18,6 +18,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
@@ -432,8 +433,7 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
-    # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
-    for new_node in new_nodes:
+    def _setup_ssh_thread(new_node):
         pod_name = new_node.metadata.name
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name))
@@ -444,6 +444,8 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         _raise_command_running_error('setup ssh', set_k8s_ssh_cmd, pod_name, rc,
                                      stdout)
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
+
+    subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
