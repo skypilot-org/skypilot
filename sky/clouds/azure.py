@@ -45,6 +45,8 @@ _DEFAULT_V1_IMAGE_ID = 'skypilot:v1-ubuntu-2004'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 
+_COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -154,24 +156,29 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
-        compute_client = azure.get_client('compute', cls.get_project_id())
-        if region is None:
-            # The region used here is only for where to send the query,
-            # not the image location. Azure's image is globally available.
-            region = 'eastus'
-        is_skypilot_image_tag = False
+        # Process skypilot images.
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
                                                              clouds='azure')
-            if image_id.startswith('/CommunityGalleries'):
+            if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
                 # Avoid querying the image size from Azure as
                 # all skypilot custom images have the same size.
                 return _DEFAULT_SKYPILOT_IMAGE_GB
+            else:
+                publisher, offer, sku, version = image_id.split(':')
+                if offer == 'ubuntu-hpc':
+                    return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
+                else:
+                    return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
 
+        # Process user-specified images.
         azure_utils.validate_image_id(image_id)
+        compute_client = azure.get_client('compute', cls.get_project_id())
 
-        # Azure community gallery image passed in by the user.
-        if image_id.startswith('/CommunityGalleries'):
+        # Community gallery image.
+        if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
+            if region is None:
+                return 0.0
             _, _, gallery_name, _, image_name = image_id.split('/')
             try:
                 return azure_utils.get_community_image_size(
@@ -179,14 +186,12 @@ class Azure(clouds.Cloud):
             except exceptions.ResourcesUnavailableError:
                 return 0.0
 
-        # Azure marketplace image
+        # Marketplace image
+        if region is None:
+            # The region used here is only for where to send the query,
+            # not the image location. Marketplace image is globally available.
+            region = 'eastus'
         publisher, offer, sku, version = image_id.split(':')
-        if is_skypilot_image_tag:
-            if offer == 'ubuntu-hpc':
-                return _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB
-            else:
-                return _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB
-        compute_client = azure.get_client('compute', cls.get_project_id())
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
@@ -328,14 +333,14 @@ class Azure(clouds.Cloud):
             # regional so we need the correct region when we check whether
             # the image exists.
             if image_id.startswith(
-                    '/CommunityGalleries'
+                    _COMMUNITY_IMAGE_PREFIX
             ) and region_name not in azure_catalog.COMMUNITY_IMAGE_AVAILABLE_REGIONS:
                 logger.info(f'Azure image {image_id} does not exist in region '
                             f'{region_name} so use the fallback image instead.')
                 image_id = service_catalog.get_image_id_from_tag(
                     _FALLBACK_IMAGE_ID, clouds='azure')
 
-        if image_id.startswith('/CommunityGalleries'):
+        if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
             image_config = {'community_gallery_image_id': image_id}
         else:
             publisher, offer, sku, version = image_id.split(':')
