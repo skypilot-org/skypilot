@@ -338,14 +338,22 @@ class DockerInitializer:
         no_exist = 'NoExist'
         # SkyPilot: Add the current user to the docker group first (if needed),
         # before checking if docker is installed to avoid permission issues.
-        cleaned_output = self._run(
-            'id -nG $USER | grep -qw docker || '
+        docker_cmd = ('id -nG $USER | grep -qw docker || '
             'sudo usermod -aG docker $USER > /dev/null 2>&1;'
             f'command -v {self.docker_cmd} || echo {no_exist!r}')
-        if no_exist in cleaned_output or 'docker' not in cleaned_output:
-            logger.error(
-                f'{self.docker_cmd.capitalize()} not installed. Please use an '
-                f'image with {self.docker_cmd.capitalize()} installed.')
+        cleaned_output = self._run(docker_cmd)
+        timeout = 60 * 5 # 5 minute timeout
+        start = time.time()
+        while no_exist in cleaned_output or 'docker' not in cleaned_output:
+            if time.time() - start > timeout:
+                logger.error(
+                    f'{self.docker_cmd.capitalize()} not installed. Please use an '
+                    f'image with {self.docker_cmd.capitalize()} installed.')
+                return
+            time.sleep(5)
+            cleaned_output = self._run(docker_cmd)
+
+            
 
     def _check_container_status(self):
         if self.initialized:
