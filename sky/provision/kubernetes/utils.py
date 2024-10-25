@@ -615,7 +615,8 @@ def get_accelerator_label_key_value(
         context: Optional[str],
         acc_type: str,
         acc_count: Optional[int],
-        check_mode=False) -> Tuple[str, str, str, str]:
+        check_mode=False
+        ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Returns the label key and value for the given GPU/TPU type.
 
     Args:
@@ -629,8 +630,8 @@ def get_accelerator_label_key_value(
     Returns:
         A tuple of the accelerator label key, value, topology label key, and
         topology value. The topology label key and value are populated only if
-        the requested accelerator type is TPU. Returns empty strings if
-        check_mode is True.
+        the requested accelerator type is TPU. Returns None if check_mode is
+        True.
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
@@ -655,12 +656,12 @@ def get_accelerator_label_key_value(
             # If check mode is enabled and autoscaler is set, we can return
             # early since we assume the cluster autoscaler will handle GPU
             # node provisioning.
-            return '', '', '', ''
+            return None, None, None, None
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
         assert formatter is not None, ('Unsupported autoscaler type:'
                                        f' {autoscaler_type}')
         return formatter.get_label_key(acc_type), formatter.get_label_value(
-            acc_type), '', ''
+            acc_type), None, None
 
     has_gpus, cluster_resources = detect_accelerator_resource(context)
     if has_gpus:
@@ -700,7 +701,7 @@ def get_accelerator_label_key_value(
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
-                return '', '', '', ''
+                return None, None, None, None
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -735,7 +736,7 @@ def get_accelerator_label_key_value(
                                 else:
                                     continue
                         else:
-                            return label, value, '', ''
+                            return label, value, None, None
 
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
