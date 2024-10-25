@@ -9,6 +9,7 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
+from sky import provision as provision_lib
 from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
@@ -16,8 +17,10 @@ from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
+from sky.provision import common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -54,6 +57,8 @@ def launch(
     dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    dag, mutated_user_config = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     if not dag.is_chain():
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
@@ -74,9 +79,11 @@ def launch(
 
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    for task_ in dag.tasks:
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='jobs')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Initializing managed job')):
+        for task_ in dag.tasks:
+            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                task_, path='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -103,6 +110,7 @@ def launch(
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
+                local_user_config=mutated_user_config,
             ),
         }
 
@@ -123,7 +131,6 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky_logging.print('Launching jobs controller...')
         sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
@@ -132,6 +139,82 @@ def launch(
                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    retry_until_up=True,
                    _disable_controller_check=True)
+
+
+def queue_from_kubernetes_pod(
+        pod_name: str,
+        context: Optional[str] = None,
+        skip_finished: bool = False) -> List[Dict[str, Any]]:
+    """Gets the jobs queue from a specific controller pod.
+
+    Args:
+        pod_name (str): The name of the controller pod to query for jobs.
+        context (Optional[str]): The Kubernetes context to use. If None, the
+            current context is used.
+        skip_finished (bool): If True, does not return finished jobs.
+
+    Returns:
+        [
+            {
+                'job_id': int,
+                'job_name': str,
+                'resources': str,
+                'submitted_at': (float) timestamp of submission,
+                'end_at': (float) timestamp of end,
+                'duration': (float) duration in seconds,
+                'recovery_count': (int) Number of retries,
+                'status': (sky.jobs.ManagedJobStatus) of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
+            }
+        ]
+
+    Raises:
+        RuntimeError: If there's an error fetching the managed jobs.
+    """
+    # Create dummy cluster info to get the command runner.
+    provider_config = {'context': context}
+    instances = {
+        pod_name: [
+            common.InstanceInfo(instance_id=pod_name,
+                                internal_ip='',
+                                external_ip='',
+                                tags={})
+        ]
+    }  # Internal IP is not required for Kubernetes
+    cluster_info = common.ClusterInfo(provider_name='kubernetes',
+                                      head_instance_id=pod_name,
+                                      provider_config=provider_config,
+                                      instances=instances)
+    managed_jobs_runner = provision_lib.get_command_runners(
+        'kubernetes', cluster_info)[0]
+
+    code = managed_job_utils.ManagedJobCodeGen.get_job_table()
+    returncode, job_table_payload, stderr = managed_jobs_runner.run(
+        code,
+        require_outputs=True,
+        separate_stderr=True,
+        stream_logs=False,
+    )
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch managed jobs',
+                                           job_table_payload + stderr,
+                                           stream_logs=False)
+    except exceptions.CommandError as e:
+        raise RuntimeError(str(e)) from e
+
+    jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+    if skip_finished:
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+    return jobs
 
 
 @usage_lib.entrypoint
@@ -180,11 +263,12 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                           f'{colorama.Style.RESET_ALL}')
 
         rich_utils.force_update_status(
-            '[cyan] Checking managed jobs - restarting '
-            'controller[/]')
+            ux_utils.spinner_message('Checking managed jobs - restarting '
+                                     'controller'))
         handle = sky.start(jobs_controller_type.value.cluster_name)
         controller_status = status_lib.ClusterStatus.UP
-        rich_utils.force_update_status('[cyan] Checking managed jobs[/]')
+        rich_utils.force_update_status(
+            ux_utils.spinner_message('Checking managed jobs'))
 
     assert handle is not None, (controller_status, refresh)
 

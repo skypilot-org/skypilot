@@ -27,7 +27,6 @@ release = version
 # -- General configuration
 
 extensions = [
-    'sphinxemoji.sphinxemoji',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.duration',
@@ -38,6 +37,8 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
+    'sphinxcontrib.googleanalytics',
+    'sphinxemoji.sphinxemoji',
     'sphinx_design',
     'myst_parser',
 ]
@@ -161,6 +162,8 @@ show_sphinx = False
 
 exclude_patterns = ['_gallery_original']
 myst_heading_anchors = 3
+
+googleanalytics_id = 'G-92WF3MDCJV'
 
 
 def setup(app):

@@ -9,7 +9,7 @@ import pathlib
 import shutil
 import time
 import traceback
-from typing import Dict, List
+from typing import Dict
 
 import filelock
 
@@ -116,15 +116,17 @@ def _cleanup(service_name: str) -> bool:
             logger.error(f'Replica {info.replica_id} failed to terminate.')
     versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
-    success = True
-    for version in versions:
+
+    def cleanup_version_storage(version: int) -> bool:
         task_yaml: str = serve_utils.generate_task_yaml_file_name(
             service_name, version)
         logger.info(f'Cleaning up storage for version {version}, '
                     f'task_yaml: {task_yaml}')
-        success = success and cleanup_storage(task_yaml)
-    if not success:
+        return cleanup_storage(task_yaml)
+
+    if not all(map(cleanup_version_storage, versions)):
         failed = True
+
     return failed
 
 
@@ -213,6 +215,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
+
             load_balancer_port = common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
 
@@ -236,13 +239,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         serve_state.set_service_status_and_active_versions(
             service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
-        process_to_kill: List[multiprocessing.Process] = []
-        if load_balancer_process is not None:
-            process_to_kill.append(load_balancer_process)
-        if controller_process is not None:
-            process_to_kill.append(controller_process)
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
+        process_to_kill = [
+            proc for proc in [load_balancer_process, controller_process]
+            if proc is not None
+        ]
         subprocess_utils.kill_children_processes(
             [process.pid for process in process_to_kill], force=True)
         for process in process_to_kill:

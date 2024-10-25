@@ -132,6 +132,8 @@ class PaperspaceCloudClient:
             'apt-get update \n'
             'apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \n'  # pylint: disable=line-too-long
             'fi \n'
+            # TODO(tian): Maybe remove this as well since we are now adding
+            # users to docker group in the DockerInitializer. Need to test.
             'usermod -aG docker paperspace \n'
             f'echo "{public_key}" >> /home/paperspace/.ssh/authorized_keys \n')
         try:

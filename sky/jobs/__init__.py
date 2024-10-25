@@ -8,6 +8,7 @@ from sky.jobs.constants import JOBS_TASK_YAML_PREFIX
 from sky.jobs.core import cancel
 from sky.jobs.core import launch
 from sky.jobs.core import queue
+from sky.jobs.core import queue_from_kubernetes_pod
 from sky.jobs.core import tail_logs
 from sky.jobs.recovery_strategy import DEFAULT_RECOVERY_STRATEGY
 from sky.jobs.recovery_strategy import RECOVERY_STRATEGIES
@@ -34,6 +35,7 @@ __all__ = [
     'cancel',
     'launch',
     'queue',
+    'queue_from_kubernetes_pod',
     'tail_logs',
     # utils
     'ManagedJobCodeGen',

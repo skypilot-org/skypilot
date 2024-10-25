@@ -32,6 +32,14 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Image ID tags
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+# For GPU-related package version,
+# see sky/clouds/service_catalog/images/provisioners/cuda.sh
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
+_DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
+
 # This local file (under ~/.aws/) will be uploaded to remote nodes (any
 # cloud), if all of the following conditions hold:
 #   - the current user identity is not using AWS SSO
@@ -217,14 +225,20 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag(
-            'skypilot:gpu-ubuntu-2004', region_name, clouds='aws')
+        image_id = service_catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
+                                                         region_name,
+                                                         clouds='aws')
         if acc is not None:
+            image_id = service_catalog.get_image_id_from_tag(
+                _DEFAULT_GPU_IMAGE_ID, region_name, clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 image_id = service_catalog.get_image_id_from_tag(
-                    'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
+                    _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
+            if acc_name in ['Trainium', 'Inferentia']:
+                image_id = service_catalog.get_image_id_from_tag(
+                    _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -296,7 +310,10 @@ class AWS(clouds.Cloud):
         # The command for getting the current zone is from:
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
-            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" '
+            '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
+            'curl -H "X-aws-ec2-metadata-token: $TOKEN" -s '
+            'http://169.254.169.254/latest/dynamic/instance-identity/document'
             f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
             'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str
@@ -547,7 +564,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            identity_str = cls.get_current_user_identity_str()
+            identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -584,7 +601,7 @@ class AWS(clouds.Cloud):
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
-            # `get_current_user_identity` does not guarantee this file exists.
+            # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
@@ -648,7 +665,7 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
         These fields come from `aws sts get-caller-identity`. We permit the same
@@ -752,11 +769,13 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_ids
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for AWS. Currently we only support one identity.
+        return [user_ids]
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         identity_str = f'{user_identity[0]} [account={user_identity[1]}]'
@@ -798,7 +817,11 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: resources_utils.DiskTier) -> str:
-        return 'standard' if disk_tier == resources_utils.DiskTier.LOW else 'gp3'
+        if disk_tier == resources_utils.DiskTier.LOW:
+            return 'standard'
+        if disk_tier == resources_utils.DiskTier.ULTRA:
+            return 'io2'
+        return 'gp3'
 
     @classmethod
     def _get_disk_specs(
@@ -806,15 +829,19 @@ class AWS(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
         tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
+            resources_utils.DiskTier.ULTRA: 20000,
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,
-            resources_utils.DiskTier.LOW: 0,  # only gp3 is required to set iops
+            resources_utils.DiskTier.LOW: 0,  # iops is not required on standard disk
         }
         return {
             'disk_tier': cls._get_disk_type(tier),
-            'disk_iops': tier2iops[tier],
-            'disk_throughput': tier2iops[tier] // 16,
-            'custom_disk_perf': tier != resources_utils.DiskTier.LOW,
+            'disk_iops': tier2iops[tier]
+                         if cls._get_disk_type(tier) != 'standard' else None,
+            # Custom disk throughput is only available for gp3
+            # see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-launchtemplate-ebs.html
+            'disk_throughput': tier2iops[tier] // 16
+                               if cls._get_disk_type(tier) == 'gp3' else None,
         }
 
     @classmethod
@@ -846,6 +873,12 @@ class AWS(clouds.Cloud):
 
         if quota_code is None:
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        if aws_utils.use_reservations():
+            # When reservations are used, it is possible that a user has
+            # reservations for an instance type, but does not have the quota
+            # for that instance type. Skipping the quota check in this case.
             return True
 
         client = aws.client('service-quotas', region_name=region)
