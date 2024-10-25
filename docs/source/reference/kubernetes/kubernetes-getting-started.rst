@@ -150,11 +150,11 @@ Unlike :code:`sky status` which lists only the SkyPilot resources launched by th
     bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
     bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
 
-You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --cloud kubernetes`.
+You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --cloud kubernetes` (or :code:`--cloud k8s`).
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud kubernetes
+    $ sky show-gpus --cloud k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
     L4    1, 2, 4                   12          12

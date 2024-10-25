@@ -142,11 +142,11 @@ Deploying on Google Cloud GKE
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud kubernetes`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --cloud kubernetes
+       $ sky show-gpus --cloud k8s
        GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
        L4    1, 2, 4                   8           6
        A100  1, 2                      4           2
@@ -197,11 +197,11 @@ Deploying on Amazon EKS
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud kubernetes`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --cloud kubernetes
+       $ sky show-gpus --cloud k8s
        GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
        A100  1, 2                      4           2
 
