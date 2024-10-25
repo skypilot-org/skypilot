@@ -409,7 +409,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     else:
                         task_specs = managed_job_state.get_task_specs(
                             job_id, task_id)
-                        if task_specs.get('max_retry_on_failure', 0) == 0:
+                        if task_specs.get('max_restarts_on_failure', 0) == 0:
                             # We don't need to wait for the managed job status
                             # update, as the job is guaranteed to be in terminal
                             # state afterwards.

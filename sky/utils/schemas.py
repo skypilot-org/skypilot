@@ -107,7 +107,7 @@ def _get_single_resources_schema():
                                 'type': 'null',
                             }],
                         },
-                        'max_retry_on_failure': {
+                        'max_restarts_on_failure': {
                             'type': 'integer',
                         },
                     }
