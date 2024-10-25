@@ -10,10 +10,10 @@ import colorama
 from sky.utils import env_options
 from sky.utils import rich_utils
 
-# If the SKYPILOT_MINIMIZE_LOGGING environment variable is set to True,
-# remove logging prefixes and unnecessary information in optimizer
-_FORMAT = (None if env_options.Options.MINIMIZE_LOGGING.get() else
-           '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')
+# UX: Should we show logging prefixes and some extra information in optimizer?
+_show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
+                        not env_options.Options.MINIMIZE_LOGGING.get())
+_FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 
 
@@ -45,6 +45,7 @@ _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
 
+NO_PREFIX_FORMATTER = NewLineFormatter(None, datefmt=_DATE_FORMAT)
 FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
 DIM_FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT, dim=True)
 
@@ -67,7 +68,10 @@ def _setup_logger():
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    _default_handler.setFormatter(FORMATTER)
+    if _show_logging_prefix:
+        _default_handler.setFormatter(FORMATTER)
+    else:
+        _default_handler.setFormatter(NO_PREFIX_FORMATTER)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False

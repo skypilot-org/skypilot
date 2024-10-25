@@ -10,6 +10,7 @@ import io
 import multiprocessing
 import os
 import textwrap
+import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -19,6 +20,7 @@ import numpy as np
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -37,6 +39,9 @@ TPU_SERVICE_ID = 'E000-3F24-B8AA'
 
 # The number of digits to round the price to.
 PRICE_ROUNDING = 5
+
+# The number of retries for the TPU API.
+TPU_RETRY_CNT = 3
 
 # This zone is only for TPU v4, and does not appear in the skus yet.
 TPU_V4_ZONES = ['us-central2-b']
@@ -414,6 +419,11 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
                 if count != 8:
                     # H100 only has 8 cards.
                     continue
+            if 'H100-MEGA-80GB' in gpu_name:
+                gpu_name = 'H100-MEGA'
+                if count != 8:
+                    # H100-MEGA only has 8 cards.
+                    continue
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
@@ -442,6 +452,7 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'A100-80GB': 80 * 1024,
         'A100': 40 * 1024,
         'H100': 80 * 1024,
+        'H100-MEGA': 80 * 1024,
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
@@ -486,12 +497,17 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             if sku['category']['usageType'] != ondemand_or_spot:
                 continue
 
-            gpu_name = row['AcceleratorName']
-            if gpu_name == 'A100-80GB':
-                gpu_name = 'A100 80GB'
-            if gpu_name == 'H100':
-                gpu_name = 'H100 80GB'
-            if f'{gpu_name} GPU' not in sku['description']:
+            gpu_names = [row['AcceleratorName']]
+            if gpu_names[0] == 'A100-80GB':
+                gpu_names = ['A100 80GB']
+            if gpu_names[0] == 'H100':
+                gpu_names = ['H100 80GB']
+            if gpu_names[0] == 'H100-MEGA':
+                # Seems that H100-MEGA has two different descriptions in SKUs in
+                # different regions: 'H100 80GB Mega' and 'H100 80GB Plus'.
+                gpu_names = ['H100 80GB Mega', 'H100 80GB Plus']
+            if not any(f'{gpu_name} GPU' in sku['description']
+                       for gpu_name in gpu_names):
                 continue
 
             unit_price = _get_unit_price(sku)
@@ -518,6 +534,34 @@ def get_gpu_df(skus: List[Dict[str, Any]],
     return df
 
 
+def _get_tpu_response_for_zone(zone: str) -> list:
+    parent = f'projects/{project_id}/locations/{zone}'
+    # Sometimes the response is empty ({}) even for enabled zones. Here we
+    # retry the request for a few times.
+    backoff = common_utils.Backoff(initial_backoff=1)
+    for _ in range(TPU_RETRY_CNT):
+        tpus_request = (
+            tpu_client.projects().locations().acceleratorTypes().list(
+                parent=parent))
+        try:
+            tpus_response = tpus_request.execute()
+            if 'acceleratorTypes' in tpus_response:
+                return tpus_response['acceleratorTypes']
+        except gcp.http_error_exception() as error:
+            if error.resp.status == 403:
+                print('  TPU API is not enabled or you don\'t have TPU access '
+                      f'to zone: {zone!r}.')
+            else:
+                print(f'  An error occurred: {error}')
+            # If error happens, fail early.
+            return []
+        time_to_sleep = backoff.current_backoff()
+        print(f'  Retry zone {zone!r} in {time_to_sleep} seconds...')
+        time.sleep(time_to_sleep)
+    print(f'ERROR: Failed to fetch TPUs for zone {zone!r}.')
+    return []
+
+
 def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     # Use hardcoded TPU V5 data as it is invisible in some zones.
     missing_tpus_df = pd.DataFrame(columns=[
@@ -526,19 +570,8 @@ def _get_tpu_for_zone(zone: str) -> 'pd.DataFrame':
     if zone in TPU_V5_MISSING_ZONES_DF:
         missing_tpus_df = TPU_V5_MISSING_ZONES_DF[zone]
     tpus = []
-    parent = f'projects/{project_id}/locations/{zone}'
-    tpus_request = tpu_client.projects().locations().acceleratorTypes().list(
-        parent=parent)
-    try:
-        tpus_response = tpus_request.execute()
-        for tpu in tpus_response['acceleratorTypes']:
-            tpus.append(tpu)
-    except gcp.http_error_exception() as error:
-        if error.resp.status == 403:
-            print('  TPU API is not enabled or you don\'t have TPU access '
-                  f'to zone: {zone!r}.')
-        else:
-            print(f'  An error occurred: {error}')
+    for tpu in _get_tpu_response_for_zone(zone):
+        tpus.append(tpu)
     new_tpus = []
     for tpu in tpus:
         tpu_name = tpu['type']
@@ -648,7 +681,13 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        assert spot or tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
+        # TODO(tian): Hack. Should investigate how to retrieve the price
+        # for TPU-v6e.
+        if not tpu_name.startswith('tpu-v6e'):
+            assert spot or tpu_price is not None, (row, hidden_tpu,
+                                                   HIDDEN_TPU_DF)
+        else:
+            tpu_price = 0.0
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)

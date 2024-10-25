@@ -7,6 +7,8 @@ import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_IGNORE_FILE = '.skyignore'
+GIT_IGNORE_FILE = '.gitignore'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
 # Default Ray tempdir is /tmp/ray.
@@ -126,9 +128,7 @@ DISABLE_GPU_ECC_COMMAND = (
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
-# Using lambda instead of str.format() since there are multiple {} in the
-# installation commands and we only want to replace some of them.
-CONDA_INSTALLATION_COMMANDS = lambda conda_auto_activate: (
+CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
@@ -137,7 +137,8 @@ CONDA_INSTALLATION_COMMANDS = lambda conda_auto_activate: (
     # true.
     '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
-    f'conda config --set auto_activate_base {conda_auto_activate} && '
+    # Caller should replace {conda_auto_activate} with either true or false.
+    'conda config --set auto_activate_base {conda_auto_activate} && '
     'conda activate base; }; }; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
@@ -154,8 +155,8 @@ CONDA_INSTALLATION_COMMANDS = lambda conda_auto_activate: (
     # We use --system-site-packages to reuse the system site packages to avoid
     # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
+    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages;'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
 _sky_version = str(version.parse(sky.__version__))
