@@ -581,6 +581,15 @@ _NETWORK_CONFIG_SCHEMA = {
 }
 
 _LABELS_SCHEMA = {
+    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
+    # compatibility. Will be removed after 0.7.0.
+    'instance_tags': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': {
+            'type': 'string',
+        },
+    },
     'labels': {
         'type': 'object',
         'required': [],
@@ -701,6 +710,7 @@ def get_config_schema():
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'gcp': {
             'type': 'object',
@@ -738,6 +748,7 @@ def get_config_schema():
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'azure': {
             'type': 'object',

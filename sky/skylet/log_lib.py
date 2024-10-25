@@ -186,11 +186,20 @@ def run_with_log(
             daemon_script = os.path.join(
                 os.path.dirname(os.path.abspath(job_lib.__file__)),
                 'subprocess_daemon.py')
-            python_path = subprocess.check_output(
-                constants.SKY_GET_PYTHON_PATH_CMD,
-                shell=True,
-                stderr=subprocess.DEVNULL,
-                encoding='utf-8').strip()
+            if not hasattr(constants, 'SKY_GET_PYTHON_PATH_CMD'):
+                # Backward compatibility: for cluster started before #3326, this
+                # constant does not exist. Since we generate the job script
+                # in backends.cloud_vm_ray_backend with inspect, so the
+                # the lates `run_with_log` will be used, but the `constants` is
+                # not updated. We fallback to `python3` in this case.
+                # TODO(zhwu): remove this after 0.7.0.
+                python_path = 'python3'
+            else:
+                python_path = subprocess.check_output(
+                    constants.SKY_GET_PYTHON_PATH_CMD,
+                    shell=True,
+                    stderr=subprocess.DEVNULL,
+                    encoding='utf-8').strip()
             daemon_cmd = [
                 python_path,
                 daemon_script,
