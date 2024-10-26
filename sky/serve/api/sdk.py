@@ -109,6 +109,23 @@ def down(
 
 @usage_lib.entrypoint
 @api_common.check_health
+def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
+    """Terminate a replica."""
+    body = payloads.ServeTerminateReplicaBody(
+        service_name=service_name,
+        replica_id=replica_id,
+        purge=purge,
+    )
+    response = requests.post(
+        f'{api_common.get_server_url()}/serve/terminate-replica',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None),
+    )
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
 def status(service_names: Optional[Union[str, List[str]]]) -> str:
     """Get the status of a service."""
     body = payloads.ServeStatusBody(service_names=service_names,)

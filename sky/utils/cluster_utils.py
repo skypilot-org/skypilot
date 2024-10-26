@@ -185,7 +185,8 @@ class SSHConfigHelper(object):
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
         if proxy_command is not None and original_private_key_path is not None:
-            proxy_command = proxy_command.replace(original_private_key_path, key_path)
+            proxy_command = proxy_command.replace(original_private_key_path,
+                                                  key_path)
 
         docker_proxy_command_generator = None
         if docker_user is not None:

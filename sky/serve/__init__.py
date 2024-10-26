@@ -4,6 +4,7 @@ import os
 from sky.serve.api.sdk import down
 from sky.serve.api.sdk import status
 from sky.serve.api.sdk import tail_logs
+from sky.serve.api.sdk import terminate_replica
 from sky.serve.api.sdk import up
 from sky.serve.api.sdk import update
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS

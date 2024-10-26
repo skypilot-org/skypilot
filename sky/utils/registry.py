@@ -1,7 +1,7 @@
 """Registry for classes to be discovered"""
 
 import typing
-from typing import Callable, Optional, Set, Type
+from typing import Callable, Dict, List, Optional, Set, Type, Union
 
 from sky.utils import ux_utils
 
@@ -25,18 +25,28 @@ class _Registry(dict, typing.Generic[T]):
         self._exclude = exclude or set()
         self._default: Optional[str] = None
         self._type_register: bool = type_register
+        self._aliases: Dict[str, str] = {}
 
     def from_str(self, name: Optional[str]) -> Optional[T]:
+        """Returns the cloud instance from the canonical name or alias."""
         if name is None:
             return None
-        if name.lower() in self._exclude:
+
+        search_name = name.lower()
+        if search_name in self._exclude:
             return None
-        if name.lower() not in self:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'{self._registry_name.capitalize()} {name!r} is not a '
-                    f'valid {self._registry_name} among {list(self.keys())}')
-        return self.get(name.lower())
+
+        if search_name in self:
+            return self[search_name]
+
+        if search_name in self._aliases:
+            return self[self._aliases[search_name]]
+
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{self._registry_name.capitalize()} {name!r} is not a '
+                f'valid {self._registry_name} among '
+                f'{[*self.keys(), *self._aliases.keys()]}')
 
     def type_register(self,
                       name: str,
@@ -55,13 +65,43 @@ class _Registry(dict, typing.Generic[T]):
 
         return decorator
 
+    @typing.overload
     def register(self, cls: Type[T]) -> Type[T]:
+        ...
+
+    @typing.overload
+    def register(
+            self,
+            cls: None = None,
+            aliases: Optional[List[str]] = None
+    ) -> Callable[[Type[T]], Type[T]]:
+        ...
+
+    def register(
+        self,
+        cls: Optional[Type[T]] = None,
+        aliases: Optional[List[str]] = None
+    ) -> Union[Type[T], Callable[[Type[T]], Type[T]]]:
         assert not self._type_register, ('register can only be used when '
                                          'type_register is False')
-        name = cls.__name__.lower()
-        assert name not in self, f'{name} already registered'
-        self[name] = cls()
-        return cls
+
+        def _register(cls: Type[T]) -> Type[T]:
+            name = cls.__name__.lower()
+            assert name not in self, f'{name} already registered'
+            self[name] = cls()
+
+            for alias in aliases or []:
+                alias = alias.lower()
+                assert alias not in self._aliases, f'{alias} already registered'
+                self._aliases[alias] = name
+            return cls
+
+        if cls is not None:
+            # Invocation without parentheses (e.g. @register)
+            return _register(cls)
+
+        # Invocation with parentheses (e.g. @register(aliases=['alias']))
+        return _register
 
     @property
     def default(self) -> str:

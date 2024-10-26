@@ -4501,14 +4501,17 @@ def serve_down(
             if all:
                 service_identity_str = 'all services'
             click.confirm(f'Terminating {service_identity_str}. Proceed?',
-                        default=True,
-                        abort=True,
-                        show_default=True)
+                          default=True,
+                          abort=True,
+                          show_default=True)
 
     if replica_id_is_defined:
-        request_id = serve_lib.terminate_replica(service_names[0], replica_id, purge)
+        request_id = serve_lib.terminate_replica(service_names[0], replica_id,
+                                                 purge)
     else:
-        request_id = serve_lib.down(service_names=service_names, all=all, purge=purge)
+        request_id = serve_lib.down(service_names=service_names,
+                                    all=all,
+                                    purge=purge)
     _async_call_or_wait(request_id, async_call, 'serve/down')
 
 
