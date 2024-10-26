@@ -3291,7 +3291,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '

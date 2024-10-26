@@ -339,7 +339,7 @@ class JobsController:
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
 
-    def _try_add_successors_to_queue(self, task_id):
+    def _try_add_successors_to_queue(self, task_id: int):
         is_task_runnable = lambda task: (all(
             self._dag.tasks.index(pred) in self._completed_tasks
             for pred in self._dag_graph.predecessors(task)) and task_id not in
@@ -355,8 +355,6 @@ class JobsController:
         try:
             succeeded = future.result()
         except exceptions.ProvisionPrechecksError as e:
-            logger.info(f'Task {task_id} failed with ProvisionPrechecksError '
-                        f'{e}')
             # Please refer to the docstring of self._run for
             # the cases when this exception can occur.
             failure_reason = ('; '.join(
@@ -420,27 +418,33 @@ class JobsController:
 
     def run(self):
         """Run controller logic and handle exceptions."""
-        all_tasks_completed = lambda: (len(self._completed_tasks) + len(
-            self._failed_tasks) + len(self._block_tasks) == len(self._dag.tasks)
-                                      )
-        with futures.ThreadPoolExecutor(
-                max_workers=len(self._dag.tasks)) as executor:
+        all_tasks_completed = lambda: len(self._dag.tasks) == (len(
+            self._completed_tasks) + len(self._failed_tasks) + len(
+                self._block_tasks))
+        # TODO(andy):Serve has a logic to prevent from too many services running
+        # at the same time. We should have a similar logic here, but instead we
+        # should calculate the sum of the subtasks (an upper bound), instead of
+        # the number of jobs (dags).
+        # Further, we could try to calculate the maximum concurrency in the dag
+        # (e.g. for a chain dag it is 1 instead of n), which could allow us to
+        # run more dags in parallel.
+        max_workers = len(self._dag.tasks)
+        with futures.ThreadPoolExecutor(max_workers) as executor:
             future_to_task = {}
             while not all_tasks_completed():
                 while not self._task_queue.empty():
                     task_id = self._task_queue.get()
                     logger.info(f'Submitting task {task_id} to executor.')
-                    log_file_name = os.path.join(
-                        constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
-                        f'replica_{task_id}_launch.log')
+                    log_file_name = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                                 'managed_jobs',
+                                                 f'task_{task_id}_launch.log')
                     with ux_utils.RedirectOutputForThread() as redirector:
                         future = executor.submit(
-                            redirector.wrap(self._run_one_task, log_file_name),
+                            redirector.run(self._run_one_task, log_file_name),
                             task_id, self._dag.tasks[task_id])
                     future_to_task[future] = task_id
 
                 done, _ = futures.wait(future_to_task.keys(),
-                                       timeout=1,
                                        return_when='FIRST_COMPLETED')
 
                 for future in done:

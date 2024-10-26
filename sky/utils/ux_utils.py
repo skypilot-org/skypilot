@@ -174,7 +174,7 @@ class RedirectOutputForThread:
         sys.stdout, sys.stderr = (self._thread_aware_stdout,
                                   self._thread_aware_stderr)
 
-    def wrap(self, func: Callable, filepath: str, mode: str = 'w'):
+    def run(self, func: Callable, filepath: str, mode: str = 'w'):
         """Wraps a function to redirect its output to a specific file."""
 
         def wrapped(*args, **kwargs) -> Any:
