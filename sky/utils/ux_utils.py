@@ -213,7 +213,7 @@ def command_hint_messages(hint_type: CommandHintType,
                             f'\n{INDENT_LAST_SYMBOL}To teardown the cluster:'
                             f'\t{BOLD}sky down {cluster_name}'
                             f'{RESET_BOLD}')
-        hint_str = (f'\n📋 Useful Commands')
+        hint_str = '\n📋 Useful Commands'
         if job_id is not None:
             hint_str += f'{job_hint_str}'
         hint_str += f'{cluster_hint_str}'

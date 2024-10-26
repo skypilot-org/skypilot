@@ -667,6 +667,7 @@ async def health() -> str:
 async def kubernetes_pod_ssh_proxy(
     websocket: fastapi.WebSocket,
     cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()):
+    """Proxies SSH port 22 to the Kubernetes pod with websocket."""
     await websocket.accept()
     cluster_name = cluster_name_body.cluster_name
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
@@ -741,7 +742,7 @@ async def kubernetes_pod_ssh_proxy(
                     if not data:
                         break
                     await websocket.send_bytes(data)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
             await websocket.close()
 
