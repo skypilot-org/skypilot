@@ -660,6 +660,77 @@ async def health() -> str:
             f'Healthy{colorama.Style.RESET_ALL}\n')
 
 
+@app.websocket('/kubernetes-pod-ssh-proxy')
+async def kubernetes_pod_ssh_proxy(
+    websocket: fastapi.WebSocket,
+    pod_body: payloads.KubernetesPodBody = fastapi.Depends()):
+    await websocket.accept()
+
+    # Start kubectl port-forward
+    pod_name = pod_body.pod_name
+    namespace = pod_body.namespace
+    context = pod_body.context
+    logger.info(f'WebSocket connection accepted for pod: {pod_name} in '
+                f'namespace: {namespace} with context: {context}')
+
+    kubectl_cmd = [
+        'kubectl',
+        f'--namespace={namespace}',
+        f'--context={context}',
+        'port-forward',
+        f'pod/{pod_name}',
+        ':22',
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *kubectl_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT)
+    logger.info(f'Started kubectl port-forward with command: {kubectl_cmd}')
+
+    # Wait for port-forward to be ready and get the local port
+    local_port = None
+    while True:
+        stdout_line = await proc.stdout.readline()
+        if stdout_line:
+            decoded_line = stdout_line.decode()
+            logger.info(f'kubectl port-forward stdout: {decoded_line}')
+            if 'Forwarding from 127.0.0.1' in decoded_line:
+                port_str = decoded_line.split(':')[-1]
+                local_port = int(port_str.replace(' -> ', ':').split(':')[0])
+                break
+        else:
+            await websocket.close()
+            return
+
+    logger.info(f'Starting port-forward to local port: {local_port}')
+    try:
+        # Connect to the local port
+        reader, writer = await asyncio.open_connection('127.0.0.1', local_port)
+
+        async def websocket_to_ssh():
+            try:
+                async for message in websocket.iter_bytes():
+                    writer.write(message)
+                    await writer.drain()
+            except fastapi.WebSocketDisconnect:
+                pass
+            writer.close()
+
+        async def ssh_to_websocket():
+            try:
+                while True:
+                    data = await reader.read(1024)
+                    if not data:
+                        break
+                    await websocket.send_bytes(data)
+            except Exception:
+                pass
+            await websocket.close()
+
+        await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
+    finally:
+        proc.terminate()
+
 if __name__ == '__main__':
     import uvicorn
     requests_lib.reset_db()
