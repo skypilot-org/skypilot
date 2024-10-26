@@ -4497,7 +4497,8 @@ def serve_down(
                 show_default=True)
         else:
             quoted_service_names = [f'{name!r}' for name in service_names]
-            service_identity_str = f'service(s) {", ".join(quoted_service_names)}'
+            list_service_str = ', '.join(quoted_service_names)
+            service_identity_str = f'service(s) {list_service_str}'
             if all:
                 service_identity_str = 'all services'
             click.confirm(f'Terminating {service_identity_str}. Proceed?',

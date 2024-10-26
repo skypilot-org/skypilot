@@ -27,6 +27,7 @@ from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -588,7 +589,7 @@ def get_controller_resources(
             # Create combinations of cloud, region, and zone.
             for zone in filtered_zones:
                 resource_copy = controller_resources_to_use.copy(
-                    cloud=clouds.CLOUD_REGISTRY.from_str(cloud_name),
+                    cloud=registry.CLOUD_REGISTRY.from_str(cloud_name),
                     region=region,
                     zone=zone)
                 result.add(resource_copy)

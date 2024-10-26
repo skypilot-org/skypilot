@@ -3,7 +3,6 @@
 import time
 from typing import Any, Dict, List, Optional
 
-from sky import authentication as auth
 from sky import sky_logging
 from sky.provision import common
 import sky.provision.lambda_cloud.lambda_utils as lambda_utils

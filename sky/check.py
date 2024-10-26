@@ -214,7 +214,7 @@ def get_cloud_credential_file_mounts(
     # enabled clouds because users may have partial credentials for some
     # clouds to access their specific resources (e.g. cloud storage) but
     # not have the complete credentials to pass sky check.
-    clouds = sky_clouds.CLOUD_REGISTRY.values()
+    clouds = registry.CLOUD_REGISTRY.values()
     file_mounts = {}
     for cloud in clouds:
         if (excluded_clouds is not None and
