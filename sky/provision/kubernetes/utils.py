@@ -36,13 +36,6 @@ if typing.TYPE_CHECKING:
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
-DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
-
-# The name for the environment variable that stores the in-cluster context name
-# for Kubernetes clusters. This is used to associate a name with the current
-# context when running with in-cluster auth. If not set, the context name is
-# set to DEFAULT_IN_CLUSTER_REGION.
-IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
@@ -2002,7 +1995,7 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
-    if context == get_in_cluster_context_name():
+    if context == kubernetes.in_cluster_context_name():
         # If the context (also used as the region) is in-cluster, we need to
         # we need to use in-cluster auth by setting the context to None.
         context = None
@@ -2144,11 +2137,3 @@ def process_skypilot_pods(
     return list(clusters.values()), jobs_controllers, serve_controllers
 
 
-def get_in_cluster_context_name() -> Optional[str]:
-    """Returns the name of the in-cluster context from the environment.
-
-    If the environment variable is not set, returns the default in-cluster
-    context name.
-    """
-    return (os.environ.get(IN_CLUSTER_CONTEXT_NAME_ENV_VAR) or
-            DEFAULT_IN_CLUSTER_REGION)

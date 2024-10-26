@@ -183,7 +183,7 @@ class Kubernetes(clouds.Cloud):
                 # If running in-cluster, we allow the region to be set to the
                 # singleton region since there is no context name available.
                 in_cluster_region = (
-                    kubernetes_utils.get_in_cluster_context_name())
+                    kubernetes_utils.in_cluster_context_name())
                 regions.append(clouds.Region(in_cluster_region))
             else:
                 regions.append(clouds.Region(context))
@@ -428,7 +428,7 @@ class Kubernetes(clouds.Cloud):
         # are set separately when the task is run. These env vars are
         # independent of the SkyPilot task to be run.
         k8s_env_vars = {
-            kubernetes_utils.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context
+            kubernetes.IN_CLUSTER_CONTEXT_NAME_ENV_VAR: context
         }
 
         deploy_vars = {
@@ -588,7 +588,7 @@ class Kubernetes(clouds.Cloud):
             # TODO: Remove this after 0.9.0.
             return region, zone
 
-        if region == kubernetes_utils.get_in_cluster_context_name():
+        if region == kubernetes.in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
             # since there is no context name available.
             return region, zone
@@ -597,7 +597,7 @@ class Kubernetes(clouds.Cloud):
         if all_contexts == [None]:
             # If [None] context is returned, use the singleton region since we
             # are running in a pod with in-cluster auth.
-            all_contexts = [kubernetes_utils.get_in_cluster_context_name()]
+            all_contexts = [kubernetes.in_cluster_context_name()]
         if region not in all_contexts:
             raise ValueError(
                 f'Context {region} not found in kubeconfig. Kubernetes only '
