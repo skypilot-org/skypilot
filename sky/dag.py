@@ -242,9 +242,15 @@ class Dag:
                 (all(degree <= 1 for degree in out_degrees) and
                  sum(degree == 0 for degree in out_degrees) == 1))
 
-    def is_dag(self) -> bool:
-        """Check if the DAG is a DAG."""
-        return nx.is_directed_acyclic_graph(self.graph)
+    def is_connected_dag(self) -> bool:
+        """Check if the graph is a connected directed acyclic graph (DAG).
+
+        Returns:
+            True if the graph is a connected DAG (weakly connected,
+            directed and acyclic), False otherwise.
+        """
+        return (nx.is_directed_acyclic_graph(self.graph) and
+                nx.is_weakly_connected(self.graph))
 
 
 class _DagContext(threading.local):

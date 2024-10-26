@@ -59,7 +59,7 @@ def launch(
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
-    if not dag.is_dag():
+    if not dag.is_connected_dag():
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Only DAG is allowed for job_launch. Dag: {dag}')
 
