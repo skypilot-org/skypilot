@@ -38,7 +38,7 @@ How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 Currently, there is a difference in whether ``.git`` is synced up depending on the command used:
 
 - For regular ``sky launch``, the workdir's ``.git`` is synced up by default.
-- For managed spot jobs ``sky jobs launch``, the workdir's ``.git`` is excluded by default.
+- For managed jobs ``sky jobs launch``, the workdir's ``.git`` is excluded by default.
 
 In the second case, to ensure the workdir's ``.git`` is synced up for managed spot jobs, you can explicitly add a file mount to sync it up:
 

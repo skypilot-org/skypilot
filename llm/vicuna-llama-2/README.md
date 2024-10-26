@@ -125,7 +125,7 @@ sky launch --no-use-spot ...
 To use SkyPilot Managed Spot, you can simply replace `sky launch` with `sky jobs launch` in the above command:
 
 ```bash
-sky spot launch -n vicuna train.yaml \
+sky jobs launch -n vicuna train.yaml \
   --env ARTIFACT_BUCKET_NAME=<your-bucket-name> \
   --env WANDB_API_KEY=<your-wandb-api-key>
 ```
