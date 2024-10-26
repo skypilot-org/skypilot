@@ -61,11 +61,11 @@ class Dag:
         in_degrees = [self.graph.in_degree(node) for node in nodes]
         out_degrees = [self.graph.out_degree(node) for node in nodes]
 
-        # Check out-degrees: all <=1 and exactly one node has out_degree ==0
+        # Check out-degrees: all <= 1 and exactly one node has out_degree == 0
         out_degree_condition = (all(degree <= 1 for degree in out_degrees) and
                                 sum(degree == 0 for degree in out_degrees) == 1)
 
-        # Check in-degrees: all <=1 and exactly one node has in_degree ==0
+        # Check in-degrees: all <= 1 and exactly one node has in_degree == 0
         in_degree_condition = (all(degree <= 1 for degree in in_degrees) and
                                sum(degree == 0 for degree in in_degrees) == 1)
 
