@@ -99,7 +99,7 @@ We can launch it with the following:
   setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
-    # to pass the key in the command line, during `sky spot launch`.
+    # to pass the key in the command line, during `sky jobs launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
     pip install -e .
