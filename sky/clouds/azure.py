@@ -1,12 +1,11 @@
 """Azure."""
 import functools
-import json
 import os
 import re
 import subprocess
 import textwrap
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -40,9 +39,9 @@ _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
 _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
 _DEFAULT_SKYPILOT_IMAGE_GB = 30
 
-_DEFAULT_CPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
-_DEFAULT_V1_IMAGE_ID = 'skypilot:v1-ubuntu-2004'
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-v2'
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
+_DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 
@@ -273,7 +272,7 @@ class Azure(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
 
@@ -305,10 +304,9 @@ class Azure(clouds.Cloud):
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         acc_count = None
         if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
             acc_count = str(sum(acc_dict.values()))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
