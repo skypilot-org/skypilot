@@ -80,6 +80,28 @@ class SSHConfigHelper(object):
         return codegen
 
     @classmethod
+    def generate_local_key_file(cls, cluster_name: str,
+                                auth_config: Dict[str, str]) -> str:
+        key_content = auth_config.pop('ssh_private_key_content', None)
+        if key_content is not None:
+            cluster_private_key_path = cls.ssh_cluster_key_path.format(
+                cluster_name)
+            expanded_cluster_private_key_path = os.path.expanduser(
+                cluster_private_key_path)
+            expanded_cluster_private_key_dir = os.path.dirname(
+                expanded_cluster_private_key_path)
+            os.makedirs(expanded_cluster_private_key_dir,
+                        exist_ok=True,
+                        mode=0o700)
+            with open(expanded_cluster_private_key_path,
+                      'w',
+                      encoding='utf-8',
+                      opener=functools.partial(os.open, mode=0o600)) as f:
+                f.write(key_content)
+            auth_config['ssh_private_key'] = cluster_private_key_path
+        return auth_config['ssh_private_key']
+
+    @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
     def add_cluster(
         cls,
@@ -116,25 +138,8 @@ class SSHConfigHelper(object):
         if docker_user is not None:
             username = docker_user
 
-        key_content = auth_config.pop('ssh_private_key_content', None)
-        original_private_key_path = auth_config.get('ssh_private_key', None)
-        if key_content is not None:
-            cluster_private_key_path = cls.ssh_cluster_key_path.format(
-                cluster_name)
-            expanded_cluster_private_key_path = os.path.expanduser(
-                cluster_private_key_path)
-            expanded_cluster_private_key_dir = os.path.dirname(
-                expanded_cluster_private_key_path)
-            os.makedirs(expanded_cluster_private_key_dir,
-                        exist_ok=True,
-                        mode=0o700)
-            with open(expanded_cluster_private_key_path,
-                      'w',
-                      encoding='utf-8',
-                      opener=functools.partial(os.open, mode=0o600)) as f:
-                f.write(key_content)
-            auth_config['ssh_private_key'] = cluster_private_key_path
-        key_path = os.path.expanduser(auth_config['ssh_private_key'])
+        key_path = cls.generate_local_key_file(cluster_name, auth_config)
+        key_path = os.path.expanduser(key_path)
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
         ip = ips[0]
@@ -184,10 +189,6 @@ class SSHConfigHelper(object):
                 f.write('\n' * 2)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
-        if proxy_command is not None and original_private_key_path is not None:
-            proxy_command = proxy_command.replace(original_private_key_path,
-                                                  key_path)
-
         docker_proxy_command_generator = None
         if docker_user is not None:
             docker_proxy_command_generator = lambda ip, port: ' '.join(
