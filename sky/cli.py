@@ -3519,7 +3519,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the spot job.'))
+              help=('Alias for --name, the name of the managed job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,

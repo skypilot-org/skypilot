@@ -215,7 +215,7 @@ class JobsController:
                                                 end_time=end_time,
                                                 callback_func=callback_func)
                 logger.info(
-                    f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
+                    f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
