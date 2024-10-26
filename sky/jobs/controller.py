@@ -365,8 +365,6 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
                 failure_reason)
         except exceptions.ManagedJobReachedMaxRetriesError as e:
-            logger.info(f'Task {task_id} failed with '
-                        f'ManagedJobReachedMaxRetriesError {e}')
             # Please refer to the docstring of self._run for
             # the cases when this exception can occur.
             failure_reason = common_utils.format_exception(e)
@@ -378,7 +376,6 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
                 failure_reason)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.info(f'Task {task_id} failed with Exception {e}')
             with ux_utils.enable_traceback():
                 logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: ' +
