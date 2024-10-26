@@ -530,9 +530,9 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                              'are currently not unsupported.')
             raise config_lib.KubernetesError(
                 _lack_resource_msg('TPU',
-                                    pod_spec,
-                                    details=error_message,
-                                    extra_msg=extra_message))
+                                   pod_spec,
+                                   details=error_message,
+                                   extra_msg=extra_message))
 
         else:
             # Re-raise the exception if it's a different error
