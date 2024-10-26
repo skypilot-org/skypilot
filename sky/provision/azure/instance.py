@@ -799,9 +799,9 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
     This function deletes a virtual machine and its associated resources
     (public IP addresses, virtual networks, managed identities, network
     interface and network security groups) that match cluster_name_on_cloud.
-    There is one attached resources that are is not removed within this
-    method: OS disk. It is set to be removed with deleteOption from
-    sky/provision/azure/azure-vm-template.json when the VM is deleted.
+    There is one attached resources that is not removed within this
+    method: OS disk. It is configured to be deleted when VM is terminated while
+    setting up storage profile from _create_vm.
 
     Args:
         subscription_id: The Azure subscription ID.
