@@ -124,6 +124,7 @@ def _get_cluster_records_and_set_ssh_config(
     all_users: bool = False,
 ) -> List[dict]:
     """Returns a list of clusters that match the glob pattern."""
+    # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
     request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
     cluster_records = sdk.stream_and_get(request_id)
@@ -131,13 +132,20 @@ def _get_cluster_records_and_set_ssh_config(
     for record in cluster_records:
         handle = record['handle']
         if handle is not None and handle.cached_external_ips is not None:
+            credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                kubernetes_utils.create_proxy_command_script()
-            crednetials = record['credentials']
+                # Replace the proxy command to proxy through the API server
+                # with websocet.
+                proxy_command = (
+                    f'python {os.path.dirname(__file__)}/templates/'
+                    f'websocket-proxy.py '
+                    f'{api_common.get_server_url().split("://")[1]} '
+                    f'{handle.cluster_name}')
+                credentials['ssh_proxy_command'] = proxy_command
             cluster_utils.SSHConfigHelper.add_cluster(
                 handle.cluster_name,
                 handle.cached_external_ips,
-                crednetials,
+                credentials,
                 handle.cached_external_ssh_ports,
                 handle.docker_user,
                 handle.ssh_user,

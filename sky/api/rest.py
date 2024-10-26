@@ -17,6 +17,7 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 from sky import check as sky_check
+from sky import clouds
 from sky import core
 from sky import execution
 from sky import optimizer
@@ -27,10 +28,12 @@ from sky.api.requests import payloads
 from sky.api.requests import requests as requests_lib
 from sky.clouds import service_catalog
 from sky.jobs.api import rest as jobs_rest
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.api import rest as serve_rest
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
@@ -663,15 +666,29 @@ async def health() -> str:
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(
     websocket: fastapi.WebSocket,
-    pod_body: payloads.KubernetesPodBody = fastapi.Depends()):
+    cluster_name_body: payloads.ClusterNameBody = fastapi.Depends()):
     await websocket.accept()
+    cluster_name = cluster_name_body.cluster_name
+    logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
-    # Start kubectl port-forward
-    pod_name = pod_body.pod_name
-    namespace = pod_body.namespace
-    context = pod_body.context
-    logger.info(f'WebSocket connection accepted for pod: {pod_name} in '
-                f'namespace: {namespace} with context: {context}')
+    cluster_records = core.status(cluster_name)
+    cluster_record = cluster_records[0]
+    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Cluster {cluster_name} is not running')
+
+    handle = cluster_record['handle']
+    assert handle is not None, 'Cluster handle is None'
+    if not isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
+            'Use ssh to connect to the cluster instead.')
+
+    config = common_utils.read_yaml(handle.cluster_yaml)
+    context = kubernetes_utils.get_context_from_config(config['provider'])
+    namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
+    pod_name = handle.cluster_name_on_cloud + '-head'
 
     kubectl_cmd = [
         'kubectl',
@@ -689,6 +706,7 @@ async def kubernetes_pod_ssh_proxy(
 
     # Wait for port-forward to be ready and get the local port
     local_port = None
+    assert proc.stdout is not None
     while True:
         stdout_line = await proc.stdout.readline()
         if stdout_line:
@@ -730,6 +748,7 @@ async def kubernetes_pod_ssh_proxy(
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
+
 
 if __name__ == '__main__':
     import uvicorn

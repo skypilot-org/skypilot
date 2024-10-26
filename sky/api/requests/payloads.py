@@ -169,11 +169,9 @@ class CancelBody(RequestBody):
     try_cancel_if_cluster_is_init: bool = False
 
 
-class KubernetesPodBody(RequestBody):
-    """The request body for the Kubernetes pod endpoint."""
-    context: str
-    namespace: str
-    pod_name: str
+class ClusterNameBody(RequestBody):
+    """Cluster node."""
+    cluster_name: str
 
 
 class ClusterJobBody(RequestBody):
