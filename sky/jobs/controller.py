@@ -393,21 +393,15 @@ class JobsController:
             else:
                 logger.info(f'Adding task {task_id} to failed tasks.')
                 self._failed_tasks.add(task_id)
-                self._cancel_downstream_tasks(task_id)
+                self._cancel_all_tasks(task_id)
 
-    def _cancel_downstream_tasks(self, task_id: int):
-        task = self._dag.tasks[task_id]
-        for downstream in self._dag_graph.successors(task):
-            downstream_id = self._dag.tasks.index(downstream)
-            logger.info(f'Adding task {downstream_id} to block tasks.')
-            self._block_tasks.add(downstream_id)
-
-            callback_func = managed_job_utils.event_callback_func(
-                job_id=self._job_id, task_id=downstream_id, task=downstream)
-            # Call set_cancelling before set_cancelled to make sure the table
-            # entries are correctly set.
-            managed_job_state.set_cancelling(self._job_id, callback_func)
-            managed_job_state.set_cancelled(self._job_id, callback_func)
+    def _cancel_all_tasks(self, task_id: int):
+        callback_func = managed_job_utils.event_callback_func(
+            job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id])
+        # Call set_cancelling before set_cancelled to make sure the table
+        # entries are correctly set.
+        managed_job_state.set_cancelling(self._job_id, callback_func)
+        managed_job_state.set_cancelled(self._job_id, callback_func)
 
     def run(self):
         """Run controller logic and handle exceptions."""
