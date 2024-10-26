@@ -242,6 +242,10 @@ class Dag:
                 (all(degree <= 1 for degree in out_degrees) and
                  sum(degree == 0 for degree in out_degrees) == 1))
 
+    def is_dag(self) -> bool:
+        """Check if the DAG is a DAG."""
+        return nx.is_directed_acyclic_graph(self.graph)
+
 
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""
