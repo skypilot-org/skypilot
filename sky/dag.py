@@ -249,8 +249,14 @@ class Dag:
             True if the graph is a connected DAG (weakly connected,
             directed and acyclic), False otherwise.
         """
-        return (nx.is_directed_acyclic_graph(self.graph) and
-                nx.is_weakly_connected(self.graph))
+
+        # A graph is weakly connected if replacing all directed edges with
+        # undirected edges produces a connected graph, i.e., any two nodes
+        # can reach each other ignoring edge directions.
+        if not nx.is_weakly_connected(self.graph):
+            return False
+
+        return nx.is_directed_acyclic_graph(self.graph)
 
 
 class _DagContext(threading.local):
