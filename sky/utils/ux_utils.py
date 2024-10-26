@@ -189,31 +189,35 @@ class CommandHintType(enum.Enum):
 
 
 def command_hint_messages(hint_type: CommandHintType,
-                          job_id: str,
+                          job_id: Optional[str] = None,
                           cluster_name: Optional[str] = None) -> str:
     """Gets the command hint messages for the given job id."""
     if hint_type == CommandHintType.CLUSTER_JOB:
-        return (f'\n📋 Useful Commands'
-                f'\nJob ID: {job_id}'
-                f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
-                f'{BOLD}sky cancel {cluster_name} {job_id}{RESET_BOLD}'
-                f'\n{INDENT_SYMBOL}To stream job logs:\t\t'
-                f'{BOLD}sky logs {cluster_name} {job_id}{RESET_BOLD}'
-                f'\n{INDENT_LAST_SYMBOL}To view job queue:\t\t'
-                f'\n{BOLD}sky queue {cluster_name}{RESET_BOLD}'
-                f'\nCluster name: {cluster_name}'
-                f'\n{INDENT_SYMBOL}To log into the head VM:\t'
-                f'{BOLD}ssh {cluster_name}'
-                f'{RESET_BOLD}'
-                f'\n{INDENT_SYMBOL}To submit a job:'
-                f'\t\t{BOLD}sky exec {cluster_name} yaml_file'
-                f'{RESET_BOLD}'
-                f'\n{INDENT_SYMBOL}To stop the cluster:'
-                f'\t{BOLD}sky stop {cluster_name}'
-                f'{RESET_BOLD}'
-                f'\n{INDENT_LAST_SYMBOL}To teardown the cluster:'
-                f'\t{BOLD}sky down {cluster_name}'
-                f'{RESET_BOLD}')
+        job_hint_str = (f'\nJob ID: {job_id}'
+                        f'\n{INDENT_SYMBOL}To cancel the job:\t\t'
+                        f'{BOLD}sky cancel {cluster_name} {job_id}{RESET_BOLD}'
+                        f'\n{INDENT_SYMBOL}To stream job logs:\t\t'
+                        f'{BOLD}sky logs {cluster_name} {job_id}{RESET_BOLD}'
+                        f'\n{INDENT_LAST_SYMBOL}To view job queue:\t\t'
+                        f'{BOLD}sky queue {cluster_name}{RESET_BOLD}')
+        cluster_hint_str = (f'\nCluster name: {cluster_name}'
+                            f'\n{INDENT_SYMBOL}To log into the head VM:\t'
+                            f'{BOLD}ssh {cluster_name}'
+                            f'{RESET_BOLD}'
+                            f'\n{INDENT_SYMBOL}To submit a job:'
+                            f'\t\t{BOLD}sky exec {cluster_name} yaml_file'
+                            f'{RESET_BOLD}'
+                            f'\n{INDENT_SYMBOL}To stop the cluster:'
+                            f'\t{BOLD}sky stop {cluster_name}'
+                            f'{RESET_BOLD}'
+                            f'\n{INDENT_LAST_SYMBOL}To teardown the cluster:'
+                            f'\t{BOLD}sky down {cluster_name}'
+                            f'{RESET_BOLD}')
+        hint_str = (f'\n📋 Useful Commands')
+        if job_id is not None:
+            hint_str += f'{job_hint_str}'
+        hint_str += f'{cluster_hint_str}'
+        return hint_str
     elif hint_type == CommandHintType.MANAGED_JOB:
         return (f'\n📋 Useful Commands'
                 f'\nManaged Job ID: {job_id}'
