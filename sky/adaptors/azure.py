@@ -20,7 +20,9 @@ from sky.utils import ux_utils
 azure = common.LazyImport(
     'azure',
     import_error_message=('Failed to import dependencies for Azure.'
-                          'Try pip install "skypilot[azure]"'))
+                          'Try pip install "skypilot[azure]"'),
+    set_loggers=lambda: logging.getLogger('azure.identity').setLevel(logging.
+                                                                     ERROR))
 Client = Any
 sky_logger = sky_logging.init_logger(__name__)
 
@@ -65,6 +67,17 @@ def exceptions():
     """Azure exceptions."""
     from azure.core import exceptions as azure_exceptions
     return azure_exceptions
+
+
+@functools.lru_cache()
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def azure_mgmt_models(name: str):
+    if name == 'compute':
+        from azure.mgmt.compute import models
+        return models
+    elif name == 'network':
+        from azure.mgmt.network import models
+        return models
 
 
 # We should keep the order of the decorators having 'lru_cache' followed
@@ -180,19 +193,24 @@ def get_client(name: str,
                 container_client = blob.ContainerClient.from_container_url(
                     container_url, credential)
                 try:
+                    # Suppress noisy logs from Azure SDK when attempting
+                    # to run exists() on private container without access.
+                    # Reference:
+                    # https://github.com/Azure/azure-sdk-for-python/issues/9422
+                    azure_logger = logging.getLogger('azure')
+                    original_level = azure_logger.getEffectiveLevel()
+                    azure_logger.setLevel(logging.CRITICAL)
                     container_client.exists()
+                    azure_logger.setLevel(original_level)
                     return container_client
                 except exceptions().ClientAuthenticationError as e:
                     # Caught when user attempted to use private container
-                    # without access rights.
+                    # without access rights. Raised error is handled at the
+                    # upstream.
                     # Reference: https://learn.microsoft.com/en-us/troubleshoot/azure/entra/entra-id/app-integration/error-code-aadsts50020-user-account-identity-provider-does-not-exist # pylint: disable=line-too-long
                     if 'ERROR: AADSTS50020' in str(e):
                         with ux_utils.print_exception_no_traceback():
-                            raise sky_exceptions.StorageBucketGetError(
-                                'Attempted to fetch a non-existent public '
-                                'container name: '
-                                f'{container_client.container_name}. '
-                                'Please check if the name is correct.')
+                            raise e
                     with ux_utils.print_exception_no_traceback():
                         raise sky_exceptions.StorageBucketGetError(
                             'Failed to retreive the container client for the '

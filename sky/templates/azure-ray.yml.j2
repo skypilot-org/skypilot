@@ -68,6 +68,8 @@ available_node_types:
             imageOffer: {{image_offer}}
             imageSku: "{{image_sku}}"
             imageVersion: {{image_version}}
+            # Community Gallery Image ID 
+            communityGalleryImageId: {{community_gallery_image_id}}
             osDiskSizeGB: {{disk_size}}
             osDiskTier: {{disk_tier}}
             {%- if use_spot %}
@@ -82,6 +84,9 @@ available_node_types:
               {{ cmd }}
               {%- endfor %}
         need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
+        {%- if disk_performance_tier is not none %}
+        disk_performance_tier: {{disk_performance_tier}}
+        {%- endif %}
         # TODO: attach disk
 
 head_node_type: ray.head.default

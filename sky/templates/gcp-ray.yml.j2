@@ -64,6 +64,9 @@ provider:
   # leakage.
   disable_launch_config_check: true
   use_managed_instance_group: {{ gcp_use_managed_instance_group }}
+{%- if enable_gvnic %}
+  enable_gvnic: {{ enable_gvnic }}
+{%- endif %}
 
 auth:
   ssh_user: gcpuser
@@ -124,6 +127,9 @@ available_node_types:
             sourceImage: {{image_id}}
           {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
+          {%- if disk_iops %}
+            provisionedIops: {{disk_iops}}
+          {%- endif %}
   {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}

@@ -58,7 +58,9 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_catalog_path(filename: str) -> str:
-    return os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
+    catalog_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, filename)
+    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+    return catalog_path
 
 
 def is_catalog_modified(filename: str) -> bool:
@@ -196,9 +198,10 @@ def read_catalog(filename: str,
                 if pull_frequency_hours is not None:
                     update_frequency_str = (
                         f' (every {pull_frequency_hours} hours)')
-                with rich_utils.safe_status((f'Updating {cloud} catalog: '
-                                             f'{filename}'
-                                             f'{update_frequency_str}')):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message(
+                            f'Updating {cloud} catalog: {filename}') +
+                        f'{update_frequency_str}'):
                     try:
                         r = requests.get(url)
                         r.raise_for_status()
@@ -225,7 +228,7 @@ def read_catalog(filename: str,
                         with open(meta_path + '.md5', 'w',
                                   encoding='utf-8') as f:
                             f.write(hashlib.md5(r.text.encode()).hexdigest())
-                logger.info(f'Updated {cloud} catalog.')
+                logger.debug(f'Updated {cloud} catalog {filename}.')
 
     return LazyDataFrame(catalog_path, update_func=_update_catalog)
 

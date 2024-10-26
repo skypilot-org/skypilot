@@ -1,7 +1,11 @@
 """DAGs: user applications to be run."""
 import pprint
 import threading
+import typing
 from typing import List, Optional
+
+if typing.TYPE_CHECKING:
+    from sky import task
 
 
 class Dag:
@@ -13,37 +17,37 @@ class Dag:
         >>>     task = sky.Task(...)
     """
 
-    def __init__(self):
-        self.tasks = []
+    def __init__(self) -> None:
+        self.tasks: List['task.Task'] = []
         import networkx as nx  # pylint: disable=import-outside-toplevel
 
         self.graph = nx.DiGraph()
-        self.name = None
+        self.name: Optional[str] = None
 
-    def add(self, task):
+    def add(self, task: 'task.Task') -> None:
         self.graph.add_node(task)
         self.tasks.append(task)
 
-    def remove(self, task):
+    def remove(self, task: 'task.Task') -> None:
         self.tasks.remove(task)
         self.graph.remove_node(task)
 
-    def add_edge(self, op1, op2):
+    def add_edge(self, op1: 'task.Task', op2: 'task.Task') -> None:
         assert op1 in self.graph.nodes
         assert op2 in self.graph.nodes
         self.graph.add_edge(op1, op2)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.tasks)
 
-    def __enter__(self):
+    def __enter__(self) -> 'Dag':
         push_dag(self)
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         pop_dag()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         pformat = pprint.pformat(self.tasks)
         return f'DAG:\n{pformat}'
 
@@ -70,15 +74,15 @@ class Dag:
 
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""
-    _current_dag = None
+    _current_dag: Optional[Dag] = None
     _previous_dags: List[Dag] = []
 
-    def push_dag(self, dag):
+    def push_dag(self, dag: Dag):
         if self._current_dag is not None:
             self._previous_dags.append(self._current_dag)
         self._current_dag = dag
 
-    def pop_dag(self):
+    def pop_dag(self) -> Optional[Dag]:
         old_dag = self._current_dag
         if self._previous_dags:
             self._current_dag = self._previous_dags.pop()
