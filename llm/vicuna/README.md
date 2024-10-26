@@ -63,14 +63,14 @@ Steps for training on your cloud(s):
 2. **Training the Vicuna-7B model on 8 A100 GPUs (80GB memory) using spot instances**:
 ```bash
 # Launch it on managed spot to save 3x cost
-sky spot launch -n vicuna train.yaml
+sky jobs launch -n vicuna train.yaml
 ```
 Note: if you would like to see the training curve on W&B, you can add `--env WANDB_API_KEY` to the above command, which will propagate your local W&B API key in the environment variable to the job.
 
 [Optional] Train a larger 13B model
 ```
 # Train a 13B model instead of the default 7B
-sky spot launch -n vicuna-7b train.yaml --env MODEL_SIZE=13
+sky jobs launch -n vicuna-7b train.yaml --env MODEL_SIZE=13
 
 # Use *unmanaged* spot instances (i.e., preemptions won't get auto-recovered).
 # Unmanaged spot provides a better interactive development experience but is vulnerable to spot preemptions.

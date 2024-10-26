@@ -2712,6 +2712,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'  Existing:\t{handle.launched_nodes}x '
                     f'{handle.launched_resources}\n'
                     f'{mismatch_str}')
+        else:
+            # For fractional acc count clusters, we round up the number of accs
+            # to 1 (sky/utils/resources_utils.py::make_ray_custom_resources_str)
+            # Here we scale the required acc count to (required / launched) * 1
+            # so the total number of accs is the same as the requested number.
+            launched_accs = launched_resources.accelerators
+            if (launched_accs is not None and
+                    valid_resource.accelerators is not None):
+                for _, count in launched_accs.items():
+                    if isinstance(count, float) and not count.is_integer():
+                        valid_resource = valid_resource.copy(
+                            accelerators={
+                                k: v / count
+                                for k, v in valid_resource.accelerators.items()
+                            })
         return valid_resource
 
     def _provision(
