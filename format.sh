@@ -60,6 +60,10 @@ BLACK_INCLUDES=(
     'sky/skylet/providers/ibm'
 )
 
+PYLINT_FLAGS=(
+    '--load-plugins'  'pylint_quotes'
+)
+
 # Format specified files
 format() {
     yapf --in-place "${YAPF_FLAGS[@]}" "$@"
@@ -77,7 +81,7 @@ format_changed() {
     MERGEBASE="$(git merge-base origin/master HEAD)"
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
-        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 \
+        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 -d '\n' \
              yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
     fi
 
@@ -119,7 +123,21 @@ mypy $(cat tests/mypy_files.txt)
 
 # Run Pylint
 echo 'Sky Pylint:'
-pylint --load-plugins pylint_quotes sky
+if [[ "$1" == '--files' ]]; then
+    # If --files is passed, filter to files within sky/ and pass to pylint.
+    pylint "${PYLINT_FLAGS[@]}" "${@:2}"
+elif [[ "$1" == '--all' ]]; then
+    # Pylint entire sky directory.
+    pylint "${PYLINT_FLAGS[@]}" sky
+else
+    # Pylint only files in sky/ that have changed in last commit.
+    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/**/*.py' 'sky/**/*.pyi')
+    if [[ -n "$changed_files" ]]; then
+        echo "$changed_files" | xargs -d '\n' pylint "${PYLINT_FLAGS[@]}"
+    else
+        echo 'Pylint skipped: no files changed in sky/.'
+    fi
+fi
 
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'
