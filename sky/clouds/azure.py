@@ -39,9 +39,9 @@ _DEFAULT_AZURE_UBUNTU_HPC_IMAGE_GB = 30
 _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
 _DEFAULT_SKYPILOT_IMAGE_GB = 30
 
-_DEFAULT_CPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
-_DEFAULT_GPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
-_DEFAULT_V1_IMAGE_ID = 'skypilot:v1-ubuntu-2004'
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-v2'
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
+_DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 
