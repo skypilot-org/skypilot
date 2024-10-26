@@ -406,12 +406,8 @@ class JobsController:
                 job_id=self._job_id, task_id=downstream_id, task=downstream)
             # Call set_cancelling before set_cancelled to make sure the table
             # entries are correctly set.
-            managed_job_state.set_cancelling(job_id=self._job_id,
-                                             task_id=downstream_id,
-                                             callback_func=callback_func)
-            managed_job_state.set_cancelled(job_id=self._job_id,
-                                            task_id=downstream_id,
-                                            callback_func=callback_func)
+            managed_job_state.set_cancelling(self._job_id, callback_func)
+            managed_job_state.set_cancelled(self._job_id, callback_func)
 
     def run(self):
         """Run controller logic and handle exceptions."""
