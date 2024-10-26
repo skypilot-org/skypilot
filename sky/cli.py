@@ -136,8 +136,9 @@ def _get_cluster_records_and_set_ssh_config(
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the API server
                 # with websocet.
-                key_path = cluster_utils.SSHConfigHelper.generate_local_key_file(
-                    handle.cluster_name, credentials)
+                key_path = (
+                    cluster_utils.SSHConfigHelper.generate_local_key_file(
+                        handle.cluster_name, credentials))
                 # Instead of directly use websocket-proxy.py, we add an
                 # additional proxy, so that ssh can use the head pod in the
                 # cluster to jump to worker pods.
