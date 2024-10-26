@@ -443,7 +443,6 @@ def set_failed(
     logger.info(failure_reason)
 
 
-
 def set_cancelling(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 

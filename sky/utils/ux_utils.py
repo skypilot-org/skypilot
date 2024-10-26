@@ -123,6 +123,9 @@ class RedirectOutputForProcess:
                 raise
 
 
+# TODO(andy): We use this class to redirect at the thread level, and it
+# should replace the process-level redirector `RedirectOutputForProcess`
+# in the future.
 class RedirectOutputForThread:
     """Redirects stdout and stderr to thread-specific files.
 
