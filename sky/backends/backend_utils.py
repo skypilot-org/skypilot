@@ -1411,7 +1411,7 @@ def check_can_clone_disk_and_override_task(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'Cannot clone disk from cluster {cluster_name!r} '
-                f'({source_cluster_status!r}). Please stop the '
+                f'({source_cluster_status.value!r}). Please stop the '
                 f'cluster first: sky stop {cluster_name}')
 
     if target_cluster_name is not None:
