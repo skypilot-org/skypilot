@@ -40,6 +40,7 @@ __all__ = [
     'SkyServiceSpec',
     'SKYSERVE_METADATA_DIR',
     'status',
+    'terminate_replica',
     'tail_logs',
     'up',
     'update',

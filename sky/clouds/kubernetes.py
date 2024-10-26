@@ -34,7 +34,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
-@registry.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 

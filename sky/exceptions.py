@@ -4,7 +4,7 @@ import enum
 import traceback
 import types
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sky.utils import env_options
 
@@ -105,12 +105,12 @@ class ProvisionPrechecksError(Exception):
     the error will be raised.
 
     Args:
-        reasons: (List[Exception]) The reasons why the prechecks failed.
+        reasons: (Sequence[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, reasons: List[Exception]) -> None:
+    def __init__(self, reasons: Sequence[Exception]) -> None:
         super().__init__()
-        self.reasons = list(reasons)
+        self.reasons = reasons
 
 
 class ManagedJobReachedMaxRetriesError(Exception):

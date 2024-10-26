@@ -224,6 +224,7 @@ class Resources:
         self._set_accelerators(accelerators, accelerator_args)
 
     def validate(self):
+        # TODO: move these out of init to prevent repeated calls.
         self._try_validate_and_set_region_zone()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
@@ -841,12 +842,6 @@ class Resources:
 
         if self.extract_docker_image() is not None:
             # TODO(tian): validate the docker image exists / of reasonable size
-            if self.accelerators is not None:
-                for acc in self.accelerators.keys():
-                    if acc.lower().startswith('tpu'):
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                'Docker image is not supported for TPU VM.')
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
                     self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
@@ -1031,6 +1026,12 @@ class Resources:
                 self.accelerators is not None):
             initial_setup_commands = [constants.DISABLE_GPU_ECC_COMMAND]
 
+        docker_image = self.extract_docker_image()
+
+        # Cloud specific variables
+        cloud_specific_variables = self.cloud.make_deploy_resources_variables(
+            self, cluster_name, region, zones, dryrun)
+
         # Docker run options
         docker_run_options = skypilot_config.get_nested(
             ('docker', 'run_options'),
@@ -1038,18 +1039,17 @@ class Resources:
             override_configs=self.cluster_config_overrides)
         if isinstance(docker_run_options, str):
             docker_run_options = [docker_run_options]
+        # Special accelerator runtime might require additional docker run
+        # options. e.g., for TPU, we need --privileged.
+        if 'docker_run_options' in cloud_specific_variables:
+            docker_run_options.extend(
+                cloud_specific_variables['docker_run_options'])
         if docker_run_options and isinstance(self.cloud, clouds.Kubernetes):
             logger.warning(
                 f'{colorama.Style.DIM}Docker run options are specified, '
                 'but ignored for Kubernetes: '
                 f'{" ".join(docker_run_options)}'
                 f'{colorama.Style.RESET_ALL}')
-
-        docker_image = self.extract_docker_image()
-
-        # Cloud specific variables
-        cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, dryrun)
         return dict(
             cloud_specific_variables,
             **{

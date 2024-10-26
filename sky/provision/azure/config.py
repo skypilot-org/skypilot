@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import random
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -22,6 +22,7 @@ UNIQUE_ID_LEN = 4
 _DEPLOYMENT_NAME = 'skypilot-config'
 _LEGACY_DEPLOYMENT_NAME = 'ray-config'
 _RESOURCE_GROUP_WAIT_FOR_DELETION_TIMEOUT = 480  # 8 minutes
+_CLUSTER_ID = '{cluster_name_on_cloud}-{unique_id}'
 
 
 def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
@@ -41,11 +42,25 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     return func
 
 
+def get_cluster_id_and_nsg_name(resource_group: str,
+                                cluster_name_on_cloud: str) -> Tuple[str, str]:
+    hasher = hashlib.md5(resource_group.encode('utf-8'))
+    unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
+    # We use the cluster name + resource group hash as the
+    # unique ID for the cluster, as we need to make sure that
+    # the deployments have unique names during failover.
+    cluster_id = _CLUSTER_ID.format(cluster_name_on_cloud=cluster_name_on_cloud,
+                                    unique_id=unique_id)
+    nsg_name = f'sky-{cluster_id}-nsg'
+    return cluster_id, nsg_name
+
+
 @common.log_function_start_end
 def bootstrap_instances(
         region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
+    # TODO: use new azure sdk instead of ARM deployment.
     del region  # unused
     provider_config = config.provider_config
     subscription_id = provider_config.get('subscription_id')
@@ -116,12 +131,13 @@ def bootstrap_instances(
 
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
-    hasher = hashlib.md5(provider_config['resource_group'].encode('utf-8'))
-    unique_id = hasher.hexdigest()[:UNIQUE_ID_LEN]
+    cluster_id, nsg_name = get_cluster_id_and_nsg_name(
+        resource_group=provider_config['resource_group'],
+        cluster_name_on_cloud=cluster_name_on_cloud)
     subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
-        random.seed(unique_id)
+        random.seed(cluster_id)
         subnet_mask = f'10.{random.randint(1, 254)}.0.0/16'
     logger.info(f'Using subnet mask: {subnet_mask}')
 
@@ -134,10 +150,10 @@ def bootstrap_instances(
                     'value': subnet_mask
                 },
                 'clusterId': {
-                    # We use the cluster name + resource group hash as the
-                    # unique ID for the cluster, as we need to make sure that
-                    # the deployments have unique names during failover.
-                    'value': f'{cluster_name_on_cloud}-{unique_id}'
+                    'value': cluster_id
+                },
+                'nsgName': {
+                    'value': nsg_name
                 },
             },
         }

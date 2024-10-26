@@ -26,6 +26,7 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -323,8 +324,7 @@ class StrategyExecutor:
                         'Failure happened before provisioning. Failover '
                         f'reasons: {reasons_str}')
                     if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(
-                            reasons=reasons)
+                        raise exceptions.ProvisionPrechecksError(reasons)
                     return None
                 logger.info('Failed to launch a cluster with error: '
                             f'{common_utils.format_exception(e)})')
@@ -379,7 +379,7 @@ class FailoverStrategyExecutor(StrategyExecutor):
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
         # preempted.)
-        self._launched_resources: Optional['sky.resources.Resources'] = None
+        self._launched_resources: Optional['resources.Resources'] = None
 
     def _launch(self,
                 max_retry: Optional[int] = 3,

@@ -44,8 +44,8 @@ NAME              STATUS   ROLES                  AGE   VERSION
 
 $ sky show-gpus --cloud kubernetes
 Kubernetes GPUs
-GPU  QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-A10  1             2           2              
+GPU  REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+A10  1                         2           2              
 
 Kubernetes per node GPU availability
 NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
