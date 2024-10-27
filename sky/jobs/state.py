@@ -444,7 +444,8 @@ def set_failed(
 
 
 def set_cancelling(job_id: int, callback_func: CallbackType):
-    """Set tasks in the job as cancelling, if they are not running and in non-terminal states.
+    """Set tasks in the job as cancelling, if they are not running and in
+    non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
     as a whole, and we should not cancel a single task.
@@ -458,7 +459,8 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
             """\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND end_at IS null AND status NOT IN (?, ?)""",
+            WHERE spot_job_id=(?) AND end_at IS null
+            AND status NOT IN (?, ?)""",
             (ManagedJobStatus.CANCELLING.value, time.time(), job_id,
              ManagedJobStatus.RUNNING.value, ManagedJobStatus.SUCCEEDED.value))
         if rows.rowcount > 0:

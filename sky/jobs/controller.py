@@ -59,6 +59,7 @@ class JobsController:
                  retry_until_up: bool) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
+        self._num_tasks = len(self._dag.tasks)
         logger.info(self._dag)
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
@@ -74,7 +75,7 @@ class JobsController:
         #   sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
         job_id_env_vars = []
         for i, task in enumerate(self._dag.tasks):
-            if len(self._dag.tasks) <= 1:
+            if self._num_tasks <= 1:
                 task_name = self._dag_name
             else:
                 assert task.name is not None, task
@@ -419,8 +420,7 @@ class JobsController:
 
     def run(self):
         """Run controller logic and handle exceptions."""
-        all_tasks_completed = lambda: len(self._dag.tasks) == len(self.
-                                                                  _task_status)
+        all_tasks_completed = lambda: self._num_tasks == len(self._task_status)
         # TODO(andy):Serve has a logic to prevent from too many services running
         # at the same time. We should have a similar logic here, but instead we
         # should calculate the sum of the subtasks (an upper bound), instead of
@@ -428,16 +428,22 @@ class JobsController:
         # Further, we could try to calculate the maximum concurrency in the dag
         # (e.g. for a chain dag it is 1 instead of n), which could allow us to
         # run more dags in parallel.
-        max_workers = len(self._dag.tasks)
+        max_workers = self._num_tasks
+        managed_job_utils.make_launch_log_dir_for_redirection(
+            self._backend.run_timestamp, self._num_tasks)
         with futures.ThreadPoolExecutor(max_workers) as executor:
             future_to_task = {}
             while not all_tasks_completed():
                 while not self._task_queue.empty():
                     task_id = self._task_queue.get()
-                    logger.info(f'Submitting task {task_id} to executor.')
-                    log_file_name = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                                                 'managed_jobs',
-                                                 f'task_{task_id}_launch.log')
+                    log_file_name = managed_job_utils.get_launch_log_file_name(
+                        self._backend.run_timestamp, task_id)
+
+                    logger.info(
+                        f'Task {task_id} is submitted to run. To prevent '
+                        f'from interleaving, the launch logs are redirected to '
+                        f'{ux_utils.BOLD}{log_file_name}{ux_utils.RESET_BOLD}')
+
                     with ux_utils.RedirectOutputForThread() as redirector:
                         future = executor.submit(
                             redirector.run(self._run_one_task, log_file_name),
