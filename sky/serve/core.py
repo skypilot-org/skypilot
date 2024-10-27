@@ -656,6 +656,56 @@ def status(
     return serve_utils.load_service_status(serve_status_payload)
 
 
+def _sync_log_file(runner, source, target_directory, target_name) -> None:
+    """Helper function for sync_down_logs.
+    - This show the src and target path.
+    - It synchronizes the log file from remote service to local machine.
+    """
+
+    logger.info(f'Downloading the log file from {source} to {target_name}...')
+    runner.rsync(source=source,
+                 target=os.path.join(target_directory, target_name),
+                 up=False,
+                 stream_logs=False)
+
+
+def _prepare_and_sync_log(
+        service_name,
+        service_component,
+        controller_handle,
+        target_directory,
+        log_files_to_sync,
+        single_file_synced,
+        sync_down_all_components=False) -> Tuple[Any, str, bool]:
+    """Helper function for sync_down_logs.
+    - This function prepares the log file for download.
+    """
+    logger.info('Starting the process to prepare '
+                f'and download {service_component.name.lower()} logs...')
+    runner = controller_handle.get_command_runners()
+
+    if service_component == serve_utils.ServiceComponent.CONTROLLER:
+        log_file_name = serve_utils.generate_remote_controller_log_file_name(
+            service_name)
+        log_file_constant = serve_constants.CONTROLLER_LOG_FILE_NAME
+    elif service_component == serve_utils.ServiceComponent.LOAD_BALANCER:
+        log_file_name = serve_utils.generate_remote_load_balancer_log_file_name(
+            service_name)
+        log_file_constant = serve_constants.LOAD_BALANCER_LOG_FILE_NAME
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Unsupported service component: {service_component}')
+
+    log_files_to_sync.append((log_file_name, log_file_constant))
+
+    if not sync_down_all_components:
+        single_file_synced = True
+        target_directory = os.path.join(target_directory, log_file_constant)
+
+    return runner, target_directory, single_file_synced
+
+
 @usage_lib.entrypoint
 def sync_down_logs(service_name: str,
                    service_component: Optional[serve_utils.ServiceComponent],
@@ -784,46 +834,25 @@ def sync_down_logs(service_name: str,
     target_directory = os.path.join(sky_logs_directory, run_timestamp)
     os.makedirs(target_directory, exist_ok=True)
     single_file_synced = False
-    log_files_to_sync = []
+    log_files_to_sync: List[Tuple[str, str]] = []
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.CONTROLLER):
-        logger.info(
-            'Starting the process to prepare and download controller logs...')
-        runner = controller_handle.get_command_runners()
-        controller_log_file_name = (
-            serve_utils.generate_remote_controller_log_file_name(service_name))
-        log_files_to_sync.append((controller_log_file_name,
-                                  serve_constants.CONTROLLER_LOG_FILE_NAME))
-        if not sync_down_all_components:
-            single_file_synced = True
-            target_directory = os.path.join(
-                target_directory, serve_constants.CONTROLLER_LOG_FILE_NAME)
+        runner, target_directory, single_file_synced = _prepare_and_sync_log(
+            service_name, serve_utils.ServiceComponent.CONTROLLER,
+            controller_handle, target_directory, log_files_to_sync,
+            single_file_synced)
 
     if (sync_down_all_components or
             service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
-        logger.info(
-            'Starting the process to prepare and download load balancer logs...'
-        )
-        runner = controller_handle.get_command_runners()
-        load_balancer_log_file_name = (
-            serve_utils.generate_remote_load_balancer_log_file_name(
-                service_name))
-        log_files_to_sync.append((load_balancer_log_file_name,
-                                  serve_constants.LOAD_BALANCER_LOG_FILE_NAME))
-        if not sync_down_all_components:
-            single_file_synced = True
-            target_directory = os.path.join(
-                target_directory, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
+        runner, target_directory, single_file_synced = _prepare_and_sync_log(
+            service_name, serve_utils.ServiceComponent.LOAD_BALANCER,
+            controller_handle, target_directory, log_files_to_sync,
+            single_file_synced)
 
     # Sync controller / load balancer log files.
     for src, tar in log_files_to_sync:
-        logger.info('Downloading the log file from '
-                    f'{src} to {tar}...')
-        runner.rsync(source=src,
-                     target=os.path.join(target_directory, tar),
-                     up=False,
-                     stream_logs=False)
+        _sync_log_file(runner, src, target_directory, tar)
 
     # Final message indicating where the logs can be found.
     logger.info(f'Synced down log{"s" if not single_file_synced else ""}'

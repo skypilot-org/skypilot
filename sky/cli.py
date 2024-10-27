@@ -4498,7 +4498,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
               '-s',
               is_flag=True,
               default=False,
-              help='Sync down the logs of sky serve, including a separate '
+              help='Sync down logs of sky serve, including a separate '
               'log file for the controller, load balancer, and each '
               'replica.')
 @click.argument('service_name', required=True, type=str)
