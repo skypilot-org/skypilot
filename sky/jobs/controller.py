@@ -463,8 +463,6 @@ class JobsController:
             failure_type: managed_job_state.ManagedJobStatus,
             failure_reason: str):
         """Update the state of the failed task."""
-        if task_id is None:
-            return
         managed_job_state.set_failed(
             self._job_id,
             task_id=task_id,
