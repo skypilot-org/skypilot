@@ -120,8 +120,14 @@ def list_accelerators_realtime(
 
             # Generate the GPU quantities for the accelerators
             if accelerator_name and accelerator_count > 0:
-                for count in range(1, accelerator_count + 1):
+                count = 1
+                while count <= accelerator_count:
                     accelerators_qtys.add((accelerator_name, count))
+                    count *= 2
+                # Add the accelerator count if it's not already in the set
+                # (e.g., if there's 12 GPUs, we should have qtys 1, 2, 4, 8, 12)
+                if accelerator_count not in accelerators_qtys:
+                    accelerators_qtys.add((accelerator_name, accelerator_count))
 
             for pod in pods:
                 # Get all the pods running on the node

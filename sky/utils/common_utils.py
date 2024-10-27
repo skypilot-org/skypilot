@@ -362,7 +362,6 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
 
             @functools.wraps(f)
             def _record(*args, **kwargs):
-                nonlocal name_or_fn
                 with cls(name_or_fn, **ctx_kwargs):
                     return f(*args, **kwargs)
 
@@ -376,7 +375,6 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
 
         @functools.wraps(name_or_fn)
         def _record(*args, **kwargs):
-            nonlocal name_or_fn
             f = name_or_fn
             func_name = getattr(f, '__qualname__', f.__name__)
             module_name = getattr(f, '__module__', '')
@@ -579,7 +577,10 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            e.message)
             else:
                 err_msg = err_msg_prefix
+                assert isinstance(e.schema, dict), 'Schema must be a dictionary'
                 known_fields = set(e.schema.get('properties', {}).keys())
+                assert isinstance(e.instance,
+                                  dict), 'Instance must be a dictionary'
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(

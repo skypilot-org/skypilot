@@ -108,9 +108,9 @@ Deploying SkyPilot
 
       $ sky show-gpus --cloud kubernetes
       Kubernetes GPUs
-      GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-      L4    1, 2, 4       12          12
-      H100  1, 2, 4, 8    16          16
+      GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+      L4    1, 2, 4                   12          12
+      H100  1, 2, 4, 8                16          16
 
       Kubernetes per node GPU availability
       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
