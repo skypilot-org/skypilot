@@ -414,8 +414,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         f'INFO: Log for the current task ({task_id}) '
                         'is finished. Waiting for the next task\'s log '
                         'to be started.')
-                    update_message(
-                        f'Waiting for the next task: {task_id + 1}.')
+                    update_message(f'Waiting for the next task: {task_id + 1}.')
                     status_display.start()
 
                     original_task_id = task_id
@@ -460,12 +459,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     wait_seconds = 0
     managed_job_status = managed_job_state.get_status(job_id)
     assert managed_job_status is not None, job_id
-    while (not managed_job_status.is_terminal() and follow and
-           wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
-        time.sleep(1)
-        wait_seconds += 1
-        managed_job_status = managed_job_state.get_status(job_id)
-        assert managed_job_status is not None, job_id
+    if follow:
+        while (not managed_job_status.is_terminal() and
+               wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
+            time.sleep(1)
+            wait_seconds += 1
+            managed_job_status = managed_job_state.get_status(job_id)
+            assert managed_job_status is not None, job_id
 
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
