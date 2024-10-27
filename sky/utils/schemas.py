@@ -310,6 +310,7 @@ def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
+    from sky.serve import constants as serve_constants
     from sky.serve import load_balancing_policies
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -389,6 +390,10 @@ def get_service_schema():
                 'type': 'string',
                 'case_insensitive_enum': list(
                     load_balancing_policies.LB_POLICIES.keys())
+            },
+            'load_balancer_type': {
+                'type': 'string',
+                'case_insensitive_enum': serve_constants.LB_TYPES
             },
         }
     }

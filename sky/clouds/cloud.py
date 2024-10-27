@@ -46,6 +46,7 @@ class CloudImplementationFeatures(enum.Enum):
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
+    ENVOY = 'envoy_load_balancer'
 
 
 class Region(collections.namedtuple('Region', ['name'])):

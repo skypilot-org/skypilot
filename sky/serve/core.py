@@ -7,6 +7,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import task as task_lib
@@ -155,6 +156,18 @@ def up(
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
             task_resources=task.resources)
+
+        # Check that the Envoy load balancer isn't being used on an unsupported
+        # cloud.
+        lb_type = task_config.get('service', {}).get('load_balancer_type', None)
+        if lb_type == serve_constants.LB_TYPE_ENVOY:
+            for resource in controller_resources:
+                if resource.cloud is None:
+                    continue
+
+                requested_features = {clouds.CloudImplementationFeatures.ENVOY}
+                resource.cloud.check_features_are_supported(
+                    resource, requested_features)
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,

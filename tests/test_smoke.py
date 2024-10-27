@@ -4363,6 +4363,29 @@ def test_skyserve_load_balancer(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.serve
+@pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP.  Envoy isn't supported on kubernetes.
+def test_skyserve_envoy_load_balancer(generic_cloud: str):
+    """Test skyserve load balancer round-robin policy"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-envoy-load-balancer',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/load_balancer/envoy_service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            f'{_get_replica_ip(name, 1)}; '
+            f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/load_balancer/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 @pytest.mark.gcp
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
