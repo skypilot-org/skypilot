@@ -345,6 +345,10 @@ class JobsController:
                                             callback_func=callback_func)
 
     def _try_add_successors_to_queue(self, task_id: int):
+        """Tasks with multiple predecessors will only be queued once, as
+        `_handle_future_completion` runs sequentially in the main thread via
+        `futures.wait()`.
+        """
         is_task_runnable = lambda task: (all(
             self._task_status.get(pred) == TaskStatus.COMPLETED
             for pred in self._dag_graph.predecessors(task)
