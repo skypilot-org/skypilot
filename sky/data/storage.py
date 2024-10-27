@@ -814,7 +814,7 @@ class Storage(object):
                                  'to be reconstructed while the corresponding '
                                  'storage account '
                                  f'{s_metadata.storage_account_name!r} does '
-                                 'not exist.')
+                                 'not exist')
                 else:
                     logger.debug(f'Storage object {self.name!r} was attempted '
                                  'to be reconstructed while the corresponding '
@@ -822,6 +822,7 @@ class Storage(object):
                 continue
 
             self._add_store(store, is_reconstructed=True)
+            # self._sync_store(store)
 
     @classmethod
     def from_metadata(cls, metadata: StorageMetadata,
@@ -923,13 +924,12 @@ class Storage(object):
                          f'store with name {self.name!r}.')
             raise
 
-        # Add store to storage
-        self._add_store(store)
-
-        # Upload source to store
-        self._sync_store(store)
-
         return store
+
+    def initialize_and_sync_store(self, store: AbstractStore) -> None:
+        """Public method to initialize and sync the given store."""
+        self._add_store(store)
+        self._sync_store(store)
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
@@ -1234,6 +1234,8 @@ class S3Store(AbstractStore):
                 # and we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
+
+        return self.bucket
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1650,10 +1652,11 @@ class GcsStore(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and
-                #  we should set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
+        return self.bucket
 
     def upload(self):
         """Uploads source to store bucket.
@@ -2769,8 +2772,8 @@ class R2Store(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and
-                #  we should set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
 
@@ -3199,8 +3202,8 @@ class IBMCosStore(AbstractStore):
             self.bucket, is_new_bucket = self._get_bucket()
             if self.is_sky_managed is None:
                 # If is_sky_managed is not specified, then this is a new storage
-                # object (i.e., did not exist in global_user_state) and
-                #  we should set the is_sky_managed property.
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
                 # If is_sky_managed is specified, then we take no action.
                 self.is_sky_managed = is_new_bucket
 

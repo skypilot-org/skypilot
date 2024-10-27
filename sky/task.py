@@ -960,16 +960,21 @@ class Task:
             if len(storage.stores) == 0:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
-                storage.add_store(store_type, store_region)
+                new_store = storage.add_store(store_type, store_region)
+                new_store.sync_bucket(store_region)
+                storage.initialize_and_sync_store(new_store)
             else:
                 # We will download the first store that is added to remote.
                 for store_type, store in storage.stores.items():
-                    if store_type != storage_lib.StoreType.AZURE:
-                        s_type, s_region = self._get_preferred_store()
-                        if store_type == s_type:
-                            store.sync_bucket(s_region)
-                        else:
-                            store.sync_bucket()
+                    if store_type == storage_lib.StoreType.AZURE:
+                        continue
+
+                    s_type, s_region = self._get_preferred_store()
+                    if store_type == s_type:
+                        store.sync_bucket(s_region)
+                    else:
+                        store.sync_bucket()
+                    storage.initialize_and_sync_store(new_store)
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
         storage_mounts = self.storage_mounts
