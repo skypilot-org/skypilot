@@ -242,6 +242,22 @@ class Dag:
                 (all(degree <= 1 for degree in out_degrees) and
                  sum(degree == 0 for degree in out_degrees) == 1))
 
+    def is_connected_dag(self) -> bool:
+        """Check if the graph is a connected directed acyclic graph (DAG).
+
+        Returns:
+            True if the graph is a connected DAG (weakly connected,
+            directed and acyclic), False otherwise.
+        """
+
+        # A graph is weakly connected if replacing all directed edges with
+        # undirected edges produces a connected graph, i.e., any two nodes
+        # can reach each other ignoring edge directions.
+        if not nx.is_weakly_connected(self.graph):
+            return False
+
+        return nx.is_directed_acyclic_graph(self.graph)
+
 
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""

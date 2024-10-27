@@ -60,6 +60,13 @@ def launch(
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
 
+    if not dag.is_connected_dag():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Only connected DAG is allowed for job_launch. If your dag '
+                f'contains multiple subgraph that is a connected dag, please '
+                f'separate them into multiple dag. Get: {dag}')
+
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
