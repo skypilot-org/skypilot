@@ -6,7 +6,6 @@ import pathlib
 import shlex
 import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Type, Union
-import tempfile
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -14,7 +13,7 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import control_master_checks 
+from sky.utils import control_master_checks
 
 logger = sky_logging.init_logger(__name__)
 
@@ -444,7 +443,10 @@ class SSHCommandRunner(CommandRunner):
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
-        self.disable_control_master = control_master_checks.disable_control_master_checks() or disable_control_master
+        self.disable_control_master = (
+            control_master_checks.disable_control_master_checks() or 
+            disable_control_master
+        )
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
