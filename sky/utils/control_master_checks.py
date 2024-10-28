@@ -31,10 +31,11 @@ def disable_control_master_checks() -> bool:
     """Disable ssh control master checks if the /tmp filesystem is 9p.
 
     Returns:
-        bool: True if the ssh control master should be disabled, False otherwise.
+        bool: True if the ssh control master should be disabled, 
+        False otherwise.
     """
     if is_tmp_9p_filesystem():
         return True
-    # there may be additional criteria to disable ssh control master 
+    # there may be additional criteria to disable ssh control master
     # in the future. They should be checked here
     return False
