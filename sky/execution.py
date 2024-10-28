@@ -173,7 +173,7 @@ def _execute(
     if any(r.job_recovery is not None for r in task.resources):
         logger.warning(
             f'{colorama.Style.DIM}The task has `job_recovery` specified, '
-            'but launched with a unmanaged job. It will be ignored.'
+            'but is launched as an unmanaged job. It will be ignored.'
             'To enable job recovery, use managed job: sky jobs launch.'
             f'{colorama.Style.RESET_ALL}')
 
