@@ -395,7 +395,7 @@ class Resources:
 
     @property
     @functools.lru_cache(maxsize=1)
-    def accelerators(self) -> Optional[Dict[str, int]]:
+    def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field

@@ -7,10 +7,7 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
 
-SkyPilot supports **managed jobs** (:code:`sky jobs`), where "managed" means
-if a job's underlying compute experienced any spot preemptions or hardware failures,
-SkyPilot will automatically recover the job.
-
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from any underlying spot preemptions or hardware failures.
 Managed jobs can be used in three modes:
 
 #. :ref:`Managed spot jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This **saves significant costs** (e.g., ~70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
@@ -102,7 +99,7 @@ We can launch it with the following:
   setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
-    # to pass the key in the command line, during `sky spot launch`.
+    # to pass the key in the command line, during `sky jobs launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
     pip install -e .
