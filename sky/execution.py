@@ -174,7 +174,7 @@ def _execute(
         logger.warning(
             f'{colorama.Style.DIM}The task has `job_recovery` specified, '
             'but is launched as an unmanaged job. It will be ignored.'
-            'To enable job recovery, use managed job: sky jobs launch.'
+            'To enable job recovery, use managed jobs: sky jobs launch.'
             f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
