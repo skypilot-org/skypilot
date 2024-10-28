@@ -4,7 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for IBM.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky import sky_logging
 from sky.adaptors import ibm
@@ -43,7 +43,7 @@ def get_vcpus_mem_from_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 

@@ -22,9 +22,9 @@ source "amazon-ebs" "cpu-ubuntu" {
     owners      = ["099720109477"]
   }
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_size = 8
-    volume_type = "gp2"
+    device_name           = "/dev/sda1"
+    volume_size           = 8
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 }
