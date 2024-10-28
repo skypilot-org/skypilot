@@ -419,7 +419,8 @@ def stream_logs_by_id(job_id: int,
                 if job_status != job_lib.JobStatus.CANCELLED:
                     assert task_id is not None, job_id
                     if specific_task_id is not None:
-                        assert task_id == specific_task_id, (task_id, specific_task_id)
+                        assert task_id == specific_task_id, (task_id,
+                                                             specific_task_id)
                         break
                     if (task_id == num_tasks - 1 or not follow):
                         break
