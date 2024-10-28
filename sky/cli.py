@@ -209,6 +209,12 @@ def _async_call_or_wait(request_id: str, async_call: bool,
     else:
         click.secho(f'Submitted {request_name} request: {request_id}',
                     fg='green')
+        click.echo(
+            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
+            f'sky api get {request_id[:-8]}{colorama.Style.RESET_ALL}\n'
+            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}Or, visit: '
+            f'{api_common.get_server_url()}/stream?request_id={request_id}'
+            f'{colorama.Style.RESET_ALL}')
 
 
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
@@ -1962,8 +1968,13 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     query_clusters = None if not clusters else clusters
-    cluster_records = _get_cluster_records_and_set_ssh_config(query_clusters,
-                                                               all_users=all_users)
+    if query_clusters is not None:
+        # We have to set all_users to True if we are querying specific clusters.
+        # Otherwise, user will not be able to see the clusters launched by other
+        # users, although they explicitly specify the clusters.
+        all_users = True
+    cluster_records = _get_cluster_records_and_set_ssh_config(
+        query_clusters, all_users=all_users)
     clusters = [cluster['name'] for cluster in cluster_records]
 
     unsupported_clusters = []

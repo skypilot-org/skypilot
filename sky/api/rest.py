@@ -32,6 +32,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.api import rest as serve_rest
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -558,14 +559,19 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
         await asyncio.sleep(1)
 
 
-async def log_streamer(request_id: str, log_path: pathlib.Path):
+async def log_streamer(request_id: str,
+                       log_path: pathlib.Path,
+                       plain_logs: bool = False):
     request_task = requests_lib.get_request(request_id)
-    with rich_utils.safe_status(
-            f'Checking request: {request_id}') as rich_status:
-        while request_task.status < requests_lib.RequestStatus.RUNNING:
-            rich_status.update(f'Waiting for request to start: {request_id}')
-            await asyncio.sleep(1)
-            request_task = requests_lib.get_request(request_id)
+    rich_status = rich_utils.safe_status(f'Checking request: {request_id}')
+    if not plain_logs:
+        rich_status.start()
+    while request_task.status < requests_lib.RequestStatus.RUNNING:
+        rich_status.update(f'Waiting for request to start: {request_id}')
+        await asyncio.sleep(1)
+        request_task = requests_lib.get_request(request_id)
+    if not plain_logs:
+        rich_status.stop()
 
     with log_path.open('rb') as f:
         while True:
@@ -576,20 +582,35 @@ async def log_streamer(request_id: str, log_path: pathlib.Path):
                     break
                 await asyncio.sleep(1)
                 continue
-            yield line
+            line_str = line.decode('utf-8')
+            if plain_logs:
+                is_payload, line_str = message_utils.decode_payload(
+                    line_str, raise_for_mismatch=False)
+                if is_payload:
+                    await asyncio.sleep(0)  # Allow other tasks to run
+                    continue
+                line_str = common_utils.remove_color(line_str)
+            yield line_str
+            await asyncio.sleep(0)  # Allow other tasks to run
 
 
 @app.get('/stream')
-async def stream(request_id: str) -> fastapi.responses.StreamingResponse:
+async def stream(
+        request_id: str,
+        plain_logs: bool = True) -> fastapi.responses.StreamingResponse:
     request_task = requests_lib.get_request(request_id)
     if request_task is None:
         print(f'No task with request ID {request_id}')
         raise fastapi.HTTPException(status_code=404,
                                     detail=f'Request {request_id} not found')
     log_path = request_task.log_path
-    return fastapi.responses.StreamingResponse(log_streamer(
-        request_id, log_path),
-                                               media_type='text/plain')
+    return fastapi.responses.StreamingResponse(
+        log_streamer(request_id, log_path, plain_logs),
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'  # Disable nginx buffering if present
+        })
 
 
 @app.post('/abort')

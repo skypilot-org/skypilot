@@ -589,6 +589,10 @@ def get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/get?request_id={request_id}',
         timeout=(5, None))
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{response.status_code} {response.text}')
     request_task = requests_lib.Request.decode(
         requests_lib.RequestPayload(**response.json()))
     error = request_task.get_error()
@@ -612,7 +616,11 @@ def stream_and_get(request_id: str) -> Any:
     prefix of the full request id.
     """
     response = requests.get(
-        f'{api_common.get_server_url()}/stream?request_id={request_id}',
+        f'{api_common.get_server_url()}/stream',
+        params={
+            'request_id': str(request_id),
+            'plain_logs': str(False),
+        },
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)

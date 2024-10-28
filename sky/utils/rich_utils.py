@@ -221,14 +221,16 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
 def decode_rich_status(encoded_msg: str) -> Optional[str]:
     """Decode the rich status message."""
-    encoded_msg = message_utils.decode_payload(encoded_msg,
-                                               raise_for_mismatch=False)
+    is_payload, encoded_msg = message_utils.decode_payload(
+        encoded_msg, raise_for_mismatch=False)
     # print(f'encoded_msg: {encoded_msg}', flush=True)
-    control, encoded_status = Control.decode(encoded_msg)
-    global _decoding_status
+    control = None
+    if is_payload:
+        control, encoded_status = Control.decode(encoded_msg)
     if control is None:
         return encoded_msg
 
+    global _decoding_status
     if threading.current_thread() is not threading.main_thread():
         if control is not None:
             return None

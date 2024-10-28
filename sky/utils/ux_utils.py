@@ -12,7 +12,6 @@ import rich.console as rich_console
 
 from sky import sky_logging
 from sky.utils import common_utils
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pathlib
@@ -112,7 +111,7 @@ class RedirectOutputForProcess:
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Failed to run {self.func.__name__}. '
                              f'Details: {common_utils.format_exception(e)}')
-                with ux_utils.enable_traceback():
+                with enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
 
