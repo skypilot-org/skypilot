@@ -2171,7 +2171,7 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
 def get_clusters(
     refresh: common.StatusRefreshMode,
     cluster_names: Optional[Union[str, List[str]]] = None,
-    all_users: bool = False,
+    all_users: bool = True,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached or optionally refreshed cluster records.
 

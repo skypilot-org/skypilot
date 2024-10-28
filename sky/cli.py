@@ -121,7 +121,7 @@ else:
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
-    all_users: bool = False,
+    all_users: bool = True,
 ) -> List[dict]:
     """Returns a list of clusters that match the glob pattern."""
     # TODO(zhwu): we should move this function into SDK.
@@ -1959,7 +1959,8 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     query_clusters = None if not clusters else clusters
-    cluster_records = _get_cluster_records_and_set_ssh_config(query_clusters)
+    cluster_records = _get_cluster_records_and_set_ssh_config(query_clusters,
+                                                               all_users=all_users)
     clusters = [cluster['name'] for cluster in cluster_records]
 
     unsupported_clusters = []
