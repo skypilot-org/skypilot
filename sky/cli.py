@@ -1621,6 +1621,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
     if kubernetes:
         _status_kubernetes(all)
         return
+    if all:
+        # Set all_users to True if user specifies --all.
+        all_users = True
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
