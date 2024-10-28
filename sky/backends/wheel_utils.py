@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import Tuple
+from typing import Optional, Tuple
 
 import filelock
 from packaging import version
@@ -133,6 +133,35 @@ def _build_sky_wheel() -> pathlib.Path:
         return wheel_dir / wheel_path.name
 
 
+def _get_hash_from_wheel_path(wheel_path: pathlib.Path) -> str:
+    return wheel_path.parent.name
+
+
+def _wheel_outdated_or_missing() -> bool:
+
+    def _get_latest_modification_time(path: pathlib.Path) -> float:
+        if not path.exists():
+            return -1.
+        try:
+            return max(os.path.getmtime(root) for root, _, _ in os.walk(path))
+        except ValueError:
+            return -1.
+
+    last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
+    last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
+
+    return (last_wheel_modification_time < last_modification_time) or not any(
+        WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}'))
+
+
+def get_sky_wheel_hash_if_built() -> Optional[str]:
+    """If the wheel for SkyPilot is built and up to date, return the wheel hash.
+    Otherwise, return None."""
+    if _wheel_outdated_or_missing():
+        return None
+    return _get_hash_from_wheel_path(_get_latest_wheel())
+
+
 def build_sky_wheel() -> Tuple[pathlib.Path, str]:
     """Build a wheel for SkyPilot, or reuse a cached wheel.
 
@@ -145,14 +174,6 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         - wheel_hash: The wheel content hash.
     """
 
-    def _get_latest_modification_time(path: pathlib.Path) -> float:
-        if not path.exists():
-            return -1.
-        try:
-            return max(os.path.getmtime(root) for root, _, _ in os.walk(path))
-        except ValueError:
-            return -1.
-
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
     # to guarantee inherent consistency.
@@ -160,13 +181,10 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # This implements a classic "compare, update and clone" consistency
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.
-        last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
-        last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
         # Only build wheels if the wheel is outdated or wheel does not exist
         # for the requested version.
-        if (last_wheel_modification_time < last_modification_time) or not any(
-                WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')):
+        if _wheel_outdated_or_missing():
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             latest_wheel = _build_sky_wheel()
@@ -180,7 +198,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         #  complexity, we can consider TTL caching wheels by version here.
         _remove_stale_wheels(latest_wheel.parent)
 
-        wheel_hash = latest_wheel.parent.name
+        wheel_hash = _get_hash_from_wheel_path(latest_wheel)
 
         # Use a unique temporary dir per wheel hash, because there may be many
         # concurrent 'sky launch' happening.  The path should be stable if the

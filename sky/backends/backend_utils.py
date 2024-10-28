@@ -2287,6 +2287,49 @@ def check_cluster_available(
     return handle
 
 
+def get_ready_cluster_handle(
+        cluster_name: str) -> Optional[backends.ResourceHandle]:
+    """If a cluster by this name exists and is up to date and ready, return its handle.
+    Otherwise, return None."""
+    cluster = global_user_state.get_cluster_from_name(cluster_name)
+    if cluster is None:
+        logger.info(f'{colorama.Style.DIM}--fast: '
+                    f'Cluster {cluster_name!r} does not exist yet.')
+        return None
+
+    target_wheel_hash = backends.wheel_utils.get_sky_wheel_hash_if_built()
+    if target_wheel_hash is None or cluster['wheel_hash'] != target_wheel_hash:
+        logger.info(
+            f'{colorama.Style.DIM}--fast: '
+            f'Cluster SkyPilot is out of date for cluster {cluster_name!r}. '
+            f'(wheel hash: {cluster["wheel_hash"]!r})')
+        return None
+
+    # Note: this does a lazy refresh. It will only actually update the status if
+    # the cluster is on spot or has autostop set.
+    try:
+        cluster_status, handle = refresh_cluster_status_handle(cluster_name)
+    except exceptions.ClusterStatusFetchingError:
+        logger.info(
+            f'{colorama.Style.DIM}--fast: '
+            f'Failed to refresh the status for cluster {cluster_name!r}.')
+        return None
+    if cluster_status != status_lib.ClusterStatus.UP:
+        logger.info(
+            f'{colorama.Style.DIM}--fast: '
+            f'Cluster {cluster_name!r} is not UP (status: {cluster_status.value}).'
+        )
+        return None
+    if handle.head_ip is None:
+        # I'm not sure how this can happen with cluster_status UP,
+        # but it is specifically cased out in check_cluster_available.
+        logger.info(f'{colorama.Style.DIM}--fast: '
+                    f'Cluster {cluster_name!r} has no head IP.')
+        return None
+
+    return handle
+
+
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 def is_controller_accessible(
     controller: controller_utils.Controllers,

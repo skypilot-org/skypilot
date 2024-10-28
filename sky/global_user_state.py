@@ -60,7 +60,8 @@ def create_table(cursor, conn):
         owner TEXT DEFAULT null,
         cluster_hash TEXT DEFAULT null,
         storage_mounts_metadata BLOB DEFAULT null,
-        cluster_ever_up INTEGER DEFAULT 0)""")
+        cluster_ever_up INTEGER DEFAULT 0,
+        wheel_hash TEXT DEFAULT null)""")
 
     # Table for Cluster History
     # usage_intervals: List[Tuple[int, int]]
@@ -130,6 +131,10 @@ def create_table(cursor, conn):
         # clusters were never really UP, setting it to 1 means they won't be
         # auto-deleted during any failover.
         value_to_replace_existing_entries=1)
+
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'wheel_hash',
+                                 'TEXT DEFAULT null')
+
     conn.commit()
 
 
@@ -140,7 +145,8 @@ def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
                           ready: bool,
-                          is_launch: bool = True):
+                          is_launch: bool = True,
+                          wheel_hash: Optional[str] = None):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
@@ -191,7 +197,7 @@ def add_or_update_cluster(cluster_name: str,
         # specified.
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner, cluster_hash, '
-        'storage_mounts_metadata, cluster_ever_up) '
+        'storage_mounts_metadata, cluster_ever_up, wheel_hash) '
         'VALUES ('
         # name
         '?, '
@@ -228,7 +234,9 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null), '
         # cluster_ever_up
-        '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?)'
+        '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?),'
+        # wheel_hash
+        'COALESCE(?, (SELECT wheel_hash FROM clusters WHERE name=?))'
         ')',
         (
             # name
@@ -260,6 +268,9 @@ def add_or_update_cluster(cluster_name: str,
             # cluster_ever_up
             cluster_name,
             int(ready),
+            # wheel_hash
+            wheel_hash,
+            cluster_name,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -570,15 +581,18 @@ def _load_storage_mounts_metadata(
 
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
-                              (cluster_name,)).fetchall()
+    rows = _DB.cursor.execute(
+        'SELECT name, launched_at, handle, last_use, status, autostop, '
+        'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
+        'cluster_ever_up, wheel_hash FROM clusters WHERE name=(?)',
+        (cluster_name,)).fetchall()
     for row in rows:
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash, storage_mounts_metadata,
-         cluster_ever_up) = row[:12]
+         to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
+         wheel_hash) = row[:13]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -594,6 +608,7 @@ def get_cluster_from_name(
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
+            'wheel_hash': wheel_hash,
         }
         return record
     return None
@@ -601,12 +616,15 @@ def get_cluster_from_name(
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
-        'select * from clusters order by launched_at desc').fetchall()
+        'select name, launched_at, handle, last_use, status, autostop, '
+        'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
+        'cluster_ever_up, wheel_hash from clusters order by launched_at desc'
+    ).fetchall()
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash, storage_mounts_metadata,
-         cluster_ever_up) = row[:12]
+         to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
+         wheel_hash) = row[:13]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -622,6 +640,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
+            'wheel_hash': wheel_hash,
         }
 
         records.append(record)

@@ -15,7 +15,6 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.exceptions import ClusterNotUpError
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
@@ -460,32 +459,22 @@ def launch(
     stages = None
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
-        maybe_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
+        maybe_handle = backend_utils.get_ready_cluster_handle(cluster_name)
         if maybe_handle is not None:
-            try:
-                # This will throw if the cluster is not available
-                backend_utils.check_cluster_available(
-                    cluster_name,
-                    operation='executing tasks',
-                    check_cloud_vm_ray_backend=False,
-                    dryrun=dryrun)
-                # If the cluster is available, restrict stages
-                handle = maybe_handle
-                stages = [
-                    # Stage.CLONE_DISK,
-                    # Stage.PROVISION,
-                    # Stage.OPTIMIZE,
-                    Stage.SYNC_WORKDIR,
-                    # Stage.SYNC_FILE_MOUNTS,
-                    # Stage.SETUP,
-                    # Stage.PRE_EXEC,
-                    Stage.EXEC,
-                    # Stage.DOWN
-                ]
-            except ClusterNotUpError:
-                # Proceed with normal provisioning
-                pass
+            logger.info(f'--fast: Cluster {cluster_name!r} is ready. '
+                        'Skipping provisioning and setup.')
+            handle = maybe_handle
+            stages = [
+                # Stage.CLONE_DISK,
+                # Stage.PROVISION,
+                # Stage.OPTIMIZE,
+                Stage.SYNC_WORKDIR,
+                # Stage.SYNC_FILE_MOUNTS,
+                # Stage.SETUP,
+                # Stage.PRE_EXEC,
+                Stage.EXEC,
+                # Stage.DOWN
+            ]
 
     return _execute(
         entrypoint=entrypoint,

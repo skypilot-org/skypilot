@@ -2897,7 +2897,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, handle.external_ips(),
-                    handle.external_ssh_ports(), lock_path)
+                    handle.external_ssh_ports(), lock_path, wheel_hash)
                 return handle
 
             cluster_config_file = config_dict['ray']
@@ -2968,8 +2968,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  source_bashrc=True)
 
             self._update_after_cluster_provisioned(
-                handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, ip_list, ssh_port_list, lock_path)
+                handle,
+                to_provision_config.prev_handle,
+                task,
+                prev_cluster_status,
+                ip_list,
+                ssh_port_list,
+                lock_path,
+                wheel_hash=wheel_hash)
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -2983,12 +2989,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  provider_config)
 
     def _update_after_cluster_provisioned(
-            self, handle: CloudVmRayResourceHandle,
+            self,
+            handle: CloudVmRayResourceHandle,
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            ip_list: List[str], ssh_port_list: List[int],
-            lock_path: str) -> None:
+            ip_list: List[str],
+            ssh_port_list: List[int],
+            lock_path: str,
+            wheel_hash: Optional[str] = None) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -3048,6 +3057,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle,
                 set(task.resources),
                 ready=True,
+                wheel_hash=wheel_hash,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
