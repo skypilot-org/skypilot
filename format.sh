@@ -81,8 +81,9 @@ format_changed() {
     MERGEBASE="$(git merge-base origin/master HEAD)"
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
-        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 -d '\n' \
-             yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
+        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | \
+            tr '\n' '\0' | xargs -P 5 -0 \
+            yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
     fi
 
 }
@@ -133,7 +134,7 @@ else
     # Pylint only files in sky/ that have changed in last commit.
     changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi')
     if [[ -n "$changed_files" ]]; then
-        echo "$changed_files" | xargs -d '\n' pylint "${PYLINT_FLAGS[@]}"
+        echo "$changed_files" | tr '\n' '\0' | xargs -0 pylint "${PYLINT_FLAGS[@]}"
     else
         echo 'Pylint skipped: no files changed in sky/.'
     fi
