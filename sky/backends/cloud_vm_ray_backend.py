@@ -3406,9 +3406,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 logger.info(
-                    f'\n📋 Useful Commands'
-                    f'\nManaged Job ID: '
+                    f'\n{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    f'\n📋 Useful Commands'
                     f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
                     f'{ux_utils.BOLD}sky jobs cancel {job_id}'
                     f'{ux_utils.RESET_BOLD}'
@@ -3425,8 +3425,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
                     f'{ux_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n📋 Useful Commands'
-                            f'\nJob ID: {job_id}'
+                logger.info(
+                            f'\n{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            f'\n📋 Useful Commands'
                             f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
                             f'{ux_utils.BOLD}sky cancel {name} {job_id}'
                             f'{ux_utils.RESET_BOLD}'
