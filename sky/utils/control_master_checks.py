@@ -1,5 +1,6 @@
 """Utils to check if ssh control master should be disabled."""
 from subprocess import CalledProcessError
+
 from sky.utils import subprocess_utils
 
 
