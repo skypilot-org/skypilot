@@ -31,13 +31,6 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
-        # The following arguments are deprecated.
-        # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
-        # Deprecated: Always be True
-        auto_restart: Optional[bool] = None,
-        # Deprecated: replaced by the target_qps_per_replica.
-        qps_upper_threshold: Optional[float] = None,
-        qps_lower_threshold: Optional[float] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -63,21 +56,6 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
-
-        # TODO(tian): Following field are deprecated. Remove after 2 minor
-        # release, i.e. 0.6.0.
-        if qps_upper_threshold is not None or qps_lower_threshold is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Field `qps_upper_threshold` and `qps_lower_threshold`'
-                    'under `replica_policy` are deprecated. '
-                    'Please use target_qps_per_replica instead.')
-        if auto_restart is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Field `auto_restart` under `replica_policy` is deprecated.'
-                    'Currently, SkyServe will cleanup failed replicas'
-                    'and auto restart it to keep the service running.')
 
         # Add the check for unknown load balancing policies
         if (load_balancing_policy is not None and
@@ -170,14 +148,8 @@ class SkyServiceSpec:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
-            service_config['qps_upper_threshold'] = policy_section.get(
-                'qps_upper_threshold', None)
-            service_config['qps_lower_threshold'] = policy_section.get(
-                'qps_lower_threshold', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
-            service_config['auto_restart'] = policy_section.get(
-                'auto_restart', None)
             service_config['upscale_delay_seconds'] = policy_section.get(
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(

@@ -307,7 +307,6 @@ class TestServeOperations:
                 'controller_port': 30001,
                 'load_balancer_port': 30000,
                 'policy': None,
-                'requested_resources': sky.Resources(),
                 'requested_resources_str': '',
                 'replica_info': [],
             }
