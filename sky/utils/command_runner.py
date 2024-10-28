@@ -445,8 +445,7 @@ class SSHCommandRunner(CommandRunner):
         self._ssh_proxy_command = ssh_proxy_command
         self.disable_control_master = (
             control_master_checks.disable_control_master_checks() or
-            disable_control_master
-        )
+            disable_control_master)
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')

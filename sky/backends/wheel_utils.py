@@ -130,8 +130,7 @@ def _build_sky_wheel() -> pathlib.Path:
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)
         if not os.path.exists(
-                os.path.join(wheel_dir, os.path.basename(wheel_path))
-        ):
+                os.path.join(wheel_dir, os.path.basename(wheel_path))):
             shutil.move(str(wheel_path), wheel_dir)
         return wheel_dir / wheel_path.name
 

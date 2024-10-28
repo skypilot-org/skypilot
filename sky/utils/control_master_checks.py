@@ -2,6 +2,7 @@
 from sky.utils import subprocess_utils
 from subprocess import CalledProcessError
 
+
 def is_tmp_9p_filesystem() -> bool:
     """Check if the /tmp filesystem is 9p.
 
@@ -9,14 +10,13 @@ def is_tmp_9p_filesystem() -> bool:
         bool: True if the /tmp filesystem is 9p, False otherwise.
     """
     try:
-        result = subprocess_utils.run(
-            ['df', '-T', '/tmp'], capture_output=True, text=True
-        )
+        result = subprocess_utils.run(['df', '-T', '/tmp'],
+                                      capture_output=True,
+                                      text=True)
 
         if result.returncode != 0:
-            raise CalledProcessError(
-                result.returncode, result.args, result.stdout, result.stderr
-            )
+            raise CalledProcessError(result.returncode, result.args,
+                                     result.stdout, result.stderr)
 
         filesystem_info = result.stdout.strip().split('\n')[1]
         filesystem_type = filesystem_info.split()[1]
@@ -26,6 +26,7 @@ def is_tmp_9p_filesystem() -> bool:
         print(f'Error running "df" command: {e}')
 
     return False
+
 
 def disable_control_master_checks() -> bool:
     """Disable ssh control master checks if the /tmp filesystem is 9p.
