@@ -115,14 +115,14 @@ class StrategyExecutor:
         if isinstance(job_recovery, dict):
             job_recovery_name = job_recovery.pop('strategy',
                                                  DEFAULT_RECOVERY_STRATEGY)
-            max_restarts_on_errors = job_recovery.pop(
-                'max_restarts_on_errors', 0)
+            max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
+                                                      0)
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
         return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
                                                       task, retry_until_up,
-                                                      max_restarts_on_errors
+                                                      max_restarts_on_errors)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
