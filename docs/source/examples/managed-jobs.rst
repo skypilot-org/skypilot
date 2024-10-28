@@ -289,8 +289,7 @@ Jobs Restarts on User Code Failure
 By default, SkyPilot will try to recover a job when its underlying cluster is preempted or failed. Any user code failures (non-zero exit codes) are not auto-recovered.
 
 In some cases, you may want a job to automatically restart on its own failures, e.g., when a training job crashes due to a Nvidia driver issue or NCCL timeouts. To specify this, you
-can further set :code:`max_restarts_on_failure` in :code:`resources.job_recovery` in the job YAML file.
-
+can set :code:`max_restarts_on_failure` in :code:`resources.job_recovery` in the job YAML file.
 .. code-block:: yaml
 
   resources:
