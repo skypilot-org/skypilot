@@ -173,8 +173,8 @@ class JobsController:
             resources_str=backend_utils.get_task_resources_str(
                 task, is_managed_job=True),
             specs={
-                'max_restarts_on_failure':
-                    self._strategy_executor.max_restarts_on_failure
+                'max_restarts_on_errors':
+                    self._strategy_executor.max_restarts_on_errors
             },
             callback_func=callback_func)
         logger.info(
@@ -287,18 +287,18 @@ class JobsController:
                     failure_reason = (
                         'To see the details, run: '
                         f'sky jobs logs --controller {self._job_id}')
-                    trigger_retry_on_failure = (
+                    should_restart_on_failure = (
                         self._strategy_executor.should_restart_on_failure())
-                    if trigger_retry_on_failure:
+                    if should_restart_on_failure:
                         max_restarts = (
-                            self._strategy_executor.max_restarts_on_failure)
+                            self._strategy_executor.max_restarts_on_errors)
                         logger.info(
                             f'User program crashed '
                             f'({managed_job_status.value}). '
-                            f'Retry the job as max_restarts_on_failure is '
+                            f'Retry the job as max_restarts_on_errors is '
                             f'set to {max_restarts}. '
-                            f'[{self._strategy_executor.retart_cnt_on_failure}/'
-                            f'{max_restarts}]')
+                            f'[{self._strategy_executor.restart_cnt_on_failure}'
+                            f'/{max_restarts}]')
                     else:
                         managed_job_state.set_failed(
                             self._job_id,

@@ -113,7 +113,8 @@ class Resources:
             for more details.
             When a dict is provided, it can have the following fields:
             - strategy: the recovery strategy to use.
-            - max_restarts_on_failure: the max number of restarts on failure.
+            - max_restarts_on_errors: the max number of restarts on user code
+              errors.
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string

@@ -107,8 +107,9 @@ def _get_single_resources_schema():
                                 'type': 'null',
                             }],
                         },
-                        'max_restarts_on_failure': {
+                        'max_restarts_on_errors': {
                             'type': 'integer',
+                            'minimum': 0,
                         },
                     }
                 }],

@@ -67,7 +67,7 @@ class StrategyExecutor:
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', retry_until_up: bool,
-                 max_restarts_on_failure: int) -> None:
+                 max_restarts_on_errors: int) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -83,8 +83,8 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.retry_until_up = retry_until_up
-        self.max_restarts_on_failure = max_restarts_on_failure
-        self.retart_cnt_on_failure = 0
+        self.max_restarts_on_errors = max_restarts_on_errors
+        self.restart_cnt_on_failure = 0
 
     def __init_subclass__(cls, name: str, default: bool = False):
         RECOVERY_STRATEGIES[name] = cls
@@ -115,14 +115,14 @@ class StrategyExecutor:
         if isinstance(job_recovery, dict):
             job_recovery_name = job_recovery.pop('strategy',
                                                  DEFAULT_RECOVERY_STRATEGY)
-            max_restarts_on_failure = job_recovery.pop(
-                'max_restarts_on_failure', 0)
+            max_restarts_on_errors = job_recovery.pop(
+                'max_restarts_on_errors', 0)
         else:
             job_recovery_name = job_recovery
-            max_restarts_on_failure = 0
+            max_restarts_on_errors = 0
         return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
                                                       task, retry_until_up,
-                                                      max_restarts_on_failure)
+                                                      max_restarts_on_errors
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -386,8 +386,8 @@ class StrategyExecutor:
         Returns:
             True if the job should be restarted, otherwise False.
         """
-        self.retart_cnt_on_failure += 1
-        if self.retart_cnt_on_failure >= self.max_restarts_on_failure:
+        self.restart_cnt_on_failure += 1
+        if self.restart_cnt_on_failure > self.max_restarts_on_errors:
             return False
         return True
 
@@ -400,9 +400,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', retry_until_up: bool,
-                 max_restarts_on_failure: int) -> None:
+                 max_restarts_on_errors: int) -> None:
         super().__init__(cluster_name, backend, task, retry_until_up,
-                         max_restarts_on_failure)
+                         max_restarts_on_errors)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is

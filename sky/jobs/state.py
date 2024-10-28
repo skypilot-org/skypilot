@@ -95,14 +95,14 @@ db_utils.add_column_to_table(_CURSOR,
                              copy_from='job_name')
 
 # Specs is some useful information about the task, e.g., the
-# max_restarts_on_failure value. It is stored in JSON format.
+# max_restarts_on_errors value. It is stored in JSON format.
 db_utils.add_column_to_table(_CURSOR,
                              _CONN,
                              'spot',
                              'specs',
                              'TEXT',
                              value_to_replace_existing_entries=json.dumps({
-                                 'max_restarts_on_failure': 0,
+                                 'max_restarts_on_errors': 0,
                              }))
 
 # `job_info` contains the mapping from job_id to the job_name.

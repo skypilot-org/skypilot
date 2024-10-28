@@ -30,7 +30,7 @@ def test_jobs_recovery_fill_default_values():
         resources:
             cpus: 2+
             job_recovery:
-                max_restarts_on_failure: 3
+                max_restarts_on_errors: 3
         """)
 
     task_config = yaml.safe_load(task_str)
@@ -42,14 +42,14 @@ def test_jobs_recovery_fill_default_values():
     assert len(resources) == 1
     assert resources[0].job_recovery[
         'strategy'] == jobs.DEFAULT_RECOVERY_STRATEGY
-    assert resources[0].job_recovery['max_restarts_on_failure'] == 3
+    assert resources[0].job_recovery['max_restarts_on_errors'] == 3
 
     task_str = textwrap.dedent(f"""\
         resources:
             cpus: 2+
             job_recovery:
                 strategy: FAILOVER
-                max_restarts_on_failure: 3
+                max_restarts_on_errors: 3
         """)
 
     task_config = yaml.safe_load(task_str)
@@ -60,7 +60,7 @@ def test_jobs_recovery_fill_default_values():
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
     assert resources[0].job_recovery['strategy'] == 'FAILOVER'
-    assert resources[0].job_recovery['max_restarts_on_failure'] == 3
+    assert resources[0].job_recovery['max_restarts_on_errors'] == 3
 
     task_str = textwrap.dedent("""\
         resources:
@@ -84,7 +84,7 @@ def test_jobs_recovery_fill_default_values():
             any_of:
                 - cpus: 2+
                   job_recovery:
-                      max_restarts_on_failure: 3
+                      max_restarts_on_errors: 3
                 - cpus: 4+
         """)
 
