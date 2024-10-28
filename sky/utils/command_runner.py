@@ -444,7 +444,7 @@ class SSHCommandRunner(CommandRunner):
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
         self.disable_control_master = (
-            control_master_checks.disable_control_master_checks() or 
+            control_master_checks.disable_control_master_checks() or
             disable_control_master
         )
         if docker_user is not None:

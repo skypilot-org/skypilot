@@ -1,15 +1,18 @@
+"""Utils to check if ssh control master should be disabled."""
 from sky.utils import subprocess_utils
 from subprocess import CalledProcessError
 
-def is_tmp_9p_filesystem():
-    """
-    Check if the /tmp filesystem is 9p.
+def is_tmp_9p_filesystem() -> bool:
+    """Check if the /tmp filesystem is 9p.
+
+    Returns:
+        bool: True if the /tmp filesystem is 9p, False otherwise.
     """
     try:
         result = subprocess_utils.run(
             ['df', '-T', '/tmp'], capture_output=True, text=True
         )
-        
+
         if result.returncode != 0:
             raise CalledProcessError(
                 result.returncode, result.args, result.stdout, result.stderr
@@ -20,17 +23,18 @@ def is_tmp_9p_filesystem():
         return filesystem_type.lower() == '9p'
 
     except CalledProcessError as e:
-        print(f"Error running 'df' command: {e}")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-    
+        print(f'Error running "df" command: {e}')
+
     return False
 
-def disable_control_master_checks(): 
-    """
-    Disable ssh control master checks if the /tmp filesystem is 9p.
+def disable_control_master_checks() -> bool:
+    """Disable ssh control master checks if the /tmp filesystem is 9p.
+
+    Returns:
+        bool: True if the ssh control master should be disabled, False otherwise.
     """
     if is_tmp_9p_filesystem():
         return True
-    # there may be additional criteria to disable ssh control master in the future. They should be checked here
+    # there may be additional criteria to disable ssh control master 
+    # in the future. They should be checked here
     return False
