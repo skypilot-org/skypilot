@@ -1,7 +1,7 @@
 """Cudo Compute Offerings Catalog."""
 
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.clouds.service_catalog import common
 import sky.provision.cudo.cudo_machine_type as cudo_mt
@@ -13,6 +13,9 @@ if typing.TYPE_CHECKING:
 _PULL_FREQUENCY_HOURS = 1
 _df = common.read_catalog(cudo_mt.VMS_CSV,
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+_DEFAULT_NUM_VCPUS = 8
+_DEFAULT_MEMORY_CPU_RATIO = 2
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -52,11 +55,18 @@ def get_default_instance_type(cpus: Optional[str] = None,
     del disk_tier
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
+    if cpus is None and memory is None:
+        cpus = f'{_DEFAULT_NUM_VCPUS}+'
+
+    memory_gb_or_ratio = memory
+    if memory is None:
+        memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+                                                      memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 

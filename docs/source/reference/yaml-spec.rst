@@ -22,8 +22,8 @@ Available fields:
     # If a relative path is used, it's evaluated relative to the location from 
     # which `sky` is called.
     #
-    # If a .gitignore file (or a .git/info/exclude file) exists in the working
-    # directory, files and directories listed in it will be excluded from syncing.
+    # To exclude files from syncing, see 
+    # https://skypilot.readthedocs.io/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
     workdir: ~/my-task-code
 
     # Number of nodes (optional; defaults to 1) to launch including the head node.
@@ -51,18 +51,18 @@ Available fields:
       #
       #   To specify a single type of accelerator:
       #     Format: <name>:<count> (or simply <name>, short for a count of 1).
-      #     accelerators: V100:4
+      #     accelerators: H100:4
       #
       #   To specify an ordered list of accelerators (try the accelerators in
       #   the specified order):
       #     Format: [<name>:<count>, ...]
-      #     accelerators: ['K80:1', 'V100:1', 'T4:1']
+      #     accelerators: ['L4:1', 'H100:1', 'A100:1']
       #
       #   To specify an unordered set of accelerators (optimize all specified
       #   accelerators together, and try accelerator with lowest cost first):
       #     Format: {<name>:<count>, ...}
-      #     accelerators: {'K80:1', 'V100:1', 'T4:1'}
-      accelerators: V100:4
+      #     accelerators: {'L4:1', 'H100:1', 'A100:1'}
+      accelerators: H100:8
 
       # Number of vCPUs per node (optional).
       #
@@ -249,9 +249,9 @@ Available fields:
       any_of:
         - cloud: aws
           region: us-west-2
-          acceraltors: V100
+          accelerators: H100
         - cloud: gcp
-          acceraltors: A100
+          accelerators: H100
 
 
     # Environment variables (optional). These values can be accessed in the

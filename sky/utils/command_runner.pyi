@@ -16,7 +16,8 @@ from sky.utils import subprocess_utils as subprocess_utils
 
 GIT_EXCLUDE: str
 RSYNC_DISPLAY_OPTION: str
-RSYNC_FILTER_OPTION: str
+RSYNC_FILTER_GITIGNORE: str
+RSYNC_FILTER_SKYIGNORE: str
 RSYNC_EXCLUDE_OPTION: str
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
 
@@ -204,7 +205,7 @@ class KubernetesCommandRunner(CommandRunner):
 
     def __init__(
         self,
-        node: Tuple[Tuple[str, str], str],
+        node: Tuple[Tuple[str, Optional[str]], str],
     ) -> None:
         ...
 

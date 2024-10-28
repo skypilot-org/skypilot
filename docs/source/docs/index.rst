@@ -80,12 +80,12 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `Llama 3.2: lightweight and vision models <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_2>`_
   * `Pixtral <https://github.com/skypilot-org/skypilot/tree/master/llm/pixtral>`_
   * `Llama 3.1 finetuning <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1-finetuning>`_ and `serving <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1>`_
   * `GPT-2 via llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`_
   * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
   * `Qwen <https://github.com/skypilot-org/skypilot/tree/master/llm/qwen>`_
-  * `Databricks DBRX <https://github.com/skypilot-org/skypilot/tree/master/llm/dbrx>`_
   * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
   * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
   * `Code Llama <https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/>`_
@@ -93,17 +93,15 @@ Runnable examples:
   * `SGLang: Fast and Expressive LLM Serving On the Cloud <https://github.com/skypilot-org/skypilot/tree/master//llm/sglang/>`_ (from official SGLang team)
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
-  * `Self-Hosted Llama-2 Chatbot <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-2>`_
   * `Ollama: Quantized LLMs on CPUs <https://github.com/skypilot-org/skypilot/tree/master/llm/ollama>`_
   * `LoRAX <https://github.com/skypilot-org/skypilot/tree/master/llm/lorax/>`_
   * `QLoRA <https://github.com/artidoro/qlora/pull/132>`_
   * `LLaMA-LoRA-Tuner <https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot>`_
   * `Tabby: Self-hosted AI coding assistant <https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml>`_
   * `LocalGPT <https://github.com/skypilot-org/skypilot/tree/master/llm/localgpt>`_
-  * `Falcon <https://github.com/skypilot-org/skypilot/tree/master/llm/falcon>`_
   * Add yours here & see more in `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`_!
 
-* Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo_gpt_train.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, `Cog <https://github.com/skypilot-org/skypilot/blob/master/examples/cog/>`_, `Unsloth <https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml>`_, `Ollama <https://github.com/skypilot-org/skypilot/blob/master/llm/ollama>`_, `llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`__ and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
+* Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo_gpt_train.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, `Cog <https://github.com/skypilot-org/skypilot/blob/master/examples/cog/>`_, `Unsloth <https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml>`_, `Ollama <https://github.com/skypilot-org/skypilot/blob/master/llm/ollama>`_, `llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`__, `Airflow <https://github.com/skypilot-org/skypilot/blob/master/examples/airflow/training_workflow>`_ and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
 
 Case Studies and Integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
 
@@ -151,6 +149,7 @@ Read the research:
    :caption: Reserved & Existing Clusters
 
    ../reservations/reservations
+   Using Existing Machines <../reservations/existing-machines>
    ../reference/kubernetes/index
 
 .. toctree::
@@ -201,6 +200,7 @@ Read the research:
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
    ../cloud-setup/quota
+   ../cloud-setup/policy
 
 .. toctree::
    :hidden:

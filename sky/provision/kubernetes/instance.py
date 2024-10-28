@@ -1,5 +1,6 @@
 """Kubernetes instance provisioning."""
 import copy
+import json
 import time
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
@@ -26,42 +28,6 @@ logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
-
-POD_STATUSES = {
-    'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
-}
-
-
-def to_label_selector(tags):
-    label_selector = ''
-    for k, v in tags.items():
-        if label_selector != '':
-            label_selector += ','
-        label_selector += '{}={}'.format(k, v)
-    return label_selector
-
-
-def _filter_pods(namespace: str, context: str, tag_filters: Dict[str, str],
-                 status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
-    non_included_pod_statuses = POD_STATUSES.copy()
-
-    field_selector = ''
-    if status_filters is not None:
-        non_included_pod_statuses -= set(status_filters)
-        field_selector = ','.join(
-            [f'status.phase!={status}' for status in non_included_pod_statuses])
-
-    label_selector = to_label_selector(tag_filters)
-    pod_list = kubernetes.core_api(context).list_namespaced_pod(
-        namespace, field_selector=field_selector, label_selector=label_selector)
-
-    # Don't return pods marked for deletion,
-    # i.e. pods with non-null metadata.DeletionTimestamp.
-    pods = [
-        pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
-    ]
-    return {pod.metadata.name: pod for pod in pods}
 
 
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
@@ -337,7 +303,8 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
+def _set_env_vars_in_pods(namespace: str, context: Optional[str],
+                          new_pods: List):
     """Setting environment variables in pods.
 
     Once all containers are ready, we can exec into them and set env vars.
@@ -365,7 +332,7 @@ def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
                                      new_pod.metadata.name, rc, stdout)
 
 
-def _check_user_privilege(namespace: str, context: str,
+def _check_user_privilege(namespace: str, context: Optional[str],
                           new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
     # the kubernetes instance pod.
@@ -401,7 +368,8 @@ def _check_user_privilege(namespace: str, context: str,
                 'from the image.')
 
 
-def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
+def _setup_ssh_in_pods(namespace: str, context: Optional[str],
+                       new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
     set_k8s_ssh_cmd = (
@@ -431,8 +399,7 @@ def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
-    # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
-    for new_node in new_nodes:
+    def _setup_ssh_thread(new_node):
         pod_name = new_node.metadata.name
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name))
@@ -444,8 +411,10 @@ def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
                                      stdout)
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
+    subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes)
 
-def _label_pod(namespace: str, context: str, pod_name: str,
+
+def _label_pod(namespace: str, context: Optional[str], pod_name: str,
                label: Dict[str, str]) -> None:
     """Label a pod."""
     kubernetes.core_api(context).patch_namespaced_pod(
@@ -454,6 +423,70 @@ def _label_pod(namespace: str, context: str, pod_name: str,
             'labels': label
         }},
         _request_timeout=kubernetes.API_TIMEOUT)
+
+
+def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
+                                        context: Optional[str]) -> Any:
+    """Attempts to create a Kubernetes Pod and handle any errors.
+
+    Currently, we handle errors due to the AppArmor annotation and retry if
+    it fails due to the `FieldValueForbidden` error.
+    See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+
+    Returns: The created Pod object.
+    """
+    try:
+        # Attempt to create the Pod with the AppArmor annotation
+        pod = kubernetes.core_api(context).create_namespaced_pod(
+            namespace, pod_spec)
+        return pod
+    except kubernetes.api_exception() as e:
+        try:
+            error_body = json.loads(e.body)
+            error_message = error_body.get('message', '')
+        except json.JSONDecodeError:
+            error_message = str(e.body)
+        # Check if the error is due to the AppArmor annotation and retry.
+        # We add an AppArmor annotation to set it as unconfined in our
+        # base template in kubernetes-ray.yml.j2. This is required for
+        # FUSE to work in the pod on most Kubernetes distributions.
+        # However, some distributions do not support the AppArmor annotation
+        # and will fail to create the pod. In this case, we retry without
+        # the annotation.
+        if (e.status == 422 and 'FieldValueForbidden' in error_message and
+                'AppArmorProfile: nil' in error_message):
+            logger.warning('AppArmor annotation caused pod creation to fail. '
+                           'Retrying without the annotation. '
+                           'Note: this may cause bucket mounting to fail.')
+
+            # Remove the AppArmor annotation
+            annotations = pod_spec.get('metadata', {}).get('annotations', {})
+            if ('container.apparmor.security.beta.kubernetes.io/ray-node'
+                    in annotations):
+                del annotations[
+                    'container.apparmor.security.beta.kubernetes.io/ray-node']
+                pod_spec['metadata']['annotations'] = annotations
+                logger.info('AppArmor annotation removed from Pod spec.')
+            else:
+                logger.warning('AppArmor annotation not found in pod spec, '
+                               'retrying will not help. '
+                               f'Current annotations: {annotations}')
+                raise e
+
+            # Retry Pod creation without the AppArmor annotation
+            try:
+                pod = kubernetes.core_api(context).create_namespaced_pod(
+                    namespace, pod_spec)
+                logger.info(f'Pod {pod.metadata.name} created successfully '
+                            'without AppArmor annotation.')
+                return pod
+            except kubernetes.api_exception() as retry_exception:
+                logger.info('Failed to create Pod without AppArmor annotation: '
+                            f'{retry_exception}')
+                raise retry_exception
+        else:
+            # Re-raise the exception if it's a different error
+            raise e
 
 
 def _create_pods(region: str, cluster_name_on_cloud: str,
@@ -474,7 +507,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     pod_spec['metadata']['labels'].update(
         {TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
-    terminating_pods = _filter_pods(namespace, context, tags, ['Terminating'])
+    terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                    ['Terminating'])
     start_time = time.time()
     while (len(terminating_pods) > 0 and
            time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
@@ -482,8 +516,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      'terminating pods. Waiting them to finish: '
                      f'{list(terminating_pods.keys())}')
         time.sleep(POLL_INTERVAL)
-        terminating_pods = _filter_pods(namespace, context, tags,
-                                        ['Terminating'])
+        terminating_pods = kubernetes_utils.filter_pods(namespace, context,
+                                                        tags, ['Terminating'])
 
     if len(terminating_pods) > 0:
         # If there are still terminating pods, we force delete them.
@@ -500,8 +534,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 _request_timeout=config_lib.DELETION_TIMEOUT,
                 grace_period_seconds=0)
 
-    running_pods = _filter_pods(namespace, context, tags,
-                                ['Pending', 'Running'])
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{list(running_pods.keys())}')
@@ -577,13 +611,13 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                     }]
                 }
             }
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    wait_pods_dict = _filter_pods(namespace, context, tags, ['Pending'])
+    wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                  ['Pending'])
     wait_pods = list(wait_pods_dict.values())
 
     networking_mode = network_utils.get_networking_mode(
@@ -613,8 +647,9 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{list(wait_pods_dict.keys())}')
 
-    running_pods = _filter_pods(namespace, context, tags, ['Running'])
-    initialized_pods = _filter_pods(namespace, context, {
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                ['Running'])
+    initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
         TAG_POD_INITIALIZED: 'true',
         **tags
     }, ['Running'])
@@ -663,7 +698,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        logger.warning(f'run_instances: Error occurred when creating pods: {e}')
+        e_msg = common_utils.format_exception(e).replace('\n', ' ')
+        logger.warning('run_instances: Error occurred when creating pods: '
+                       f'{e_msg}')
         raise
 
 
@@ -680,7 +717,8 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _terminate_node(namespace: str, context: str, pod_name: str) -> None:
+def _terminate_node(namespace: str, context: Optional[str],
+                    pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
@@ -722,7 +760,7 @@ def terminate_instances(
     tag_filters = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
-    pods = _filter_pods(namespace, context, tag_filters, None)
+    pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
 
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
@@ -746,7 +784,9 @@ def get_cluster_info(
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
 
-    running_pods = _filter_pods(namespace, context, tag_filters, ['Running'])
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tag_filters,
+                                                ['Running'])
+
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
 

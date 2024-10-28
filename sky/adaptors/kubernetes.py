@@ -75,15 +75,17 @@ def _load_config(context: Optional[str] = None):
                 suffix += f' Error: {str(e)}'
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
-                err_str = ('Failed to load Kubernetes configuration. '
-                           'Kubeconfig does not contain any valid context(s).'
-                           f'{suffix}\n'
-                           '    If you were running a local Kubernetes '
-                           'cluster, run `sky local up` to start the cluster.')
+                err_str = (
+                    f'Failed to load Kubernetes configuration for {context!r}. '
+                    'Kubeconfig does not contain any valid context(s).'
+                    f'{suffix}\n'
+                    '    If you were running a local Kubernetes '
+                    'cluster, run `sky local up` to start the cluster.')
             else:
-                err_str = ('Failed to load Kubernetes configuration. '
-                           'Please check if your kubeconfig file exists at '
-                           f'~/.kube/config and is valid.{suffix}')
+                err_str = (
+                    f'Failed to load Kubernetes configuration for {context!r}. '
+                    'Please check if your kubeconfig file exists at '
+                    f'~/.kube/config and is valid.{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
