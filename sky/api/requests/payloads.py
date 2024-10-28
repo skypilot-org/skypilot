@@ -331,6 +331,15 @@ class ListAcceleratorsBody(RequestBody):
     case_sensitive: bool = True
 
 
+class ListAcceleratorCountsBody(RequestBody):
+    """The request body for the list accelerator counts endpoint."""
+    gpus_only: bool = True
+    name_filter: Optional[str] = None
+    region_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
+    clouds: Optional[Union[List[str], str]] = None
+
+
 class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True

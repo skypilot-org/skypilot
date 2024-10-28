@@ -171,7 +171,8 @@ async def list_accelerators(
 @app.post('/list_accelerator_counts')
 async def list_accelerator_counts(
         request: fastapi.Request,
-        list_accelerator_counts_body: payloads.ListAcceleratorsBody) -> None:
+        list_accelerator_counts_body: payloads.ListAcceleratorCountsBody
+) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='list_accelerator_counts',

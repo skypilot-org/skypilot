@@ -3136,7 +3136,7 @@ def show_gpus(
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
-    cloud_name = str(cloud_obj).lower()
+    cloud_name = str(cloud_obj).lower() if cloud is not None else None
     # service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:
@@ -3282,6 +3282,7 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
+            print('zhwu DEBUG', clouds_to_list)
             result = sdk.stream_and_get(
                 sdk.list_accelerator_counts(
                     gpus_only=True,
