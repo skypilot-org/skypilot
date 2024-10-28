@@ -171,10 +171,11 @@ def _execute(
     task = dag.tasks[0]
 
     if any(r.job_recovery is not None for r in task.resources):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Job recovery is specified in the task. To launch a '
-                'managed job, please use: sky jobs launch')
+        logger.warning(
+            f'{colorama.Style.DIM}The task has `job_recovery` specified, '
+            'but launched with a unmanaged job. It will be ignored.'
+            'To enable job recovery, use managed job: sky jobs launch.'
+            f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
     if cluster_name is not None:
