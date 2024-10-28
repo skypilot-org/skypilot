@@ -3426,8 +3426,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
                     f'{ux_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(
-                            f'\n{fore.CYAN}Job ID: '
+                logger.info(f'\n{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             f'\n📋 Useful Commands'
                             f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
