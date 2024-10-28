@@ -392,6 +392,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             f'INFO: Log for the current task ({task_id}) '
                             'is finished. Waiting for the next task\'s log '
                             'to be started.')
+                        # Add a newline to avoid the status display below
+                        # removing the last line of the task output.
                         print()
                         status_display.update(
                             ux_utils.spinner_message(
