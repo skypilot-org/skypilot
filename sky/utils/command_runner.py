@@ -11,9 +11,9 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import control_master_checks
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import control_master_checks
 
 logger = sky_logging.init_logger(__name__)
 

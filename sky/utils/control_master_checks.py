@@ -1,6 +1,6 @@
 """Utils to check if ssh control master should be disabled."""
-from sky.utils import subprocess_utils
 from subprocess import CalledProcessError
+from sky.utils import subprocess_utils
 
 
 def is_tmp_9p_filesystem() -> bool:
