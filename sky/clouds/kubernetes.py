@@ -16,6 +16,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -180,8 +181,8 @@ class Kubernetes(clouds.Cloud):
         regions = []
         for context in existing_contexts:
             if context is None:
-                # If running in-cluster, we allow the region to be set to the
-                # singleton region since there is no context name available.
+                # If running in-cluster, we look up the context name and
+                # fetch it from the environment, if available.
                 in_cluster_region = (
                     kubernetes_utils.get_in_cluster_context_name())
                 regions.append(clouds.Region(in_cluster_region))
@@ -385,7 +386,8 @@ class Kubernetes(clouds.Cloud):
             if k8s_service_account_name is None:
                 err_msg = (f'Context {context!r} not found in '
                            'remote identities from config.yaml')
-                raise ValueError(err_msg)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(err_msg)
         else:
             # If remote_identity is not a dict, use
             k8s_service_account_name = remote_identity
