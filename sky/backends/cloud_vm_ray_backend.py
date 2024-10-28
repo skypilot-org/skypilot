@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -150,15 +151,6 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # We use 120KB as a threshold to be safe for other arguments that
 # might be added during ssh.
 _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
-
-# The summarized reason for each type of exception
-_EXCEPTION_SUMMARY_MESSAGE = {
-    exceptions.InvalidClusterNameError: 'Cluster name is invalid.',
-    exceptions.NotSupportedError: 'Cloud does not support requested features.',
-    exceptions.CloudUserIdentityError: 'Cloud user identity is invalid.',
-    exceptions.ResourcesUnavailableError: 'Requested resources cannot be '
-                                          'satisfied on this cloud.',
-}
 
 _RESOURCES_UNAVAILABLE_LOG = (
     'The reasons for the infeasibility of each resource are summarized below. '
@@ -2069,10 +2061,17 @@ class RetryingVmProvisioner(object):
                 # ends here.
                 table = log_utils.create_table(['Resource', 'Reason'])
                 for (resource, exception) in resource_exceptions.items():
-                    table.add_row([
-                        resource,
-                        _EXCEPTION_SUMMARY_MESSAGE[exception.__class__]
-                    ])
+                    launched_resource_str = str(resource)
+                    # accelerator_args is way too long.
+                    # Convert from:
+                    #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
+                    # to:
+                    #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
+                    pattern = ', accelerator_args={.*}'
+                    launched_resource_str = re.sub(pattern, '...',
+                                                   launched_resource_str)
+                    table.add_row([launched_resource_str, exception])
+                table.max_table_width = shutil.get_terminal_size().columns
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
                     failover_history=failover_history)
