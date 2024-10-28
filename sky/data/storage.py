@@ -1020,8 +1020,8 @@ class Storage(object):
                         file_count += 1
             return file_count
 
-        excluded_list = (storage_utils.get_excluded_files_from_gitignore(
-            self.source))
+        excluded_list = storage_utils.get_excluded_files_from_gitignore(
+            self.source)
         excluded_list.append('.git')
 
         # Checks for total number of files before compressing
