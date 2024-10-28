@@ -69,7 +69,7 @@ def refresh_cluster_status_event():
         # TODO(zhwu): Periodically refresh will cause the cluster being locked
         # and other operations, such as down, may fail due to not being able to
         # acquire the lock.
-        core.status(refresh=True)
+        core.status(refresh=True, all_users=True)
         print('Refreshed cluster status...')
         time.sleep(20)
 
