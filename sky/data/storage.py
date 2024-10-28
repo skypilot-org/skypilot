@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -13,6 +14,7 @@ import urllib.parse
 import uuid
 
 import colorama
+import pathspec
 
 from sky import check as sky_check
 from sky import clouds
@@ -1004,26 +1006,19 @@ class Storage(object):
             return
 
         def num_files(source, excluded_list):
-            count = 0
-            find_cmd = [
-                'find', source, '-type', 'd', '-name', '.git', '-prune', '-o',
-                '-print'
-            ]
-            grep_cmd = ['cat']
-            if len(excluded_list) > 0:
-                grep_cmd = ['grep', '-vE', f'"({"|".join(excluded_list)})"']
-            all_files = subprocess.Popen(find_cmd, stdout=subprocess.PIPE)
-            relevant_files = subprocess.Popen(grep_cmd,
-                                              stdin=all_files.stdout,
-                                              stdout=subprocess.PIPE)
-            all_files.stdout.close()
-            num_files = subprocess.Popen(['wc', '-l'],
-                                         stdin=relevant_files.stdout,
-                                         stdout=subprocess.PIPE)
-            relevant_files.stdout.close()
-            count += int(num_files.communicate()[0])
-            num_files.stdout.close()
-            return count
+
+            file_count = 0
+            spec = pathspec.PathSpec.from_lines(
+                pathspec.patterns.GitWildMatchPattern, excluded_list)
+            for root, _, files in os.walk(source):
+                for file in files:
+                    if file.startswith('skypilot-filemounts-'
+                                      ) and file.endswith('.tar.gz'):
+                        logger.warning(f'Consider renaming the file: {file}')
+                    rel_path = os.path.relpath(os.path.join(root, file), source)
+                    if not spec.match_file(rel_path):
+                        file_count += 1
+            return file_count
 
         excluded_list = (storage_utils.get_excluded_files_from_gitignore(
             self.source))
@@ -1037,19 +1032,25 @@ class Storage(object):
             return
 
         try:
-            with tempfile.TemporaryDirectory() as tmpdirname:
+            with tempfile.TemporaryDirectory() as tmp_cmpdir:
                 # uuid used to avoid collisions if compressing multiple sources
-                file_name = f'skypilot-filemounts-{uuid.uuid1()}.zip'
-                tmp_path = os.path.join(tmpdirname, file_name)
-                command = ['tar', '-czf', tmp_path]
-                for ignored_file in excluded_list:
-                    command.append(f'--exclude=./{ignored_file}')
-                # TODO(warrickhe): Possibly extend compression to all filemounts
-                # Currently only supports workdirs
-                command.extend(['-C', self.source, '.'])
-                subprocess.Popen(command)
+                # currently only compressing
+                file_name = f'skypilot-filemounts-{uuid.uuid1()}'
+                tmp_path = os.path.join(tmp_cmpdir, file_name)
+                tmp_workdir = tempfile.mkdtemp()
+                # secure a tempdir, delete for make_archive
+                shutil.rmtree(tmp_workdir)
+                # should only be used on workdir, which is a str
+                assert isinstance(store.source, str)
+                shutil.copytree(store.source,
+                                tmp_workdir,
+                                ignore=shutil.ignore_patterns(*excluded_list))
+                shutil.make_archive(tmp_path,
+                                    'gztar',
+                                    root_dir=tmp_workdir,
+                                    base_dir='.')
                 original_source = store.source
-                store.source = tmpdirname
+                store.source = tmp_cmpdir
                 self._sync_store(store)
                 store.source = original_source
         except exceptions.StorageUploadError:
