@@ -512,16 +512,13 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_pending_jobs():
-    rows = _CURSOR.execute(
-        'SELECT job_id, created_time, submit FROM pending_jobs')
-    rows = list(rows)
-    return {
-        job_id: {
-            'created_time': created_time,
-            'submit': submit
-        } for job_id, created_time, submit in rows
-    }
+def _get_pending_job(job_id: int) -> Optional[Dict[str, Any]]:
+    rows = _CURSOR.execute('SELECT created_time, submit FROM pending_jobs '
+                           f'WHERE job_id={job_id!r}')
+    for row in rows:
+        created_time, submit = row
+        return {'created_time': created_time, 'submit': submit}
+    return None
 
 
 def update_job_status(job_ids: List[int],
@@ -540,50 +537,40 @@ def update_job_status(job_ids: List[int],
     if len(job_ids) == 0:
         return []
 
-    # TODO: if too slow, directly query against redis.
-    ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]
-
     job_client = _create_ray_job_submission_client()
 
-    # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
-    # which contains the job status (str) and submission_id (str).
-    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
-
-    pending_jobs = _get_pending_jobs()
-    job_details = {}
-    ray_job_ids_set = set(ray_job_ids)
-    for job_detail in job_detail_lists:
-        if job_detail.submission_id in ray_job_ids_set:
-            job_details[job_detail.submission_id] = job_detail
-
     statuses = []
-    for job_id, ray_job_id in zip(job_ids, ray_job_ids):
+    for job_id in job_ids:
+        ray_job_id = make_ray_job_id(job_id)
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
-            if ray_job_id in job_details:
-                ray_status = job_details[ray_job_id].status
+            try:
+                job_detail = job_client.get_job_info(ray_job_id)
+            except RuntimeError:
+                # An RuntimeError is raised when the job does not exist.
+                # https://docs.ray.io/en/latest/cluster/running-applications/job-submission/doc/ray.job_submission.JobSubmissionClient.get_job_info.html#ray.job_submission.JobSubmissionClient.get_job_info  # pylint: disable=line-too-long
+                pass
+            else:
+                ray_status = job_detail.status
                 status = _RAY_TO_JOB_STATUS_MAP[ray_status]
-            if job_id in pending_jobs:
-                if pending_jobs[job_id]['created_time'] < psutil.boot_time():
-                    logger.info(
-                        f'Job {job_id} is stale, setting to FAILED: '
-                        f'created_time={pending_jobs[job_id]["created_time"]}, '
-                        f'boot_time={psutil.boot_time()}')
+            pending_job = _get_pending_job(job_id)
+            if pending_job is not None:
+                if pending_job['created_time'] < psutil.boot_time():
+                    logger.info(f'Job {job_id} is stale, setting to FAILED: '
+                                f'created_time={pending_job["created_time"]}, '
+                                f'boot_time={psutil.boot_time()}')
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
                     status = JobStatus.FAILED
                 # Gives a 60 second grace period between job being submit from
-                # the pending table until appearing in ray jobs.
-                if (pending_jobs[job_id]['submit'] > 0 and
-                        pending_jobs[job_id]['submit'] <
+                # the pending table until appearing in ray jobs. For jobs
+                # submitted outside of the grace period, we will consider the
+                # ray job status.
+                if not (pending_job['submit'] > 0 and pending_job['submit'] <
                         time.time() - _PENDING_SUBMIT_GRACE_PERIOD):
-                    # For jobs submitted outside of the grace period, we will
-                    # consider the ray job status.
-                    continue
-                else:
                     # Reset the job status to PENDING even though it may not
                     # appear in the ray jobs, so that it will not be considered
                     # as stale.
