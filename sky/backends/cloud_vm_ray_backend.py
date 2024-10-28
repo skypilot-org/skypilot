@@ -3381,7 +3381,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if not detach_run:
                 if (handle.cluster_name in controller_utils.Controllers.
                         JOBS_CONTROLLER.value.candidate_cluster_names):
-                    self.tail_managed_job_logs(handle, job_id)
+                    if managed_job_dag is not None and managed_job_dag.is_chain(
+                    ):
+                        self.tail_managed_job_logs(handle, job_id)
+                    else:
+                        logger.info(f'{ux_utils.INDENT_SYMBOL}To stream job '
+                                    'logs:\t\t\t'
+                                    f'{ux_utils.BOLD}sky jobs logs {job_id} '
+                                    f'--controller or {ux_utils.BOLD}'
+                                    f'sky jobs logs {job_id} --task-id '
+                                    f'task_id{ux_utils.RESET_BOLD}')
                 else:
                     # Sky logs. Not using subprocess.run since it will make the
                     # ssh keep connected after ctrl-c.
@@ -3773,12 +3782,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
+                              task_id: Optional[int] = None,
                               controller: bool = False,
                               follow: bool = True) -> None:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller)
+            job_name, job_id, task_id, follow, controller)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.

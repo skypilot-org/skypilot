@@ -556,6 +556,19 @@ def get_latest_task_id_status(
     return task_id, status
 
 
+def get_task_id_status(
+        job_id: int,
+        task_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
+    """Get the task id and status of a job."""
+
+    id_statuses = _get_all_task_ids_statuses(job_id)
+    if task_id >= len(id_statuses):
+        return None, None
+    result = id_statuses[task_id]
+    assert result[0] == task_id
+    return result
+
+
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
     _, status = get_latest_task_id_status(job_id)
     return status

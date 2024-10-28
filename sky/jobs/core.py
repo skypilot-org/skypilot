@@ -366,8 +366,8 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool) -> None:
+def tail_logs(name: Optional[str], job_id: Optional[int],
+              task_id: Optional[int], follow: bool, controller: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -393,6 +393,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     backend.tail_managed_job_logs(handle,
                                   job_id=job_id,
                                   job_name=name,
+                                  task_id=task_id,
                                   follow=follow,
                                   controller=controller)
 

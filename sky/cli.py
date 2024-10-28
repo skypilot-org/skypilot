@@ -3830,14 +3830,27 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option('--task-id',
+              required=False,
+              type=int,
+              help='Tail the logs of a specific task.')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+def jobs_logs(name: Optional[str], job_id: Optional[int],
+              task_id: Optional[int], follow: bool, controller: bool):
     """Tail the log of a managed job."""
+    if name is not None and job_id is not None:
+        raise ValueError('Cannot specify both name and job_id.')
+    if task_id is not None:
+        if job_id is None:
+            raise ValueError('Must specify job_id when specifying task_id.')
+        if controller:
+            raise ValueError('Cannot specify both task_id and controller.')
+
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
+                               task_id=task_id,
                                follow=follow,
                                controller=controller)
     except exceptions.ClusterNotUpError:

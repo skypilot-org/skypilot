@@ -306,8 +306,11 @@ def cancel_job_by_name(job_name: str) -> str:
     return f'Job {job_name!r} is scheduled to be cancelled.'
 
 
-def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
+def stream_logs_by_id(job_id: int,
+                      specific_task_id: Optional[int],
+                      follow: bool = True) -> str:
     """Stream logs by job id."""
+
     controller_status = job_lib.get_status(job_id)
     status_msg = ux_utils.spinner_message(
         'Waiting for controller process to be RUNNING') + '{status_str}'
@@ -350,9 +353,20 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         f'{managed_job_state.get_failure_reason(job_id)}'
                     ) if managed_job_status.is_failed() else ''
 
+        def get_next_task_id_status(
+            job_id: int, task_id: Optional[int]
+        ) -> Tuple[Optional[int],
+                   Optional['managed_job_state.ManagedJobStatus']]:
+            """Get the next task id and status of a job.
+            If task_id is not None, return the status of the specific task.
+            """
+            if task_id is not None:
+                return managed_job_state.get_task_id_status(job_id, task_id)
+            return managed_job_state.get_latest_task_id_status(job_id)
+
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
-            managed_job_state.get_latest_task_id_status(job_id))
+        task_id, managed_job_status = get_next_task_id_status(
+            job_id, specific_task_id)
 
         # task_id and managed_job_status can be None if the controller process
         # just started and the managed job status has not set to PENDING yet.
@@ -383,11 +397,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
                                                        job_id=job_id))
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
-                    managed_job_state.get_latest_task_id_status(job_id))
+                task_id, managed_job_status = get_next_task_id_status(
+                    job_id, specific_task_id)
                 continue
 
-            assert managed_job_status is not None
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
 
@@ -405,7 +418,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
                     assert task_id is not None, job_id
-                    if task_id == num_tasks - 1 or not follow:
+                    if specific_task_id is not None:
+                        assert task_id == specific_task_id, (task_id, specific_task_id)
+                        break
+                    if (task_id == num_tasks - 1 or not follow):
                         break
 
                     # The log for the current job is finished. We need to
@@ -419,8 +435,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
 
                     original_task_id = task_id
                     while True:
-                        task_id, managed_job_status = (
-                            managed_job_state.get_latest_task_id_status(job_id))
+                        task_id, managed_job_status = get_next_task_id_status(
+                            job_id, specific_task_id)
                         if original_task_id != task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
@@ -475,6 +491,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
 
 def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
+                task_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True) -> str:
     """Stream logs by job id or job name."""
@@ -495,9 +512,11 @@ def stream_logs(job_id: Optional[int],
                 return f'No managed job found with name {job_name!r}.'
             if len(managed_jobs) > 1:
                 job_ids_str = ', '.join(job['job_id'] for job in managed_jobs)
-                raise ValueError(
-                    f'Multiple managed jobs found with name {job_name!r} (Job '
-                    f'IDs: {job_ids_str}). Please specify the job_id instead.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Multiple managed jobs found with name {job_name!r} '
+                        f'IDs: {job_ids_str}). Please specify the job_id '
+                        'instead.')
             job_id = managed_jobs[0]['job_id']
         assert job_id is not None, (job_id, job_name)
         # TODO: keep the following code sync with
@@ -511,17 +530,19 @@ def stream_logs(job_id: Optional[int],
         log_lib.tail_logs(job_id=job_id, log_dir=log_dir, follow=follow)
         return ''
 
-    if job_id is None:
-        assert job_name is not None
-        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
-        if len(job_ids) == 0:
-            return f'No running managed job found with name {job_name!r}.'
-        if len(job_ids) > 1:
-            raise ValueError(
-                f'Multiple running jobs found with name {job_name!r}.')
-        job_id = job_ids[0]
+    else:
+        if job_id is None:
+            assert job_name is not None
+            job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+                job_name)
+            if len(job_ids) == 0:
+                return f'No running managed job found with name {job_name!r}.'
+            if len(job_ids) > 1:
+                raise ValueError(
+                    f'Multiple running jobs found with name {job_name!r}.')
+            job_id = job_ids[0]
 
-    return stream_logs_by_id(job_id, follow)
+        return stream_logs_by_id(job_id, task_id, follow)
 
 
 def dump_managed_job_queue() -> str:
@@ -832,6 +853,7 @@ class ManagedJobCodeGen:
     def stream_logs(cls,
                     job_name: Optional[str],
                     job_id: Optional[int],
+                    task_id: Optional[int],
                     follow: bool = True,
                     controller: bool = False) -> str:
         # We inspect the source code of the function here for backward
@@ -853,7 +875,7 @@ class ManagedJobCodeGen:
         code += inspect.getsource(stream_logs)
         code += textwrap.dedent(f"""\
 
-        msg = stream_logs({job_id!r}, {job_name!r}, 
+        msg = stream_logs({job_id!r}, {job_name!r}, task_id={task_id},
                            follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
