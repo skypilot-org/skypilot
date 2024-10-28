@@ -551,7 +551,7 @@ def update_job_status(job_ids: List[int],
                 job_detail = job_client.get_job_info(ray_job_id)
             except RuntimeError:
                 # An RuntimeError is raised when the job does not exist.
-                # https://docs.ray.io/en/latest/cluster/running-applications/job-submission/doc/ray.job_submission.JobSubmissionClient.get_job_info.html#ray.job_submission.JobSubmissionClient.get_job_info  # pylint: disable=line-too-long
+                # https://docs.ray.io/en/latest/cluster/running-applications/job-submission/doc/ray.job_submission.JobSubmissionClient.get_job_info.html  # pylint: disable=line-too-long
                 pass
             else:
                 ray_status = job_detail.status
