@@ -3841,12 +3841,16 @@ def jobs_logs(name: Optional[str], job_id: Optional[int],
     """Tail the log of a managed job."""
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
+
     if task_id is not None:
         if job_id is None:
-            raise ValueError('Must specify job_id when specifying task_id.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Must specify job_id when specifying task_id.')
         if controller:
-            raise ValueError('Cannot specify both task_id and controller.')
-
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both task_id and controller.')
+    # TODO(andy): Add validation to ensure either `--task-id` or `--controller`
+    # is specified when dealing with non-linear job DAGs.
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
