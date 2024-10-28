@@ -288,7 +288,7 @@ class JobsController:
                         'To see the details, run: '
                         f'sky jobs logs --controller {self._job_id}')
                     trigger_retry_on_failure = (
-                        self._strategy_executor.trigger_retry_on_failure())
+                        self._strategy_executor.should_restart_on_failure())
                     if trigger_retry_on_failure:
                         max_restarts = (
                             self._strategy_executor.max_restarts_on_failure)
@@ -297,7 +297,7 @@ class JobsController:
                             f'({managed_job_status.value}). '
                             f'Retry the job as max_restarts_on_failure is '
                             f'set to {max_restarts}. '
-                            f'[{self._strategy_executor.retry_cnt_on_failure}/'
+                            f'[{self._strategy_executor.retart_cnt_on_failure}/'
                             f'{max_restarts}]')
                     else:
                         managed_job_state.set_failed(

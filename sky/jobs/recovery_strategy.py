@@ -84,7 +84,7 @@ class StrategyExecutor:
         self.backend = backend
         self.retry_until_up = retry_until_up
         self.max_restarts_on_failure = max_restarts_on_failure
-        self.retry_cnt_on_failure = 0
+        self.retart_cnt_on_failure = 0
 
     def __init_subclass__(cls, name: str, default: bool = False):
         RECOVERY_STRATEGIES[name] = cls
@@ -380,10 +380,14 @@ class StrategyExecutor:
                         f'{gap_seconds:.1f} seconds.')
             time.sleep(gap_seconds)
 
-    def trigger_retry_on_failure(self) -> bool:
-        """Trigger a retry on failure."""
-        self.retry_cnt_on_failure += 1
-        if self.retry_cnt_on_failure >= self.max_restarts_on_failure:
+    def should_restart_on_failure(self) -> bool:
+        """Increments counter & checks if job should be restarted on a failure.
+
+        Returns:
+            True if the job should be restarted, otherwise False.
+        """
+        self.retart_cnt_on_failure += 1
+        if self.retart_cnt_on_failure >= self.max_restarts_on_failure:
             return False
         return True
 
