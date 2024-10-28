@@ -419,7 +419,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         print()
                         status_display.update(
                             ux_utils.spinner_message(
-                                'Waiting for next retry for the failed task'))
+                                'Waiting for next restart for the failed task'))
                         status_display.start()
                         while True:
                             _, managed_job_status = (
