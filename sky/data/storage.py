@@ -1291,8 +1291,12 @@ class S3Store(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {base_dir_path} '
+            if self.region is not None and self.region != 'us-east-1':
+                region_arg = f'--region {self.region}'
+            else:
+                region_arg = ''
+            sync_command = (f'aws s3 sync {region_arg} --no-follow-symlinks '
+                            f'--exclude="*" {includes} {base_dir_path} '
                             f's3://{self.name}')
             return sync_command
 
@@ -1304,9 +1308,13 @@ class S3Store(AbstractStore):
                 f'--exclude {shlex.quote(file_name)}'
                 for file_name in excluded_list
             ])
+            if self.region is not None and self.region != 'us-east-1':
+                region_arg = f'--region {self.region}'
+            else:
+                region_arg = ''
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
-                            f'{src_dir_path} '
+            sync_command = (f'aws s3 sync {region_arg} --no-follow-symlinks '
+                            f'{excludes} {src_dir_path} '
                             f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
