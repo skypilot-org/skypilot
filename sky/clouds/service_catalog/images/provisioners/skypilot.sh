@@ -36,11 +36,10 @@ echo PATH=$PATH
 python3 -m venv ~/skypilot-runtime
 PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python
 
-# Pip installs
-$PYTHON_EXEC -m pip install "setuptools<70" "grpcio!=1.48.0,<=1.51.3,>=1.42.0" "platformdirs<5,>=3.9.1" "rpds-py>=0.7.1" "referencing>=0.28.4" "jsonschema-specifications>=2023.03.6" "six~=1.16" "google-api-core<3.0.0,>=1.0.0" "opencensus-context>=0.1.3" "charset-normalizer<4,>=2" "urllib3<3,>=1.21.1" "idna<4,>=2.5" "certifi>=2017.4.17" "wrapt" "wcwidth>=0.1.4" "google-auth<3.0.dev0,>=2.14.1" "proto-plus<2.0.0dev,>=1.22.3" "googleapis-common-protos<2.0.dev0,>=1.56.2" "propcache>=0.2.0" "pyasn1-modules>=0.2.1" "cachetools<6.0,>=2.0.0" "rsa<5,>=3.1.4" "pyasn1<0.7.0,>=0.4.6" "networkx" "wheel" "pendulum" "cryptography" "pandas>=1.3.0" "PrettyTable>=2.0.0" "colorama" "jinja2>=3.0" "tabulate" "python-dotenv" "rich" "pulp" "kubernetes>=20.0.0" "grpcio!=1.48.0,<=1.51.3,>=1.42.0" "MarkupSafe>=2.0" "python-dateutil>=2.5.3" "oauthlib>=3.2.2" "durationpy>=0.7" "websocket-client!=0.40.0,!=0.41.*,!=0.42.*,>=0.32.0" "requests-oauthlib" "tzdata>=2022.7" "numpy>=1.22.4" "pytz>=2020.1" "cffi>=1.12" "time-machine>=2.6.0" "markdown-it-py>=2.2.0" "pygments<3.0.0,>=2.13.0" "pycparser" "mdurl~=0.1" "yarl<2.0,>=1.12.0" "async-timeout<5.0,>=4.0" "nvidia-ml-py>=11.450.129" "blessed>=1.17.1" "annotated-types>=0.6.0" "pydantic-core==2.23.4" "typing-extensions>=4.6.1" "distlib<1,>=0.3.7"
-$PYTHON_EXEC -m pip install "skypilot-nightly"
+# Install SkyPilot
+$PYTHON_EXEC -m pip install "skypilot-nightly[remote]"
 
-# Install ray
+# Install Ray
 RAY_ADDRESS=127.0.0.1:6380
 $PYTHON_EXEC -m pip install --exists-action w -U "ray[default]==2.9.3"
 export PATH=$PATH:$HOME/.local/bin
@@ -50,11 +49,11 @@ $PYTHON_EXEC -m pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
   $PYTHON_EXEC -c "from sky.skylet.ray_patches import patch; patch()" || exit 1
 }
 
-ls ~/skypilot-runtime/bin/python
 # Install cloud dependencies
 if [ "$CLOUD" = "azure" ]; then
     $PYTHON_EXEC -m pip install "skypilot-nightly[azure]"
 elif [ "$CLOUD" = "gcp" ]; then
+    # We don't have to install the google-cloud-sdk since it is installed by default in GCP machines.
     $PYTHON_EXEC -m pip install "skypilot-nightly[gcp]"
 elif [ "$CLOUD" = "aws" ]; then
     $PYTHON_EXEC -m pip install "skypilot-nightly[aws]"
