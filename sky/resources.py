@@ -112,9 +112,11 @@ class Resources:
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
             When a dict is provided, it can have the following fields:
+
             - strategy: the recovery strategy to use.
             - max_restarts_on_errors: the max number of restarts on user code
               errors.
+
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
