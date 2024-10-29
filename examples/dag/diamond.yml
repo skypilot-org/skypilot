@@ -1,4 +1,4 @@
-name: pipeline
+name: diamond
 downstream:
   data-processing:
     - infer_A
