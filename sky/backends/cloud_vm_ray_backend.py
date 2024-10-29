@@ -2272,7 +2272,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cached_cluster_info = cluster_info
             # Update cluster config by private IPs (if available).
             if vpn_config is not None:
-                self.setup_vpn(vpn_config)
+                self._setup_vpn(vpn_config)
                 vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
                                                       self.cluster_name,
                                                       vpn_config)
@@ -2474,18 +2474,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
-    def setup_vpn(self, vpn_config: vpn_utils.VPNConfig) -> None:
+    def _setup_vpn(self, vpn_config: vpn_utils.VPNConfig) -> None:
         assert self.cached_cluster_info is not None, (
             'cluster_info should be set before setting up VPN.')
-        instance_ids = self.cached_cluster_info.instance_ids()
         runners = self.get_command_runners()
 
-        def _run_setup_commands(runner_instance_id):
-            runner, instance_id = runner_instance_id
-            hostname = instance_id.split('/')[-1]
-            if not hostname.startswith(self.cluster_name):
-                hostname = f'{self.cluster_name}-{hostname}'
-            command = vpn_config.get_setup_command(hostname)
+        def _run_setup_commands(id_runner):
+            node_id, runner = id_runner
+            command = vpn_config.get_setup_command(self.cluster_name, node_id)
             returncode, stdout, stderr = runner.run([command],
                                                     require_outputs=True,
                                                     stream_logs=False)
@@ -2494,7 +2490,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'Stdout: {stdout}. Stderr: {stderr}')
 
         subprocess_utils.run_in_parallel(_run_setup_commands,
-                                         zip(runners, instance_ids))
+                                         enumerate(runners))
 
     @property
     def cluster_yaml(self):
@@ -4203,11 +4199,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             vpn_config = vpn_utils.VPNConfig.from_backend_config(
                 handle.vpn_config)
             if handle.cached_cluster_info is not None:
-                for instance_id in handle.cached_cluster_info.instance_ids():
-                    hostname = instance_id.split('/')[-1]
-                    if not hostname.startswith(handle.cluster_name):
-                        hostname = f'{handle.cluster_name}-{hostname}'
-                    vpn_config.remove_host(hostname)
+                for node_id in range(handle.cached_cluster_info.num_instances):
+                    vpn_config.remove_node(handle.cluster_name, node_id)
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

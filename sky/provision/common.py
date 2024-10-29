@@ -126,6 +126,14 @@ class ClusterInfo:
         """Get the number of instances in the cluster."""
         return sum(len(instances) for instances in self.instances.values())
 
+    def get_instances(self) -> List[InstanceInfo]:
+        """Get all instances."""
+        head_instance = self.get_head_instance()
+        worker_instances = self.get_worker_instances()
+        if head_instance is not None:
+            return [head_instance] + worker_instances
+        return worker_instances
+
     def get_head_instance(self) -> Optional[InstanceInfo]:
         """Get the instance metadata of the head node"""
         if self.head_instance_id is None:

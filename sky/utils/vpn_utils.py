@@ -34,7 +34,7 @@ class VPNConfig:
             raise ValueError('Unsupported VPN configuration. Please check '
                              'the YAML configuration.')
 
-    def get_setup_command(self, hostname: str) -> str:
+    def get_setup_command(self, cluster_name: str, node_id: int) -> str:
         """Get the command to setup the VPN on VM instances."""
         raise NotImplementedError
 
@@ -47,12 +47,12 @@ class VPNConfig:
         """
         return {}
 
-    def get_private_ip(self, hostname: str) -> str:
-        """Get the private IP address from the hostname."""
+    def get_private_ip(self, cluster_name: str, node_id: int) -> str:
+        """Get the private IP address from the cluster name and node ID."""
         raise NotImplementedError
 
-    def remove_host(self, hostname: str) -> None:
-        """Remove a host from the VPN."""
+    def remove_node(self, cluster_name: str, node_id: int) -> None:
+        """Remove a node from the VPN."""
         raise NotImplementedError
 
     def to_yaml_config(self) -> Dict[str, Any]:
@@ -132,11 +132,15 @@ class TailscaleConfig(VPNConfig):
         assert auth_key is not None and api_key is not None and tailnet is not None
         return TailscaleConfig(auth_key, api_key, tailnet)
 
-    def get_setup_command(self, hostname: str) -> str:
-        return self._SETUP_COMMAND.format(
-            tailscale_auth_key=self._auth_key,
-            hostname=common_utils.make_cluster_name_on_cloud(
-                hostname, self._MAX_HOSTNAME_LENGTH))
+    @staticmethod
+    def _get_hostname(cluster_name: str, node_id: int) -> str:
+        return common_utils.make_cluster_name_on_cloud(
+            f'{cluster_name}-{node_id}', TailscaleConfig._MAX_HOSTNAME_LENGTH)
+
+    def get_setup_command(self, cluster_name: str, node_id: int) -> str:
+        return self._SETUP_COMMAND.format(tailscale_auth_key=self._auth_key,
+                                          hostname=self._get_hostname(
+                                              cluster_name, node_id))
 
     def get_setup_env_vars(self) -> Dict[str, str]:
         return {
@@ -162,30 +166,30 @@ class TailscaleConfig(VPNConfig):
                 return device_info.get('id')
         return None
 
-    def get_private_ip(self, hostname: str) -> str:
-        """Get the private IP address from the hostname."""
-        device_name = common_utils.make_cluster_name_on_cloud(
-            hostname, self._MAX_HOSTNAME_LENGTH)
+    def get_private_ip(self, cluster_name: str, node_id: int) -> str:
+        """Get the private IP address from the cluster name and node ID."""
+        device_name = self._get_hostname(cluster_name, node_id)
         device_id = self._get_device_id_from_hostname(device_name)
         url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
         resp = requests.get(url_to_query, headers=self._get_auth_headers())
         return resp.json().get('addresses', [])[0]
 
-    def remove_host(self, hostname: str) -> None:
-        """Remove a host from the VPN."""
-        device_name = common_utils.make_cluster_name_on_cloud(
-            hostname, self._MAX_HOSTNAME_LENGTH)
+    def remove_node(self, cluster_name: str, node_id: int) -> None:
+        """Remove a node from the VPN."""
+        device_name = self._get_hostname(cluster_name, node_id)
         device_id = self._get_device_id_from_hostname(device_name)
         if not device_id:
-            logger.warning(f'Could not find node ID for hostname {hostname}.'
-                           ' Skipping host removal.')
+            logger.warning(
+                f'Could not find device ID for node {cluster_name}-{node_id}.'
+                ' Skipping host removal.')
 
         url_to_remove = f'https://api.tailscale.com/api/v2/device/{device_id}'
         resp = requests.delete(url_to_remove, headers=self._get_auth_headers())
         if resp.status_code != 200:
-            logger.warning(f'Failed to remove host {hostname} from the VPN.'
-                           f' Status code: {resp.status_code}.'
-                           f' Response: {resp.text}')
+            logger.warning(
+                f'Failed to remove node {cluster_name}-{node_id} from the VPN.'
+                f' Status code: {resp.status_code}.'
+                f' Response: {resp.text}')
 
     def to_yaml_config(self) -> Dict[str, Any]:
         """Get the VPN configuration in YAML format."""
@@ -213,12 +217,7 @@ def rewrite_cluster_info_by_vpn(
     cluster_info: common.ClusterInfo,
     cluster_name: str,
     vpn_config: VPNConfig,
-) -> common.ClusterInfo:
-    for (instance_id, instance_list) in cluster_info.instances.items():
-        # TODO(yi): test if this works on TPU VM.
-        for (i, instance) in enumerate(instance_list):
-            hostname = f'{instance_id}-{i}'.split('/')[-1]
-            if not hostname.startswith(cluster_name):
-                hostname = f'{cluster_name}-{hostname}'
-            instance.external_ip = vpn_config.get_private_ip(hostname)
-    return cluster_info
+) -> None:
+    instance_list = cluster_info.get_instances()
+    for (node_id, instance) in enumerate(instance_list):
+        instance.external_ip = vpn_config.get_private_ip(cluster_name, node_id)
