@@ -7,12 +7,14 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  - Hysun He (hysun.he@oracle.com) @ Jun, 2023: Reduce retry times by
    excluding those unsubscribed regions.
+ - Hysun He (hysun.he@oracle.com) @ Oct 14, 2024: Bug fix for validation
+   of the Marketplace images
 """
 
 import logging
 import threading
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import OCI
@@ -129,7 +131,7 @@ def get_default_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(
         _get_df(), instance_type)
 
@@ -206,4 +208,24 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
+    # Oct.14, 2024 by Hysun He: Marketplace images are region neutral, so don't
+    # check with region for the Marketplace images.
+    df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
+    if df.empty:
+        return False
+    app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
+    if app_catalog_listing_id:
+        return True
     return common.is_image_tag_valid_impl(_image_df, tag, region)
+
+
+def get_image_os_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    del region
+    df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
+    if df.empty:
+        os_type = oci_utils.oci_config.get_default_image_os()
+    else:
+        os_type = df['OS'].iloc[0]
+
+    logger.debug(f'Operation system for the image {tag} is {os_type}')
+    return os_type

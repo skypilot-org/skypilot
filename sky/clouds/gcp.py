@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -477,6 +477,9 @@ class GCP(clouds.Cloud):
                     'runtime_version']
                 resources_vars['tpu_node_name'] = r.accelerator_args.get(
                     'tpu_name')
+                # TPU VMs require privileged mode for docker containers to
+                # access TPU devices.
+                resources_vars['docker_run_options'] = ['--privileged']
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
@@ -666,7 +669,7 @@ class GCP(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.
         return None

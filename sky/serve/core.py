@@ -504,6 +504,53 @@ def down(
 
 
 @usage_lib.entrypoint
+def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
+    """Tear down a specific replica for the given service.
+
+    Args:
+        service_name: Name of the service.
+        replica_id: ID of replica to terminate.
+        purge: Whether to terminate replicas in a failed status. These replicas
+          may lead to resource leaks, so we require the user to explicitly
+          specify this flag to make sure they are aware of this potential
+          resource leak.
+
+    Raises:
+        sky.exceptions.ClusterNotUpError: if the sky sere controller is not up.
+        RuntimeError: if failed to terminate the replica.
+    """
+    handle = backend_utils.is_controller_accessible(
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message=
+        'No service is running now. Please spin up a service first.',
+        non_existent_message='No service is running now. '
+        'Please spin up a service first.',
+    )
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = serve_utils.ServeCodeGen.terminate_replica(service_name, replica_id,
+                                                      purge)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False,
+                                                     separate_stderr=True)
+
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to terminate the replica',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    sky_logging.print(stdout)
+
+
+@usage_lib.entrypoint
 def status(
     service_names: Optional[Union[str,
                                   List[str]]] = None) -> List[Dict[str, Any]]:
@@ -525,8 +572,6 @@ def status(
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
             'policy': (Optional[str]) load balancer policy description,
-            'requested_resources': (sky.Resources) requested resources
-              for replica (deprecated),
             'requested_resources_str': (str) str representation of
               requested resources,
             'replica_info': (List[Dict[str, Any]]) replica information,

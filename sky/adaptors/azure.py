@@ -69,6 +69,17 @@ def exceptions():
     return azure_exceptions
 
 
+@functools.lru_cache()
+@common.load_lazy_modules(modules=_LAZY_MODULES)
+def azure_mgmt_models(name: str):
+    if name == 'compute':
+        from azure.mgmt.compute import models
+        return models
+    elif name == 'network':
+        from azure.mgmt.network import models
+        return models
+
+
 # We should keep the order of the decorators having 'lru_cache' followed
 # by 'load_lazy_modules' as we need to make sure a caller can call
 # 'get_client.cache_clear', which is a function provided by 'lru_cache'
@@ -120,6 +131,9 @@ def get_client(name: str,
             from azure.mgmt import authorization
             return authorization.AuthorizationManagementClient(
                 credential, subscription_id)
+        elif name == 'msi':
+            from azure.mgmt import msi
+            return msi.ManagedServiceIdentityClient(credential, subscription_id)
         elif name == 'graph':
             import msgraph
             return msgraph.GraphServiceClient(credential)
