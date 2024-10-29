@@ -4,7 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky import clouds as cloud_lib
 from sky import sky_logging
@@ -137,7 +137,7 @@ def get_default_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
@@ -157,6 +157,7 @@ def get_instance_type_for_accelerator(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
+
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
