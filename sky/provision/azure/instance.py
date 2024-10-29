@@ -792,6 +792,39 @@ def _filter_instances(
     return nodes
 
 
+def _delete_nic_with_retry(network_client,
+                           resource_group,
+                           nic_name,
+                           max_retries=15,
+                           retry_interval=20):
+    """Delete a NIC with retries.
+
+    When a VM is created, its NIC is reserved for 180 seconds, preventing its
+    immediate deletion. If the NIC is in this reserved state, we must retry
+    deletion with intervals until the reservation expires. This situation
+    commonly arises if a VM termination is followed by a failover to another
+    region due to provisioning failures.
+    """
+    delete_network_interfaces = _get_azure_sdk_function(
+        client=network_client.network_interfaces, function_name='begin_delete')
+    for _ in range(max_retries):
+        try:
+            delete_network_interfaces(resource_group_name=resource_group,
+                                      network_interface_name=nic_name).result()
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete nic: {}'.format(e))
+            # Retry when deletion fails with reserved NIC.
+            if 'NicReservedForAnotherVm' in str(e):
+                logger.warning(f'NIC {nic_name} is reserved. '
+                               f'Retrying in {retry_interval} seconds...')
+                time.sleep(retry_interval)
+            else:
+                raise e
+    logger.error(
+        f'Failed to delete NIC {nic_name} after {max_retries} attempts.')
+
+
 def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
                                      cluster_name_on_cloud: str) -> None:
     """Removes VM with attached resources and Deployments.
@@ -849,8 +882,6 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
     delete_network_security_group = _get_azure_sdk_function(
         client=network_client.network_security_groups,
         function_name='begin_delete')
-    delete_network_interfaces = _get_azure_sdk_function(
-        client=network_client.network_interfaces, function_name='begin_delete')
     delete_role_assignment = _get_azure_sdk_function(
         client=auth_client.role_assignments, function_name='delete')
 
@@ -870,8 +901,8 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
             # Network Interface to be completely removed with .result() so the
             # dependency of Network Interface on Public IP Address is
             # disassociated. This takes about ~1s.
-            delete_network_interfaces(resource_group_name=resource_group,
-                                      network_interface_name=nic_name).result()
+            _delete_nic_with_retry(network_client, resource_group, nic_name)
+
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nic: {}'.format(e))
 
