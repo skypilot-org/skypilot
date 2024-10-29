@@ -792,11 +792,11 @@ def _filter_instances(
     return nodes
 
 
-def _delete_nic_with_retry(network_client,
-                           resource_group,
-                           nic_name,
-                           max_retries=15,
-                           retry_interval=20):
+def _delete_nic_with_retries(network_client,
+                             resource_group,
+                             nic_name,
+                             max_retries=15,
+                             retry_interval=20):
     """Delete a NIC with retries.
 
     When a VM is created, its NIC is reserved for 180 seconds, preventing its
@@ -812,10 +812,9 @@ def _delete_nic_with_retry(network_client,
             delete_network_interfaces(resource_group_name=resource_group,
                                       network_interface_name=nic_name).result()
             return
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning('Failed to delete nic: {}'.format(e))
-            # Retry when deletion fails with reserved NIC.
+        except azure.exceptions().HttpResponseError as e:
             if 'NicReservedForAnotherVm' in str(e):
+                # Retry when deletion fails with reserved NIC.
                 logger.warning(f'NIC {nic_name} is reserved. '
                                f'Retrying in {retry_interval} seconds...')
                 time.sleep(retry_interval)
@@ -901,8 +900,7 @@ def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
             # Network Interface to be completely removed with .result() so the
             # dependency of Network Interface on Public IP Address is
             # disassociated. This takes about ~1s.
-            _delete_nic_with_retry(network_client, resource_group, nic_name)
-
+            _delete_nic_with_retries(network_client, resource_group, nic_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nic: {}'.format(e))
 
