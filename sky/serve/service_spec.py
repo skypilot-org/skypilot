@@ -10,7 +10,6 @@ from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.utils import vpn_utils
 
 
 class SkyServiceSpec:
@@ -92,7 +91,6 @@ class SkyServiceSpec:
             int] = base_ondemand_fallback_replicas
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
-        self._vpn_config: Optional[vpn_utils.VPNConfig] = None
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -279,9 +277,6 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
-    def set_vpn_config(self, vpn_config: vpn_utils.VPNConfig) -> None:
-        self._vpn_config = vpn_config
-
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
@@ -339,10 +334,6 @@ class SkyServiceSpec:
     @property
     def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
-
-    @property
-    def vpn_config(self) -> Optional[vpn_utils.VPNConfig]:
-        return self._vpn_config
 
     @property
     def use_ondemand_fallback(self) -> bool:

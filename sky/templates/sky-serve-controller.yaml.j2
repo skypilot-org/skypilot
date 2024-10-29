@@ -30,11 +30,6 @@ file_mounts:
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
 
-{%- if vpn_config is not none %}
-vpn:
-  {{vpn_config}}
-{%- endif %}
-
 run: |
   # Activate the Python environment, so that cloud SDKs can be found in the
   # PATH.

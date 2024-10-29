@@ -1,5 +1,6 @@
 """Utils for VPN setup on instances."""
 import os
+import pprint
 from typing import Any, Dict, Optional
 
 import requests
@@ -218,6 +219,34 @@ def rewrite_cluster_info_by_vpn(
     cluster_name: str,
     vpn_config: VPNConfig,
 ) -> None:
+    """Rewrite the cluster info with the VPN configuration."""
     instance_list = cluster_info.get_instances()
     for (node_id, instance) in enumerate(instance_list):
         instance.external_ip = vpn_config.get_private_ip(cluster_name, node_id)
+
+
+def check_vpn_unchanged(
+        new_config: Optional[VPNConfig],
+        old_config_dict: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Check if the VPN configuration is unchanged.
+    Args:
+        vpn_config: The new VPN configuration to be launched.
+        old_config: The old VPN configuration in the backend.
+    Returns:
+        None if the VPN configuration is unchanged, otherwise a string
+        indicating the mismatch.
+    """
+    new_config_dict = new_config.to_backend_config(
+    ) if new_config is not None else None
+    use_or_not_mismatch_str = (
+        '{} VPN, but current config requires the opposite')
+    if old_config_dict is None:
+        if new_config_dict is None:
+            return None
+        return use_or_not_mismatch_str.format('without')
+    if new_config_dict is None:
+        return use_or_not_mismatch_str.format('with')
+    if new_config_dict == old_config_dict:
+        return None
+    return (f'with VPN config\n{pprint.pformat(old_config_dict)}, '
+            f'but current config is\n{pprint.pformat(new_config_dict)}')

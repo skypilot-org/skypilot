@@ -494,9 +494,6 @@ class Task:
         service = config.pop('service', None)
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
-            # TODO(yi): make it optional to use VPN IP on controller.
-            if vpn_config is not None:
-                service.set_vpn_config(vpn_config)
         task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'

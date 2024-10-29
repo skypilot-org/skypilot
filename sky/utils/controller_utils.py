@@ -9,7 +9,6 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
-import yaml
 
 from sky import check as sky_check
 from sky import clouds
@@ -26,7 +25,6 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
-from sky.serve.service_spec import SkyServiceSpec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -356,10 +354,8 @@ def download_and_stream_latest_job_log(
 
 
 def shared_controller_vars_to_fill(
-        controller: Controllers,
-        remote_user_config_path: str,
-        local_user_config: Dict[str, Any],
-        service_config: Optional[SkyServiceSpec] = None) -> Dict[str, str]:
+        controller: Controllers, remote_user_config_path: str,
+        local_user_config: Dict[str, Any]) -> Dict[str, str]:
     if not local_user_config:
         local_user_config_path = None
     else:
@@ -406,14 +402,6 @@ def shared_controller_vars_to_fill(
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
-    # Check if VPN auth key should be set.
-    if service_config is not None:
-        # Only support Tailscale VPN now
-        if service_config.vpn_config is not None:
-            env_vars.update(service_config.vpn_config.get_setup_env_vars())
-            vpn_config_yaml = yaml.dump(
-                service_config.vpn_config.to_yaml_config())
-            vars_to_fill['vpn_config'] = vpn_config_yaml
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

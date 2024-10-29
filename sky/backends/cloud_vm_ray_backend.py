@@ -8,7 +8,6 @@ import json
 import math
 import os
 import pathlib
-import pprint
 import re
 import shlex
 import signal
@@ -2671,28 +2670,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
-        def _check_vpn_unchanged() -> Optional[str]:
-            """Check if the VPN configuration is unchanged.
-
-            Returns:
-                None if the VPN configuration is unchanged, otherwise a string
-                indicating the mismatch.
-            """
-            new_vpn_config = task.vpn_config.to_backend_config(
-            ) if task.vpn_config is not None else None
-            use_or_not_mismatch_str = (
-                '{} VPN, but current config requires the opposite')
-            if handle.vpn_config is None:
-                if new_vpn_config is None:
-                    return None
-                return use_or_not_mismatch_str.format('without')
-            if new_vpn_config is None:
-                return use_or_not_mismatch_str.format('with')
-            if new_vpn_config == handle.vpn_config:
-                return None
-            return (f'with VPN config\n{pprint.pformat(handle.vpn_config)}, '
-                    f'but current config is\n{pprint.pformat(new_vpn_config)}')
-
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
 
@@ -2710,7 +2687,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
 
         # VPN check
-        vpn_check_result = _check_vpn_unchanged()
+        vpn_check_result = vpn_utils.check_vpn_unchanged(
+            task.vpn_config, handle.vpn_config)
         if vpn_check_result is not None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(

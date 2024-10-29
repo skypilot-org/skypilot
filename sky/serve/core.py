@@ -24,6 +24,7 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import vpn_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -164,7 +165,6 @@ def up(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
                 local_user_config=mutated_user_config,
-                service_config=task.service,
             ),
         }
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
@@ -181,7 +181,13 @@ def up(
         }
         controller_task.set_resources(controller_resources)
 
-        # # Set service_name so the backend will know to modify default ray
+        # Set VPN configuration on the controller, so the controller can
+        # start the VPN service on the replicas.
+        if task.vpn_config is not None:
+            controller_task.set_vpn_config(task.vpn_config)
+            controller_task.update_envs(task.vpn_config.get_setup_env_vars())
+
+        # Set service_name so the backend will know to modify default ray
         # task CPU usage to custom value instead of default 0.5 vCPU. We need
         # to set it to a smaller value to support a larger number of services.
         controller_task.service_name = service_name
@@ -330,6 +336,17 @@ def update(
         'To spin up a new service, '
         f'use {backend_utils.BOLD}sky serve up{backend_utils.RESET_BOLD}',
     )
+
+    vpn_check_result = vpn_utils.check_vpn_unchanged(task.vpn_config,
+                                                     handle.vpn_config)
+    if vpn_check_result is not None:
+        mismatch_str = (
+            f'To fix: specify a new cluster name, or down the '
+            f'existing cluster first: sky down {handle.cluster_name}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesMismatchError(
+                'VPN configuration mismatch: '
+                f'{vpn_check_result}.\n{mismatch_str}')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
