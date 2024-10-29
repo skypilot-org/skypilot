@@ -837,6 +837,9 @@ class Optimizer:
                 'use_spot': resources.use_spot
             }
             if isinstance(resources.cloud, clouds.Kubernetes):
+                # Region for Kubernetes is the context name, i.e. different
+                # Kubernetes clusters. We add region to the key to show all the
+                # Kubernetes clusters in the optimizer table for better UX.
                 resource_key_dict['region'] = resources.region
             return json.dumps(resource_key_dict, sort_keys=True)
 
