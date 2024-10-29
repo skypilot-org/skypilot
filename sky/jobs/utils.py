@@ -539,8 +539,9 @@ def stream_logs(job_id: Optional[int],
             if len(job_ids) == 0:
                 return f'No running managed job found with name {job_name!r}.'
             if len(job_ids) > 1:
-                raise ValueError(
-                    f'Multiple running jobs found with name {job_name!r}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Multiple running jobs found with name {job_name!r}.')
             job_id = job_ids[0]
 
         return stream_logs_by_id(job_id, task_id, follow)
