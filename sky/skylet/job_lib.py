@@ -532,7 +532,7 @@ def update_job_status(job_ids: List[int],
     during job cancelling, we still need this to handle the staleness problem,
     caused by instance restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==2.4.0.
+    This function should only be run on the remote instance with ray>=2.4.0.
     """
     if len(job_ids) == 0:
         return []
