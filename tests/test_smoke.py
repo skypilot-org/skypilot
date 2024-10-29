@@ -4438,6 +4438,20 @@ def test_core_api_sky_launch_exec():
     assert job_id_dummy is None
     sky.down(name)
 
+# The sky launch CLI has some additional checks to make sure the cluster is up/
+# restarted. However, the core API doesn't have these; make sure it still works
+def test_core_api_sky_launch_fast(generic_cloud: str):
+    name = _get_cluster_name()
+    cloud = sky.clouds.CLOUD_REGISTRY.from_str(generic_cloud)
+    try:
+        task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
+        sky.launch(task, cluster_name=name, idle_minutes_to_autostop=1, fast=True)
+        # Sleep to let the cluster autostop
+        time.sleep(120)
+        # Run it again - should work with fast=True
+        sky.launch(task, cluster_name=name, idle_minutes_to_autostop=1, fast=True)
+    finally:
+        sky.down(name)
 
 # ---------- Testing Storage ----------
 class TestStorageWithCredentials:
