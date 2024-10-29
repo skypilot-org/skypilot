@@ -225,6 +225,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
+        # TODO: move these out of init to prevent repeated calls.
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_managed_job_attributes()
@@ -391,7 +392,7 @@ class Resources:
 
     @property
     @functools.lru_cache(maxsize=1)
-    def accelerators(self) -> Optional[Dict[str, int]]:
+    def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field

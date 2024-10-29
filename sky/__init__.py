@@ -128,6 +128,7 @@ GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
 Kubernetes = clouds.Kubernetes
+K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
@@ -143,6 +144,7 @@ __all__ = [
     'GCP',
     'IBM',
     'Kubernetes',
+    'K8s',
     'Lambda',
     'OCI',
     'Paperspace',
