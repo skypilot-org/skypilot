@@ -8,6 +8,7 @@ You only need to do this once.
 packer init plugins.pkr.hcl
 ```
 3. Setup cloud credentials
+4. `cd sky/clouds/service_catalog/images`
 
 ## Generate Images
 FYI time to packer build images:
@@ -30,7 +31,7 @@ packer build ${IMAGE}.pkr.hcl
 2. Make the image public
 ```bash
 # Make image public
-export IMAGE_NAME=skypilot-gcp-cpu-ubuntu-xxx  # Update this
+export IMAGE_NAME=skypilot-gcp-cpu-ubuntu-20241029144600  # Update this
 export IMAGE_ID=projects/sky-dev-465/global/images/${IMAGE_NAME}
 gcloud compute images add-iam-policy-binding ${IMAGE_NAME} --member='allAuthenticatedUsers' --role='roles/compute.imageUser'
 ```
@@ -44,7 +45,8 @@ packer build ${IMAGE}.pkr.hcl
 ```
 2. Copy images to all regions
 ```bash
-export IMAGE_ID=ami-0b31b24524afa8e47   # Update this
+export TYPE=gpu  # Update this
+export IMAGE_ID=ami-05e9f5efd844f1a4f   # Update this
 python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE}
 ```
 3. Add fallback images if any region failed \
@@ -55,11 +57,11 @@ Look for "NEED_FALLBACK" in the output `images.csv` and edit. (You can use publi
 ```bash
 export SECRET=xxxxxx  # Update this
 ```
-2. Build and copy images for all regions and both VM generations (1 and 2).
+2. Build and copy images for all regions for GPU (gen 1 & 2) and CPU (gen 2 only).
 ```bash
-export VM_GENERATION=2  # Update this
-packer build -force --var vm_generation=${VM_GENERATION} --var client_secret=${SECRET} skypilot-azure-cpu-ubuntu.pkr.hcl
-packer build --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
+export TYPE=gpu  # Update this
+export VM_GENERATION=1  # Update this
+packer build --var vm_generation=${VM_GENERATION} --var client_secret=${SECRET} skypilot-azure-${TYPE}-ubuntu.pkr.hcl
 ```
 
 ## Test Images
