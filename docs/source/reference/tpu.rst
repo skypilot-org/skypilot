@@ -52,6 +52,8 @@ More details can be found on GCP `documentation <https://cloud.google.com/tpu/do
 TPU VMs
 -------
 
+Google's latest TPU v6 (Trillium) VMs offers great performance and it is now supported by SkyPilot.
+
 To use TPU VMs, set the following in a task YAML's ``resources`` field:
 
 .. code-block:: yaml
