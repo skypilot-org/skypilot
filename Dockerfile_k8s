@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3:23.3.1-0
+FROM --platform=linux/amd64 continuumio/miniconda3:23.3.1-0
 
 # TODO(romilb): Investigate if this image can be consolidated with the skypilot
 #  client image (`Dockerfile`)
@@ -9,8 +9,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt update -y && \
     apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat curl -y && \
     rm -rf /var/lib/apt/lists/* && \
-    apt remove -y python3 && \
-    conda init
+    apt remove -y python3
 
 # Setup SSH and generate hostkeys
 RUN mkdir -p /var/run/sshd && \
@@ -33,13 +32,24 @@ ENV HOME /home/sky
 # Set current working directory
 WORKDIR /home/sky
 
-# Install SkyPilot pip dependencies preemptively to speed up provisioning time
-RUN conda init && \
-    pip install wheel Click colorama cryptography jinja2 jsonschema networkx  \
-    oauth2client pandas pendulum PrettyTable rich tabulate filelock packaging  \
-    'protobuf<4.0.0' pulp pycryptodome==3.12.0 docker kubernetes==28.1.0  \
-    grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
-    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+SHELL ["/bin/bash", "-c"]
+
+# Install python system packages
+RUN curl -o Miniconda3-Linux-x86_64.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh && \
+    bash Miniconda3-Linux-x86_64.sh -b && \
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" && \
+    conda init && conda config --set auto_activate_base true && conda activate base && \
+    grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
+    rm Miniconda3-Linux-x86_64.sh && \
+    conda create -y -n skypilot-runtime python=3.10 && \
+    conda activate skypilot-runtime && \
+    export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    python3 -m venv ~/skypilot-runtime && \
+    PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
+    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,docker,kubernetes]'
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
 # Add /home/sky/.local/bin/ to PATH
