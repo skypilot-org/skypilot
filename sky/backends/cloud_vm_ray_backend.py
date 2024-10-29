@@ -3875,6 +3875,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
         cluster_status_fetched = False
+        prev_cluster_status = None
         if refresh_cluster_status:
             try:
                 prev_cluster_status, _ = (

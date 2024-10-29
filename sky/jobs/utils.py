@@ -210,20 +210,23 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
     return callback_func
 
 
-def make_launch_log_dir_for_redirection(timestamp: str, num_tasks: int):
-    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, timestamp)
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    for task_id in range(num_tasks):
-        log_file_name = get_launch_log_file_name(timestamp, task_id)
-        if not os.path.exists(log_file_name):
-            with open(log_file_name, 'w', encoding='utf-8'):
-                pass
+def get_launch_log_dir(timestamp: str):
+    return (pathlib.Path(constants.SKY_LOGS_DIRECTORY) / timestamp).expanduser()
 
 
 def get_launch_log_file_name(timestamp: str, task_id: int):
-    return os.path.join(constants.SKY_LOGS_DIRECTORY, timestamp,
-                        f'task_{task_id}_launch.log')
+    return get_launch_log_dir(timestamp) / f'task_{task_id}_launch.log'
+
+
+def make_launch_log_dir_for_redirection(timestamp: str, num_tasks: int):
+    log_dir = get_launch_log_dir(timestamp)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    for task_id in range(num_tasks):
+        log_file_name = get_launch_log_file_name(timestamp, task_id)
+        if log_file_name.exists():
+            raise RuntimeError(
+                f'Launch log file {log_file_name} already exists.')
+        log_file_name.touch()
 
 
 # ======== user functions ========
