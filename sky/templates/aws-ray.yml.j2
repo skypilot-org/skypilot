@@ -131,6 +131,9 @@ available_node_types:
             - Key: {{ label_key }}
               Value: {{ label_value|tojson }}
             {%- endfor %}
+      # Use IDMSv2
+      MetadataOptions:
+        HttpTokens: required 
 
 head_node_type: ray.head.default
 

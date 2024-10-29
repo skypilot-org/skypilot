@@ -379,26 +379,33 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 #
 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
 #   Nvidia driver: 470.57.02, CUDA Version: 11.4
-_GPU_UBUNTU_DATE_PYTORCH = [
-    ('gpu', '20.04', '20231103', '2.1.0'),
-    ('gpu', '18.04', '20221114', '1.10.0'),
-    ('k80', '20.04', '20211208', '1.10.0'),
-    ('k80', '18.04', '20211208', '1.10.0'),
+#
+# Neuron (Inferentia / Trainium):
+# https://aws.amazon.com/releasenotes/aws-deep-learning-ami-base-neuron-ubuntu-20-04/  # pylint: disable=line-too-long
+# Deep Learning Base Neuron AMI (Ubuntu 20.04) 20240923
+# TODO(tian): find out the driver version.
+#   Neuron driver:
+_GPU_DESC_UBUNTU_DATE = [
+    ('gpu', 'AMI GPU PyTorch 2.1.0', '20.04', '20231103'),
+    ('gpu', 'AMI GPU PyTorch 1.10.0', '18.04', '20221114'),
+    ('k80', 'AMI GPU PyTorch 1.10.0', '20.04', '20211208'),
+    ('k80', 'AMI GPU PyTorch 1.10.0', '18.04', '20211208'),
+    ('neuron', 'Base Neuron AMI', '22.04', '20240923'),
 ]
 
 
-def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
-                    pytorch_version: str) -> Optional[str]:
+def _fetch_image_id(region: str, description: str, ubuntu_version: str,
+                    creation_date: str) -> Optional[str]:
     try:
         image = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
-                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch {pytorch_version} (Ubuntu {ubuntu_version}) {creation_date}"' \\
+                --filters 'Name=name,Values="Deep Learning {description} (Ubuntu {ubuntu_version}) {creation_date}"' \\
                     'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
             """,
                                         shell=True)
     except subprocess.CalledProcessError as e:
-        print(f'Failed {region}, {ubuntu_version}, {creation_date}. '
-              'Trying next date.')
+        print(f'Failed {region}, {description}, {ubuntu_version}, '
+              f'{creation_date}. Trying next date.')
         print(f'{type(e)}: {e}')
         image_id = None
     else:
@@ -407,21 +414,21 @@ def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
     return image_id
 
 
-def _get_image_row(
-        region: str, gpu: str, ubuntu_version: str, date: str,
-        pytorch_version) -> Tuple[str, str, str, str, Optional[str], str]:
-    print(f'Getting image for {region}, {ubuntu_version}, {gpu}')
-    image_id = _fetch_image_id(region, ubuntu_version, date, pytorch_version)
+def _get_image_row(region: str, gpu: str, description: str, ubuntu_version: str,
+                   date: str) -> Tuple[str, str, str, str, Optional[str], str]:
+    print(f'Getting image for {region}, {description}, {ubuntu_version}, {gpu}')
+    image_id = _fetch_image_id(region, description, ubuntu_version, date)
     if image_id is None:
         # not found
-        print(f'Failed to find image for {region}, {ubuntu_version}, {gpu}')
+        print(f'Failed to find image for {region}, {description}, '
+              f'{ubuntu_version}, {gpu}')
     tag = f'skypilot:{gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
 
 def get_all_regions_images_df(regions: Set[str]) -> 'pd.DataFrame':
     image_metas = [
-        (r, *i) for r, i in itertools.product(regions, _GPU_UBUNTU_DATE_PYTORCH)
+        (r, *i) for r, i in itertools.product(regions, _GPU_DESC_UBUNTU_DATE)
     ]
     with mp_pool.Pool() as pool:
         results = pool.starmap(_get_image_row, image_metas)
@@ -531,11 +538,13 @@ if __name__ == '__main__':
     instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
-    image_df = get_all_regions_images_df(user_regions)
-    _check_regions_integrity(image_df, 'images')
+    # Disable refreshing images.csv as we are using skypilot custom AMIs
+    # See sky/clouds/service_catalog/images/README.md for more details.
+    # image_df = get_all_regions_images_df(user_regions)
+    # _check_regions_integrity(image_df, 'images')
 
-    image_df.to_csv('aws/images.csv', index=False)
-    print('AWS Images saved to aws/images.csv')
+    # image_df.to_csv('aws/images.csv', index=False)
+    # print('AWS Images saved to aws/images.csv')
 
     if args.az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()

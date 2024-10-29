@@ -1,7 +1,7 @@
 .. _kubernetes-ports:
 
 Exposing Services on Kubernetes
--------------------------------
+===============================
 
 .. note::
     This is a guide on how to configure an existing Kubernetes cluster (along with the caveats involved) to successfully expose ports and services externally through SkyPilot.
@@ -23,7 +23,7 @@ If your cluster does not support LoadBalancer services, SkyPilot can also use `a
 .. _kubernetes-loadbalancer:
 
 LoadBalancer Service
-^^^^^^^^^^^^^^^^^^^^
+--------------------
 
 This mode exposes ports through a Kubernetes `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
 
@@ -52,11 +52,31 @@ These load balancers will be automatically terminated when the cluster is delete
 
     To work around this issue, make sure all your ports have services running behind them.
 
+Internal Load Balancers
+^^^^^^^^^^^^^^^^^^^^^^^
+
+To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
+
+Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/config.yaml``):
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      custom_metadata:
+        annotations:
+          # For GCP/GKE
+          networking.gke.io/load-balancer-type: "Internal"
+          # For AWS/EKS
+          service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+          # For Azure/AKS
+          service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+
 
 .. _kubernetes-ingress:
 
 Nginx Ingress
-^^^^^^^^^^^^^
+-------------
 
 This mode exposes ports by creating a Kubernetes `Ingress <https://kubernetes.io/docs/concepts/services-networking/ingress/>`_ backed by an existing `Nginx Ingress Controller <https://kubernetes.github.io/ingress-nginx/>`_.
 

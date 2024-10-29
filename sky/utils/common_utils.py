@@ -16,7 +16,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
-import colorama
 import jinja2
 import jsonschema
 import yaml
@@ -479,11 +478,9 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     Returns:
         A string that represents the exception.
     """
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
-    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+        return f'[{class_fullname(e.__class__)}] {e}'
+    return f'{class_fullname(e.__class__)}: {e}'
 
 
 def remove_color(s: str):
@@ -679,3 +676,23 @@ def deprecated_function(
         return func(*args, **kwargs)
 
     return new_func
+
+
+def truncate_long_string(s: str, max_length: int = 35) -> str:
+    """Truncate a string to a maximum length, preserving whole words."""
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'  # Use '…'?
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'
