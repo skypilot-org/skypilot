@@ -8,16 +8,22 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.adaptors import kubernetes
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
 
+
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
     pd = adaptors_common.LazyImport('pandas')
+
+
+logger = sky_logging.init_logger(__name__)
 
 _PULL_FREQUENCY_HOURS = 7
 
@@ -96,7 +102,17 @@ def list_accelerators_realtime(
     key = label_formatter.get_label_key()
     nodes = kubernetes_utils.get_kubernetes_nodes(context)
     # Get the pods to get the real-time GPU usage
-    pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+    try:
+        pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+    except kubernetes.api_exception() as e:
+        if e.status == 403:
+            logger.warning('Failed to get pods in the Kubernetes cluster. '
+                           'Please check if the user has the necessary '
+                           'permissions to list pods. Realtime GPU usage '
+                           'information may be incorrect.')
+            pods = []
+        else:
+            raise
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
