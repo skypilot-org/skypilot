@@ -3,7 +3,7 @@
 # Runs a task that uses cloud buckets for uploading and accessing files.
 #
 # Usage:
-#   sky spot launch -c spot-storage examples/managed_job_with_storage.yaml
+#   sky jobs launch -c spot-storage examples/managed_job_with_storage.yaml
 #   sky down spot-storage
 
 resources:

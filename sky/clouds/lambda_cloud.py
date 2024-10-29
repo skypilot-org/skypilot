@@ -1,14 +1,13 @@
 """Lambda Cloud."""
-import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
 from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.clouds.utils import lambda_utils
+from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -37,10 +36,6 @@ class Lambda(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is currently not supported on {_REPR}.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
-            f'Docker image is currently not supported on {_REPR}. '
-            'You can try running docker command inside the `run` section in task.yaml.'
-        ),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.IMAGE_ID: f'Specifying image ID is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
@@ -48,6 +43,9 @@ class Lambda(clouds.Cloud):
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS: f'Host controllers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.VPN: f'VPN is currently not supported in {_REPR}.',
     }
+
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -138,7 +136,7 @@ class Lambda(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='lambda')
 
@@ -166,16 +164,22 @@ class Lambda(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
-        return {
+        resources_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
         }
+
+        if acc_dict is not None:
+            # Lambda cloud's docker runtime information does not contain
+            # 'nvidia-container-runtime', causing no GPU option is added to
+            # the docker run command. We patch this by adding it here.
+            resources_vars['docker_run_options'] = ['--gpus all']
+
+        return resources_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

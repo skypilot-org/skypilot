@@ -56,7 +56,7 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import resources
+    from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
@@ -69,9 +69,6 @@ SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
-
-BOLD = '\033[1m'
-RESET_BOLD = '\033[0m'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
@@ -280,18 +277,22 @@ def path_size_megabytes(path: str) -> int:
         If successful: the size of 'path' in megabytes, rounded down. Otherwise,
         -1.
     """
-    resolved_path = pathlib.Path(path).expanduser().resolve()
     git_exclude_filter = ''
-    if (resolved_path / command_runner.GIT_EXCLUDE).exists():
-        # Ensure file exists; otherwise, rsync will error out.
-        #
-        # We shlex.quote() because the path may contain spaces:
-        #   'my dir/.git/info/exclude'
-        # Without quoting rsync fails.
-        git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
+    resolved_path = pathlib.Path(path).expanduser().resolve()
+    if (resolved_path / constants.SKY_IGNORE_FILE).exists():
+        rsync_filter = command_runner.RSYNC_FILTER_SKYIGNORE
+    else:
+        rsync_filter = command_runner.RSYNC_FILTER_GITIGNORE
+        if (resolved_path / command_runner.GIT_EXCLUDE).exists():
+            # Ensure file exists; otherwise, rsync will error out.
+            #
+            # We shlex.quote() because the path may contain spaces:
+            #   'my dir/.git/info/exclude'
+            # Without quoting rsync fails.
+            git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
+                shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
-                     f'{command_runner.RSYNC_FILTER_OPTION} '
+                     f'{rsync_filter} '
                      f'{git_exclude_filter} --dry-run {path!r}')
     rsync_output = ''
     try:
@@ -400,6 +401,8 @@ class SSHConfigHelper(object):
 
     ssh_conf_path = '~/.ssh/config'
     ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
+    ssh_conf_per_cluster_lock_path = os.path.expanduser(
+        '~/.sky/ssh_config_{}.lock')
     ssh_cluster_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
@@ -485,12 +488,6 @@ class SSHConfigHelper(object):
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
 
-        # For backward compatibility: before #2706, we wrote the config of SkyPilot clusters
-        # directly in ~/.ssh/config. For these clusters, we remove the config in ~/.ssh/config
-        # and write/overwrite the config in ~/.sky/ssh/<cluster_name> instead.
-        cls._remove_stale_cluster_config_for_backward_compatibility(
-            cluster_name, ip, auth_config, docker_user)
-
         if not os.path.exists(config_path):
             config = ['\n']
             with open(config_path,
@@ -559,139 +556,20 @@ class SSHConfigHelper(object):
             f.write(codegen)
 
     @classmethod
-    def _remove_stale_cluster_config_for_backward_compatibility(
-        cls,
-        cluster_name: str,
-        ip: str,
-        auth_config: Dict[str, str],
-        docker_user: Optional[str] = None,
-    ):
-        """Remove authentication information for cluster from local SSH config.
-
-        If no existing host matching the provided specification is found, then
-        nothing is removed.
-
-        Args:
-            ip: Head node's IP address.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
-            docker_user: If not None, use this user to ssh into the docker
-        """
-        username = auth_config['ssh_user']
-        config_path = os.path.expanduser(cls.ssh_conf_path)
-        cluster_config_path = os.path.expanduser(
-            cls.ssh_cluster_path.format(cluster_name))
-        if not os.path.exists(config_path):
-            return
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = f.readlines()
-
-        start_line_idx = None
-
-        # Scan the config for the cluster name.
-        for i, line in enumerate(config):
-            next_line = config[i + 1] if i + 1 < len(config) else ''
-            if docker_user is None:
-                found = (line.strip() == f'HostName {ip}' and
-                         next_line.strip() == f'User {username}')
-            else:
-                found = (line.strip() == 'HostName localhost' and
-                         next_line.strip() == f'User {docker_user}')
-                if found:
-                    # Find the line starting with ProxyCommand and contains the ip
-                    found = False
-                    for idx in range(i, len(config)):
-                        # Stop if we reach an empty line, which means a new host
-                        if not config[idx].strip():
-                            break
-                        if config[idx].strip().startswith('ProxyCommand'):
-                            proxy_command_line = config[idx].strip()
-                            if proxy_command_line.endswith(f'@{ip}'):
-                                found = True
-                                break
-            if found:
-                start_line_idx = i - 1
-                break
-
-        if start_line_idx is not None:
-            # Scan for end of previous config.
-            cursor = start_line_idx
-            while cursor > 0 and len(config[cursor].strip()) > 0:
-                cursor -= 1
-            prev_end_line_idx = cursor
-
-            # Scan for end of the cluster config.
-            end_line_idx = None
-            cursor = start_line_idx + 1
-            start_line_idx -= 1  # remove auto-generated comment
-            while cursor < len(config):
-                if config[cursor].strip().startswith(
-                        '# ') or config[cursor].strip().startswith('Host '):
-                    end_line_idx = cursor
-                    break
-                cursor += 1
-
-            # Remove sky-generated config and update the file.
-            config[prev_end_line_idx:end_line_idx] = [
-                '\n'
-            ] if end_line_idx is not None else []
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(''.join(config).strip())
-                f.write('\n' * 2)
-
-        # Delete include statement if it exists in the config.
-        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
-                               f'{cluster_name}` to remove)')
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = f.readlines()
-
-        for i, line in enumerate(config):
-            config_str = line.strip()
-            if f'Include {cluster_config_path}' in config_str:
-                with open(config_path, 'w', encoding='utf-8') as f:
-                    if i < len(config) - 1 and config[i + 1] == '\n':
-                        del config[i + 1]
-                    # Delete Include string
-                    del config[i]
-                    # Delete Sky Autogen Comment
-                    if i > 0 and sky_autogen_comment in config[i - 1].strip():
-                        del config[i - 1]
-                    f.write(''.join(config))
-                break
-            if 'Host' in config_str:
-                break
-
-    @classmethod
-    # TODO: We can remove this after 0.6.0 and have a lock only per cluster.
-    @timeline.FileLockEvent(ssh_conf_lock_path)
-    def remove_cluster(
-        cls,
-        cluster_name: str,
-        ip: str,
-        auth_config: Dict[str, str],
-        docker_user: Optional[str] = None,
-    ):
+    def remove_cluster(cls, cluster_name: str):
         """Remove authentication information for cluster from ~/.sky/ssh/<cluster_name>.
 
-        For backward compatibility also remove the config from ~/.ssh/config if it exists.
-
         If no existing host matching the provided specification is found, then
         nothing is removed.
 
         Args:
-            ip: Head node's IP address.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
-            docker_user: If not None, use this user to ssh into the docker
+            cluster_name: Cluster name.
         """
-        cluster_config_path = os.path.expanduser(
-            cls.ssh_cluster_path.format(cluster_name))
-        common_utils.remove_file_if_exists(cluster_config_path)
-
-        # Ensures backward compatibility: before #2706, we wrote the config of SkyPilot clusters
-        # directly in ~/.ssh/config. For these clusters, we should clean up the config.
-        # TODO: Remove this after 0.6.0
-        cls._remove_stale_cluster_config_for_backward_compatibility(
-            cluster_name, ip, auth_config, docker_user)
+        with timeline.FileLockEvent(
+                cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
+            cluster_config_path = os.path.expanduser(
+                cls.ssh_cluster_path.format(cluster_name))
+            common_utils.remove_file_if_exists(cluster_config_path)
 
 
 def _replace_yaml_dicts(
@@ -750,7 +628,7 @@ def _replace_yaml_dicts(
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
-        to_provision: 'resources.Resources',
+        to_provision: 'resources_lib.Resources',
         num_nodes: int,
         cluster_config_template: str,
         cluster_name: str,
@@ -866,7 +744,7 @@ def write_cluster_config(
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
     # Deprecated: instance_tags have been replaced by labels. For backward
     # compatibility, we support them and the schema allows them only if
-    # `labels` are not specified. This should be removed after 0.7.0.
+    # `labels` are not specified. This should be removed after 0.8.0.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'instance_tags'),
                                         labels)
     # labels is a dict, which is guaranteed by the type check in
@@ -1167,7 +1045,8 @@ def wait_until_ray_cluster_ready(
     runner = command_runner.SSHCommandRunner(node=(head_ip, 22),
                                              **ssh_credentials)
     with rich_utils.safe_status(
-            '[bold cyan]Waiting for workers...') as worker_status:
+            ux_utils.spinner_message('Waiting for workers',
+                                     log_path=log_path)) as worker_status:
         while True:
             rc, output, stderr = runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -1183,9 +1062,11 @@ def wait_until_ray_cluster_ready(
             ready_head, ready_workers = _count_healthy_nodes_from_ray(
                 output, is_local_cloud=is_local_cloud)
 
-            worker_status.update('[bold cyan]'
-                                 f'{ready_workers} out of {num_nodes - 1} '
-                                 'workers ready')
+            worker_status.update(
+                ux_utils.spinner_message(
+                    f'{ready_workers} out of {num_nodes - 1} '
+                    'workers ready',
+                    log_path=log_path))
 
             # In the local case, ready_head=0 and ready_workers=num_nodes. This
             # is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
@@ -1300,7 +1181,6 @@ def parallel_data_transfer_to_nodes(
         stream_logs: bool; Whether to stream logs to stdout
         source_bashrc: bool; Source bashrc before running the command.
     """
-    fore = colorama.Fore
     style = colorama.Style
 
     origin_source = source
@@ -1337,12 +1217,10 @@ def parallel_data_transfer_to_nodes(
 
     num_nodes = len(runners)
     plural = 's' if num_nodes > 1 else ''
-    message = (f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
-               f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
-               f'{style.BRIGHT}{target}{style.RESET_ALL}')
+    message = (f'  {style.DIM}{action_message} (to {num_nodes} node{plural})'
+               f': {origin_source} -> {target}{style.RESET_ALL}')
     logger.info(message)
-    with rich_utils.safe_status(f'[bold cyan]{action_message}[/]'):
-        subprocess_utils.run_in_parallel(_sync_node, runners)
+    subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
 def check_local_gpus() -> bool:
@@ -2484,9 +2362,9 @@ def get_clusters(
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
-        total=len(records))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'Refreshing status for {len(records)} cluster{plural}'),
+                             total=len(records))
 
     def _refresh_cluster(cluster_name):
         try:
@@ -2771,6 +2649,10 @@ def get_endpoints(cluster: str,
     cluster_records = get_clusters(include_controller=True,
                                    refresh=False,
                                    cluster_names=[cluster])
+    if not cluster_records:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster!r} not found.', cluster_status=None)
     assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]
     if (not skip_status_check and

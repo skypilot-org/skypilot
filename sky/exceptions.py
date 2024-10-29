@@ -1,7 +1,7 @@
 """Exceptions."""
 import enum
 import typing
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 if typing.TYPE_CHECKING:
     from sky import status_lib
@@ -61,12 +61,12 @@ class ProvisionPrechecksError(Exception):
     the error will be raised.
 
     Args:
-        reasons: (List[Exception]) The reasons why the prechecks failed.
+        reasons: (Sequence[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, reasons: List[Exception]) -> None:
+    def __init__(self, reasons: Sequence[Exception]) -> None:
         super().__init__()
-        self.reasons = list(reasons)
+        self.reasons = reasons
 
 
 class ManagedJobReachedMaxRetriesError(Exception):
@@ -290,4 +290,9 @@ class PortDoesNotExistError(Exception):
 
 class UserRequestRejectedByPolicy(Exception):
     """Raised when a user request is rejected by an admin policy."""
+    pass
+
+
+class NoClusterLaunchedError(Exception):
+    """No cluster launched, so cleanup can be skipped during failover."""
     pass

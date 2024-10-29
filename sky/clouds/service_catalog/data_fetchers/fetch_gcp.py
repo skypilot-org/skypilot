@@ -419,6 +419,11 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
                 if count != 8:
                     # H100 only has 8 cards.
                     continue
+            if 'H100-MEGA-80GB' in gpu_name:
+                gpu_name = 'H100-MEGA'
+                if count != 8:
+                    # H100-MEGA only has 8 cards.
+                    continue
             if 'VWS' in gpu_name:
                 continue
             if gpu_name.startswith('TPU-'):
@@ -447,6 +452,7 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'A100-80GB': 80 * 1024,
         'A100': 40 * 1024,
         'H100': 80 * 1024,
+        'H100-MEGA': 80 * 1024,
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
@@ -491,12 +497,17 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             if sku['category']['usageType'] != ondemand_or_spot:
                 continue
 
-            gpu_name = row['AcceleratorName']
-            if gpu_name == 'A100-80GB':
-                gpu_name = 'A100 80GB'
-            if gpu_name == 'H100':
-                gpu_name = 'H100 80GB'
-            if f'{gpu_name} GPU' not in sku['description']:
+            gpu_names = [row['AcceleratorName']]
+            if gpu_names[0] == 'A100-80GB':
+                gpu_names = ['A100 80GB']
+            if gpu_names[0] == 'H100':
+                gpu_names = ['H100 80GB']
+            if gpu_names[0] == 'H100-MEGA':
+                # Seems that H100-MEGA has two different descriptions in SKUs in
+                # different regions: 'H100 80GB Mega' and 'H100 80GB Plus'.
+                gpu_names = ['H100 80GB Mega', 'H100 80GB Plus']
+            if not any(f'{gpu_name} GPU' in sku['description']
+                       for gpu_name in gpu_names):
                 continue
 
             unit_price = _get_unit_price(sku)
@@ -670,7 +681,13 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        assert spot or tpu_price is not None, (row, hidden_tpu, HIDDEN_TPU_DF)
+        # TODO(tian): Hack. Should investigate how to retrieve the price
+        # for TPU-v6e.
+        if not tpu_name.startswith('tpu-v6e'):
+            assert spot or tpu_price is not None, (row, hidden_tpu,
+                                                   HIDDEN_TPU_DF)
+        else:
+            tpu_price = 0.0
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)

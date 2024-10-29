@@ -2,13 +2,12 @@
 import enum
 import fnmatch
 import functools
-import json
 import os
 import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -31,6 +30,14 @@ if typing.TYPE_CHECKING:
     from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
+
+# Image ID tags
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+# For GPU-related package version,
+# see sky/clouds/service_catalog/images/provisioners/cuda.sh
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
+_DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
 # This local file (under ~/.aws/) will be uploaded to remote nodes (any
 # cloud), if all of the following conditions hold:
@@ -217,17 +224,20 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag(
-            'skypilot:gpu-ubuntu-2004', region_name, clouds='aws')
+        image_id = service_catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
+                                                         region_name,
+                                                         clouds='aws')
         if acc is not None:
+            image_id = service_catalog.get_image_id_from_tag(
+                _DEFAULT_GPU_IMAGE_ID, region_name, clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 image_id = service_catalog.get_image_id_from_tag(
-                    'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
+                    _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
             if acc_name in ['Trainium', 'Inferentia']:
                 image_id = service_catalog.get_image_id_from_tag(
-                    'skypilot:neuron-ubuntu-2204', region_name, clouds='aws')
+                    _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -299,7 +309,10 @@ class AWS(clouds.Cloud):
         # The command for getting the current zone is from:
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
-            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" '
+            '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
+            'curl -H "X-aws-ec2-metadata-token: $TOKEN" -s '
+            'http://169.254.169.254/latest/dynamic/instance-identity/document'
             f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
             'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str
@@ -369,7 +382,7 @@ class AWS(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
 
@@ -397,10 +410,8 @@ class AWS(clouds.Cloud):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         if r.extract_docker_image() is not None:
             image_id_to_use = None

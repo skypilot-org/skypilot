@@ -9,8 +9,9 @@ reused across cloud object creation.
 """
 import collections
 import enum
+import math
 import typing
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
 from sky import skypilot_config
@@ -307,7 +308,7 @@ class Cloud:
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         raise NotImplementedError
 
@@ -674,8 +675,9 @@ class Cloud:
         assert resources.is_launchable(), resources
 
         def _equal_accelerators(
-                acc_requested: Optional[Dict[str, int]],
-                acc_from_instance_type: Optional[Dict[str, int]]) -> bool:
+            acc_requested: Optional[Dict[str, Union[int, float]]],
+            acc_from_instance_type: Optional[Dict[str, Union[int,
+                                                             float]]]) -> bool:
             """Check the requested accelerators equals to the instance type
 
             Check the requested accelerators equals to the accelerators
@@ -690,12 +692,14 @@ class Cloud:
             for acc in acc_requested:
                 if acc not in acc_from_instance_type:
                     return False
-                if acc_requested[acc] != acc_from_instance_type[acc]:
+                # Avoid float point precision issue.
+                if not math.isclose(acc_requested[acc],
+                                    acc_from_instance_type[acc]):
                     return False
             return True
 
-        acc_from_instance_type = (cls.get_accelerators_from_instance_type(
-            resources.instance_type))
+        acc_from_instance_type = cls.get_accelerators_from_instance_type(
+            resources.instance_type)
         if not _equal_accelerators(resources.accelerators,
                                    acc_from_instance_type):
             with ux_utils.print_exception_no_traceback():
@@ -819,6 +823,10 @@ class Cloud:
         raise NotImplementedError
 
     # === End of image related methods ===
+
+    @classmethod
+    def canonical_name(cls) -> str:
+        return cls.__name__.lower()
 
     def __repr__(self):
         return self._REPR
