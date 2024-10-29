@@ -539,6 +539,14 @@ def update_job_status(job_ids: List[int],
 
     job_client = _create_ray_job_submission_client()
 
+    # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
+    # which contains the job status (str) and submission_id (str).
+    ray_job_query_time = time.time()
+    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
+    job_details = {
+        job_detail.submission_id: job_detail for job_detail in job_detail_lists
+    }
+
     statuses = []
     for job_id in job_ids:
         ray_job_id = make_ray_job_id(job_id)
@@ -547,14 +555,8 @@ def update_job_status(job_ids: List[int],
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
-            try:
-                job_detail = job_client.get_job_info(ray_job_id)
-            except RuntimeError:
-                # An RuntimeError is raised when the job does not exist.
-                # https://docs.ray.io/en/latest/cluster/running-applications/job-submission/doc/ray.job_submission.JobSubmissionClient.get_job_info.html  # pylint: disable=line-too-long
-                pass
-            else:
-                ray_status = job_detail.status
+            if ray_job_id in job_details:
+                ray_status = job_details[ray_job_id].status
                 status = _RAY_TO_JOB_STATUS_MAP[ray_status]
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
@@ -570,7 +572,7 @@ def update_job_status(job_ids: List[int],
                 # submitted outside of the grace period, we will consider the
                 # ray job status.
                 if not (pending_job['submit'] > 0 and pending_job['submit'] <
-                        time.time() - _PENDING_SUBMIT_GRACE_PERIOD):
+                        ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
                     # Reset the job status to PENDING even though it may not
                     # appear in the ray jobs, so that it will not be considered
                     # as stale.
