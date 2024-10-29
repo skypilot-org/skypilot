@@ -3379,15 +3379,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
-        is_dag_chain = managed_job_dag is not None and managed_job_dag.is_chain(
-        )
         try:
             if not detach_run:
-                if (handle.cluster_name in controller_utils.Controllers.
-                        JOBS_CONTROLLER.value.candidate_cluster_names):
+                to_launch_managed_jobs_controller = (
+                    handle.cluster_name in controller_utils.Controllers.
+                    JOBS_CONTROLLER.value.candidate_cluster_names)
+                if to_launch_managed_jobs_controller:
+                    is_dag_chain = (managed_job_dag is not None and
+                                    managed_job_dag.is_chain())
                     if is_dag_chain:
                         self.tail_managed_job_logs(handle, job_id)
                     else:
+                        # For non-chain DAGs, we avoid continuously polling
+                        # logs for each running task, as parallel tasks may
+                        # cause issues: either logs from shorter tasks might
+                        # be missed if they complete early, or logs from
+                        # multiple tasks could interleave, making them hard
+                        # to follow. Instead, we let the user do
+                        # `sky jobs logs <job_id> --task-id <task_id>`,
+                        # similar to sky serve.
                         pass
                 else:
                     # Sky logs. Not using subprocess.run since it will make the
