@@ -25,21 +25,21 @@ if typing.TYPE_CHECKING:
 else:
     pd = adaptors_common.LazyImport('pandas')
 
-_logger = sky_logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
-def debug_enabled(logger: Logger):
+def debug_enabled(log: Logger):
 
     def decorate(f):
 
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             dt_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            logger.debug(f'{dt_str} Enter {f}, {args}, {kwargs}')
+            log.debug(f'{dt_str} Enter {f}, {args}, {kwargs}')
             try:
                 return f(*args, **kwargs)
             finally:
-                logger.debug(f'{dt_str} Exit {f}')
+                log.debug(f'{dt_str} Exit {f}')
 
         return wrapper
 
@@ -52,7 +52,7 @@ class QueryHelper:
     """
     # Call Cloud API to try getting the satisfied nodes.
     @classmethod
-    @debug_enabled(logger=_logger)
+    @debug_enabled(logger)
     def query_instances_by_tags(cls, tag_filters, region):
 
         where_clause_tags = ''
@@ -83,12 +83,12 @@ class QueryHelper:
 
     @classmethod
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
-        _logger.debug(f'Terminate instance by tags: {tag_filters}')
+        logger.debug(f'Terminate instance by tags: {tag_filters}')
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
             inst_id = inst.identifier
-            _logger.debug(f'Got instance(to be terminated): {inst_id}')
+            logger.debug(f'Got instance(to be terminated): {inst_id}')
 
             try:
                 oci_adaptor.get_core_client(
@@ -97,18 +97,77 @@ class QueryHelper:
                         inst_id)
             except oci_adaptor.oci.exceptions.ServiceError as e:
                 fail_count += 1
-                _logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
+                logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
                 traceback.print_exc()
 
         if fail_count == 0:
-            _logger.debug('Instance teardown result: OK')
+            logger.debug('Instance teardown result: OK')
         else:
-            _logger.warning(f'Instance teardown result: {fail_count} failed!')
+            logger.warning(f'Instance teardown result: {fail_count} failed!')
 
         return fail_count
 
+
     @classmethod
-    @debug_enabled(logger=_logger)
+    @debug_enabled(logger)
+    def launch_instance(cls, region, launch_config):
+        """ To create a new instance """
+        return oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).launch_instance(
+                    launch_instance_details=launch_config)
+
+
+    @classmethod
+    @debug_enabled(logger)
+    def start_instance(cls, region, instance_id):
+        """ To start an existing instance """
+        return oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).instance_action(
+                    instance_id=instance_id, action='START')
+
+
+    @classmethod
+    @debug_enabled(logger)
+    def stop_instance(cls, region, instance_id):
+        """ To stop an instance """
+        return oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).instance_action(
+                    instance_id=instance_id, action='STOP')
+
+
+    @classmethod
+    @debug_enabled(logger)
+    def wait_instance_until_status(cls, region, node_id, status):
+        """ To wait a instance becoming the specified state """
+        compute_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile())
+
+        resp = compute_client.get_instance(instance_id=node_id)
+
+        oci_adaptor.oci.wait_until(
+            compute_client,
+            resp,
+            'lifecycle_state',
+            status,
+        )
+
+    @classmethod
+    def get_instance_primary_vnic(cls, region, inst_info):
+        """ Get the primary vnic infomation of the instance """
+        list_vnic_attachments_response = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).list_vnic_attachments(
+                availability_domain=inst_info['ad'],
+                compartment_id=inst_info['compartment'],
+                instance_id=inst_info['inst_id'],
+            )
+        vnic = list_vnic_attachments_response.data[0]
+        return oci_adaptor.get_net_client(
+            region,
+            oci_utils.oci_config.get_profile()).get_vnic(vnic_id=vnic.vnic_id).data
+
+
+    @classmethod
+    @debug_enabled(logger)
     def subscribe_image(cls, compartment_id, listing_id, resource_version,
                         region):
         if (pd.isna(listing_id) or listing_id.strip() == 'None' or
@@ -144,13 +203,13 @@ class QueryHelper:
                     eula_link=agreements.eula_link,
                 ))
         except oci_adaptor.oci.exceptions.ServiceError as e:
-            _logger.critical(
+            logger.critical(
                 f'[Failed] subscribe_image: {listing_id} - {resource_version}'
                 f'Error message: {str(e)}')
             raise RuntimeError('ERR: Image subscription error!') from e
 
     @classmethod
-    @debug_enabled(logger=_logger)
+    @debug_enabled(logger)
     def find_compartment(cls, region) -> str:
         """ If compartment is not configured, we use root compartment """
         # Try to use the configured one first
@@ -185,7 +244,7 @@ class QueryHelper:
         return skypilot_compartment
 
     @classmethod
-    @debug_enabled(logger=_logger)
+    @debug_enabled(logger)
     def find_create_vcn_subnet(cls, region) -> Optional[str]:
         """ If sub is not configured, we find/create VCN skypilot_vcn """
         subnet = oci_utils.oci_config.get_vcn_subnet(region)
@@ -211,9 +270,9 @@ class QueryHelper:
                 vcn_id=skypilot_vcn,
                 display_name=oci_utils.oci_config.VCN_SUBNET_NAME,
                 lifecycle_state='AVAILABLE')
-            _logger.debug(f'Got VCN subnet \n{list_subnets_response.data}')
+            logger.debug(f'Got VCN subnet \n{list_subnets_response.data}')
             if len(list_subnets_response.data) < 1:
-                _logger.error(
+                logger.error(
                     f'No subnet {oci_utils.oci_config.VCN_SUBNET_NAME} '
                     f'found in the VCN {oci_utils.oci_config.VCN_NAME}')
                 raise RuntimeError(
@@ -227,7 +286,7 @@ class QueryHelper:
             return cls.create_vcn_subnet(net_client, skypilot_compartment)
 
     @classmethod
-    @debug_enabled(logger=_logger)
+    @debug_enabled(logger)
     def create_vcn_subnet(cls, net_client,
                           skypilot_compartment) -> Optional[str]:
 
@@ -245,7 +304,7 @@ class QueryHelper:
                     is_ipv6_enabled=False,
                     dns_label=oci_utils.oci_config.VCN_DNS_LABEL))
             vcn_data = create_vcn_response.data
-            _logger.debug(f'Created VCN \n{vcn_data}')
+            logger.debug(f'Created VCN \n{vcn_data}')
             skypilot_vcn = vcn_data.id
             route_table = vcn_data.default_route_table_id
             security_list = vcn_data.default_security_list_id
@@ -260,7 +319,7 @@ class QueryHelper:
                     vcn_id=skypilot_vcn,
                     display_name=oci_utils.oci_config.VCN_INTERNET_GATEWAY_NAME
                 ))
-            _logger.debug(
+            logger.debug(
                 f'Created internet gateway \n{create_ig_response.data}')
             ig = create_ig_response.data.id
 
@@ -277,7 +336,7 @@ class QueryHelper:
                     prohibit_public_ip_on_vnic=False,
                     route_table_id=route_table,
                     security_list_ids=[security_list]))
-            _logger.debug(f'Created subnet \n{create_subnet_response.data}')
+            logger.debug(f'Created subnet \n{create_subnet_response.data}')
             subnet = create_subnet_response.data.id
 
             list_services_response = net_client.list_services(limit=100)
@@ -297,7 +356,7 @@ class QueryHelper:
                                 service_id=services[0].id)
                         ],
                         vcn_id=skypilot_vcn))
-                _logger.debug(f'Service Gateway: \n{create_sg_response.data}')
+                logger.debug(f'Service Gateway: \n{create_sg_response.data}')
                 sg = create_sg_response.data.id
 
             # Update security list: Allow all traffic in the same subnet
@@ -339,7 +398,7 @@ class QueryHelper:
                             type=3),
                         description='ICMP traffic (VCN).'),
                 ]))
-            _logger.debug(
+            logger.debug(
                 f'Updated security_list: \n{update_security_list_response.data}'
             )
 
@@ -355,10 +414,10 @@ class QueryHelper:
                         description='Route table for SkyPilot VCN',
                         route_type='STATIC')
                 ]))
-            _logger.debug(f'Route table: \n{update_route_table_response.data}')
+            logger.debug(f'Route table: \n{update_route_table_response.data}')
 
         except oci_adaptor.oci.exceptions.ServiceError as e:
-            _logger.error(f'Create VCN Error: Create new VCN '
+            logger.error(f'Create VCN Error: Create new VCN '
                           f'{oci_utils.oci_config.VCN_NAME} failed: {str(e)}')
             # In case of partial success while creating vcn
             cls.delete_vcn(net_client, skypilot_vcn, subnet, ig, sg)
@@ -367,7 +426,7 @@ class QueryHelper:
         return subnet
 
     @classmethod
-    @debug_enabled(logger=_logger)
+    @debug_enabled(logger)
     def delete_vcn(cls, net_client, skypilot_vcn, skypilot_subnet,
                    internet_gateway, service_gateway):
         if skypilot_vcn is None:
@@ -377,19 +436,19 @@ class QueryHelper:
                 # Delete internet gateway
                 delete_ig_response = net_client.delete_internet_gateway(
                     ig_id=internet_gateway)
-                _logger.debug(f'Deleted internet gateway {internet_gateway}'
+                logger.debug(f'Deleted internet gateway {internet_gateway}'
                               f'-{delete_ig_response.data}')
             if service_gateway is not None:
                 # Delete service gateway
                 delete_sg_response = net_client.delete_service_gateway(
                     service_gateway_id=service_gateway)
-                _logger.debug(f'Deleted service gateway {service_gateway}'
+                logger.debug(f'Deleted service gateway {service_gateway}'
                               f'-{delete_sg_response.data}')
             if skypilot_subnet is not None:
                 # Delete subnet
                 delete_subnet_response = net_client.delete_subnet(
                     subnet_id=skypilot_subnet)
-                _logger.debug(f'Deleted subnet {skypilot_subnet}'
+                logger.debug(f'Deleted subnet {skypilot_subnet}'
                               f'-{delete_subnet_response.data}')
             # Delete vcn
             retry_count = 0
@@ -397,12 +456,12 @@ class QueryHelper:
                 try:
                     delete_vcn_response = net_client.delete_vcn(
                         vcn_id=skypilot_vcn)
-                    _logger.debug(
+                    logger.debug(
                         f'Deleted vcn {skypilot_vcn}-{delete_vcn_response.data}'
                     )
                     break
                 except oci_adaptor.oci.exceptions.ServiceError as e:
-                    _logger.info(f'Waiting del SG/IG/Subnet finish: {str(e)}')
+                    logger.info(f'Waiting del SG/IG/Subnet finish: {str(e)}')
                     retry_count = retry_count + 1
                     if retry_count == oci_utils.oci_config.MAX_RETRY_COUNT:
                         raise e
@@ -411,7 +470,7 @@ class QueryHelper:
                             oci_utils.oci_config.RETRY_INTERVAL_BASE_SECONDS)
 
         except oci_adaptor.oci.exceptions.ServiceError as e:
-            _logger.error(
+            logger.error(
                 f'Delete VCN {oci_utils.oci_config.VCN_NAME} Error: {str(e)}')
 
 

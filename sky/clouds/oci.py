@@ -612,12 +612,11 @@ class OCI(clouds.Cloud):
                     'Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        status_map = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY
         for node in vms:
             vm_status = node.lifecycle_state
-            if vm_status in status_map:
-                sky_status = status_map[vm_status]
-                if sky_status is not None:
-                    status_list.append(sky_status)
+            sky_status = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY.get(
+                vm_status, None)
+            if sky_status is not None:
+                status_list.append(sky_status)
 
         return status_list

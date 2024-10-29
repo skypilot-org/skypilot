@@ -78,6 +78,9 @@ class OCIConfig:
         resources_utils.DiskTier.HIGH: DISK_TIER_HIGH,
     }
 
+    # Oracle instance's lifecycle state to sky state mapping.
+    # For Oracle VM instance's lifecyle state, please refer to the link:
+    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
     STATE_MAPPING_OCI_TO_SKY = {
         'PROVISIONING': status_lib.ClusterStatus.INIT,
         'STARTING': status_lib.ClusterStatus.INIT,

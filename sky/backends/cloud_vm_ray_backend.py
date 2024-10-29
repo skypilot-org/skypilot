@@ -3994,24 +3994,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stdout = ''
                 stderr = str(e)
 
-        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-        # May, 2023 by Hysun: Allow terminate INIT cluster which may have
-        # some instances provisioning in background but not completed.
-        elif (isinstance(cloud, clouds.OCI) and terminate and
-              prev_cluster_status in (status_lib.ClusterStatus.STOPPED,
-                                      status_lib.ClusterStatus.INIT)):
-            region = config['provider']['region']
-
-            # pylint: disable=import-outside-toplevel
-            from sky.provision.constants import TAG_RAY_CLUSTER_NAME
-            from sky.provision.oci.query_utils import query_helper
-
-            # 0: All terminated successfully, failed count otherwise
-            returncode = query_helper.terminate_instances_by_tags(
-                {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}, region)
-
-            # To avoid undefined local variables error.
-            stdout = stderr = ''
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
