@@ -89,7 +89,7 @@ def _load_config(context: Optional[str] = None):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
 
-    if context == in_cluster_context_name():
+    if context == in_cluster_context_name() or context is None:
         try:
             # Load in-cluster config if running in a pod and context is None.
             # Kubernetes set environment variables for service discovery do not

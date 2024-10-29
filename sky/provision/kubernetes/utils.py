@@ -753,6 +753,9 @@ def is_kubeconfig_exec_auth(
         str: Error message if exec-based authentication is used, None otherwise
     """
     k8s = kubernetes.kubernetes
+    if context == kubernetes.in_cluster_context_name():
+        # If in-cluster config is used, exec-based auth is not used.
+        return False, None
     try:
         k8s.config.load_kube_config()
     except kubernetes.config_exception():
@@ -835,30 +838,34 @@ def is_incluster_config_available() -> bool:
     return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
 
 
-def get_all_kube_config_context_names() -> List[Optional[str]]:
-    """Get all kubernetes context names from the kubeconfig file.
+def get_all_kube_context_names() -> List[str]:
+    """Get all kubernetes context names available in the environment.
 
-    If running in-cluster, returns [None] to indicate in-cluster config.
+    Fetches context names from the kubeconfig file and in-cluster auth, if any.
+
+    If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
+    returns the default in-cluster kubernetes context name.
 
     We should not cache the result of this function as the admin policy may
     update the contexts.
 
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
-            available, an empty list otherwise. If running in-cluster,
-            returns [None] to indicate in-cluster config.
+            available, an empty list otherwise.
     """
     k8s = kubernetes.kubernetes
+    context_names = []
     try:
         all_contexts, _ = k8s.config.list_kube_config_contexts()
         # all_contexts will always have at least one context. If kubeconfig
         # does not have any contexts defined, it will raise ConfigException.
-        return [context['name'] for context in all_contexts]
+        context_names = [context['name'] for context in all_contexts]
     except k8s.config.config_exception.ConfigException:
-        # If running in cluster, return [None] to indicate in-cluster config
-        if is_incluster_config_available():
-            return [None]
-        return []
+        # If no config found, continue
+        pass
+    if is_incluster_config_available():
+        context_names.append(kubernetes.in_cluster_context_name())
+    return context_names
 
 
 @functools.lru_cache()
