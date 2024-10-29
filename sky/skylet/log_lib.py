@@ -21,6 +21,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
@@ -377,7 +378,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(f'INFO: Job finished (status: {status_str}).')
+                print(
+                    ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).'))
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
@@ -412,8 +415,6 @@ def tail_logs(job_id: Optional[int],
         return
     logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
                  f'{managed_job_id}.')
-    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
-                f'{colorama.Style.RESET_ALL}')
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
@@ -437,7 +438,7 @@ def tail_logs(job_id: Optional[int],
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
-    start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
+    start_stream_at = 'Waiting for task resources on '
     if follow and status in [
             job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,

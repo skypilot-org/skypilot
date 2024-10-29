@@ -28,42 +28,6 @@ TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
 
-POD_STATUSES = {
-    'Pending', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Terminating'
-}
-
-
-def to_label_selector(tags):
-    label_selector = ''
-    for k, v in tags.items():
-        if label_selector != '':
-            label_selector += ','
-        label_selector += '{}={}'.format(k, v)
-    return label_selector
-
-
-def _filter_pods(namespace: str, context: str, tag_filters: Dict[str, str],
-                 status_filters: Optional[List[str]]) -> Dict[str, Any]:
-    """Filters pods by tags and status."""
-    non_included_pod_statuses = POD_STATUSES.copy()
-
-    field_selector = ''
-    if status_filters is not None:
-        non_included_pod_statuses -= set(status_filters)
-        field_selector = ','.join(
-            [f'status.phase!={status}' for status in non_included_pod_statuses])
-
-    label_selector = to_label_selector(tag_filters)
-    pod_list = kubernetes.core_api(context).list_namespaced_pod(
-        namespace, field_selector=field_selector, label_selector=label_selector)
-
-    # Don't return pods marked for deletion,
-    # i.e. pods with non-null metadata.DeletionTimestamp.
-    pods = [
-        pod for pod in pod_list.items if pod.metadata.deletion_timestamp is None
-    ]
-    return {pod.metadata.name: pod for pod in pods}
-
 
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
     head_pod_name = None
@@ -338,7 +302,8 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
+def _set_env_vars_in_pods(namespace: str, context: Optional[str],
+                          new_pods: List):
     """Setting environment variables in pods.
 
     Once all containers are ready, we can exec into them and set env vars.
@@ -366,7 +331,7 @@ def _set_env_vars_in_pods(namespace: str, context: str, new_pods: List):
                                      new_pod.metadata.name, rc, stdout)
 
 
-def _check_user_privilege(namespace: str, context: str,
+def _check_user_privilege(namespace: str, context: Optional[str],
                           new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
     # the kubernetes instance pod.
@@ -402,7 +367,8 @@ def _check_user_privilege(namespace: str, context: str,
                 'from the image.')
 
 
-def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
+def _setup_ssh_in_pods(namespace: str, context: Optional[str],
+                       new_nodes: List) -> None:
     # Setting up ssh for the pod instance. This is already setup for
     # the jump pod so it does not need to be run for it.
     set_k8s_ssh_cmd = (
@@ -446,7 +412,7 @@ def _setup_ssh_in_pods(namespace: str, context: str, new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
 
-def _label_pod(namespace: str, context: str, pod_name: str,
+def _label_pod(namespace: str, context: Optional[str], pod_name: str,
                label: Dict[str, str]) -> None:
     """Label a pod."""
     kubernetes.core_api(context).patch_namespaced_pod(
@@ -475,7 +441,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     pod_spec['metadata']['labels'].update(
         {TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
 
-    terminating_pods = _filter_pods(namespace, context, tags, ['Terminating'])
+    terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                    ['Terminating'])
     start_time = time.time()
     while (len(terminating_pods) > 0 and
            time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
@@ -483,8 +450,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      'terminating pods. Waiting them to finish: '
                      f'{list(terminating_pods.keys())}')
         time.sleep(POLL_INTERVAL)
-        terminating_pods = _filter_pods(namespace, context, tags,
-                                        ['Terminating'])
+        terminating_pods = kubernetes_utils.filter_pods(namespace, context,
+                                                        tags, ['Terminating'])
 
     if len(terminating_pods) > 0:
         # If there are still terminating pods, we force delete them.
@@ -501,8 +468,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 _request_timeout=config_lib.DELETION_TIMEOUT,
                 grace_period_seconds=0)
 
-    running_pods = _filter_pods(namespace, context, tags,
-                                ['Pending', 'Running'])
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                ['Pending', 'Running'])
     head_pod_name = _get_head_pod_name(running_pods)
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{list(running_pods.keys())}')
@@ -583,7 +550,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
 
-    wait_pods_dict = _filter_pods(namespace, context, tags, ['Pending'])
+    wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                  ['Pending'])
     wait_pods = list(wait_pods_dict.values())
 
     networking_mode = network_utils.get_networking_mode(
@@ -613,8 +581,9 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{list(wait_pods_dict.keys())}')
 
-    running_pods = _filter_pods(namespace, context, tags, ['Running'])
-    initialized_pods = _filter_pods(namespace, context, {
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+                                                ['Running'])
+    initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
         TAG_POD_INITIALIZED: 'true',
         **tags
     }, ['Running'])
@@ -663,7 +632,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     try:
         return _create_pods(region, cluster_name_on_cloud, config)
     except (kubernetes.api_exception(), config_lib.KubernetesError) as e:
-        logger.warning(f'run_instances: Error occurred when creating pods: {e}')
+        e_msg = common_utils.format_exception(e).replace('\n', ' ')
+        logger.warning('run_instances: Error occurred when creating pods: '
+                       f'{e_msg}')
         raise
 
 
@@ -680,7 +651,8 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _terminate_node(namespace: str, context: str, pod_name: str) -> None:
+def _terminate_node(namespace: str, context: Optional[str],
+                    pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
@@ -722,7 +694,7 @@ def terminate_instances(
     tag_filters = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
-    pods = _filter_pods(namespace, context, tag_filters, None)
+    pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
 
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
@@ -746,7 +718,9 @@ def get_cluster_info(
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
 
-    running_pods = _filter_pods(namespace, context, tag_filters, ['Running'])
+    running_pods = kubernetes_utils.filter_pods(namespace, context, tag_filters,
+                                                ['Running'])
+
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None
 

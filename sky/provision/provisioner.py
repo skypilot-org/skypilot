@@ -14,6 +14,7 @@ import colorama
 
 import sky
 from sky import clouds
+from sky import exceptions
 from sky import provision
 from sky import sky_logging
 from sky import status_lib
@@ -42,76 +43,50 @@ _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 def _bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
-    zones: Optional[List[clouds.Zone]],
     cluster_name: resources_utils.ClusterName,
     bootstrap_config: provision_common.ProvisionConfig,
 ) -> provision_common.ProvisionRecord:
     provider_name = repr(cloud)
     region_name = region.name
 
-    style = colorama.Style
-
-    if not zones:
-        # For Azure, zones is always an empty list.
-        zone_str = 'all zones'
-    else:
-        zone_str = ','.join(z.name for z in zones)
-
-    if isinstance(cloud, clouds.Kubernetes):
-        # Omit the region name for Kubernetes.
-        logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
-                    f'{cluster_name!r}.')
-    else:
-        logger.info(f'{style.BRIGHT}Launching on {cloud} '
-                    f'{region_name}{style.RESET_ALL} ({zone_str})')
-
     start = time.time()
-    with rich_utils.safe_status('[bold cyan]Launching[/]') as status:
+    # TODO(suquark): Should we cache the bootstrapped result?
+    #  Currently it is not necessary as bootstrapping takes
+    #  only ~3s, caching it seems over-engineering and could
+    #  cause other issues like the cache is not synced
+    #  with the cloud configuration.
+    config = provision.bootstrap_instances(provider_name, region_name,
+                                           cluster_name.name_on_cloud,
+                                           bootstrap_config)
+
+    provision_record = provision.run_instances(provider_name,
+                                               region_name,
+                                               cluster_name.name_on_cloud,
+                                               config=config)
+
+    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
+    logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching - Checking instance status',
+                                 str(provision_logging.config.log_path)))
+    # AWS would take a very short time (<<1s) updating the state of the
+    # instance.
+    time.sleep(1)
+    for retry_cnt in range(_MAX_RETRY):
         try:
-            # TODO(suquark): Should we cache the bootstrapped result?
-            #  Currently it is not necessary as bootstrapping takes
-            #  only ~3s, caching it seems over-engineering and could
-            #  cause other issues like the cache is not synced
-            #  with the cloud configuration.
-            config = provision.bootstrap_instances(provider_name, region_name,
-                                                   cluster_name.name_on_cloud,
-                                                   bootstrap_config)
-        except Exception as e:
-            logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
-                         f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
-                         'with the following error:'
-                         f'{colorama.Style.RESET_ALL}\n'
-                         f'{common_utils.format_exception(e)}')
-            raise
-
-        provision_record = provision.run_instances(provider_name,
-                                                   region_name,
-                                                   cluster_name.name_on_cloud,
-                                                   config=config)
-
-        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-        logger.debug(
-            f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        status.update('[bold cyan]Launching - Checking instance status[/]')
-        # AWS would take a very short time (<<1s) updating the state of the
-        # instance.
-        time.sleep(1)
-        for retry_cnt in range(_MAX_RETRY):
-            try:
-                provision.wait_instances(provider_name,
-                                         region_name,
-                                         cluster_name.name_on_cloud,
-                                         state=status_lib.ClusterStatus.UP)
-                break
-            except (aws.botocore_exceptions().WaiterError, RuntimeError):
-                time.sleep(backoff.current_backoff())
-        else:
-            raise RuntimeError(
-                f'Failed to wait for instances of {cluster_name!r} to be '
-                f'ready on the cloud provider after max retries {_MAX_RETRY}.')
-        logger.debug(
-            f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-            'retries.')
+            provision.wait_instances(provider_name,
+                                     region_name,
+                                     cluster_name.name_on_cloud,
+                                     state=status_lib.ClusterStatus.UP)
+            break
+        except (aws.botocore_exceptions().WaiterError, RuntimeError):
+            time.sleep(backoff.current_backoff())
+    else:
+        raise RuntimeError(
+            f'Failed to wait for instances of {cluster_name!r} to be '
+            f'ready on the cloud provider after max retries {_MAX_RETRY}.')
+    logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+                 'retries.')
 
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
@@ -162,8 +137,11 @@ def bulk_provision(
             logger.debug(
                 'Provision config:\n'
                 f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
-            return _bulk_provision(cloud, region, zones, cluster_name,
+            return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
+        except exceptions.NoClusterLaunchedError:
+            # Skip the teardown if the cluster was never launched.
+            raise
         except Exception:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
@@ -258,6 +236,8 @@ def _ssh_probe_command(ip: str,
         f'UserKnownHostsFile={os.devnull}',
         '-o',
         'IdentitiesOnly=yes',
+        '-o',
+        'AddKeysToAgent=yes',
         '-o',
         'ExitOnForwardFailure=yes',
         '-o',
@@ -438,23 +418,30 @@ def _post_provision_setup(
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
+    docker_config = config_from_yaml.get('docker', {})
 
     with rich_utils.safe_status(
-            '[bold cyan]Launching - Waiting for SSH access[/]') as status:
+            ux_utils.spinner_message(
+                'Launching - Waiting for SSH access',
+                provision_logging.config.log_path)) as status:
 
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+        logger.debug(f'SSH Connection ready for {cluster_name!r}')
+        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
-        logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
-                    f'or found existing instance{plural}.'
-                    f'{colorama.Style.RESET_ALL}')
+        verb = 'is' if len(cluster_info.instances) == 1 else 'are'
+        indent_str = (ux_utils.INDENT_SYMBOL
+                      if docker_config else ux_utils.INDENT_LAST_SYMBOL)
+        logger.info(f'{indent_str}{colorama.Style.DIM}{vm_str}{plural} {verb} '
+                    f'up.{colorama.Style.RESET_ALL}')
 
-        docker_config = config_from_yaml.get('docker', {})
         if docker_config:
             status.update(
-                '[bold cyan]Launching - Initializing docker container[/]')
+                ux_utils.spinner_message(
+                    'Launching - Initializing docker container',
+                    provision_logging.config.log_path))
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -468,6 +455,8 @@ def _post_provision_setup(
             cluster_info.docker_user = docker_user
             ssh_credentials['docker_user'] = docker_user
             logger.debug(f'Docker user: {docker_user}')
+            logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
+                        f'Docker container is up.{colorama.Style.RESET_ALL}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
@@ -480,8 +469,9 @@ def _post_provision_setup(
         # for later.
         file_mounts = config_from_yaml.get('file_mounts', {})
 
-        runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
-                                   'runtime ({step}/3 - {step_name})')
+        runtime_preparation_str = (ux_utils.spinner_message(
+            'Preparing SkyPilot runtime ({step}/3 - {step_name})',
+            provision_logging.config.log_path))
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -549,8 +539,9 @@ def _post_provision_setup(
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully provisioned cluster: '
-                f'{cluster_name}{colorama.Style.RESET_ALL}')
+    logger.info(
+        ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
+                                   provision_logging.config.log_path))
     return cluster_info
 
 
@@ -580,7 +571,10 @@ def post_provision_runtime_setup(
                                          provision_record=provision_record,
                                          custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
-            logger.error('*** Failed setting up cluster. ***')
+            logger.error(
+                ux_utils.error_message(
+                    'Failed to set up SkyPilot runtime on cluster.',
+                    provision_logging.config.log_path))
             logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
             with ux_utils.print_exception_no_traceback():
                 raise

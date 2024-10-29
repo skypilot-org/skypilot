@@ -20,7 +20,9 @@ from sky.utils import ux_utils
 azure = common.LazyImport(
     'azure',
     import_error_message=('Failed to import dependencies for Azure.'
-                          'Try pip install "skypilot[azure]"'))
+                          'Try pip install "skypilot[azure]"'),
+    set_loggers=lambda: logging.getLogger('azure.identity').setLevel(logging.
+                                                                     ERROR))
 Client = Any
 sky_logger = sky_logging.init_logger(__name__)
 

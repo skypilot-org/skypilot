@@ -204,5 +204,5 @@ Unlike short-term reservations above, long-term reservations are typically more 
 
 SkyPilot supports long-term reservations and on-premise clusters through Kubernetes, i.e., you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
 
-See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`kubernetes-overview`.
+See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`Using Existing Machines <existing-machines>` or :ref:`bring your existing Kubernetes cluster <kubernetes-overview>`.
 

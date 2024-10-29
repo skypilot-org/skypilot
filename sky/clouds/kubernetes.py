@@ -1,4 +1,5 @@
 """Kubernetes."""
+import functools
 import json
 import os
 import re
@@ -52,8 +53,7 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
-    _SINGLETON_REGION = 'kubernetes'
-    _regions: List[clouds.Region] = [clouds.Region(_SINGLETON_REGION)]
+    _LEGACY_SINGLETON_REGION = 'kubernetes'
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -88,8 +88,12 @@ class Kubernetes(clouds.Cloud):
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        context = resources.region
+        if context is None:
+            context = kubernetes_utils.get_current_kube_config_context_name()
         # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth()
+        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
+            context)
         if is_exec_auth:
             assert isinstance(message, str), message
             # Controllers cannot spin up new pods with exec auth.
@@ -99,7 +103,7 @@ class Kubernetes(clouds.Cloud):
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
         # Allow spot instances if supported by the cluster
-        spot_label_key, _ = kubernetes_utils.get_spot_label()
+        spot_label_key, _ = kubernetes_utils.get_spot_label(context)
         if spot_label_key is not None:
             unsupported_features.pop(
                 clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
@@ -110,16 +114,108 @@ class Kubernetes(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        return cls._regions
+    @functools.lru_cache(maxsize=1)
+    def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str,
+                                                                ...]) -> None:
+        """Log skipped contexts for only once.
+
+        We don't directly cache the result of _filter_existing_allowed_contexts
+        as the admin policy may update the allowed contexts.
+        """
+        if skipped_contexts:
+            logger.warning(
+                f'Kubernetes contexts {set(skipped_contexts)!r} specified in '
+                '"allowed_contexts" not found in kubeconfig. '
+                'Ignoring these contexts.')
+
+    @classmethod
+    def _existing_allowed_contexts(cls) -> List[Optional[str]]:
+        """Get existing allowed contexts.
+
+        If None is returned in the list, it means that we are running in a pod
+        with in-cluster auth. In this case, we specify None context, which will
+        use the service account mounted in the pod.
+        """
+        all_contexts = kubernetes_utils.get_all_kube_config_context_names()
+        if len(all_contexts) == 0:
+            return []
+        if all_contexts == [None]:
+            # If only one context is found and it is None, we are running in a
+            # pod with in-cluster auth. In this case, we allow it to be used
+            # without checking against allowed_contexts.
+            # TODO(romilb): We may want check in-cluster auth against
+            #  allowed_contexts in the future by adding a special context name
+            #  for in-cluster auth.
+            return [None]
+        all_contexts = set(all_contexts)
+
+        allowed_contexts = skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'), None)
+
+        if allowed_contexts is None:
+            current_context = (
+                kubernetes_utils.get_current_kube_config_context_name())
+            allowed_contexts = []
+            if current_context is not None:
+                allowed_contexts = [current_context]
+
+        existing_contexts = []
+        skipped_contexts = []
+        for context in allowed_contexts:
+            if context in all_contexts:
+                existing_contexts.append(context)
+            else:
+                skipped_contexts.append(context)
+        cls._log_skipped_contexts_once(tuple(skipped_contexts))
+        return existing_contexts
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        # No notion of regions in Kubernetes - return a single region.
-        return cls.regions()
+        del accelerators, zone, use_spot  # unused
+        existing_contexts = cls._existing_allowed_contexts()
+
+        regions = []
+        for context in existing_contexts:
+            if context is None:
+                # If running in-cluster, we allow the region to be set to the
+                # singleton region since there is no context name available.
+                regions.append(clouds.Region(
+                    kubernetes_utils.IN_CLUSTER_REGION))
+            else:
+                regions.append(clouds.Region(context))
+
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+
+        # Check if requested instance type will fit in the cluster.
+        # TODO(zhwu,romilb): autoscaler type needs to be regional (per
+        # kubernetes cluster/context).
+        regions_to_return = []
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if autoscaler_type is None and instance_type is not None:
+            # If autoscaler is not set, check if the instance type fits in the
+            # cluster. Else, rely on the autoscaler to provision the right
+            # instance type without running checks. Worst case, if autoscaling
+            # fails, the pod will be stuck in pending state until
+            # provision_timeout, after which failover will be triggered.
+            for r in regions:
+                context = r.name
+                fits, reason = kubernetes_utils.check_instance_fits(
+                    context, instance_type)
+                if fits:
+                    regions_to_return.append(r)
+                else:
+                    logger.debug(
+                        f'Instance type {instance_type} does '
+                        'not fit in the Kubernetes cluster with context: '
+                        f'{context}. Reason: {reason}')
+        else:
+            regions_to_return = regions
+
+        return regions_to_return
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -201,9 +297,9 @@ class Kubernetes(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Optional[List[clouds.Zone]]]:
-        del num_nodes, region, instance_type, accelerators, use_spot  # Unused.
-        for r in cls.regions():
-            yield r.zones
+        # Always yield None for zones, since Kubernetes does not have zones, and
+        # we should allow any region get to this point.
+        yield None
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -225,7 +321,10 @@ class Kubernetes(clouds.Cloud):
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
         if region is None:
-            region = self._regions[0]
+            context = kubernetes_utils.get_current_kube_config_context_name()
+        else:
+            context = region.name
+        assert context is not None, 'No context found in kubeconfig'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -244,9 +343,14 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        if resources.image_id is not None:
+        image_id_dict = resources.image_id
+        if image_id_dict is not None:
             # Use custom image specified in resources
-            image_id = resources.image_id['kubernetes']
+            if None in image_id_dict:
+                image_id = image_id_dict[None]
+            else:
+                assert resources.region in image_id_dict, image_id_dict
+                image_id = image_id_dict[resources.region]
             if image_id.startswith('docker:'):
                 image_id = image_id[len('docker:'):]
         else:
@@ -265,7 +369,7 @@ class Kubernetes(clouds.Cloud):
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(acc_type)
+                kubernetes_utils.get_gpu_label_key_value(context, acc_type)
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -309,13 +413,10 @@ class Kubernetes(clouds.Cloud):
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
-            'region': region.name,
             'cpus': str(cpus),
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(timeout),
-            'k8s_namespace':
-                kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_port_mode': port_mode.value,
             'k8s_networking_mode': network_utils.get_networking_mode().value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
@@ -335,18 +436,30 @@ class Kubernetes(clouds.Cloud):
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        if curr_context is not None:
-            deploy_vars['k8s_context'] = curr_context
+        if context is not None:
+            deploy_vars['k8s_context'] = context
+
+        namespace = kubernetes_utils.get_kube_config_context_namespace(context)
+        deploy_vars['k8s_namespace'] = namespace
 
         return deploy_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
+        # TODO(zhwu): This needs to be updated to return the correct region
+        # (context) that has enough resources.
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
+            regions = self.regions_with_offering(
+                resources.instance_type,
+                accelerators=resources.accelerators,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone)
+            if not regions:
+                return resources_utils.FeasibleResources([], [], None)
             resources = resources.copy(accelerators=None)
             return resources_utils.FeasibleResources([resources],
                                                      fuzzy_candidate_list, None)
@@ -391,34 +504,48 @@ class Kubernetes(clouds.Cloud):
                 kubernetes_utils.KubernetesInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
-        # Check if requested instance type will fit in the cluster.
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if autoscaler_type is None:
-            # If autoscaler is not set, check if the instance type fits in the
-            # cluster. Else, rely on the autoscaler to provision the right
-            # instance type without running checks. Worst case, if autoscaling
-            # fails, the pod will be stuck in pending state until
-            # provision_timeout, after which failover will be triggered.
-            fits, reason = kubernetes_utils.check_instance_fits(
-                chosen_instance_type)
-            if not fits:
-                logger.debug(f'Instance type {chosen_instance_type} does '
-                             'not fit in the Kubernetes cluster. '
-                             f'Reason: {reason}')
-                return resources_utils.FeasibleResources([], [], reason)
-
+        # Check the availability of the specified instance type in all contexts.
+        available_regions = self.regions_with_offering(
+            chosen_instance_type,
+            accelerators=None,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone)
+        if not available_regions:
+            return resources_utils.FeasibleResources([], [], None)
         # No fuzzy lists for Kubernetes
+        # We don't set the resources returned with regions, because the
+        # optimizer will further find the valid region (context) for the
+        # resources.
         return resources_utils.FeasibleResources(_make([chosen_instance_type]),
                                                  [], None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # Test using python API
-        try:
-            return kubernetes_utils.check_credentials()
-        except Exception as e:  # pylint: disable=broad-except
-            return (False, 'Credential check failed: '
-                    f'{common_utils.format_exception(e)}')
+        existing_allowed_contexts = cls._existing_allowed_contexts()
+        if not existing_allowed_contexts:
+            if skypilot_config.loaded_config_path() is None:
+                check_skypilot_config_msg = ''
+            else:
+                check_skypilot_config_msg = (
+                    ' and check "allowed_contexts" in your '
+                    f'{skypilot_config.loaded_config_path()} file.')
+            return (False, 'No available context found in kubeconfig. '
+                    'Check if you have a valid kubeconfig file' +
+                    check_skypilot_config_msg)
+        reasons = []
+        for context in existing_allowed_contexts:
+            try:
+                check_result = kubernetes_utils.check_credentials(context)
+                if check_result[0]:
+                    return check_result
+                reasons.append(f'{context}: {check_result[1]}')
+            except Exception as e:  # pylint: disable=broad-except
+                return (False, f'Credential check failed for {context}: '
+                        f'{common_utils.format_exception(e)}')
+        return (False, 'Failed to find available context with working '
+                'credentials. Details:\n' + '\n'.join(reasons))
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
@@ -433,10 +560,27 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region != self._SINGLETON_REGION:
+        if region == self._LEGACY_SINGLETON_REGION:
+            # For backward compatibility, we allow the region to be set to the
+            # legacy singleton region.
+            # TODO: Remove this after 0.9.0.
+            return region, zone
+
+        if region == kubernetes_utils.IN_CLUSTER_REGION:
+            # If running incluster, we set region to IN_CLUSTER_REGION
+            # since there is no context name available.
+            return region, zone
+
+        all_contexts = kubernetes_utils.get_all_kube_config_context_names()
+        if all_contexts == [None]:
+            # If [None] context is returned, use the singleton region since we
+            # are running in a pod with in-cluster auth.
+            all_contexts = [kubernetes_utils.IN_CLUSTER_REGION]
+        if region not in all_contexts:
             raise ValueError(
-                'Kubernetes support does not support setting region.'
-                ' Cluster used is determined by the kubeconfig.')
+                f'Context {region} not found in kubeconfig. Kubernetes only '
+                'supports context names as regions. Available '
+                f'contexts: {all_contexts}')
         if zone is not None:
             raise ValueError('Kubernetes support does not support setting zone.'
                              ' Cluster used is determined by the kubeconfig.')

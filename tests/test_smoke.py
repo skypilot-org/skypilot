@@ -282,34 +282,49 @@ def test_example_app():
 
 _VALIDATE_LAUNCH_OUTPUT = (
     # Validate the output of the job submission:
-    # I 05-23 07:52:47 cloud_vm_ray_backend.py:3217] Running setup on 1 node.
+    # ⚙️ Launching on Kubernetes.
+    #   Pod is up.
+    # ✓ Cluster launched: test. View logs at: ~/sky_logs/sky-2024-10-07-19-44-18-177288/provision.log
+    # ⚙️ Running setup on 1 pod.
     # running setup
-    # I 05-23 07:52:49 cloud_vm_ray_backend.py:3230] Setup completed.
-    # I 05-23 07:52:55 cloud_vm_ray_backend.py:3319] Job submitted with Job ID: 1
-    # I 05-23 07:52:58 log_lib.py:408] Start streaming logs for job 1.
-    # INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).
-    # INFO: Waiting for task resources on 1 node. This will block if the cluster is full.
-    # INFO: All task resources reserved.
-    # INFO: Reserved IPs: ['10.128.0.127']
-    # (min, pid=4164) # conda environments:
-    # (min, pid=4164) #
-    # (min, pid=4164) base                  *  /opt/conda
-    # (min, pid=4164)
-    # (min, pid=4164) task run finish
-    # INFO: Job finished (status: SUCCEEDED).
+    # ✓ Setup completed.
+    # ⚙️ Job submitted, ID: 1.
+    # ├── Waiting for task resources on 1 node.
+    # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
+    # (min, pid=1277) # conda environments:
+    # (min, pid=1277) #
+    # (min, pid=1277) base                  *  /opt/conda
+    # (min, pid=1277)
+    # (min, pid=1277) task run finish
+    # ✓ Job finished (status: SUCCEEDED).
+
+    # 📋 Useful Commands
+    # Job ID: 1
+    # ├── To cancel the job:          sky cancel test 1
+    # ├── To stream job logs:         sky logs test 1
+    # └── To view job queue:          sky queue test
+
+    # Cluster name: test
+    # ├── To log into the head VM:    ssh test
+    # ├── To submit a job:            sky exec test yaml_file
+    # ├── To stop the cluster:        sky stop test
+    # └── To teardown the cluster:    sky down test
+    'echo "$s" && echo "==Validating launching==" && '
+    'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
     'echo "$s" && echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
-    'grep -A 1 "Job submitted with Job ID:" | '
-    'grep "Start streaming logs for job" && '
+    'grep -A 1 "Job submitted, ID:" | '
+    'grep "Waiting for task resources on " && '
     'echo "==Validating task output starting==" && echo "$s" | '
-    'grep -A 1 "INFO: Reserved IPs" | grep "(min, pid=" && '
+    'grep -A 1 "Job started. Streaming logs..." | grep "(min, pid=" && '
     'echo "==Validating task output ending==" && '
     'echo "$s" | grep -A 1 "task run finish" | '
-    'grep "INFO: Job finished (status: SUCCEEDED)" && '
+    'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
-    'echo "$s" | grep -A 1 "INFO: Job finished (status: SUCCEEDED)" | '
-    'grep "Job ID:"')
+    'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
+    'grep "Useful Commands" && '
+    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
 
 
 # ---------- A minimal task ----------
@@ -368,7 +383,7 @@ def test_aws_region():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -391,7 +406,7 @@ def test_gcp_region_and_service_account():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -431,7 +446,7 @@ def test_azure_region():
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
-            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} || exit 1\'',
+            f'sky exec {name} \'which python | grep {constants.SKY_REMOTE_PYTHON_ENV_NAME} && exit 1 || true\'',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -849,14 +864,14 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky status -r {name} | grep "UP"',
         f'sky logs {name} 1 --status',
-        f'sky logs {name} 1 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
         'sleep 60',
         f'sky status -r {name} | grep "STOPPED"',
         f'sky start -y {name}',
-        f'sky logs {name} 2 --no-follow | grep -P "myenv\\s+\\*"',
+        f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')
@@ -2121,6 +2136,64 @@ def test_task_labels_kubernetes():
         run_one_test(test)
 
 
+# ---------- Pod Annotations on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_add_pod_annotations_for_autodown_with_launch():
+    name = _get_cluster_name()
+    test = Test(
+        'add_pod_annotations_for_autodown_with_launch',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            # Autodown is set.
+            f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop'
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_add_and_remove_pod_annotations_with_autostop():
+    name = _get_cluster_name()
+    test = Test(
+        'add_and_remove_pod_annotations_with_autostop',
+        [
+            # Launch Kubernetes cluster with two nodes, each being head node and worker node.
+            f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --cloud kubernetes',
+            # Set autodown on the cluster with 'autostop' command.
+            f'sky autostop -y {name} -i 20 --down',
+            # Get names of the pods containing cluster name.
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            # Describe the first pod and check for annotations.
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check for annotations.
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Cancel the set autodown to remove the annotations from the pods.
+            f'sky autostop -y {name} --cancel',
+            # Describe the first pod and check if annotations are removed.
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            # Describe the second pod and check if annotations are removed.
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
+            '! kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
@@ -2589,7 +2662,7 @@ def test_managed_jobs(generic_cloud: str):
             f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
-            f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Successfully provisioned cluster:"',
+            f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
             f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         # TODO(zhwu): Change to _JOB_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
@@ -3369,26 +3442,37 @@ def test_aws_disk_tier():
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
-        type = GCP._get_disk_type(disk_tier)
+        disk_types = [GCP._get_disk_type(disk_tier)]
         name = _get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
-        test = Test(
-            'gcp-disk-tier-' + disk_tier.value,
-            [
-                f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier.value} echo "hello sky"',
-                f'name=`gcloud compute instances list --filter='
-                f'"labels.ray-cluster-name:{name_on_cloud}" '
-                '--format="value(name)"`; '
-                f'gcloud compute disks list --filter="name=$name" '
-                f'--format="value(type)" | grep {type} '
-            ],
-            f'sky down -y {name}',
-            timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
-        )
-        run_one_test(test)
+        instance_type_options = ['']
+        if disk_tier == resources_utils.DiskTier.BEST:
+            # Ultra disk tier requires n2 instance types to have more than 64 CPUs.
+            # If using default instance type, it will only enable the high disk tier.
+            disk_types = [
+                GCP._get_disk_type(resources_utils.DiskTier.HIGH),
+                GCP._get_disk_type(resources_utils.DiskTier.ULTRA),
+            ]
+            instance_type_options = ['', '--instance-type n2-standard-64']
+        for disk_type, instance_type_option in zip(disk_types,
+                                                   instance_type_options):
+            test = Test(
+                'gcp-disk-tier-' + disk_tier.value,
+                [
+                    f'sky launch -y -c {name} --cloud gcp --region {region} '
+                    f'--disk-tier {disk_tier.value} {instance_type_option} ',
+                    f'name=`gcloud compute instances list --filter='
+                    f'"labels.ray-cluster-name:{name_on_cloud}" '
+                    '--format="value(name)"`; '
+                    f'gcloud compute disks list --filter="name=$name" '
+                    f'--format="value(type)" | grep {disk_type} '
+                ],
+                f'sky down -y {name}',
+                timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
+            )
+            run_one_test(test)
 
 
 @pytest.mark.azure
@@ -5524,3 +5608,89 @@ def test_sky_bench(generic_cloud: str):
         f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_context_failover():
+    """Test if the kubernetes context failover works.
+    
+    This test requires two kubernetes clusters:
+    - kind-skypilot: the local cluster with mock labels for 8 H100 GPUs.
+    - another accessible cluster: with enough CPUs
+    To start the first cluster, run:
+      sky local up
+      # Add mock label for accelerator
+      kubectl label node --overwrite skypilot-control-plane skypilot.co/accelerator=h100 --context kind-skypilot
+      # Get the token for the cluster in context kind-skypilot
+      TOKEN=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.users[0].user.token}\')
+      # Get the API URL for the cluster in context kind-skypilot
+      API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
+      # Add mock capacity for GPU
+      curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+      # Add a new namespace to test the handling of namespaces
+      kubectl create namespace test-namespace --context kind-skypilot
+      # Set the namespace to test-namespace
+      kubectl config set-context kind-skypilot --namespace=test-namespace --context kind-skypilot
+    """
+    # Get context that is not kind-skypilot
+    contexts = subprocess.check_output('kubectl config get-contexts -o name',
+                                       shell=True).decode('utf-8').split('\n')
+    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    config = textwrap.dedent(f"""\
+    kubernetes:
+      allowed_contexts:
+        - kind-skypilot
+        - {context}
+    """)
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+        f.write(config.encode('utf-8'))
+        f.flush()
+        name = _get_cluster_name()
+        test = Test(
+            'kubernetes-context-failover',
+            [
+                # Check if kind-skypilot is provisioned with H100 annotations already
+                'NODE_INFO=$(kubectl get nodes -o yaml --context kind-skypilot) && '
+                'echo "$NODE_INFO" | grep nvidia.com/gpu | grep 8 && '
+                'echo "$NODE_INFO" | grep skypilot.co/accelerator | grep h100 || '
+                '{ echo "kind-skypilot does not exist '
+                'or does not have mock labels for GPUs. Check the instructions in '
+                'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
+                # Check namespace for kind-skypilot is test-namespace
+                'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
+                '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
+                'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
+                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
+                # Get contexts and set current context to the other cluster that is not kind-skypilot
+                f'kubectl config use-context {context}',
+                # H100 should not in the current context
+                '! sky show-gpus --cloud kubernetes | grep H100',
+                f'sky launch -y -c {name}-1 --cpus 1 echo hi',
+                f'sky logs {name}-1 --status',
+                # It should be launched not on kind-skypilot
+                f'sky status -a {name}-1 | grep "{context}"',
+                # Test failure for launching H100 on other cluster
+                f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --cloud kubernetes --region {context} echo hi && exit 1 || true',
+                # Test failover
+                f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --cloud kubernetes echo hi',
+                f'sky logs {name}-3 --status',
+                # Test pods
+                f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
+                # It should be launched on kind-skypilot
+                f'sky status -a {name}-3 | grep "kind-skypilot"',
+                # Should be 7 free GPUs
+                f'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "  7"',
+                # Remove the line with "kind-skypilot"
+                f'sed -i "/kind-skypilot/d" {f.name}',
+                # Should still be able to exec and launch on existing cluster
+                f'sky exec {name}-3 "echo hi"',
+                f'sky logs {name}-3 --status',
+                f'sky status -r {name}-3 | grep UP',
+                f'sky launch -c {name}-3 --gpus h100 echo hi',
+                f'sky logs {name}-3 --status',
+                f'sky status -r {name}-3 | grep UP',
+            ],
+            f'sky down -y {name}-1 {name}-3',
+            env={'SKYPILOT_CONFIG': f.name},
+        )
+        run_one_test(test)

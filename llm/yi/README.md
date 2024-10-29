@@ -1,4 +1,4 @@
-# Serving Yi on Your Own Kubernetes or Cloud
+# Running Yi with SkyPilot on Your Cloud
 
 🤖 The Yi series models are the next generation of open-source large language models trained from scratch by [01.AI](https://www.lingyiwanwu.com/en).
 
