@@ -175,7 +175,7 @@ You should see the following outputs when the job finishes.
 
 
 
-**You can also find more useful examples for serving LLMs on TPUs in the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`_.**
+**You can also find more useful examples for serving LLMs on TPUs in ** `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`_.
 
 TPU Nodes (Legacy)
 ------------------
