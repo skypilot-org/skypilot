@@ -440,9 +440,9 @@ class JobsController:
                         self._backend.run_timestamp, task_id)
 
                     logger.info(
-                        f'Task {task_id} is submitted to run. To prevent '
-                        f'from interleaving, the launch logs are redirected to '
-                        f'{ux_utils.BOLD}{log_file_name}{ux_utils.RESET_BOLD}')
+                        f'Task {task_id} is submitted to run. To see logs: '
+                        f'{ux_utils.BOLD}sky jobs logs {self._job_id} '
+                        f'--task-id {task_id}{ux_utils.RESET_BOLD}')
 
                     with ux_utils.RedirectOutputForThread() as redirector:
                         future = executor.submit(

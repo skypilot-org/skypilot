@@ -3282,6 +3282,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Executes generated code on the head node."""
         style = colorama.Style
         fore = colorama.Fore
+
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
