@@ -20,6 +20,9 @@ Use one command to quickly get TPU nodes for development:
 
 .. code-block:: bash
 
+   # Use latest TPU v6 (Trillium) VMs:
+   sky launch --gpus tpu-v6e-16
+   # Use TPU v2 (Ampere) VMs:
    sky launch --gpus tpu-v2-8
    # Preemptible TPUs:
    sky launch --gpus tpu-v2-8 --use-spot
@@ -55,69 +58,126 @@ To use TPU VMs, set the following in a task YAML's ``resources`` field:
 .. code-block:: yaml
 
    resources:
-      accelerators: tpu-v2-8
+      accelerators: tpu-v6e-16
       accelerator_args:
-         runtime_version: tpu-vm-base  # optional
+         runtime_version: v2-alpha-tpuv6e  # optional
 
 The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the optional :code:`tpu_vm` bool (defaults to true, which means TPU VM is used), and an optional TPU ``runtime_version`` field.
 To show what TPU types are supported, run :code:`sky show-gpus`.
 
-Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU VM using JAX.
+Here is a complete task YAML that trains a `Llama 3 model <https://ai.meta.com/blog/meta-llama-3/>`_ on a TPU VM using Torch XLA.
 
 .. code-block:: yaml
 
-   name: mnist-tpu-vm
-
    resources:
-      accelerators: tpu-v2-8
-      accelerator_args:
-         tpu_vm: True
-         runtime_version: tpu-vm-base
+   accelerators: tpu-v6e-8 # Fill in the accelerator type you want to use
+
+   envs:
+   HF_TOKEN: # fill in your huggingface token
+
+   workdir: .
 
    setup: |
-      git clone https://github.com/google/flax.git
+   pip3 install huggingface_hub
+   python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
-      conda activate flax
-      if [ $? -eq 0 ]; then
-         echo 'conda env exists'
-      else
-         conda create -n flax python=3.8 -y
-         conda activate flax
-         # Make sure to install TPU related packages in a conda env to avoid package conflicts.
-         pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-         pip install --upgrade clu
-         pip install -e flax
-         pip install tensorflow tensorflow-datasets
-      fi
+   # Setup TPU
+   pip3 install cloud-tpu-client
+   sudo apt update
+   sudo apt install -y libopenblas-base
+   pip3 install --pre torch==2.6.0.dev20240916+cpu torchvision==0.20.0.dev20240916+cpu \
+      --index-url https://download.pytorch.org/whl/nightly/cpu
+   pip install "torch_xla[tpu]@https://storage.googleapis.com/pytorch-xla-releases/wheels/tpuvm/torch_xla-2.6.0.dev20240916-cp310-cp310-linux_x86_64.whl" \
+      -f https://storage.googleapis.com/libtpu-releases/index.html
+   pip install torch_xla[pallas] \
+      -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html \
+      -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
+
+   # Setup runtime for training
+   git clone -b flash_attention https://github.com/pytorch-tpu/transformers.git
+   cd transformers
+   pip3 install -e .
+   pip3 install datasets evaluate scikit-learn accelerate
 
    run: |
-      conda activate flax
-      cd flax/examples/mnist
-      python3 main.py --workdir=/tmp/mnist \
-      --config=configs/default.py \
-      --config.learning_rate=0.05 \
-      --config.num_epochs=10
+   unset LD_PRELOAD
+   PJRT_DEVICE=TPU XLA_USE_SPMD=1 ENABLE_PJRT_COMPATIBILITY=true \
+   python3 transformers/examples/pytorch/language-modeling/run_clm.py \
+      --dataset_name wikitext \
+      --dataset_config_name wikitext-2-raw-v1 \
+      --per_device_train_batch_size 16 \
+      --do_train \
+      --output_dir /home/$USER/tmp/test-clm \
+      --overwrite_output_dir \
+      --config_name /home/$USER/sky_workdir/config-8B.json \
+      --cache_dir /home/$USER/cache \
+      --tokenizer_name meta-llama/Meta-Llama-3-8B \
+      --block_size 8192 \
+      --optim adafactor \
+      --save_strategy no \
+      --logging_strategy no \
+      --fsdp "full_shard" \
+      --fsdp_config /home/$USER/sky_workdir/fsdp_config.json \
+      --torch_dtype bfloat16 \
+      --dataloader_drop_last yes \
+      --flash_attention \
+      --max_steps 20
 
-This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu>`_ (``examples/tpu/tpuvm_mnist.yaml``), or you can paste it into a local file.
+This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/blob/tpu-v6/examples/tpu/v6e/train-llama3-8b.yaml>`_, or you can paste it into a local file.
 
 Launch it with:
 
 .. code-block:: console
 
-   $ sky launch examples/tpu/tpuvm_mnist.yaml -c mycluster
+   $ sky launch train.yaml -c llama-3-train
 
 You should see the following outputs when the job finishes.
 
 .. code-block:: console
 
-   $ sky launch examples/tpu/tpuvm_mnist.yaml -c mycluster
-   ...
-   (mnist-tpu-vm pid=10155) I0823 07:49:25.468526 139641357117440 train.py:146] epoch:  9, train_loss: 0.0120, train_accuracy: 99.64, test_loss: 0.0278, test_accuracy: 99.02
-   (mnist-tpu-vm pid=10155) I0823 07:49:26.966874 139641357117440 train.py:146] epoch: 10, train_loss: 0.0095, train_accuracy: 99.73, test_loss: 0.0264, test_accuracy: 99.19
+   $ sky launch train.yaml -c llama-3-train
+   (head, rank=0, pid=17894) ***** train metrics *****
+   (head, rank=0, pid=17894)   epoch                    =         2.5
+   (head, rank=0, pid=17894)   total_flos               = 219870840GF
+   (head, rank=0, pid=17894)   train_loss               =     10.1527
+   (head, rank=0, pid=17894)   train_runtime            =  0:11:13.18
+   (head, rank=0, pid=17894)   train_samples            =         282
+   (head, rank=0, pid=17894)   train_samples_per_second =       0.951
+   (head, rank=0, pid=17894)   train_steps_per_second   =        0.03
+
+   (worker1, rank=1, pid=15406, ip=10.164.0.57) ***** train metrics *****
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   epoch                    =         2.5
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   total_flos               = 219870840GF
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   train_loss               =     10.1527
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   train_runtime            =  0:11:15.08
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   train_samples            =         282
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   train_samples_per_second =       0.948
+   (worker1, rank=1, pid=15406, ip=10.164.0.57)   train_steps_per_second   =        0.03
+
+   (worker2, rank=2, pid=16552, ip=10.164.0.58) ***** train metrics *****
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   epoch                    =         2.5
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   total_flos               = 219870840GF
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   train_loss               =     10.1527
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   train_runtime            =  0:11:15.61
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   train_samples            =         282
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   train_samples_per_second =       0.947
+   (worker2, rank=2, pid=16552, ip=10.164.0.58)   train_steps_per_second   =        0.03
+
+   (worker3, rank=3, pid=17469, ip=10.164.0.59) ***** train metrics *****
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   epoch                    =         2.5
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   total_flos               = 219870840GF
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   train_loss               =     10.1527
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   train_runtime            =  0:11:15.10
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   train_samples            =         282
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   train_samples_per_second =       0.948
+   (worker3, rank=3, pid=17469, ip=10.164.0.59)   train_steps_per_second   =        0.03
 
 
-TPU Nodes
----------
+
+**You can also find more useful examples for serving LLMs on TPUs in the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`_.**
+
+TPU Nodes (Legacy)
+------------------
 
 In a TPU Node, a normal CPU VM (an `n1` instance) needs to be provisioned to communicate with the TPU host/device.
 
