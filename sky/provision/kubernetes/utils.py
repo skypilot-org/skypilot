@@ -1807,7 +1807,18 @@ def get_kubernetes_node_info(
     """
     nodes = get_kubernetes_nodes(context)
     # Get the pods to get the real-time resource usage
-    pods = get_all_pods_in_kubernetes_cluster(context)
+    try:
+        pods = get_all_pods_in_kubernetes_cluster(context)
+    except kubernetes.api_exception() as e:
+        if e.status == 403:
+            #TODO(romilb): This warning shows up twice
+            logger.warning('Failed to get pods in the Kubernetes cluster. '
+                           'Please check if the user has the necessary '
+                           'permissions to list pods. Realtime GPU usage '
+                           'information may be incorrect.')
+            pods = []
+        else:
+            raise
 
     label_formatter, _ = detect_gpu_label_formatter(context)
     if not label_formatter:
