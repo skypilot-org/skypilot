@@ -313,27 +313,6 @@ def _create_vm(
     )
     # poller.result() will block on async operation until it's done.
     logger.info(f'Created VM {vm_poller.result().name}.')
-    # Configure driver extension for A10 GPUs. A10 GPUs requires a
-    # special type of drivers which is available at Microsoft HPC
-    # extension. Reference:
-    # https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
-    # This can take more than 20mins for setting up the A10 GPUs
-    if node_config.get('need_nvidia_driver_extension', False):
-        ext_poller = compute_client.virtual_machine_extensions.\
-            begin_create_or_update(
-            resource_group_name=provider_config['resource_group'],
-            vm_name=vm_name,
-            vm_extension_name='NvidiaGpuDriverLinux',
-            extension_parameters=compute.VirtualMachineExtension(
-                location=provider_config['location'],
-                publisher='Microsoft.HpcCompute',
-                type_properties_type='NvidiaGpuDriverLinux',
-                type_handler_version='1.9',
-                auto_upgrade_minor_version=True,
-                settings='{}'))
-        logger.info(
-            f'Created VM extension {ext_poller.result().name} for VM {vm_name}.'
-        )
     return vm_poller.result()
 
 
