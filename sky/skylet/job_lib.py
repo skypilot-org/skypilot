@@ -537,19 +537,24 @@ def update_job_status(job_ids: List[int],
     if len(job_ids) == 0:
         return []
 
+    # TODO: if too slow, directly query against redis.
+    ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]
+
     job_client = _create_ray_job_submission_client()
 
     # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
     # which contains the job status (str) and submission_id (str).
     ray_job_query_time = time.time()
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
-    job_details = {
-        job_detail.submission_id: job_detail for job_detail in job_detail_lists
-    }
+
+    job_details = {}
+    ray_job_ids_set = set(ray_job_ids)
+    for job_detail in job_detail_lists:
+        if job_detail.submission_id in ray_job_ids_set:
+            job_details[job_detail.submission_id] = job_detail
 
     statuses = []
-    for job_id in job_ids:
-        ray_job_id = make_ray_job_id(job_id)
+    for job_id, ray_job_id in zip(job_ids, ray_job_ids):
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
