@@ -1047,7 +1047,7 @@ def cli():
     is_flag=True,
     default=False,
     required=False,
-    help=('[Experimental] If the cluster is already up and available, skip'
+    help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
