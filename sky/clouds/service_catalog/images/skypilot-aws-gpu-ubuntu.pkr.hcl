@@ -4,11 +4,11 @@ variable "region" {
 }
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  date = formatdate("YYMMDD", timestamp())
 }
 
 source "amazon-ebs" "gpu-ubuntu" {
-  ami_name      = "skypilot-aws-gpu-ubuntu-${local.timestamp}"
+  ami_name      = "skypilot-aws-gpu-ubuntu-${local.date}"
   instance_type = "g6.xlarge"
   region        = var.region
   ssh_username  = "ubuntu"

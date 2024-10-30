@@ -9,13 +9,13 @@ variable "vm_generation" {
 }
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  date = formatdate("YYMMDD", timestamp())
   version   = formatdate("YY.MM.DD", timestamp())
 }
 
 source "azure-arm" "gpu-ubuntu" {
   managed_image_resource_group_name = "skypilot-images"
-  managed_image_name                = "skypilot-azure-gpu-ubuntu-${local.timestamp}"
+  managed_image_name                = "skypilot-azure-gpu-ubuntu-${local.date}"
 
   subscription_id = "59d8c23c-7ef5-42c7-b2f3-a919ad8026a7"
   tenant_id       = "7c81f068-46f8-4b26-9a46-2fbec2287e3d"
