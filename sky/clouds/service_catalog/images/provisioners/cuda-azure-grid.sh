@@ -25,8 +25,9 @@ sudo sh $CUDA_TOOLKIT_FILE --silent --toolkit --override
 
 # Set environment variables
 echo 'export PATH=$PATH:/usr/local/cuda-12.2/bin' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.2/lib64' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-12.2/lib64' >> ~/.bashrc
 source ~/.bashrc
 
 # Verify installations
+rm -f NVIDIA-Linux-x86_64-535.161.08-grid-azure.run cuda_12.2.0_535.54.03_linux.run
 nvidia-smi
