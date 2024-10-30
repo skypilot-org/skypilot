@@ -1950,17 +1950,8 @@ class RetryingVmProvisioner(object):
 
         failover_history: List[Exception] = list()
 
-        style = colorama.Style
-        fore = colorama.Fore
         # Retrying launchable resources.
         while True:
-            if (isinstance(to_provision.cloud, clouds.Azure) and
-                    to_provision.accelerators is not None and
-                    'A10' in to_provision.accelerators and prev_handle is None):
-                logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
-                               'an A10 cluster on Azure. This may take ~20 '
-                               'minutes due to driver installation.'
-                               f'{style.RESET_ALL}')
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
