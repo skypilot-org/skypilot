@@ -1801,6 +1801,9 @@ def get_kubernetes_node_info(
     number of GPUs available on the node and the number of free GPUs on the
     node.
 
+    If the user does not have sufficient permissions to list pods in all
+    namespaces, the function will return free GPUs as -1.
+
     Returns:
         Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
             key and the KubernetesNodeInfo object as value
@@ -1811,12 +1814,7 @@ def get_kubernetes_node_info(
         pods = get_all_pods_in_kubernetes_cluster(context)
     except kubernetes.api_exception() as e:
         if e.status == 403:
-            #TODO(romilb): This warning shows up twice
-            logger.warning('Failed to get pods in the Kubernetes cluster. '
-                           'Please check if the user has the necessary '
-                           'permissions to list pods. Realtime GPU usage '
-                           'information may be incorrect.')
-            pods = []
+            pods = None
         else:
             raise
 
@@ -1839,19 +1837,22 @@ def get_kubernetes_node_info(
         accelerator_count = int(node.status.allocatable.get(
             'nvidia.com/gpu', 0))
 
-        for pod in pods:
-            # Get all the pods running on the node
-            if (pod.spec.node_name == node.metadata.name and
-                    pod.status.phase in ['Running', 'Pending']):
-                # Iterate over all the containers in the pod and sum the
-                # GPU requests
-                for container in pod.spec.containers:
-                    if container.resources.requests:
-                        allocated_qty += int(
-                            container.resources.requests.get(
-                                'nvidia.com/gpu', 0))
+        if pods is None:
+            accelerators_available = -1
 
-        accelerators_available = accelerator_count - allocated_qty
+        else:
+            for pod in pods:
+                # Get all the pods running on the node
+                if (pod.spec.node_name == node.metadata.name and
+                        pod.status.phase in ['Running', 'Pending']):
+                    # Iterate over all the containers in the pod and sum the
+                    # GPU requests
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            allocated_qty += int(
+                                container.resources.requests.get(
+                                    'nvidia.com/gpu', 0))
+            accelerators_available = accelerator_count - allocated_qty
 
         node_info_dict[node.metadata.name] = KubernetesNodeInfo(
             name=node.metadata.name,

@@ -3117,9 +3117,10 @@ def show_gpus(
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
+            available = available[gpu] if available[gpu] != -1 else 'NA'
             realtime_gpu_table.add_row([
                 gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available
             ])
         return realtime_gpu_table
 
@@ -3129,10 +3130,11 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
+            available = node_info.free['nvidia.com/gpu'] if node_info.free['nvidia.com/gpu'] != -1 else 'NA'
             node_table.add_row([
                 node_name, node_info.gpu_type,
                 node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                available
             ])
         return node_table
 

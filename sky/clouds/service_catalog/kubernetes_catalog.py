@@ -71,6 +71,11 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
+    """List accelerators in the Kubernetes cluster.
+
+    If the user does not have sufficient permissions to list pods in all
+    namespaces, the function will return free GPUs as -1.
+    """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
@@ -106,11 +111,11 @@ def list_accelerators_realtime(
         pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
     except kubernetes.api_exception() as e:
         if e.status == 403:
-            logger.warning('Failed to get pods in the Kubernetes cluster. '
-                           'Please check if the user has the necessary '
-                           'permissions to list pods. Realtime GPU usage '
-                           'information may be incorrect.')
-            pods = []
+            logger.warning('Failed to get pods in the Kubernetes cluster '
+                           '(forbidden). Please check if your account has '
+                           'necessary permissions to list pods. Realtime GPU '
+                           'availability information may be incorrect.')
+            pods = None
         else:
             raise
     # Total number of GPUs in the cluster
@@ -145,6 +150,21 @@ def list_accelerators_realtime(
                 if accelerator_count not in accelerators_qtys:
                     accelerators_qtys.add((accelerator_name, accelerator_count))
 
+            if accelerator_count >= min_quantity_filter:
+                quantized_count = (min_quantity_filter *
+                                   (accelerator_count // min_quantity_filter))
+                if accelerator_name not in total_accelerators_capacity:
+                    total_accelerators_capacity[
+                        accelerator_name] = quantized_count
+                else:
+                    total_accelerators_capacity[
+                        accelerator_name] += quantized_count
+
+            if pods is None:
+                # If we can't get the pods, we can't get the GPU usage
+                total_accelerators_available[accelerator_name] = -1
+                continue
+
             for pod in pods:
                 # Get all the pods running on the node
                 if (pod.spec.node_name == node.metadata.name and
@@ -158,16 +178,6 @@ def list_accelerators_realtime(
                                     'nvidia.com/gpu', 0))
 
             accelerators_available = accelerator_count - allocated_qty
-
-            if accelerator_count >= min_quantity_filter:
-                quantized_count = (min_quantity_filter *
-                                   (accelerator_count // min_quantity_filter))
-                if accelerator_name not in total_accelerators_capacity:
-                    total_accelerators_capacity[
-                        accelerator_name] = quantized_count
-                else:
-                    total_accelerators_capacity[
-                        accelerator_name] += quantized_count
 
             if accelerator_name not in total_accelerators_available:
                 total_accelerators_available[accelerator_name] = 0
