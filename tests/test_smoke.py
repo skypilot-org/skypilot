@@ -85,24 +85,15 @@ STORAGE_SETUP_COMMANDS = [
     'touch ~/.ssh/id_rsa.pub'
 ]
 
-# Wait until the jobs controller is not in INIT state.
-# This is a workaround for the issue that when multiple job tests
-# are running in parallel, the jobs controller may be in INIT and
-# the job queue/cancel command will return staled table.
-_JOB_QUEUE_WAIT = ('s=$(sky jobs queue); '
-                   'until ! echo "$s" | grep "jobs will not be shown until"; '
-                   'do echo "Waiting for job queue to be ready..."; '
-                   'sleep 5; s=$(sky jobs queue); done; echo "$s"; '
-                   'echo; echo; echo "$s"')
-_JOB_CANCEL_WAIT = (
-    's=$(sky jobs cancel -y -n {job_name}); '
-    'until ! echo "$s" | grep "Please wait for the controller to be ready."; '
-    'do echo "Waiting for the jobs controller '
-    'to be ready"; sleep 5; s=$(sky jobs cancel -y -n {job_name}); '
-    'done; echo "$s"; echo; echo; echo "$s"')
-# TODO(zhwu): make the jobs controller on GCP, to avoid parallel test issues
-# when the controller being on Azure, which takes a long time for launching
-# step.
+# Get the job queue, and print it once on its own, then print it again to
+# use with grep by the caller.
+_GET_JOB_QUEUE = 's=$(sky jobs queue); echo "$s"; echo "$s"'
+# Wait for a job to be not in RUNNING state. Used to check for RECOVERING.
+_JOB_WAIT_NOT_RUNNING = (
+    's=$(sky jobs queue);'
+    'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
+    'sleep 10; s=$(sky jobs queue);'
+    'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -2706,6 +2697,9 @@ def test_stop_gcp_spot():
 
 
 # ---------- Testing managed job ----------
+# TODO(zhwu): make the jobs controller on GCP, to avoid parallel test issues
+# when the controller being on Azure, which takes a long time for launching
+# step.
 @pytest.mark.managed_jobs
 def test_managed_jobs(generic_cloud: str):
     """Test the managed jobs yaml."""
@@ -2716,22 +2710,21 @@ def test_managed_jobs(generic_cloud: str):
             f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
-            _JOB_CANCEL_WAIT.format(job_name=f'{name}-1'),
+            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep "PENDING\|SUBMITTED\|STARTING\|RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "PENDING\|SUBMITTED\|STARTING\|RUNNING"',
+            f'sky jobs cancel -y -n {name}-1',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 200',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
+            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep CANCELLED',
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        # TODO(zhwu): Change to _JOB_CANCEL_WAIT.format(job_name=f'{name}-1 -n {name}-2') when
+        # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
-        (_JOB_CANCEL_WAIT.format(job_name=f'{name}-1') + '; ' +
-         _JOB_CANCEL_WAIT.format(job_name=f'{name}-2')),
+        f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -2753,26 +2746,26 @@ def test_job_pipeline(generic_cloud: str):
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
             # after it, i.e. the 4 tasks within the job.
             # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
             # task within the job.
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 3p | grep "PENDING"',
-            _JOB_CANCEL_WAIT.format(job_name=f'{name}'),
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
+            f'sky jobs cancel -y -n {name}',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
             'sleep 200',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
-            f'{_JOB_QUEUE_WAIT}| grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=f'{name}'),
+        f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
@@ -2795,9 +2788,9 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
             f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 330',
             # Make sure the job failed quickly.
-            f'{_JOB_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -2820,17 +2813,17 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
             f'sky jobs launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
             'sleep 600',
             # Make sure the job failed quickly.
-            f'{_JOB_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "FAILED_SETUP"',
             # Task 0 should be SUCCEEDED.
-            f'{_JOB_QUEUE_WAIT} | grep -A 4 {name}| sed -n 2p | grep "SUCCEEDED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "SUCCEEDED"',
             # Task 1 should be FAILED_SETUP.
-            f'{_JOB_QUEUE_WAIT} | grep -A 4 {name}| sed -n 3p | grep "FAILED_SETUP"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "FAILED_SETUP"',
             # Task 2 should be CANCELLED.
-            f'{_JOB_QUEUE_WAIT} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLED"',
             # Task 3 should be CANCELLED.
-            f'{_JOB_QUEUE_WAIT} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
@@ -2853,7 +2846,7 @@ def test_managed_jobs_recovery_aws(aws_config_region):
         [
             f'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 360',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -2861,13 +2854,13 @@ def test_managed_jobs_recovery_aws(aws_config_region):
              f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 100',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            _JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -2893,17 +2886,17 @@ def test_managed_jobs_recovery_gcp():
         [
             f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 360',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 60',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            _JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -2924,7 +2917,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
             'sleep 400',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
             # Terminate the cluster manually.
@@ -2941,16 +2934,16 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
                 f'-{user_hash} '
                 f'--query Reservations[].Instances[].InstanceId '
                 '--output text)'),
-            'sleep 100',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            _JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
             f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -2975,7 +2968,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
             'sleep 400',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
             # Terminate the cluster manually.
@@ -2984,16 +2977,16 @@ def test_managed_jobs_pipeline_recovery_gcp():
             # separated by `-`.
             (f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
-            'sleep 60',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            _JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
             f'diff /tmp/{name}-run-ids /tmp/{name}-run-ids-new',
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -3014,9 +3007,9 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
         [
             f'sky jobs launch -n {name} --cloud {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             'sleep 360',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -3035,7 +3028,7 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
         [
             f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 450',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -3044,13 +3037,13 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
              'Name=tag:ray-node-type,Values=worker '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 50',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            _JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 560',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=30 * 60,
     )
     run_one_test(test)
@@ -3076,17 +3069,17 @@ def test_managed_jobs_recovery_multi_node_gcp():
         [
             f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 400',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             terminate_cmd,
-            'sleep 50',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            _JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 420',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         timeout=25 * 60,
     )
     run_one_test(test)
@@ -3109,12 +3102,12 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Test cancellation during spot cluster being launched.
             f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000"  -y -d',
             'sleep 60',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
-            _JOB_CANCEL_WAIT.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING"',
+            f'sky jobs cancel -y -n {name}',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -3123,11 +3116,11 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Test cancelling the spot cluster during spot job being setup.
             f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
-            _JOB_CANCEL_WAIT.format(job_name=f'{name}-2'),
+            f'sky jobs cancel -y -n {name}-2',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -3136,20 +3129,20 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Test cancellation during spot job is recovering.
             f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000"  -y -d',
             'sleep 300',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
-            _JOB_CANCEL_WAIT.format(job_name=f'{name}-3'),
+            _JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'sky jobs cancel -y -n {name}-3',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -3185,33 +3178,33 @@ def test_managed_jobs_cancellation_gcp():
             # Test cancellation during spot cluster being launched.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000"  -y -d',
             'sleep 60',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
-            _JOB_CANCEL_WAIT.format(job_name=name),
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING"',
+            f'sky jobs cancel -y -n {name}',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "CANCELLED"',
             # Test cancelling the spot cluster during spot job being setup.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
-            _JOB_CANCEL_WAIT.format(job_name=f'{name}-2'),
+            f'sky jobs cancel -y -n {name}-2',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "CANCELLED"',
             # Test cancellation during spot job is recovering.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000"  -y -d',
             'sleep 300',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 80',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
-            _JOB_CANCEL_WAIT.format(job_name=f'{name}-3'),
+            _JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'sky jobs cancel -y -n {name}-3',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "CANCELLING\|CANCELLED"',
             'sleep 120',
-            f'{_JOB_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
+            f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "CANCELLED"',
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'
@@ -3302,12 +3295,12 @@ def test_managed_jobs_storage(generic_cloud: str):
                 f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 'sleep 60',  # Wait the spot queue to be updated
-                f'{_JOB_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
+                f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
             ],
-            (_JOB_CANCEL_WAIT.format(job_name=name),
+            (f'sky jobs cancel -y -n {name}',
              f'; sky storage delete {output_storage_name} || true'),
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
             timeout=20 * 60,
@@ -3327,11 +3320,11 @@ def test_managed_jobs_tpu():
         [
             f'sky jobs launch -n {name} --use-spot examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep STARTING',
             'sleep 900',  # TPU takes a while to launch
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -3348,9 +3341,9 @@ def test_managed_jobs_inline_env(generic_cloud: str):
         [
             f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             'sleep 20',
-            f'{_JOB_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
+            f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
         ],
-        _JOB_CANCEL_WAIT.format(job_name=name),
+        f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -3642,7 +3635,7 @@ def test_long_setup_run_script(generic_cloud: str):
             setup: |
               echo "start long setup"
             """))
-        for i in range(1024 * 120):
+        for i in range(1024 * 200):
             f.write(f'  echo {i}\n')
         f.write('  echo "end long setup"\n')
         f.write(
@@ -3650,7 +3643,7 @@ def test_long_setup_run_script(generic_cloud: str):
             run: |
               echo "run"
         """))
-        for i in range(1024 * 120):
+        for i in range(1024 * 200):
             f.write(f'  echo {i}\n')
         f.write('  echo "end run"\n')
         f.flush()
@@ -5629,7 +5622,7 @@ def test_multiple_accelerators_unordered():
 def test_multiple_accelerators_unordered_with_default():
     name = _get_cluster_name()
     test = Test(
-        'multiple-accelerators-unordered',
+        'multiple-accelerators-unordered-with-default',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
@@ -5676,7 +5669,7 @@ def test_sky_bench(generic_cloud: str):
 @pytest.mark.kubernetes
 def test_kubernetes_context_failover():
     """Test if the kubernetes context failover works.
-    
+
     This test requires two kubernetes clusters:
     - kind-skypilot: the local cluster with mock labels for 8 H100 GPUs.
     - another accessible cluster: with enough CPUs

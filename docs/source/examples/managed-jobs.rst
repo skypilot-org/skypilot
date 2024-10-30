@@ -288,6 +288,24 @@ candidate resources for a job. See documentation :ref:`here
 In this example, SkyPilot will perform cost optimizations to select the resource to use, which almost certainly
 will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand/reserved instances.
 
+
+Jobs Restarts on User Code Failure
+-----------------------------------
+
+By default, SkyPilot will try to recover a job when its underlying cluster is preempted or failed. Any user code failures (non-zero exit codes) are not auto-recovered.
+
+In some cases, you may want a job to automatically restart on its own failures, e.g., when a training job crashes due to a Nvidia driver issue or NCCL timeouts. To specify this, you
+can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the job YAML file.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      # Restart the job up to 3 times on user code errors.
+      max_restarts_on_errors: 3
+
+
 More advanced policies for resource selection, such as the `Can't Be Late
 <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
 paper, may be supported in the future.

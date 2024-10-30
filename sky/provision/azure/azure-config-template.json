@@ -14,6 +14,12 @@
                 "description": "Subnet parameters."
             }
         },
+        "location": {
+            "type": "string",
+            "metadata": {
+                "description": "Location of where the resources are allocated."
+            }
+        },
         "nsgName": {
             "type": "string",
             "metadata": {
@@ -23,7 +29,7 @@
     },
     "variables": {
         "contributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-        "location": "[resourceGroup().location]",
+        "location": "[parameters('location')]",
         "msiName": "[concat('sky-', parameters('clusterId'), '-msi')]",
         "roleAssignmentName": "[concat('sky-', parameters('clusterId'), '-ra')]",
         "nsgName": "[parameters('nsgName')]",
