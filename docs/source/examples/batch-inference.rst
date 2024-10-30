@@ -24,11 +24,12 @@ It is a common use case for AI:
 
 We now walk through the steps for developing and scaling out batch inference with SkyPilot.
 We take a real-world example, LMSys-1M dataset, and a popular open-source model, Meta-Llama-3.1-7B, to showcase the process.
-All scripts can be found in the `examples in SkyPilot repository <>`__.
+All scripts can be found in the `examples in SkyPilot repository <https://github.com/skypilot-org/skypilot/tree/main/examples/batch_inference>`__.
 
 **TL;DR:** To run batch inference on LMSys-1M dataset with Meta-Llama-3.1-7B model, you can use the following command:
 
 .. code-block:: bash
+
     # Clone SkyPilot repository and cd into the examples/batch_inference directory.
     git clone https://github.com/skypilot-org/skypilot.git
     cd skypilot/examples/batch_inference
@@ -54,7 +55,7 @@ All scripts can be found in the `examples in SkyPilot repository <>`__.
           --env MODEL_NAME=meta-llama/Meta-Llama-3.1-8B-Instruct &
     done
 
-.. image:: An image for the `sky jobs queue`
+.. TODO: Add an image for the `sky jobs queue`
 
 .. _split-data-into-smaller-chunks:
 
@@ -324,7 +325,7 @@ which does not charge for data egress, so you don't need to pay for the data rea
 .. TODO: how to deal with output data?
 
 2. Reduce restart overhead: Keeping the average overhead (including provisioning, setting up and potential progress loss during failure)
-to be within half an hour could be ideal for more efficient usage of spot instances, according to our `paper <>`_.
+to be within half an hour could be ideal for more efficient usage of spot instances, according to our `paper <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__.
 
 3. Chunk size: the time for processing a data chunk is highly related to the size (number of samples) within a chunk, which will impact the potential progress loss during failure as mentioned in *Tip 2*. Before splitting the dataset into chunks, you could benchmark the time for
 processing a single chunk in order to get the best performance.
@@ -333,6 +334,6 @@ processing a single chunk in order to get the best performance.
 Next steps
 ----------
 
-1. Details of :ref:`SkyPilot Manged Jobs <managed-jobs>`_.
+1. Details of :ref:`SkyPilot Manged Jobs <managed-jobs>`.
 2. Join `SkyPilot community Slack <https://slack.skypilot.co>`__ for questions and requests.
 
