@@ -54,7 +54,7 @@ More details can be found on GCP `documentation <https://cloud.google.com/tpu/do
 .. _tpu-vms:
 
 TPU VMs/Pods
------------
+------------
 
 Google's latest TPU v6 (Trillium) VMs offers great performance and it is now supported by SkyPilot.
 
@@ -152,7 +152,7 @@ You should see the following outputs when the job finishes.
 
 
 Multi-Host TPU Pods
-------------------
+-------------------
 
 A `TPU Pod <https://cloud.google.com/tpu/docs/training-on-tpu-pods>`_ is a collection of TPU devices connected by dedicated high-speed network interfaces for high-performance training.
 
