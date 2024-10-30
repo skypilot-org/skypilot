@@ -4,33 +4,7 @@ Trillium (also refers to v6e) is Cloud TPU’s latest generation AI accelerator.
 
 ## Catalogs
 
-Currently, for TPU v6e, the public APIs for regions and pricing is not released yet. The current enabled availability zones for TPU v6e includes `us-south1-a`, `europe-west4-a` and `us-east5-b`. To use TPU v6e, add the following at the end of `~/.sky/catalogs/v5/gcp/vms.csv`:
-
-```csv
-,,,tpu-v6e-1,1,tpu-v6e-1,us-south1,us-south1-a,0,0
-,,,tpu-v6e-1,1,tpu-v6e-1,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-1,1,tpu-v6e-1,us-east5,us-east5-b,0,0
-,,,tpu-v6e-4,1,tpu-v6e-4,us-south1,us-south1-a,0,0
-,,,tpu-v6e-4,1,tpu-v6e-4,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-4,1,tpu-v6e-4,us-east5,us-east5-b,0,0
-,,,tpu-v6e-8,1,tpu-v6e-8,us-south1,us-south1-a,0,0
-,,,tpu-v6e-8,1,tpu-v6e-8,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-8,1,tpu-v6e-8,us-east5,us-east5-b,0,0
-,,,tpu-v6e-16,1,tpu-v6e-16,us-south1,us-south1-a,0,0
-,,,tpu-v6e-16,1,tpu-v6e-16,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-16,1,tpu-v6e-16,us-east5,us-east5-b,0,0
-,,,tpu-v6e-32,1,tpu-v6e-32,us-south1,us-south1-a,0,0
-,,,tpu-v6e-32,1,tpu-v6e-32,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-32,1,tpu-v6e-32,us-east5,us-east5-b,0,0
-,,,tpu-v6e-64,1,tpu-v6e-64,us-south1,us-south1-a,0,0
-,,,tpu-v6e-64,1,tpu-v6e-64,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-64,1,tpu-v6e-64,us-east5,us-east5-b,0,0
-,,,tpu-v6e-128,1,tpu-v6e-128,us-south1,us-south1-a,0,0
-,,,tpu-v6e-128,1,tpu-v6e-128,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-128,1,tpu-v6e-128,us-east5,us-east5-b,0,0
-,,,tpu-v6e-256,1,tpu-v6e-256,us-south1,us-south1-a,0,0
-,,,tpu-v6e-256,1,tpu-v6e-256,europe-west4,europe-west4-a,0,0
-,,,tpu-v6e-256,1,tpu-v6e-256,us-east5,us-east5-b,0,0
+Currently, for TPU v6e, the public APIs for regions and pricing is not released yet, and pricing info for `us-central1`, `us-central2`, `us-south1` is not available. We set the price to `0.0` in those regions for now.
 ```
 
 ## Provisioning
