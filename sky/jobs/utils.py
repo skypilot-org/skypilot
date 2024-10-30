@@ -487,7 +487,7 @@ def stream_logs(job_id: Optional[int],
         # of running remotely.
         run_timestamp = job_lib.get_run_timestamp(job_id)
         if run_timestamp is None:
-            return f'No managed job contrller log found with job_id {job_id}.'
+            return f'No managed job controller log found with job_id {job_id}.'
         log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
         log_lib.tail_logs(job_id=job_id, log_dir=log_dir, follow=follow)
         return ''
@@ -503,6 +503,28 @@ def stream_logs(job_id: Optional[int],
         job_id = job_ids[0]
 
     return stream_logs_by_id(job_id, follow)
+
+
+def get_job_id(job_name: Optional[str], job_id: Optional[int]) -> int:
+    if job_id is None and job_name is None:
+        job_id = managed_job_state.get_latest_job_id()
+        if job_id is None:
+            raise ValueError('No managed job found.')
+    if job_id is None:
+        assert job_name is not None
+        managed_jobs = managed_job_state.get_managed_jobs()
+        managed_jobs = list(
+            filter(lambda job: job['job_name'] == job_name, managed_jobs))
+        if len(managed_jobs) == 0:
+            raise ValueError(f'No managed job found with name {job_name!r}.')
+        if len(managed_jobs) > 1:
+            job_ids_str = ', '.join(job['job_id'] for job in managed_jobs)
+            raise ValueError(
+                f'Multiple managed jobs found with name {job_name!r} (Job '
+                f'IDs: {job_ids_str}). Please specify the job_id instead.')
+        job_id = managed_jobs[0]['job_id']
+    assert job_id is not None, (job_id, job_name)
+    return job_id
 
 
 def dump_managed_job_queue() -> str:
@@ -837,6 +859,15 @@ class ManagedJobCodeGen:
         msg = stream_logs({job_id!r}, {job_name!r}, 
                            follow={follow}, controller={controller})
         print(msg, flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_job_id(cls, job_name: Optional[Str], job_id: Optional[int]) -> str:
+        # This function is used to get the log path of the job controller.
+        code = textwrap.dedent(f"""\
+        msg = utils.get_job_id({job_name!r}, {job_id!r})
+        print(msg, end="", flush=True)
         """)
         return cls._build(code)
 

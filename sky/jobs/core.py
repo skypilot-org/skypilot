@@ -28,6 +28,8 @@ from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
+logger = sky_logging.init_logger(__name__)
+
 
 @usage_lib.entrypoint
 def launch(
@@ -391,6 +393,44 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                   job_name=name,
                                   follow=follow,
                                   controller=controller)
+
+
+@usage_lib.entrypoint
+def download_logs(name: Optional[str], job_id: Optional[int],
+                  controller: bool) -> None:
+    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    handle = backend_utils.is_controller_accessible(
+        controller=jobs_controller_type,
+        stopped_message=(
+            'Please restart the jobs controller with '
+            f'`sky start {jobs_controller_type.value.cluster_name}`.'))
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+
+    if name is not None and job_id is not None:
+        raise ValueError('Cannot specify both name and job_id.')
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+
+    # The following code is learned from stream_logs
+    if controller:
+        job_id_code = managed_job_utils.ManagedJobCodeGen.get_job_id(
+            name, job_id)
+        returncode, job_id_str, _ = backend.run_on_head(handle,
+                                                        job_id_code,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+        if returncode == 0:
+            job_id = int(job_id_str)
+            logger.info(f'Downloading logs to {target_path}')
+            backend.sync_down_logs(handle, [job_id])
+        else:
+            logger.error('Failed to find log for the given job')
+    else:
+        """
+        TODO: Download logs from the job pod to controller cluster, then
+        download to local"""
+        raise NotImplementedError(
+            'Download logs from job pod is not implemented yet')
 
 
 spot_launch = common_utils.deprecated_function(

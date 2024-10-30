@@ -3826,6 +3826,11 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               required=False,
               type=str,
               help='Managed job name.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down the logs of a job.')
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -3840,14 +3845,19 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
           'launching/recoveries, etc.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+def jobs_logs(name: Optional[str], job_id: Optional[int], sync_down: bool,
+              follow: bool, controller: bool):
     """Tail the log of a managed job."""
     try:
-        managed_jobs.tail_logs(name=name,
-                               job_id=job_id,
-                               follow=follow,
-                               controller=controller)
+        if sync_down:
+            managed_jobs.download_logs(name=name,
+                                       job_id=job_id,
+                                       controller=controller)
+        else:
+            managed_jobs.tail_logs(name=name,
+                                   job_id=job_id,
+                                   follow=follow,
+                                   controller=controller)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
