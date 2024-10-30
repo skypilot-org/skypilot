@@ -34,7 +34,7 @@ _DB_PATH: str = _get_db_path()
 def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     """Creates the service and replica tables if they do not exist."""
 
-    # auto_restart column is deprecated.
+    # auto_restart and requested_resources column is deprecated.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
@@ -323,8 +323,8 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
-     load_balancer_port, status, uptime, policy, _, requested_resources,
-     requested_resources_str, _, active_versions) = row[:13]
+     load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
+     _, active_versions) = row[:13]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -340,10 +340,6 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         # The versions that is active for the load balancer. This is a list of
         # integers in json format. This is mainly for display purpose.
         'active_versions': json.loads(active_versions),
-        # TODO(tian): Backward compatibility.
-        # Remove after 2 minor release, 0.6.0.
-        'requested_resources': pickle.loads(requested_resources)
-                               if requested_resources is not None else None,
         'requested_resources_str': requested_resources_str,
     }
 
