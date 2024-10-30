@@ -129,6 +129,9 @@ if [[ "$1" == '--files' ]]; then
     pylint "${PYLINT_FLAGS[@]}" "${@:2}"
 elif [[ "$1" == '--all' ]]; then
     # Pylint entire sky directory.
+    pylint "${PYLINT_FLAGS[@]}" $(git ls-files 'sky/*.py' 'sky/*.pyi')
+elif [[ "$1" == '--legacy' ]]; then
+    # Pylint entire sky directory, ignoring all dirs without a __init__.py file.
     pylint "${PYLINT_FLAGS[@]}" sky
 else
     # Pylint only files in sky/ that have changed in last commit.
