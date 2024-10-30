@@ -197,7 +197,7 @@ Package Installation
 
 Unable to import PyTorch in a SkyPilot task.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-If you are using the default SkyPilot images (not passing in `--image-id`), ``pip install torch`` should work.
+For `PyTorch <https://pytorch.org/>`_ installation, if you are using the default SkyPilot images (not passing in `--image-id`), ``pip install torch`` should work.
 
 But if you use your own image which has an older NVIDIA driver (535.161.08 or lower) and you install the default PyTorch, you may encounter the following error:
 

@@ -15,8 +15,8 @@ variable "use_grid_driver" {
 }
 
 locals {
-  date = formatdate("YYMMDD", timestamp())
-  version   = formatdate("YY.MM.DD", timestamp())
+  date    = formatdate("YYMMDD", timestamp())
+  version = formatdate("YY.MM.DD", timestamp())
 }
 
 source "azure-arm" "gpu-ubuntu" {
@@ -79,7 +79,7 @@ build {
   }
   provisioner "shell" {
     environment_vars = [
-      var.use_grid_driver ? "AZURE_GRID_DRIVER=1" : "",
+      var.use_grid_driver ? "AZURE_GRID_DRIVER=1" : "AZURE_GRID_DRIVER=0",
     ]
     script = "./provisioners/user-toolkit.sh"
   }
