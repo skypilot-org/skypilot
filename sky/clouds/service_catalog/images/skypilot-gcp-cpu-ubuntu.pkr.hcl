@@ -27,4 +27,7 @@ build {
     ]
     script = "./provisioners/skypilot.sh"
   }
+  provisioner "shell" {
+    script = "./provisioners/user-toolkit.sh"
+  }
 }
