@@ -24,7 +24,7 @@ FYI time to packer build images:
 ### GCP
 1. Build a single global image.
 ```bash
-export TYPE=gpu  # Update this
+export TYPE=cpu  # Update this
 export IMAGE=skypilot-gcp-${TYPE}-ubuntu
 packer build ${IMAGE}.pkr.hcl
 ```
@@ -39,7 +39,7 @@ gcloud compute images add-iam-policy-binding ${IMAGE_NAME} --member='allAuthenti
 ### AWS
 1. Generate the source image for a single region.
 ```bash
-export TYPE=gpu  # Update this
+export TYPE=cpu  # Update this
 export IMAGE=skypilot-aws-${TYPE}-ubuntu
 packer build ${IMAGE}.pkr.hcl
 ```
