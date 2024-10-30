@@ -39,7 +39,7 @@ Two different TPU architectures are available on GCP:
 - `TPU VMs/Pods <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
 - `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
 
-Both are supported by SkyPilot. We recommend TPU VMs which is a newer architecture encouraged by GCP.
+Both are supported by SkyPilot. We recommend TPU VMs and Pods which are newer architectures encouraged by GCP.
 
 The two architectures differ as follows.
 For TPU VMs/Pods, you can directly SSH into the "TPU host" VM that is physically connected to the TPU device.
