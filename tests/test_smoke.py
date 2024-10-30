@@ -2781,7 +2781,10 @@ def test_managed_jobs_recovery_aws(aws_config_region):
              f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 100',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}" | grep "RUNNING"; do '
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -2817,7 +2820,10 @@ def test_managed_jobs_recovery_gcp():
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 60',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}" | grep "RUNNING"; do '
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -2861,7 +2867,10 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
                 f'-{user_hash} '
                 f'--query Reservations[].Instances[].InstanceId '
                 '--output text)'),
-            'sleep 100',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}" | grep "RUNNING"; do '
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -2904,7 +2913,10 @@ def test_managed_jobs_pipeline_recovery_gcp():
             # separated by `-`.
             (f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
-            'sleep 60',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}" | grep "RUNNING"; do '
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -2964,7 +2976,10 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
              'Name=tag:ray-node-type,Values=worker '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 50',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}" | grep "RUNNING"; do'
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 560',
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -3000,7 +3015,10 @@ def test_managed_jobs_recovery_multi_node_gcp():
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             terminate_cmd,
-            'sleep 50',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}" | grep "RUNNING"; do'
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 420',
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -3063,7 +3081,10 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
              f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 120',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}-3" | grep "RUNNING"; do'
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky jobs cancel -y -n {name}-3',
             'sleep 5',
@@ -3125,7 +3146,10 @@ def test_managed_jobs_cancellation_gcp():
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 80',
+            ('s=$(sky jobs queue);'
+             f'until ! echo "$s" | grep "{name}-3" | grep "RUNNING"; do'
+             'sleep 10; s=$(sky jobs queue);'
+             'echo "Waiting for job to stop RUNNING"; echo "$s"; done'),
             f's=$(sky jobs queue); echo "$s"; echo "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky jobs cancel -y -n {name}-3',
             'sleep 5',
