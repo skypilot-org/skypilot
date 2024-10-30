@@ -311,9 +311,10 @@ def _create_vm(
         vm_name=vm_name,
         parameters=vm_instance,
     )
-    vm_poller.wait()
-    logger.info(f'Created VM {vm_poller.result().name}.')
-    return vm_poller.result()
+    # This line will block until the VM is created or the operation times out.
+    vm = vm_poller.result()
+    logger.info(f'Created VM {vm.name}.')
+    return vm
 
 
 def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',

@@ -11,6 +11,11 @@ wget -nv $GRID_DRIVER_URL -O $GRID_DRIVER_FILE
 sudo chmod +x $GRID_DRIVER_FILE
 sudo sh $GRID_DRIVER_FILE --silent --disable-nouveau
 
+echo "Set vGPU Licensing Daemon config..."
+sudo cp /etc/nvidia/gridd.conf.template /etc/nvidia/gridd.conf
+sudo sed -i '/^FeatureType=0/s/^/# /' /etc/nvidia/gridd.conf
+echo "IgnoreSP=FALSE" | sudo tee -a /etc/nvidia/gridd.conf
+echo "EnableUI=FALSE" | sudo tee -a /etc/nvidia/gridd.conf
 
 echo "Installing CUDA toolkit..."
 CUDA_TOOLKIT_URL="https://developer.download.nvidia.com/compute/cuda/12.2.0/local_installers/cuda_12.2.0_535.54.03_linux.run"
