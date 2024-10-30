@@ -3175,9 +3175,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
             if returncode == 255:
                 is_message_too_long = False
-                with open(setup_log_path, 'r', encoding='utf-8') as f:
-                    if 'too long' in f.read():
-                        is_message_too_long = True
+                try:
+                    with open(os.path.expanduser(setup_log_path),
+                              'r',
+                              encoding='utf-8') as f:
+                        if 'too long' in f.read():
+                            is_message_too_long = True
+                except Exception:  # pylint: disable=broad-except
+                    # We don't crash the setup if we cannot read the log file.
+                    # Instead, we should normally proceed to raise for setup
+                    # failure.
+                    pass
 
                 if is_message_too_long:
                     # If the setup script is too long, we retry it with dumping

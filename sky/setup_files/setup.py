@@ -153,7 +153,7 @@ install_requires = [
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
-    "typing_extensions",
+    'typing_extensions',
     'filelock >= 3.6.0',
     'packaging',
     'psutil',
