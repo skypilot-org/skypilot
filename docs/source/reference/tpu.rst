@@ -191,7 +191,7 @@ We can run the same Llama 3 training job in on a TPU Pod with the following comm
 
 .. code-block:: console
 
-   $ HF_TOKEN=<your-huggingface-token> sky launch -c tpu-pod train-llama3-8b.yaml --env HF_TOKEN
+   $ HF_TOKEN=<your-huggingface-token> sky launch -c tpu-pod --gpus tpu-v6e-32 train-llama3-8b.yaml --env HF_TOKEN
 
 You should see the following output.
 
