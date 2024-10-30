@@ -5,8 +5,8 @@ envs:
   HF_TOKEN:
   # Output bucket to use for storing the results
   OUTPUT_BUCKET:
-  # The file path that contains the paths to data chunks to be processed.
-  DATA_GROUP_METADATA:
+  # The file that contains the paths to data chunks to be processed.
+  DATA_METADATA:
 
 
 file_mounts:
@@ -35,6 +35,6 @@ setup: |
 
 run: |
   python worker.py \
-    --data-group-metadata /groups.txt \
+    --data-metadata /groups.txt \
     --model-name $MODEL_NAME \
     --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE
