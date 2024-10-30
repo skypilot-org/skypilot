@@ -415,13 +415,11 @@ def download_logs(name: Optional[str], job_id: Optional[int],
     if controller:
         job_id_code = managed_job_utils.ManagedJobCodeGen.get_job_id(
             name, job_id)
-        returncode, job_id_str, _ = backend.run_on_head(handle,
+        returncode, job_id, _ = backend.run_on_head(handle,
                                                         job_id_code,
                                                         require_outputs=True,
                                                         stream_logs=False)
         if returncode == 0:
-            job_id = int(job_id_str)
-            logger.info(f'Downloading logs to {target_path}')
             backend.sync_down_logs(handle, [job_id])
         else:
             logger.error('Failed to find log for the given job')

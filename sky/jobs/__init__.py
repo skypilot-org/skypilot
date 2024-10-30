@@ -10,6 +10,7 @@ from sky.jobs.core import launch
 from sky.jobs.core import queue
 from sky.jobs.core import queue_from_kubernetes_pod
 from sky.jobs.core import tail_logs
+from sky.jobs.core import download_logs
 from sky.jobs.recovery_strategy import DEFAULT_RECOVERY_STRATEGY
 from sky.jobs.recovery_strategy import RECOVERY_STRATEGIES
 from sky.jobs.state import ManagedJobStatus
