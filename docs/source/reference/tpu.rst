@@ -1,5 +1,6 @@
 .. _tpu:
 
+=========
 Cloud TPU
 =========
 
@@ -124,7 +125,7 @@ Here is a complete task YAML that trains a `Llama 3 model <https://ai.meta.com/b
       --flash_attention \
       --max_steps 20
 
-This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/blob/tpu-v6/examples/tpu/v6e/train-llama3-8b.yaml>`_, or you can paste it into a local file.
+This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/blob/tpu-v6/examples/tpu/v6e/train-llama3-8b.yaml>`__, or you can paste it into a local file.
 
 Launch it with:
 
@@ -175,7 +176,7 @@ You should see the following outputs when the job finishes.
 
 
 
-**You can also find more useful examples for serving LLMs on TPUs in ** `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`_.
+**You can also find more useful examples for serving LLMs on TPUs in** `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu/v6e>`__.
 
 TPU Nodes (Legacy)
 ------------------
