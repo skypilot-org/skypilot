@@ -863,7 +863,7 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_id(cls, job_name: Optional[Str], job_id: Optional[int]) -> str:
+    def get_job_id(cls, job_name: Optional[str], job_id: Optional[int]) -> str:
         # This function is used to get the log path of the job controller.
         code = textwrap.dedent(f"""\
         msg = utils.get_job_id({job_name!r}, {job_id!r})

@@ -38,6 +38,7 @@ __all__ = [
     'queue',
     'queue_from_kubernetes_pod',
     'tail_logs',
+    'download_logs',
     # utils
     'ManagedJobCodeGen',
     'format_job_table',
