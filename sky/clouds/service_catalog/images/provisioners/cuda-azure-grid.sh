@@ -9,7 +9,7 @@ GRID_DRIVER_FILE="NVIDIA-Linux-x86_64-535.161.08-grid-azure.run"
 
 wget -nv $GRID_DRIVER_URL -O $GRID_DRIVER_FILE
 sudo chmod +x $GRID_DRIVER_FILE
-sudo sh $GRID_DRIVER_FILE --silent
+sudo sh $GRID_DRIVER_FILE --silent --disable-nouveau
 
 
 echo "Installing CUDA toolkit..."

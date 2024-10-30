@@ -33,7 +33,7 @@ source "azure-arm" "gpu-ubuntu" {
   image_offer     = "0001-com-ubuntu-server-jammy"
   image_sku       = var.vm_generation == 1 ? "22_04-lts" : "22_04-lts-gen2"
   location        = var.use_grid_driver || var.vm_generation == 1 ? "eastus" : "centralus"
-  vm_size         = var.use_grid_driver ? "Standard_NV36ads_A10_v5" : (var.vm_generation == 1 ? "Standard_NC4as_T4_v3" : "Standard_NC24ads_A100_v4")
+  vm_size         = var.use_grid_driver ? "Standard_NV6ads_A10_v5" : (var.vm_generation == 1 ? "Standard_NC4as_T4_v3" : "Standard_NC24ads_A100_v4")
   ssh_username    = "azureuser"
   azure_tags = {
     Created_by = "packer"

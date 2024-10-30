@@ -311,7 +311,7 @@ def _create_vm(
         vm_name=vm_name,
         parameters=vm_instance,
     )
-    # poller.result() will block on async operation until it's done.
+    vm_poller.wait()
     logger.info(f'Created VM {vm_poller.result().name}.')
     return vm_poller.result()
 
