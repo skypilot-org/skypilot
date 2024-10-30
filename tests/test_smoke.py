@@ -3579,7 +3579,7 @@ def test_long_setup_run_script(generic_cloud: str):
             setup: |
               echo "start long setup"
             """))
-        for i in range(1024 * 120):
+        for i in range(1024 * 200):
             f.write(f'  echo {i}\n')
         f.write('  echo "end long setup"\n')
         f.write(
@@ -3587,7 +3587,7 @@ def test_long_setup_run_script(generic_cloud: str):
             run: |
               echo "run"
         """))
-        for i in range(1024 * 120):
+        for i in range(1024 * 200):
             f.write(f'  echo {i}\n')
         f.write('  echo "end run"\n')
         f.flush()
