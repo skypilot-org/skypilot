@@ -3183,9 +3183,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             is_message_too_long = True
                 except Exception:  # pylint: disable=broad-except
                     # We don't crash the setup if we cannot read the log file.
-                    # Instead, we should normally proceed to raise for setup
-                    # failure.
-                    pass
+                    # Instead, we should retry the setup with dumping the script
+                    # to a file.
+                    is_message_too_long = True
 
                 if is_message_too_long:
                     # If the setup script is too long, we retry it with dumping
