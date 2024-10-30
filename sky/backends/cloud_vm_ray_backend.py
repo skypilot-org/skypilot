@@ -3181,10 +3181,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               encoding='utf-8') as f:
                         if 'too long' in f.read():
                             is_message_too_long = True
-                except Exception:  # pylint: disable=broad-except
+                except Exception as e:  # pylint: disable=broad-except
                     # We don't crash the setup if we cannot read the log file.
                     # Instead, we should retry the setup with dumping the script
                     # to a file.
+                    logger.debug('Failed to read setup log file '
+                                 f'{setup_log_path}: {e}')
                     is_message_too_long = True
 
                 if is_message_too_long:
