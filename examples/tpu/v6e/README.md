@@ -5,8 +5,8 @@ Trillium (also refers to v6e) is Cloud TPU’s latest generation AI accelerator.
 ## Catalogs
 
 Currently, for TPU v6e, the public APIs for regions and pricing is not released yet, and pricing info for `us-central1`, `us-central2`, `us-south1` is not available. We set the price to `0.0` in those regions for now.
-```
 
+```
 ## Provisioning
 
 To provision TPU v6e, use the following command:
