@@ -429,20 +429,21 @@ class JobsController:
         # (e.g. for a chain dag it is 1 instead of n), which could allow us to
         # run more dags in parallel.
         max_workers = self._num_tasks
-        managed_job_utils.make_launch_log_dir_for_redirection(
-            self._backend.run_timestamp, self._num_tasks)
+        managed_job_utils.make_launch_log_dir_for_redirection(self._job_id)
         with futures.ThreadPoolExecutor(max_workers) as executor:
             future_to_task = {}
             while not all_tasks_completed():
                 while not self._task_queue.empty():
                     task_id = self._task_queue.get()
                     log_file_name = managed_job_utils.get_launch_log_file_name(
-                        self._backend.run_timestamp, task_id)
+                        self._job_id, task_id)
 
                     logger.info(
                         f'Task {task_id} is submitted to run. To see logs: '
                         f'{ux_utils.BOLD}sky jobs logs {self._job_id} '
                         f'--task-id {task_id}{ux_utils.RESET_BOLD}')
+
+                    logger.info(f'Redirecting output to {log_file_name}.')
 
                     with ux_utils.RedirectOutputForThread() as redirector:
                         future = executor.submit(
@@ -551,6 +552,7 @@ def start(job_id, dag_yaml, retry_until_up):
                                                      args=(job_id, dag_yaml,
                                                            retry_until_up))
         controller_process.start()
+        logger.info(f'Controller process {controller_process.pid} started.')
         while controller_process.is_alive():
             _handle_signal(job_id)
             time.sleep(1)
