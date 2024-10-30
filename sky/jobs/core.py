@@ -415,18 +415,17 @@ def download_logs(name: Optional[str], job_id: Optional[int],
     if controller:
         job_id_code = managed_job_utils.ManagedJobCodeGen.get_job_id(
             name, job_id)
-        returncode, job_id, _ = backend.run_on_head(handle,
+        returncode, job_id_str, _ = backend.run_on_head(handle,
                                                         job_id_code,
                                                         require_outputs=True,
                                                         stream_logs=False)
         if returncode == 0:
-            backend.sync_down_logs(handle, [job_id])
+            backend.sync_down_logs(handle, [job_id_str])
         else:
             logger.error('Failed to find log for the given job')
     else:
-        """
-        TODO: Download logs from the job pod to controller cluster, then
-        download to local"""
+        # TODO: Download logs from the job pod to controller cluster, then
+        # download to local
         raise NotImplementedError(
             'Download logs from job pod is not implemented yet')
 
