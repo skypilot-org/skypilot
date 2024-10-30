@@ -21,15 +21,11 @@ Use one command to quickly get TPU nodes for development:
 .. code-block:: bash
 
    # Use latest TPU v6 (Trillium) VMs:
-   sky launch --gpus tpu-v6e-16
-   # Use TPU v2 (Ampere) VMs:
-   sky launch --gpus tpu-v2-8
+   sky launch --gpus tpu-v6e-8
+   # Use TPU v4 (Titan) VMs:
+   sky launch --gpus tpu-v4-8
    # Preemptible TPUs:
-   sky launch --gpus tpu-v2-8 --use-spot
-   # Change TPU type to tpu-v3-8:
-   sky launch --gpus tpu-v3-8
-   # Change the host VM type to n1-highmem-16:
-   sky launch --gpus tpu-v3-8 -t n1-highmem-16
+   sky launch --gpus tpu-v6e-8 --use-spot
 
 After the command finishes, you will be dropped into a TPU host VM and can start developing code right away.
 
