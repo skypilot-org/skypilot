@@ -729,13 +729,13 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
                   'not found in SKUs or hidden TPU price DF.')
         # TODO(tian): Hack. Should investigate how to retrieve the price
         # for TPU-v6e.
-        if not (tpu_name.startswith('tpu-v6e') and
+        if (tpu_name.startswith('tpu-v6e') and
                 tpu_region in TPU_V6E_MISSING_REGIONS):
-            assert spot or tpu_price is not None, (row, hidden_tpu,
-                                                   HIDDEN_TPU_DF)
-        else:
             if not spot:
                 tpu_price = 0.0
+        else:
+            assert spot or tpu_price is not None, (row, hidden_tpu,
+                                                   HIDDEN_TPU_DF)
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)
