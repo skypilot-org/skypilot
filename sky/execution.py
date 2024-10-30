@@ -11,11 +11,11 @@ import sky
 from sky import admin_policy
 from sky import backends
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.exceptions import ClusterNotUpError
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
@@ -471,20 +471,14 @@ def launch(
                     operation='executing tasks',
                     check_cloud_vm_ray_backend=False,
                     dryrun=dryrun)
-                # If the cluster is available, restrict stages
                 handle = maybe_handle
-                stages = [
-                    # Stage.CLONE_DISK,
-                    # Stage.PROVISION,
-                    # Stage.OPTIMIZE,
-                    Stage.SYNC_WORKDIR,
-                    # Stage.SYNC_FILE_MOUNTS,
-                    # Stage.SETUP,
-                    # Stage.PRE_EXEC,
-                    Stage.EXEC,
-                    # Stage.DOWN
-                ]
-            except ClusterNotUpError:
+                # Get all stages
+                stages = list(Stage)
+                # Skip CLONE_DISK, PROVISION, and SETUP
+                stages.remove(Stage.CLONE_DISK)
+                stages.remove(Stage.PROVISION)
+                stages.remove(Stage.SETUP)
+            except exceptions.ClusterNotUpError:
                 # Proceed with normal provisioning
                 pass
 
