@@ -12,6 +12,7 @@ import colorama
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
@@ -353,6 +354,13 @@ class Azure(clouds.Cloud):
         need_nvidia_driver_extension = (acc_dict is not None and
                                         'A10' in acc_dict)
 
+        # Determine resource group for deploying the instance.
+        resource_group_name = skypilot_config.get_nested(
+            ('azure', 'resource_group_vm'), None)
+        use_external_resource_group = resource_group_name is not None
+        if resource_group_name is None:
+            resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
+
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
@@ -409,7 +417,8 @@ class Azure(clouds.Cloud):
             'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
-            'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
+            'resource_group': resource_group_name,
+            'use_external_resource_group': use_external_resource_group,
         }
 
         # Setting disk performance tier for high disk tier.
