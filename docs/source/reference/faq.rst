@@ -192,6 +192,22 @@ For example, if you have access to special regions of GCP, add the data to ``~/.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
 
+Package Installation
+---------------------
+
+Unable to import PyTorch in a SkyPilot task.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If you are using the default SkyPilot images (not passing in `--image-id`), ``pip install torch`` should work.
+
+But if you use your own image which has an older NVIDIA driver (535.161.08 or lower) and you install the default PyTorch, you may encounter the following error:
+
+.. code-block:: bash
+
+  ImportError: /home/azureuser/miniconda3/lib/python3.10/site-packages/torch/lib/../../nvidia/cusparse/lib/libcusparse.so.12: undefined symbol: __nvJitLinkComplete_12_4, version libnvJitLink.so.12
+
+You will need to install a PyTorch version that is compatible with your NVIDIA driver, e.g., ``pip install torch --index-url https://download.pytorch.org/whl/cu121``.
+
+
 Miscellaneous
 -------------
 
