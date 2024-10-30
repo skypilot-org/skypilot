@@ -141,10 +141,10 @@ columns = [
     'job_id',
     'task_id',
     'task_name',
+    'specs',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
-    'specs',
 ]
 
 
