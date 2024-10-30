@@ -3184,7 +3184,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't crash the setup if we cannot read the log file.
                     # Instead, we should retry the setup with dumping the script
-                    # to a file.
+                    # to a file to be safe.
                     logger.debug('Failed to read setup log file '
                                  f'{setup_log_path}: {e}')
                     is_message_too_long = True
