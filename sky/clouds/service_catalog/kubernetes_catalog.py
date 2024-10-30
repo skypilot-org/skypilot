@@ -16,12 +16,10 @@ from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
 
-
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
     pd = adaptors_common.LazyImport('pandas')
-
 
 logger = sky_logging.init_logger(__name__)
 
