@@ -59,9 +59,10 @@ export SECRET=xxxxxx  # Update this
 ```
 2. Build and copy images for all regions for GPU (gen 1 & 2) and CPU (gen 2 only).
 ```bash
-export TYPE=gpu  # Update this
-export VM_GENERATION=1  # Update this
-packer build --var vm_generation=${VM_GENERATION} --var client_secret=${SECRET} skypilot-azure-${TYPE}-ubuntu.pkr.hcl
+packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-cpu-ubuntu.pkr.hcl
+packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
+packer build --var vm_generation=1 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
+packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid_driver=true skypilot-azure-gpu-ubuntu.pkr.hcl
 ```
 
 ## Test Images
