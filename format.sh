@@ -104,6 +104,8 @@ if [[ "$1" == '--files' ]]; then
    # entire python directory is formatted.
 elif [[ "$1" == '--all' ]]; then
    format_all
+elif [[ "$1" == '--legacy' ]]; then
+   format_all
 else
    # Format only the files that changed in last commit.
    format_changed
