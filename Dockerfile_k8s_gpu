@@ -36,25 +36,19 @@ SHELL ["/bin/bash", "-c"]
 
 # Install conda and other dependencies
 # Keep the conda and Ray versions below in sync with the ones in skylet.constants
-RUN curl -o Miniconda3-Linux-x86_64.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh && \
+RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
     bash Miniconda3-Linux-x86_64.sh -b && \
-    eval "$(~/miniconda3/bin/conda shell.bash hook)" && \
-    conda init && conda config --set auto_activate_base true && conda activate base && \
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
     grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
     rm Miniconda3-Linux-x86_64.sh && \
-    conda create -y -n skypilot-runtime python=3.10 && \
-    conda activate skypilot-runtime && \
     export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
     python3 -m venv ~/skypilot-runtime && \
     PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,docker,kubernetes]' && \
-    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y
-    
-RUN curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# Add /home/sky/.local/bin/ to PATH
-RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome>=3.12.0' && \
+    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Copy SkyPilot code base. This is required for the ssh jump pod to find the
 # lifecycle management scripts

@@ -82,7 +82,7 @@ fi
 # Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
 if [[ $(uname -m) == "arm64" ]]; then
   echo "Loading image for arm64 (Apple Silicon etc.): $TAG"
-  docker buildx build --load --platform linux/arm64 --progress=plain -t $TAG -f Dockerfile_k8s ./sky
+  docker buildx build --load --platform linux/arm64 -t $TAG -f Dockerfile_k8s ./sky
 elif [[ $(uname -m) == "x86_64" ]]; then
   echo "Building for amd64 (Intel CPUs): $TAG"
   docker buildx build --load --platform linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
