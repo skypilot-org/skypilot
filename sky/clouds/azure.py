@@ -44,6 +44,8 @@ _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
 _DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
+# This is used by Azure GPU VMs that use grid drivers (e.g. A10).
+_DEFAULT_GPU_GRID_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-grid'
 
 _COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
 
@@ -220,6 +222,8 @@ class Azure(clouds.Cloud):
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 return _DEFAULT_GPU_K80_IMAGE_ID
+            if acc_name == 'A10':
+                return _DEFAULT_GPU_GRID_IMAGE_ID
         # About Gen V1 vs V2:
         # In Azure, all instances with K80 (Standard_NC series), some
         # instances with M60 (Standard_NV series) and some cpu instances
@@ -350,10 +354,6 @@ class Azure(clouds.Cloud):
                 'image_version': version,
             }
 
-        # Setup the A10 nvidia driver.
-        need_nvidia_driver_extension = (acc_dict is not None and
-                                        'A10' in acc_dict)
-
         # Determine resource group for deploying the instance.
         resource_group_name = skypilot_config.get_nested(
             ('azure', 'resource_group_vm'), None)
@@ -413,7 +413,6 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'need_nvidia_driver_extension': need_nvidia_driver_extension,
             'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),

@@ -1,0 +1,53 @@
+resources:
+  accelerators: tpu-v6e-8 # Fill in the accelerator type you want to use
+
+envs:
+  HF_TOKEN: # fill in your huggingface token
+
+workdir: .
+
+setup: |
+  pip3 install huggingface_hub
+  python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+  # Setup TPU
+  pip3 install cloud-tpu-client
+  sudo apt update
+  sudo apt install -y libopenblas-base
+  pip3 install --pre torch==2.6.0.dev20240916+cpu torchvision==0.20.0.dev20240916+cpu \
+    --index-url https://download.pytorch.org/whl/nightly/cpu
+  pip install "torch_xla[tpu]@https://storage.googleapis.com/pytorch-xla-releases/wheels/tpuvm/torch_xla-2.6.0.dev20240916-cp310-cp310-linux_x86_64.whl" \
+    -f https://storage.googleapis.com/libtpu-releases/index.html
+  pip install torch_xla[pallas] \
+    -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html \
+    -f https://storage.googleapis.com/jax-releases/jaxlib_nightly_releases.html
+
+  # Setup runtime for training
+  git clone -b flash_attention https://github.com/pytorch-tpu/transformers.git
+  cd transformers
+  pip3 install -e .
+  pip3 install datasets evaluate scikit-learn accelerate
+
+run: |
+  unset LD_PRELOAD
+  PJRT_DEVICE=TPU XLA_USE_SPMD=1 ENABLE_PJRT_COMPATIBILITY=true \
+  python3 transformers/examples/pytorch/language-modeling/run_clm.py \
+    --dataset_name wikitext \
+    --dataset_config_name wikitext-2-raw-v1 \
+    --per_device_train_batch_size 16 \
+    --do_train \
+    --output_dir /home/$USER/tmp/test-clm \
+    --overwrite_output_dir \
+    --config_name /home/$USER/sky_workdir/config-8B.json \
+    --cache_dir /home/$USER/cache \
+    --tokenizer_name meta-llama/Meta-Llama-3-8B \
+    --block_size 8192 \
+    --optim adafactor \
+    --save_strategy no \
+    --logging_strategy no \
+    --fsdp "full_shard" \
+    --fsdp_config /home/$USER/sky_workdir/fsdp_config.json \
+    --torch_dtype bfloat16 \
+    --dataloader_drop_last yes \
+    --flash_attention \
+    --max_steps 20

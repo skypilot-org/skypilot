@@ -83,7 +83,6 @@ available_node_types:
               {%- for cmd in cloud_init_setup_commands %}
               {{ cmd }}
               {%- endfor %}
-        need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
         {%- if disk_performance_tier is not none %}
         disk_performance_tier: {{disk_performance_tier}}
         {%- endif %}
