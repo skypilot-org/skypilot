@@ -1,15 +1,12 @@
 #!/bin/bash
 # Builds the Dockerfile_k8s image as the SkyPilot image.
-# Optionally, if -p is specified, pushes the image to the registry.
 # Uses buildx to build the image for both amd64 and arm64.
-# If -p flag is specified, pushes the image to the registry.
-# If -g flag is specified, builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64.
-# If -l flag is specified, uses the latest tag instead of the date tag. Date tag is of the form YYYYMMDD.
-# Usage: ./build_image.sh [-p] [-g]
+# Usage: ./skypilot-k8s-image.sh [-p] [-g] [-l] [-r region]
 # -p: Push the image to the registry
-# -g: Build the GPU image
-# -l: Use latest tag
-region=us # default region
+# -g: Builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64
+# -l: Use latest tag instead of the date tag. Date tag is of the form YYYYMMDD
+# -r: Specify the region to be us, europe or asia
+region=us
 push=false
 gpu=false
 latest=false

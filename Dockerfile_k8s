@@ -43,9 +43,5 @@ RUN conda init && export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
-# Copy SkyPilot code base. This is required for the ssh jump pod to find the
-# lifecycle management scripts
-COPY --chown=sky . /skypilot/sky/
-
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

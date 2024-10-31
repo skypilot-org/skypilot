@@ -8,11 +8,14 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
+
+logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -31,7 +34,16 @@ _image_df = common.read_catalog('kubernetes/images.csv',
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+    global _image_df
+    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_id is None:
+        # Refresh the image catalog and try again, if the image tag is not
+        # found.
+        logger.debug('Refreshing the image catalog and trying again.')
+        _image_df = common.read_catalog('kubernetes/images.csv',
+                                        pull_frequency_hours=0)
+        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    return image_id
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
