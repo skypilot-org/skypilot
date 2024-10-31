@@ -2498,10 +2498,13 @@ def get_task_resources_str(task: 'task_lib.Task',
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
     spot_str = ''
+    is_controller_task = task.is_controller_task()
     task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
-                       if task.is_controller_task() else
+                       if is_controller_task else
                        str(DEFAULT_TASK_CPU_DEMAND))
-    if task.best_resources is not None:
+    if is_controller_task:
+        resources_str = f'CPU:{task_cpu_demand}'
+    elif task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:
             if task.best_resources.use_spot:
