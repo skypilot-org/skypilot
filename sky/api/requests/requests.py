@@ -271,6 +271,16 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 
 
 @init_db
+def get_latest_request_id() -> Optional[str]:
+    """Get the latest request ID."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute('SELECT request_id FROM requests ORDER BY created_at DESC LIMIT 1')
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+@init_db
 def get_request(request_id: str) -> Optional[Request]:
     """Get a REST task."""
     with filelock.FileLock(request_lock_path(request_id)):

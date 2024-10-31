@@ -5543,13 +5543,20 @@ def api_stop():
 
 @api.command('get', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
+@click.option('--log-path',
+              '-l',
+              required=False,
+              type=str,
+              help='The path to the log file to stream.')
 @usage_lib.entrypoint
-def api_get(request_id: Optional[str]):
+def api_get(request_id: Optional[str], log_path: Optional[str]):
     """Stream the logs of a request running on API server."""
-    if request_id is None:
+    if request_id is None and log_path is None:
         # TODO(zhwu): get the latest request ID.
-        raise click.BadParameter('Please provide the request ID.')
-    sdk.stream_and_get(request_id)
+        raise click.BadParameter('Please provide the request ID or log path.')
+    if request_id is not None and log_path is not None:
+        raise click.BadParameter('Only one of request ID and log path can be provided.')
+    sdk.stream_and_get(request_id, log_path)
 
 
 @api.command('abort', cls=_DocumentedCodeCommand)

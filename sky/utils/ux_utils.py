@@ -26,7 +26,8 @@ BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
 # Log path hint in the spinner during launching
-_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: sky api get -l '
+                  '{log_path}'
                   f'{colorama.Style.RESET_ALL}')
 
 

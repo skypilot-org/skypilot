@@ -609,7 +609,7 @@ def get(request_id: str) -> Any:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def stream_and_get(request_id: str) -> Any:
+def stream_and_get(request_id: Optional[str] = None, log_path: Optional[str] = None) -> Any:
     """Stream the logs of a request and get the final result.
 
     This will block until the request is finished. The request id can be a
@@ -618,7 +618,8 @@ def stream_and_get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/stream',
         params={
-            'request_id': str(request_id),
+            'request_id': str(request_id) if request_id is not None else None,
+            'log_path': str(log_path) if log_path is not None else None,
             'plain_logs': str(False),
         },
         # 5 seconds to connect, no read timeout

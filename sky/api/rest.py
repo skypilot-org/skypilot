@@ -7,7 +7,7 @@ import os
 import pathlib
 import sys
 import time
-from typing import List
+from typing import List, Optional
 import uuid
 import zipfile
 
@@ -562,24 +562,26 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
 async def log_streamer(request_id: str,
                        log_path: pathlib.Path,
                        plain_logs: bool = False):
-    request_task = requests_lib.get_request(request_id)
-    rich_status = rich_utils.safe_status(f'Checking request: {request_id}')
-    if not plain_logs:
-        rich_status.start()
-    while request_task.status < requests_lib.RequestStatus.RUNNING:
-        rich_status.update(f'Waiting for request to start: {request_id}')
-        await asyncio.sleep(1)
+    if request_id is not None:
         request_task = requests_lib.get_request(request_id)
-    if not plain_logs:
-        rich_status.stop()
+        rich_status = rich_utils.safe_status(f'Checking request: {request_id}')
+        if not plain_logs:
+            rich_status.start()
+        while request_task.status < requests_lib.RequestStatus.RUNNING:
+            rich_status.update(f'Waiting for request to start: {request_id}')
+            await asyncio.sleep(1)
+            request_task = requests_lib.get_request(request_id)
+        if not plain_logs:
+            rich_status.stop()
 
     with log_path.open('rb') as f:
         while True:
             line = f.readline()
             if not line:
-                request_task = requests_lib.get_request(request_id)
-                if request_task.status > requests_lib.RequestStatus.RUNNING:
-                    break
+                if request_id is not None:
+                    request_task = requests_lib.get_request(request_id)
+                    if request_task.status > requests_lib.RequestStatus.RUNNING:
+                        break
                 await asyncio.sleep(1)
                 continue
             line_str = line.decode('utf-8')
@@ -596,14 +598,35 @@ async def log_streamer(request_id: str,
 
 @app.get('/stream')
 async def stream(
-        request_id: str,
+        request_id: Optional[str] = None,
+        log_path: Optional[str] = None,
         plain_logs: bool = True) -> fastapi.responses.StreamingResponse:
-    request_task = requests_lib.get_request(request_id)
-    if request_task is None:
-        print(f'No task with request ID {request_id}')
-        raise fastapi.HTTPException(status_code=404,
-                                    detail=f'Request {request_id} not found')
-    log_path = request_task.log_path
+
+    if request_id is not None and log_path is not None:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Only one of request_id and log_path can be provided')
+    
+    if request_id is None and log_path is None:
+        request_id = requests_lib.get_latest_request_id()
+        if request_id is None:
+            raise fastapi.HTTPException(status_code=404,
+                                        detail='No request found')
+
+    if request_id is not None:
+        request_task = requests_lib.get_request(request_id)
+        if request_task is None:
+            print(f'No task with request ID {request_id}')
+            raise fastapi.HTTPException(status_code=404,
+                                        detail=f'Request {request_id} not found')
+        log_path = request_task.log_path
+    else:
+        # Make sure the log path is under ~/sky_logs.
+        resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
+        if not str(resolved_log_path).startswith(os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
+            raise fastapi.HTTPException(status_code=400,
+                                        detail=f'Unauthorized log path: {log_path}')
+        log_path = resolved_log_path
+
     return fastapi.responses.StreamingResponse(
         log_streamer(request_id, log_path, plain_logs),
         media_type='text/plain',
