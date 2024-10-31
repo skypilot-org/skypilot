@@ -3560,6 +3560,15 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(cooperc): remove this flag once --fast can robustly detect cluster
+# yaml config changes
+@click.option('--fast',
+              default=False,
+              is_flag=True,
+              help='[Experimental] Launch the job more quickly, but skip some '
+              'initialization steps. If you update SkyPilot or your local '
+              'cloud credentials, they will not be reflected until you run '
+              '`sky jobs launch` at least once without this flag.')
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3586,6 +3595,7 @@ def jobs_launch(
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
+    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3669,7 +3679,8 @@ def jobs_launch(
     managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
-                        retry_until_up=retry_until_up)
+                        retry_until_up=retry_until_up,
+                        fast=fast)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
