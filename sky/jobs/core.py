@@ -36,6 +36,7 @@ def launch(
     stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
+    fast: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
@@ -47,6 +48,9 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
+        fast: Whether to use sky.launch(fast=True) for the jobs controller. If
+          True, the SkyPilot wheel and the cloud credentials may not be updated
+          on the jobs controller.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -138,6 +142,7 @@ def launch(
                    idle_minutes_to_autostop=skylet_constants.
                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    retry_until_up=True,
+                   fast=fast,
                    _disable_controller_check=True)
 
 
