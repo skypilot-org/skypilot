@@ -2500,8 +2500,7 @@ def get_task_resources_str(task: 'task_lib.Task',
     spot_str = ''
     is_controller_task = task.is_controller_task()
     task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
-                       if is_controller_task else
-                       str(DEFAULT_TASK_CPU_DEMAND))
+                       if is_controller_task else str(DEFAULT_TASK_CPU_DEMAND))
     if is_controller_task:
         resources_str = f'CPU:{task_cpu_demand}'
     elif task.best_resources is not None:
