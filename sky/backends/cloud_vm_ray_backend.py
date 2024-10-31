@@ -2117,8 +2117,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # Replace the home directory with ~ for better robustness across systems
         # with different home directories.
         if cluster_yaml.startswith(os.path.expanduser('~')):
-            cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
-                                                  1)
+            cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~', 1)
         self._cluster_yaml = cluster_yaml
         # List of (internal_ip, feasible_ip) tuples for all the nodes in the
         # cluster, sorted by the feasible ips. The feasible ips can be either
