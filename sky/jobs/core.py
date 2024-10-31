@@ -56,7 +56,6 @@ def launch(
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
-
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])

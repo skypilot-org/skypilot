@@ -3565,7 +3565,7 @@ def jobs():
 @click.option('--fast',
               default=False,
               is_flag=True,
-              help='[Experimental] Launch the job more quickly, but skip some '
+              help='[Experimental] Launch the job faster by skipping controller '
               'initialization steps. If you update SkyPilot or your local '
               'cloud credentials, they will not be reflected until you run '
               '`sky jobs launch` at least once without this flag.')
