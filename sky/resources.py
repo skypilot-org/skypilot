@@ -602,6 +602,9 @@ class Resources:
                         # TPU V5 requires a newer runtime version.
                         if acc.startswith('tpu-v5'):
                             return 'v2-alpha-tpuv5'
+                        # TPU V6e requires a newer runtime version.
+                        if acc.startswith('tpu-v6e'):
+                            return 'v2-alpha-tpuv6e'
                         return 'tpu-vm-base'
 
                     accelerator_args['runtime_version'] = (
