@@ -656,8 +656,13 @@ def status(
 
 
 @dataclass
-class SyncLogFileParams:
-    """Parameters for syncing a log file."""
+class SyncLogFileArgs:
+    """Parameters for syncing a log file.
+    - source: remote file path of logs.
+    - target: local machine file path of logs.
+    - message: template message to print to user.
+    - message_args: arguments to fill in template.
+    """
     source: str
     target: str
     message: str
@@ -717,18 +722,31 @@ def sync_down_logs(service_name: str,
     sky_logs_directory = os.path.expanduser(skylet_constants.SKY_LOGS_DIRECTORY)
     run_timestamp = backend_utils.get_run_timestamp()
 
+    # Define the service components to be run:
+    # Either sync down all components or one specified component.
+    # The service_component_to_be_run_list can be:
+    # - [replica] if service_component is replica.
+    # - [lb/controller] if service_component is lb or controller.
+    # - [replica, lb, controller] if service_component is None.
     service_component_to_be_run_list = ([
         serve_utils.ServiceComponent.REPLICA,
         serve_utils.ServiceComponent.CONTROLLER,
         serve_utils.ServiceComponent.LOAD_BALANCER
     ] if service_component is None else [service_component])
 
-    log_files_to_be_synced: List[SyncLogFileParams] = []
+    # Define all log files to be synced.
+    log_files_to_be_synced: List[SyncLogFileArgs] = []
     runner = controller_handle.get_command_runners()
 
     # Prepare and download replica logs (single/all components).
     if (serve_utils.ServiceComponent.REPLICA
             in service_component_to_be_run_list):
+        # The remove logic here is that:
+        # - If user specifies replica, we need to remove it from list.
+        #   The list becomes [] after process, which means we do not
+        #   need to handle controller and lb logs then.
+        # - If sync all components, remove replica from the list,
+        #   then the list is [lb, controller], which will be handled below.
         service_component_to_be_run_list.remove(
             serve_utils.ServiceComponent.REPLICA)
 
@@ -764,9 +782,9 @@ def sync_down_logs(service_name: str,
             serve_utils.generate_remote_service_dir_name(service_name))
         dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
         log_files_to_be_synced.append(
-            SyncLogFileParams(dir_for_download, sky_logs_directory,
-                              'Downloading the replica logs from %s to %s...',
-                              [remote_service_dir_name, sky_logs_directory]))
+            SyncLogFileArgs(dir_for_download, sky_logs_directory,
+                            'Downloading the replica logs from %s to %s...',
+                            [remote_service_dir_name, sky_logs_directory]))
 
         # Remove the logs from the remote server after downloading.
         logger.info('Preparing to remove replica logs from remote server...')
@@ -800,6 +818,12 @@ def sync_down_logs(service_name: str,
     target_directory = os.path.join(sky_logs_directory, run_timestamp)
     os.makedirs(target_directory, exist_ok=True)
 
+    # Prepare and download controller and load balancer logs.
+    # After the remove logic in replica, the list is either
+    # [] or [lb, controller] or [lb] or [controller].
+    # - If it is [], we do not need to handle controller and lb logs.
+    # - If it is [lb, controller], we need to handle both.
+    # - If it is [lb] or [controller], we need to handle the one in list.
     for running_component in service_component_to_be_run_list:
         logger.info('Starting the process to prepare '
                     f'and download {running_component.name} logs...')
@@ -815,15 +839,18 @@ def sync_down_logs(service_name: str,
                     service_name)
             log_file_constant = serve_constants.LOAD_BALANCER_LOG_FILE_NAME
         else:
+            # Actually, this should never happen. So I believe we can
+            # remove this block of code. PTAL :)
+            # TODO(bxhu): remove this code block after check.
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Unsupported service component: {running_component}')
 
         log_files_to_be_synced.append(
-            SyncLogFileParams(log_file_name,
-                              os.path.join(target_directory, log_file_constant),
-                              'Downloading the log file from %s to %s...',
-                              [log_file_name, log_file_constant]))
+            SyncLogFileArgs(log_file_name,
+                            os.path.join(target_directory, log_file_constant),
+                            'Downloading the log file from %s to %s...',
+                            [log_file_name, log_file_constant]))
 
     for arg in log_files_to_be_synced:
         logger.info(arg.message, *arg.message_args)
@@ -833,8 +860,8 @@ def sync_down_logs(service_name: str,
                      stream_logs=False)
 
     # Final message indicating where the logs can be found.
-    logger.info(f'Synced down log(s)'
-                f' can be found at: {target_directory}')
+    logger.info('Synced down logs '
+                f'can be found at: {target_directory}')
 
 
 @usage_lib.entrypoint
