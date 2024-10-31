@@ -170,14 +170,11 @@ To show all available TPU Pod types, run :code:`sky show-gpus` (more than 8 core
 
 .. code-block:: console
 
-   GOOGLE_TPU   AVAILABLE_QUANTITIES
+   GOOGLE_TPU    AVAILABLE_QUANTITIES
    tpu-v6e-8     1
    tpu-v6e-32    1
    tpu-v6e-128   1
    tpu-v6e-256   1
-   tpu-v6e-512   1
-   tpu-v6e-1024  1
-   tpu-v6e-2048  1
    ...
 
 After creating a TPU Pod, multiple host VMs (e.g., :code:`tpu-v6e-32` comes with 4 host VMs) are launched.
