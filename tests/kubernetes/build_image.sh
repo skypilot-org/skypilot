@@ -9,31 +9,33 @@
 # -p: Push the image to the registry
 # -g: Build the GPU image
 # -l: Use latest tag
-
-# TAG=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot
-TAG=us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot
-
+region=us # default region
 push=false
 gpu=false
 latest=false
 
 # Parse command line arguments
-while getopts ":pgl" opt; do
+OPTSTRING=":pglr:"
+while getopts ${OPTSTRING} opt; do
   case ${opt} in
-    p )
+    p)
       push=true
       ;;
-    g )
+    g)
       gpu=true
       ;;
-    l )
+    l)
       latest=true
       ;;
-    \? )
-      echo "Usage: ./build_image.sh [-p] [-g] [-l]"
+    r)
+      region=${OPTARG}
+      ;;
+    ?)
+      echo "Usage: ./build_image.sh [-p] [-g] [-l] [-r region]"
       echo "-p: Push the image to the registry"
       echo "-g: Build the GPU image"
       echo "-l: Use latest tag instead of the date tag"
+      echo "-r: Specify the region to be us, europe or asia"
       exit 1
       ;;
   esac
@@ -43,6 +45,9 @@ echo "Options:"
 echo "Push: $push"
 echo "GPU: $gpu"
 echo "Latest: $latest"
+echo "Region: $region"
+
+TAG=$region-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot
 
 # Set the version tag. If the latest flag is used, use the latest tag
 if [[ $latest == "true" ]]; then
