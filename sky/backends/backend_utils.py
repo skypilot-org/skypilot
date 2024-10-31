@@ -640,11 +640,7 @@ def write_cluster_config(
         keep_launch_fields_in_existing_config: bool = True) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
-    Returns: {provisioner: path to yaml, the provisioning spec}.
-      'provisioner' can be
-        - 'ray'
-        - 'tpu-create-script' (if TPU is requested)
-        - 'tpu-delete-script' (if TPU is requested)
+    Returns: {'ray': path to yaml, the provisioning spec}.
     Raises:
         exceptions.ResourcesUnavailableError: if the region/zones requested does
             not appear in the catalog, or an ssh_proxy_command is specified but
