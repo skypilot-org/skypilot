@@ -473,11 +473,13 @@ def launch(
                     dryrun=dryrun)
                 handle = maybe_handle
                 # Get all stages
-                stages = list(Stage)
-                # Skip CLONE_DISK, PROVISION, and SETUP
-                stages.remove(Stage.CLONE_DISK)
-                stages.remove(Stage.PROVISION)
-                stages.remove(Stage.SETUP)
+                stages = [
+                    Stage.SYNC_WORKDIR,
+                    Stage.SYNC_FILE_MOUNTS,
+                    Stage.PRE_EXEC,
+                    Stage.EXEC,
+                    Stage.DOWN,
+                ]
             except exceptions.ClusterNotUpError:
                 # Proceed with normal provisioning
                 pass
