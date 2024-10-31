@@ -1949,17 +1949,8 @@ class RetryingVmProvisioner(object):
 
         failover_history: List[Exception] = list()
 
-        style = colorama.Style
-        fore = colorama.Fore
         # Retrying launchable resources.
         while True:
-            if (isinstance(to_provision.cloud, clouds.Azure) and
-                    to_provision.accelerators is not None and
-                    'A10' in to_provision.accelerators and prev_handle is None):
-                logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
-                               'an A10 cluster on Azure. This may take ~20 '
-                               'minutes due to driver installation.'
-                               f'{style.RESET_ALL}')
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
@@ -2475,7 +2466,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Returns number of IPs per node in the cluster, handling TPU Pod."""
         is_tpu_vm_pod = gcp_utils.is_tpu_vm_pod(self.launched_resources)
         if is_tpu_vm_pod:
-            num_ips = gcp_utils.get_num_tpu_devices(self.launched_resources)
+            num_ips = len(self.internal_ips())
         else:
             num_ips = 1
         return num_ips
@@ -3174,9 +3165,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
             if returncode == 255:
                 is_message_too_long = False
-                with open(setup_log_path, 'r', encoding='utf-8') as f:
-                    if 'too long' in f.read():
-                        is_message_too_long = True
+                try:
+                    with open(os.path.expanduser(setup_log_path),
+                              'r',
+                              encoding='utf-8') as f:
+                        if 'too long' in f.read():
+                            is_message_too_long = True
+                except Exception as e:  # pylint: disable=broad-except
+                    # We don't crash the setup if we cannot read the log file.
+                    # Instead, we should retry the setup with dumping the script
+                    # to a file to be safe.
+                    logger.debug('Failed to read setup log file '
+                                 f'{setup_log_path}: {e}')
+                    is_message_too_long = True
 
                 if is_message_too_long:
                     # If the setup script is too long, we retry it with dumping

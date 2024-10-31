@@ -24,7 +24,7 @@ FYI time to packer build images:
 ### GCP
 1. Build a single global image.
 ```bash
-export TYPE=gpu  # Update this
+export TYPE=cpu  # Update this
 export IMAGE=skypilot-gcp-${TYPE}-ubuntu
 packer build ${IMAGE}.pkr.hcl
 ```
@@ -39,7 +39,7 @@ gcloud compute images add-iam-policy-binding ${IMAGE_NAME} --member='allAuthenti
 ### AWS
 1. Generate the source image for a single region.
 ```bash
-export TYPE=gpu  # Update this
+export TYPE=cpu  # Update this
 export IMAGE=skypilot-aws-${TYPE}-ubuntu
 packer build ${IMAGE}.pkr.hcl
 ```
@@ -59,9 +59,10 @@ export SECRET=xxxxxx  # Update this
 ```
 2. Build and copy images for all regions for GPU (gen 1 & 2) and CPU (gen 2 only).
 ```bash
-export TYPE=gpu  # Update this
-export VM_GENERATION=1  # Update this
-packer build --var vm_generation=${VM_GENERATION} --var client_secret=${SECRET} skypilot-azure-${TYPE}-ubuntu.pkr.hcl
+packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-cpu-ubuntu.pkr.hcl
+packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
+packer build --var vm_generation=1 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
+packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid_driver=true skypilot-azure-gpu-ubuntu.pkr.hcl
 ```
 
 ## Test Images
