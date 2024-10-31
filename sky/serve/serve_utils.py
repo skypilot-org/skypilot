@@ -240,6 +240,15 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
+def generate_replica_download_directory(service_name: str,
+                                        timestamp: str) -> str:
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
+    dir_for_download = os.path.join(dir_name, timestamp)
+    os.makedirs(dir_for_download, exist_ok=True)
+    return dir_for_download
+
+
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
@@ -756,13 +765,26 @@ def append_job_logs_to_replica_log(new_replica_log_file: str,
                                    f'{replica_id}.\n')
 
 
+def copy_logs_file(log_file_name: str, replica_id: Optional[int],
+                   dir_for_download: str,
+                   target_replica_id: Optional[int]) -> bool:
+    if has_valid_replica_id(
+            log_file_name, target_replica_id) and os.path.exists(log_file_name):
+        shutil.copy(log_file_name, dir_for_download)
+        return True
+    else:
+        logger.error(
+            f'{colorama.Fore.RED}Path {dir_for_download} does not exist, '
+            f'or replica_id {replica_id} is invalid.'
+            f'{colorama.Style.RESET_ALL}')
+        return False
+
+
 def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                       target_replica_id: Optional[int]) -> None:
     logger.info('Preparing replica logs for download...')
-    remote_service_dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(remote_service_dir_name)
-    dir_for_download = os.path.join(dir_name, timestamp)
-    os.makedirs(dir_for_download, exist_ok=True)
+    dir_for_download = generate_replica_download_directory(
+        service_name, timestamp)
 
     # Get record from serve state.
     service_record = serve_state.get_service_from_name(service_name)
@@ -779,38 +801,31 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
     for replica in terminated_replicas:
         replica_id = replica['replica_id']
         log_file_name = generate_replica_log_file_name(service_name, replica_id)
-        if has_valid_replica_id(log_file_name, target_replica_id):
-            if os.path.exists(log_file_name):
-                shutil.copy(log_file_name, dir_for_download)
+        copy_logs_file(log_file_name, replica_id, dir_for_download,
+                       target_replica_id)
 
-    # These copies of logs may still be continuously updating.
+    # These non-terminated logs may still be continuously updating.
     # We need to synchronize the latest log data from the remote server.
     for replica in service_record['replica_info']:
         replica_id = replica['replica_id']
-        launch_log_file = generate_replica_launch_log_file_name(
-            service_name, replica_id)
 
         # Skip already-terminated replicas (processed above).
         if replica in terminated_replicas:
             continue
 
-        # Check if launch log file exists and has correct replica_id.
-        if not (os.path.exists(launch_log_file) and
-                has_valid_replica_id(launch_log_file, target_replica_id)):
-            logger.error(
-                f'{colorama.Fore.RED}Path {launch_log_file} does not exist, '
-                f'or replica_id {replica_id} is invalid.'
-                f'{colorama.Style.RESET_ALL}')
-            continue
-
-        # Copy launch log file into the download directory.
+        launch_log_file = generate_replica_launch_log_file_name(
+            service_name, replica_id)
         new_replica_log_file = os.path.join(dir_for_download,
                                             f'replica_{replica_id}.log')
-        shutil.copy(launch_log_file, new_replica_log_file)
-
+        # Check if launch log file exists and has correct replica_id.
+        # Copy launch log file into the download directory.
+        if not copy_logs_file(launch_log_file, replica_id, new_replica_log_file,
+                              target_replica_id):
+            continue
         # Sync down job logs for replica.
         if replica['status'] == serve_state.ReplicaStatus.PROVISIONING:
             continue
+
         logger.info(f'Syncing down logs for replica {replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
@@ -856,9 +871,7 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
     logger.info('Removing replica logs...')
-    remote_service_dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(remote_service_dir_name)
-    dir_to_remove = os.path.join(dir_name, timestamp)
+    dir_to_remove = generate_replica_download_directory(service_name, timestamp)
     shutil.rmtree(dir_to_remove)
 
 
