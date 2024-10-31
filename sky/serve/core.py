@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+from dataclasses import dataclass
 import os
 import re
 import signal
@@ -654,54 +655,13 @@ def status(
     return serve_utils.load_service_status(serve_status_payload)
 
 
-def _sync_log_file(runner, source, target_directory, target_name) -> None:
-    """Helper function for sync_down_logs.
-    - This show the src and target path.
-    - It synchronizes the log file from remote service to local machine.
-    """
-
-    logger.info(f'Downloading the log file from {source} to {target_name}...')
-    runner.rsync(source=source,
-                 target=os.path.join(target_directory, target_name),
-                 up=False,
-                 stream_logs=False)
-
-
-def _prepare_and_sync_log(
-        service_name,
-        service_component,
-        controller_handle,
-        target_directory,
-        log_files_to_sync,
-        single_file_synced,
-        sync_down_all_components=False) -> Tuple[Any, str, bool]:
-    """Helper function for sync_down_logs.
-    - This function prepares the log file for download.
-    """
-    logger.info('Starting the process to prepare '
-                f'and download {service_component.name.lower()} logs...')
-    runner = controller_handle.get_command_runners()
-
-    if service_component == serve_utils.ServiceComponent.CONTROLLER:
-        log_file_name = serve_utils.generate_remote_controller_log_file_name(
-            service_name)
-        log_file_constant = serve_constants.CONTROLLER_LOG_FILE_NAME
-    elif service_component == serve_utils.ServiceComponent.LOAD_BALANCER:
-        log_file_name = serve_utils.generate_remote_load_balancer_log_file_name(
-            service_name)
-        log_file_constant = serve_constants.LOAD_BALANCER_LOG_FILE_NAME
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Unsupported service component: {service_component}')
-
-    log_files_to_sync.append((log_file_name, log_file_constant))
-
-    if not sync_down_all_components:
-        single_file_synced = True
-        target_directory = os.path.join(target_directory, log_file_constant)
-
-    return runner, target_directory, single_file_synced
+@dataclass
+class SyncLogFileParams:
+    """Parameters for syncing a log file."""
+    source: str
+    target: str
+    message: str
+    message_args: List[str]
 
 
 @usage_lib.entrypoint
@@ -756,11 +716,22 @@ def sync_down_logs(service_name: str,
     # Define local directory for logs and get the current timestamp.
     sky_logs_directory = os.path.expanduser(skylet_constants.SKY_LOGS_DIRECTORY)
     run_timestamp = backend_utils.get_run_timestamp()
-    sync_down_all_components = service_component is None
+
+    service_component_to_be_run_list = ([
+        serve_utils.ServiceComponent.REPLICA,
+        serve_utils.ServiceComponent.CONTROLLER,
+        serve_utils.ServiceComponent.LOAD_BALANCER
+    ] if service_component is None else [service_component])
+
+    log_files_to_be_synced: List[SyncLogFileParams] = []
+    runner = controller_handle.get_command_runners()
 
     # Prepare and download replica logs (single/all components).
-    if (sync_down_all_components or
-            service_component == serve_utils.ServiceComponent.REPLICA):
+    if (serve_utils.ServiceComponent.REPLICA
+            in service_component_to_be_run_list):
+        service_component_to_be_run_list.remove(
+            serve_utils.ServiceComponent.REPLICA)
+
         logger.info(
             'Starting the process to prepare and download replica logs...')
         prepare_code = (
@@ -789,16 +760,13 @@ def sync_down_logs(service_name: str,
             raise RuntimeError(e.error_msg) from e
 
         # Define remote directory for logs and download them.
-        runner = controller_handle.get_command_runners()
         remote_service_dir_name = (
             serve_utils.generate_remote_service_dir_name(service_name))
         dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
-        logger.info('Downloading the replica logs from %s to %s...',
-                    remote_service_dir_name, sky_logs_directory)
-        runner.rsync(source=dir_for_download,
-                     target=sky_logs_directory,
-                     up=False,
-                     stream_logs=False)
+        log_files_to_be_synced.append(
+            SyncLogFileParams(dir_for_download, sky_logs_directory,
+                              'Downloading the replica logs from %s to %s...',
+                              [remote_service_dir_name, sky_logs_directory]))
 
         # Remove the logs from the remote server after downloading.
         logger.info('Preparing to remove replica logs from remote server...')
@@ -831,29 +799,41 @@ def sync_down_logs(service_name: str,
     # and then the replica logs download would overwrite it.
     target_directory = os.path.join(sky_logs_directory, run_timestamp)
     os.makedirs(target_directory, exist_ok=True)
-    single_file_synced = False
-    log_files_to_sync: List[Tuple[str, str]] = []
 
-    if (sync_down_all_components or
-            service_component == serve_utils.ServiceComponent.CONTROLLER):
-        runner, target_directory, single_file_synced = _prepare_and_sync_log(
-            service_name, serve_utils.ServiceComponent.CONTROLLER,
-            controller_handle, target_directory, log_files_to_sync,
-            single_file_synced)
+    for running_component in service_component_to_be_run_list:
+        logger.info('Starting the process to prepare '
+                    f'and download {running_component.name} logs...')
 
-    if (sync_down_all_components or
-            service_component == serve_utils.ServiceComponent.LOAD_BALANCER):
-        runner, target_directory, single_file_synced = _prepare_and_sync_log(
-            service_name, serve_utils.ServiceComponent.LOAD_BALANCER,
-            controller_handle, target_directory, log_files_to_sync,
-            single_file_synced)
+        if running_component == serve_utils.ServiceComponent.CONTROLLER:
+            log_file_name = \
+                serve_utils.generate_remote_controller_log_file_name(
+                    service_name)
+            log_file_constant = serve_constants.CONTROLLER_LOG_FILE_NAME
+        elif running_component == serve_utils.ServiceComponent.LOAD_BALANCER:
+            log_file_name = \
+                serve_utils.generate_remote_load_balancer_log_file_name(
+                    service_name)
+            log_file_constant = serve_constants.LOAD_BALANCER_LOG_FILE_NAME
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Unsupported service component: {running_component}')
 
-    # Sync controller / load balancer log files.
-    for src, tar in log_files_to_sync:
-        _sync_log_file(runner, src, target_directory, tar)
+        log_files_to_be_synced.append(
+            SyncLogFileParams(log_file_name,
+                              os.path.join(target_directory, log_file_constant),
+                              'Downloading the log file from %s to %s...',
+                              [log_file_name, log_file_constant]))
+
+    for arg in log_files_to_be_synced:
+        logger.info(arg.message, *arg.message_args)
+        runner.rsync(source=arg.source,
+                     target=arg.target,
+                     up=False,
+                     stream_logs=False)
 
     # Final message indicating where the logs can be found.
-    logger.info(f'Synced down log{"s" if not single_file_synced else ""}'
+    logger.info(f'Synced down log(s)'
                 f' can be found at: {target_directory}')
 
 
