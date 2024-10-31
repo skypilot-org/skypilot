@@ -2114,8 +2114,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self._version = self._VERSION
         self.cluster_name = cluster_name
         self.cluster_name_on_cloud = cluster_name_on_cloud
-        self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
+        # Replace the home directory with ~ for better robustness across systems
+        # with different home directories.
+        if cluster_yaml.startswith(os.path.expanduser('~')):
+            cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
+        self._cluster_yaml = cluster_yaml
         # List of (internal_ip, feasible_ip) tuples for all the nodes in the
         # cluster, sorted by the feasible ips. The feasible ips can be either
         # internal or external ips, depending on the use_internal_ips flag.
