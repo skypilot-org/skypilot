@@ -139,8 +139,7 @@ class ReplicaStatus(enum.Enum):
 
     @classmethod
     def terminal_statuses(cls) -> List['ReplicaStatus']:
-        return [cls.SHUTTING_DOWN, cls.PREEMPTED
-        ] + cls.failed_statuses()
+        return [cls.SHUTTING_DOWN, cls.PREEMPTED] + cls.failed_statuses()
 
     @classmethod
     def scale_down_decision_order(cls) -> List['ReplicaStatus']:

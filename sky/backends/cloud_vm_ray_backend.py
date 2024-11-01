@@ -3634,7 +3634,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Sync down logs for the given job_ids.
 
         Returns:
-            A dictionary mapping job_id to log path.
+            - If run_stamp is not found, return {}.
+            - Else, return a dictionary mapping <job_id, log path>.
         """
         code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
         returncode, run_timestamps, stderr = self.run_on_head(

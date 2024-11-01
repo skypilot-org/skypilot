@@ -765,26 +765,19 @@ def append_job_logs_to_replica_log(new_replica_log_file: str,
                                    f'{replica_id}.\n')
 
 
-def copy_logs_file(log_file_name: str, replica_id: Optional[int],
-                   dir_for_download: str,
-                   target_replica_id: Optional[int]) -> bool:
-    if has_valid_replica_id(
-            log_file_name, target_replica_id) and os.path.exists(log_file_name):
-        shutil.copy(log_file_name, dir_for_download)
-        return True
-    else:
-        logger.error(
-            f'{colorama.Fore.RED}Path {dir_for_download} does not exist, '
-            f'or replica_id {replica_id} is invalid.'
-            f'{colorama.Style.RESET_ALL}')
-        return False
-
-
 def prepare_replica_logs_for_download(service_name: str, timestamp: str,
                                       target_replica_id: Optional[int]) -> None:
+    """Prepare replica logs for download.
+    - This function is a command towards remote server.
+    - It tells remote machine how to prepare the logs for download.
+    """
+
     logger.info('Preparing replica logs for download...')
-    dir_for_download = generate_replica_download_directory(
-        service_name, timestamp)
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
+    # Local download directory for replica
+    dir_for_download = os.path.join(dir_name, timestamp)  # path
+    os.makedirs(dir_for_download, exist_ok=True)  # directory
 
     # Get record from serve state.
     service_record = serve_state.get_service_from_name(service_name)
@@ -792,40 +785,51 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist.')
 
-    # Directly copy over log files of already-terminated
-    # replicas in this service.
-    terminated_replicas = [
-        info for info in service_record['replica_info']
-        if info['status'] in serve_state.ReplicaStatus.terminal_statuses()
-    ]
-    for replica in terminated_replicas:
-        replica_id = replica['replica_id']
-        log_file_name = generate_replica_log_file_name(service_name, replica_id)
-        copy_logs_file(log_file_name, replica_id, dir_for_download,
-                       target_replica_id)
-
-    # These non-terminated logs may still be continuously updating.
-    # We need to synchronize the latest log data from the remote server.
     for replica in service_record['replica_info']:
         replica_id = replica['replica_id']
-
-        # Skip already-terminated replicas (processed above).
-        if replica in terminated_replicas:
+        # Directly copy over log files of already-terminated
+        # replicas in this service.
+        if replica['status'] in serve_state.ReplicaStatus.terminal_statuses():
+            target_log_file = generate_replica_log_file_name(
+                service_name, replica_id)  # remote log files (terminated)
+            if not (os.path.exists(target_log_file) and
+                    has_valid_replica_id(target_log_file, target_replica_id)):
+                logger.error(f'{colorama.Fore.RED}Path {target_log_file} does'
+                             f'not existor replica_id {replica_id} is invalid.'
+                             '{colorama.Style.RESET_ALL}')
+                continue
+            # Copy log file into download directory.
+            # Path = dir_for_download
+            shutil.copy(target_log_file, dir_for_download)
             continue
 
+        # Current possible states, follow time order:
+        # PROVISIONING -> PENDING |-> STARTING -> READY
+        #                         |-> STARTING -> NOT_READY
+        # These logs may still be continuously updating and need to be
+        # synchronize the latest log data from remote server.
+
+        # 1) Copy over existing launch logs.
         launch_log_file = generate_replica_launch_log_file_name(
-            service_name, replica_id)
+            service_name, replica_id)  # remote log files (running)
+        if not (os.path.exists(launch_log_file) and
+                has_valid_replica_id(launch_log_file, target_replica_id)):
+            logger.error(
+                f'{colorama.Fore.RED}Path {launch_log_file} does not exist, '
+                f'or replica_id {replica_id} is invalid.'
+                '{colorama.Style.RESET_ALL}')
+            continue
+        # Copy log file into download directory.
+        # Path = dir_for_download/replica_id.log
         new_replica_log_file = os.path.join(dir_for_download,
                                             f'replica_{replica_id}.log')
-        # Check if launch log file exists and has correct replica_id.
-        # Copy launch log file into the download directory.
-        if not copy_logs_file(launch_log_file, replica_id, new_replica_log_file,
-                              target_replica_id):
-            continue
-        # Sync down job logs for replica.
+        shutil.copy(launch_log_file, new_replica_log_file)
+
         if replica['status'] == serve_state.ReplicaStatus.PROVISIONING:
+            logger.info(f'Replica {replica_id} still in PROVISIONING state.')
             continue
 
+        # 2) Sync down the running job dataflow.
         logger.info(f'Syncing down logs for replica {replica_id}...')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(
@@ -839,17 +843,16 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
 
         # Set up local directory for replica job logs.
         replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                            'replica_jobs')
-        os.makedirs(replica_job_logs_dir, exist_ok=True)
+                                            'replica_jobs')  # path
+        os.makedirs(replica_job_logs_dir, exist_ok=True)  # directory
         job_log_file_name = None
         try:
-            # Try to sync down the logs for the replica.
             log_dirs = backend.sync_down_logs(handle,
                                               job_ids=None,
                                               local_dir=replica_job_logs_dir)
+            # log_dirs = Map <job_id, log_path> or {empty}
         except exceptions.CommandError as e:
-            # If this error occurs, we need to shut down at once
-            # instead of just logging and continue.
+            # If this error occurs, we need to shut down at once.
             raise RuntimeError('Failed to download the logs: '
                                f'{common_utils.format_exception(e)}') from e
         else:
