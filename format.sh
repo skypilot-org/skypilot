@@ -152,6 +152,10 @@ if [[ "$1" == '--files' ]]; then
     pylint "${PYLINT_FLAGS[@]}" "${@:2}"
 elif [[ "$1" == '--all' ]]; then
     # Pylint entire sky directory.
+    # Equals to: `pylint "${PYLINT_FLAGS[@]}" $(git ls-files 'sky/*.py' 'sky/*.pyi'| 
+    # grep -v -E "sky\/skylet\/providers\/|sky\/skylet\/ray_patches\/|
+    # sky\/setup_files\/setup.py|sky\/clouds\/service_catalog\/|sky\/callbacks\/|
+    # sky\/backends\/monkey_patches\/|sky\/jobs\/dashboard\/")``
     pylint "${PYLINT_FLAGS[@]}" $(git ls-files 'sky/*.py' 'sky/*.pyi' | grep -v -E "$GREP_PATTERN")
 elif [[ "$1" == '--legacy' ]]; then
     # Pylint entire sky directory, ignoring all dirs without a __init__.py file.
