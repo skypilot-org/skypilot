@@ -525,13 +525,14 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
         # TPU support.
         elif 'Invalid resource requests for google.com/tpu.' in error_message:
             extra_message = ('Verify if the cluster has a TPU slice node with '
-                            'a topology matching the number of TPU(s) '
-                            'requested. Note that multi-host TPU podslices '
-                            'are currently not unsupported.')
-            raise config_lib.KubernetesError(_lack_resource_msg('TPU',
-                                    pod_spec,
-                                    details=error_msg,
-                                    extra_msg=extra_message))
+                             'a topology matching the number of TPU(s) '
+                             'requested. Note that multi-host TPU podslices '
+                             'are currently not unsupported.')
+            raise config_lib.KubernetesError(
+                _lack_resource_msg('TPU',
+                                   pod_spec,
+                                   details=error_message,
+                                   extra_msg=extra_message))
         else:
             # Re-raise the exception if it's a different error
             raise e
