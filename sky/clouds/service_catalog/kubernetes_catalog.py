@@ -128,6 +128,9 @@ def list_accelerators_realtime(
                         node.status.allocatable))
 
                 if accelerator_name and accelerator_count > 0:
+                    # TPUs are counted in a different way compared to GPUs.
+                    # Multi-node GPUs can be split into smaller units and be
+                    # provisioned, but TPUs are considered as an atomic unit.
                     if kubernetes_utils.is_tpu_on_gke(accelerator_name):
                         accelerators_qtys.add(
                             (accelerator_name, accelerator_count))
