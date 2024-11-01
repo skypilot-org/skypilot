@@ -519,7 +519,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                 logger.info('Failed to create Pod without AppArmor annotation: '
                             f'{retry_exception}')
                 raise retry_exception
-        # Unlike other errors from resource lackage on CPU/GPU/Memory, TPU
+        # Unlike other error from resource lackage on CPU/GPU/Memory, TPU
         # lackage error is raised when pod is attemtped to be created.
         # TODO(Doyoung): Update the error message raised with the multi-host
         # TPU support.
