@@ -324,7 +324,9 @@ def _set_env_vars_in_pods(namespace: str, context: Optional[str],
     set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
     def _set_env_vars_thread(new_pod):
-        logger.info(f'{"-"*20}Start: Set up env vars in pod {new_pod.metadata.name!r} {"-"*20}')
+        logger.info(
+            f'{"-"*20}Start: Set up env vars in pod {new_pod.metadata.name!r} '
+            f'{"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), new_pod.metadata.name))
         rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
@@ -332,7 +334,9 @@ def _set_env_vars_in_pods(namespace: str, context: Optional[str],
                                    stream_logs=False)
         _raise_command_running_error('set env vars', set_k8s_env_var_cmd,
                                      new_pod.metadata.name, rc, stdout)
-        logger.info(f'{"-"*20}End: Set up env vars in pod {new_pod.metadata.name!r} {"-"*20}')
+        logger.info(
+            f'{"-"*20}End: Set up env vars in pod {new_pod.metadata.name!r} '
+            f'{"-"*20}')
 
     subprocess_utils.run_in_parallel(_set_env_vars_thread, new_pods)
 
@@ -357,7 +361,8 @@ def _check_user_privilege(namespace: str, context: Optional[str],
     def _check_privilege_thread(new_node):
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), new_node.metadata.name))
-        logger.info(f'{"-"*20}Start: Check user privilege in pod {new_node.metadata.name!r} {"-"*20}')
+        logger.info(f'{"-"*20}Start: Check user privilege in pod '
+                    f'{new_node.metadata.name!r} {"-"*20}')
         rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
                                         require_outputs=True,
                                         separate_stderr=True,
@@ -372,7 +377,8 @@ def _check_user_privilege(namespace: str, context: Optional[str],
                 'Ensure the default user has root access or '
                 '"sudo" is installed and the user is added to the sudoers '
                 'from the image.')
-        logger.info(f'{"-"*20}End: Check user privilege in pod {new_node.metadata.name!r} {"-"*20}')
+        logger.info(f'{"-"*20}End: Check user privilege in pod '
+                    f'{new_node.metadata.name!r} {"-"*20}')
 
     subprocess_utils.run_in_parallel(_check_privilege_thread, new_nodes)
 
