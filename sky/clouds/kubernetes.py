@@ -70,9 +70,6 @@ class Kubernetes(clouds.Cloud):
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
-    # We are only allowed to host images in the following meta regions.
-    IMAGE_META_REGIONS = ['us', 'europe', 'asia']
-    DEFAULT_IMAGE_META_REGION = 'us'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -322,14 +319,10 @@ class Kubernetes(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
-        meta_region = self.DEFAULT_IMAGE_META_REGION
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
             context = region.name
-            img_meta_region = region.name.split('-')[0]
-            if img_meta_region in self.IMAGE_META_REGIONS:
-                meta_region = img_meta_region
         assert context is not None, 'No context found in kubeconfig'
 
         r = resources
@@ -362,10 +355,10 @@ class Kubernetes(clouds.Cloud):
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
             # Get the container image ID from the service catalog.
             image_id = service_catalog.get_image_id_from_tag(
-                image_id, region=meta_region, clouds='kubernetes')
+                image_id, clouds='kubernetes')
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
-            self.IMAGE_CPU, region=meta_region, clouds='kubernetes')
+            self.IMAGE_CPU, clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
