@@ -12,7 +12,7 @@ ignore=third_party,ray_patches,providers
 
 # Files or directories matching the regex patterns are skipped. The regex
 # matches against base names, not paths.
-ignore-patterns=
+; ignore-paths=sky/skylet/providers
 
 # Pickle collected data for later comparisons.
 persistent=no
