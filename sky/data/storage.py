@@ -1102,6 +1102,9 @@ class S3Store(AbstractStore):
         # We should eventually make all opt-in regions also work for S3 by
         # passing the right endpoint flags.
         if region in self._CUSTOM_ENDPOINT_REGIONS:
+            logger.warning('AWS opt-in regions are not supported for S3. '
+                           f'Falling back to default region '
+                           f'{self._DEFAULT_REGION} for bucket {name!r}.')
             region = self._DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
