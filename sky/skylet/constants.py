@@ -150,6 +150,9 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
+    # Do NOT use --system-site-packages here, because if users upgrade any
+    # packages in the base env, they interfere with skypilot dependencies.
+    # Reference: https://github.com/skypilot-org/skypilot/issues/4097
     f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV};'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
