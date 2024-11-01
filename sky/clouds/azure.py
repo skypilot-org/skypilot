@@ -177,7 +177,7 @@ class Azure(clouds.Cloud):
         azure_utils.validate_image_id(image_id)
         try:
             compute_client = azure.get_client('compute', cls.get_project_id())
-        except (azure.exceptions().AzureError, RuntimeError) as e:
+        except (azure.exceptions().AzureError, RuntimeError):
             # Fallback to default image size if no credentials are available.
             return 0.0
 
