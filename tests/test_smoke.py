@@ -360,6 +360,69 @@ def test_minimal(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Test fast launch ----------
+def test_launch_fast(generic_cloud: str):
+    name = _get_cluster_name()
+
+    test = Test(
+        'test_launch_fast',
+        [
+            # First launch to create the cluster
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+
+            # Second launch to test fast launch - should not reprovision
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            ' echo "$s" && '
+            # Validate that cluster was not re-launched.
+            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+            # Validate that setup was not re-run.
+            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            # Validate that the task ran and finished.
+            'echo "$s" | grep -A 1 "task run finish" | grep "Job finished (status: SUCCEEDED)"',
+            f'sky logs {name} 2 --status',
+            f'sky status -r {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=_get_timeout(generic_cloud),
+    )
+    run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+def test_launch_fast_with_autostop(generic_cloud: str):
+    name = _get_cluster_name()
+    # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
+    # the VM is stopped.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    test = Test(
+        'test_launch_fast_with_autostop',
+        [
+            # First launch to create the cluster with a short autostop
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+            f'sleep {autostop_timeout}',
+
+            # Ensure cluster is stopped
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+
+            # Launch again. Do full output validation - we expect the cluster to re-launch
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 2 --status',
+            f'sky status -r {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=_get_timeout(generic_cloud) + autostop_timeout,
+    )
+    run_one_test(test)
+
+
 # ---------- Test region ----------
 @pytest.mark.aws
 def test_aws_region():
@@ -3039,7 +3102,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Test cancellation during spot cluster being launched.
             f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000"  -y -d',
             'sleep 60',
-            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING"',
+            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             f'sky jobs cancel -y -n {name}',
             'sleep 5',
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "CANCELLING\|CANCELLED"',
@@ -4374,6 +4437,28 @@ def test_core_api_sky_launch_exec():
     job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)
     assert job_id_dummy is None
     sky.down(name)
+
+
+# The sky launch CLI has some additional checks to make sure the cluster is up/
+# restarted. However, the core API doesn't have these; make sure it still works
+def test_core_api_sky_launch_fast(generic_cloud: str):
+    name = _get_cluster_name()
+    cloud = sky.clouds.CLOUD_REGISTRY.from_str(generic_cloud)
+    try:
+        task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
+        sky.launch(task,
+                   cluster_name=name,
+                   idle_minutes_to_autostop=1,
+                   fast=True)
+        # Sleep to let the cluster autostop
+        time.sleep(120)
+        # Run it again - should work with fast=True
+        sky.launch(task,
+                   cluster_name=name,
+                   idle_minutes_to_autostop=1,
+                   fast=True)
+    finally:
+        sky.down(name)
 
 
 # ---------- Testing Storage ----------

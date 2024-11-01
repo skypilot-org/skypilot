@@ -555,6 +555,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    fast: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -619,6 +620,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        fast=fast,
     )
 
 
@@ -1040,6 +1042,13 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--fast',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('[Experimental] If the cluster is already up and available, skip '
+          'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1071,6 +1080,7 @@ def launch(
     yes: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
+    fast: bool,
 ):
     """Launch a cluster or task.
 
@@ -1139,7 +1149,8 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         fast=fast)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -3549,6 +3560,15 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(cooperc): remove this flag once --fast can robustly detect cluster
+# yaml config changes
+@click.option('--fast',
+              default=False,
+              is_flag=True,
+              help='[Experimental] Launch the job faster by skipping '
+              'controller initialization steps. If you update SkyPilot or '
+              'your local cloud credentials, they will not be reflected until '
+              'you run `sky jobs launch` at least once without this flag.')
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3575,6 +3595,7 @@ def jobs_launch(
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
+    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3658,7 +3679,8 @@ def jobs_launch(
     managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
-                        retry_until_up=retry_until_up)
+                        retry_until_up=retry_until_up,
+                        fast=fast)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
