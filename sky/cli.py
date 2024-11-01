@@ -2017,8 +2017,8 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     default=0,
     type=int,
     help=
-    'The number of lines to display from the end of the log file. If 0, print all lines.'
-)
+    'The number of lines to display from the end of the log file. '
+    'If 0, print all lines.')
 @click.argument('cluster',
                 required=True,
                 type=str,
