@@ -392,7 +392,8 @@ def tail_logs(job_id: Optional[int],
         managed_job_id: The managed job id (for logging info only to avoid
             confusion).
         follow: Whether to follow the logs or print the logs so far and exit.
-        number_of_lines: The number of lines to display from the end of the log file, if 0, print all lines.
+        number_of_lines: The number of lines to display from the end of the
+            log file, if 0, print all lines.
     """
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
@@ -449,7 +450,8 @@ def tail_logs(job_id: Optional[int],
                     print(line, end='')
                 # Flush the last n lines
                 print(end='', flush=True)
-            # Now, the cursor is at the end of the last lines if tail_f_lines > 0
+            # Now, the cursor is at the end of the last lines
+            # if tail_f_lines > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
                                          start_streaming_at=start_stream_at):
