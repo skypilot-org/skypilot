@@ -240,15 +240,6 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
-def generate_replica_download_directory(service_name: str,
-                                        timestamp: str) -> str:
-    remote_service_dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(remote_service_dir_name)
-    dir_for_download = os.path.join(dir_name, timestamp)
-    os.makedirs(dir_for_download, exist_ok=True)
-    return dir_for_download
-
-
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
@@ -874,7 +865,9 @@ def prepare_replica_logs_for_download(service_name: str, timestamp: str,
 
 def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
     logger.info('Removing replica logs...')
-    dir_to_remove = generate_replica_download_directory(service_name, timestamp)
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
+    dir_to_remove = os.path.join(dir_name, timestamp)
     shutil.rmtree(dir_to_remove)
 
 
