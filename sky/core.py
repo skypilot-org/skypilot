@@ -776,7 +776,10 @@ def tail_logs(cluster_name: str,
         f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.tail_logs(handle, job_id, follow=follow, number_of_lines=number_of_lines)
+    backend.tail_logs(handle, 
+                      job_id, 
+                      follow=follow, 
+                      number_of_lines=number_of_lines)
 
 
 @usage_lib.entrypoint
