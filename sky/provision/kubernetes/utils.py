@@ -86,7 +86,9 @@ PORT_FORWARD_PROXY_CMD_PATH = ('~/.sky/kubernetes-port-forward-proxy-command-'
 # https://cloud.google.com/kubernetes-engine/docs/how-to/tpus#run
 GKE_TPU_ACCELERATOR_TO_GENERATION = {
     'tpu-v4-podslice': 'v4',
+    # Only Single-host v5e TPU configurations are allowed.
     'tpu-v5-lite-device': 'v5e',
+    # Multi-host compatible v5e TPU configurations allowed.
     'tpu-v5-lite-podslice': 'v5e',
     'tpu-v5p-slice': 'v5p',
 }
@@ -256,7 +258,7 @@ class GKELabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
-        if isinstance(accelerator, str) and accelerator.startswith('tpu-'):
+        if accelerator is not None and accelerator.startswith('tpu-'):
             return cls.TPU_LABEL_KEY
         return cls.GPU_LABEL_KEY
 
@@ -436,10 +438,10 @@ def detect_accelerator_resource(
     nodes = get_kubernetes_nodes(context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_gpu = (GPU_RESOURCE_KEY in cluster_resources or
-               TPU_RESOURCE_KEY in cluster_resources)
+    has_accelerator = (GPU_RESOURCE_KEY in cluster_resources or
+                       TPU_RESOURCE_KEY in cluster_resources)
 
-    return has_gpu, cluster_resources
+    return has_accelerator, cluster_resources
 
 
 @functools.lru_cache(maxsize=10)
@@ -868,10 +870,10 @@ def check_credentials(context: Optional[str],
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
     try:
-        _, _, _, _ = get_accelerator_label_key_value(context,
-                                                     acc_type='',
-                                                     acc_count=0,
-                                                     check_mode=True)
+        get_accelerator_label_key_value(context,
+                                        acc_type='',
+                                        acc_count=0,
+                                        check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
@@ -2222,7 +2224,7 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
     return 0
 
 
-def reduce_tpu_topology(topology: str):
+def reduce_tpu_topology(topology: str) -> int:
     """Computes the number of TPU chips from its topology string."""
     chip_dimensions = [int(chip_count) for chip_count in topology.split('x')]
     # tpu_topology_chip_count represents the total number of TPU chips in the
@@ -2232,7 +2234,7 @@ def reduce_tpu_topology(topology: str):
     return tpu_topology_chip_count
 
 
-def is_multi_host_tpu(node_metadata_labels: dict):
+def is_multi_host_tpu(node_metadata_labels: dict) -> bool:
     """Determines whether the given node is a multi-host TPU configuration."""
     if GKELabelFormatter.TPU_LABEL_KEY in node_metadata_labels:
         assert GKELabelFormatter.TPU_TOPOLOGY_LABEL_KEY in node_metadata_labels
@@ -2258,14 +2260,13 @@ def is_multi_host_tpu(node_metadata_labels: dict):
     return False
 
 
-def multi_host_tpu_exists_in_cluster(context: Optional[str] = None):
+def multi_host_tpu_exists_in_cluster(context: Optional[str] = None) -> bool:
     """Checks if there exists a multi-host TPU within the cluster."""
-    multi_host_tpu_in_cluster = False
     nodes = get_kubernetes_nodes(context)
     for node in nodes:
         if is_multi_host_tpu(node.metadata.labels):
-            multi_host_tpu_in_cluster = True
-    return multi_host_tpu_in_cluster
+            return True
+    return False
 
 
 @dataclasses.dataclass

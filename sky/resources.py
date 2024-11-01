@@ -588,8 +588,9 @@ class Resources:
                     else:
                         self._cloud = clouds.GCP()
                 assert (self.cloud.is_same_cloud(clouds.GCP()) or
-                        self.cloud.is_same_cloud(clouds.Kubernetes())
-                       ), 'Cloud must be GCP or Kubernetes.'
+                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                            'Cloud must be GCP or Kubernetes for TPU '
+                            'accelerators.')
 
                 if accelerator_args is None:
                     accelerator_args = {}

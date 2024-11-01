@@ -401,15 +401,13 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
-              {% if tpu_requested %}
+              {% if k8s_resource_key is not none %}
               # Number of requested google.com/tpu must be equal to the total
               # number of available TPU chips on the TPU slice node either it
               # being a node from multi-host TPU slice or single-host TPU
               # slice. Example reference:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
-              google.com/tpu: {{accelerator_count}}
-              {% else %}
-              nvidia.com/gpu: {{accelerator_count}}
+              {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
               {% if k8s_fuse_device_required %}
               # Kubernetes resource exposed by the fuse device manager
@@ -418,10 +416,8 @@ available_node_types:
               {% endif %}
             limits:
               # Limits need to be defined for GPU/TPU requests
-              {% if tpu_requested %}
-              google.com/tpu: {{accelerator_count}}
-              {% else %}
-              nvidia.com/gpu: {{accelerator_count}}
+              {% if k8s_resource_key is not none %}
+              {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
               {% if k8s_fuse_device_required %}
               smarter-devices/fuse: "1"

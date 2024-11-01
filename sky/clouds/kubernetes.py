@@ -364,6 +364,7 @@ class Kubernetes(clouds.Cloud):
         k8s_acc_label_value = None
         k8s_topology_label_key = None
         k8s_topology_label_value = None
+        k8s_resource_key = None
         tpu_requested = False
 
         # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
@@ -375,6 +376,9 @@ class Kubernetes(clouds.Cloud):
             if (k8s_acc_label_key ==
                     kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
                 tpu_requested = True
+                k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+            else:
+                k8s_resource_key = kubernetes_utils.GPU_RESOURCE_KEY
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -439,6 +443,7 @@ class Kubernetes(clouds.Cloud):
             'tpu_requested': tpu_requested,
             'k8s_topology_label_key': k8s_topology_label_key,
             'k8s_topology_label_value': k8s_topology_label_value,
+            'k8s_resource_key': k8s_resource_key,
             'image_id': image_id,
         }
 
