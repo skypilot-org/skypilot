@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
+from collections import deque
 import copy
 import io
 import multiprocessing.pool
@@ -381,7 +382,8 @@ def _follow_job_logs(file,
 def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
-              follow: bool = True) -> None:
+              follow: bool = True,
+              number_of_lines: int = 0) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -390,6 +392,7 @@ def tail_logs(job_id: Optional[int],
         managed_job_id: The managed job id (for logging info only to avoid
             confusion).
         follow: Whether to follow the logs or print the logs so far and exit.
+        number_of_lines: The number of lines to display from the end of the log file, if 0, print all lines.
     """
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
@@ -440,6 +443,13 @@ def tail_logs(job_id: Optional[int],
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
+            if number_of_lines > 0:
+                lines = deque(log_file.readlines(), maxlen=number_of_lines)
+                for line in lines:
+                    print(line, end='')
+                # Flush the last n lines
+                print(end='', flush=True)
+            # Now, the cursor is at the end of the last lines if tail_f_lines > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
                                          start_streaming_at=start_stream_at):
@@ -448,7 +458,12 @@ def tail_logs(job_id: Optional[int],
         try:
             start_stream = False
             with open(log_path, 'r', encoding='utf-8') as f:
-                for line in f.readlines():
+                if number_of_lines > 0:
+                    lines = deque(f.readlines(), maxlen=number_of_lines)
+                    start_stream = True
+                else:
+                    lines = f.readlines()
+                for line in lines:
                     if start_stream_at in line:
                         start_stream = True
                     if start_stream:
