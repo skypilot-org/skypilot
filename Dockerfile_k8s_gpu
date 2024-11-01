@@ -44,7 +44,7 @@ RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x8
     export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
     python3 -m venv ~/skypilot-runtime && \
     PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome>=3.12.0' && \
+    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
     curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
