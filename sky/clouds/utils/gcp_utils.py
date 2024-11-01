@@ -53,14 +53,6 @@ def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
     return not acc.endswith('-8')
 
 
-def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:
-    if resources is None or not is_tpu(resources):
-        raise ValueError('resources must be a valid TPU resource.')
-    acc, _ = list(resources.accelerators.items())[0]
-    num_tpu_devices = int(int(acc.split('-')[2]) / 8)
-    return num_tpu_devices
-
-
 @dataclasses.dataclass
 class SpecificReservation:
     count: int

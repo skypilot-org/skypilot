@@ -1,5 +1,6 @@
 """Kubernetes instance provisioning."""
 import copy
+import json
 import time
 from typing import Any, Dict, List, Optional, Union
 import uuid
@@ -459,6 +460,83 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
+def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
+                                        context: Optional[str]) -> Any:
+    """Attempts to create a Kubernetes Pod and handle any errors.
+
+    Currently, we handle errors due to the AppArmor annotation and retry if
+    it fails due to the `FieldValueForbidden` error.
+    See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+
+    Returns: The created Pod object.
+    """
+    try:
+        # Attempt to create the Pod with the AppArmor annotation
+        pod = kubernetes.core_api(context).create_namespaced_pod(
+            namespace, pod_spec)
+        return pod
+    except kubernetes.api_exception() as e:
+        try:
+            error_body = json.loads(e.body)
+            error_message = error_body.get('message', '')
+        except json.JSONDecodeError:
+            error_message = str(e.body)
+        # Check if the error is due to the AppArmor annotation and retry.
+        # We add an AppArmor annotation to set it as unconfined in our
+        # base template in kubernetes-ray.yml.j2. This is required for
+        # FUSE to work in the pod on most Kubernetes distributions.
+        # However, some distributions do not support the AppArmor annotation
+        # and will fail to create the pod. In this case, we retry without
+        # the annotation.
+        if (e.status == 422 and 'FieldValueForbidden' in error_message and
+                'AppArmorProfile: nil' in error_message):
+            logger.warning('AppArmor annotation caused pod creation to fail. '
+                           'Retrying without the annotation. '
+                           'Note: this may cause bucket mounting to fail.')
+
+            # Remove the AppArmor annotation
+            annotations = pod_spec.get('metadata', {}).get('annotations', {})
+            if ('container.apparmor.security.beta.kubernetes.io/ray-node'
+                    in annotations):
+                del annotations[
+                    'container.apparmor.security.beta.kubernetes.io/ray-node']
+                pod_spec['metadata']['annotations'] = annotations
+                logger.info('AppArmor annotation removed from Pod spec.')
+            else:
+                logger.warning('AppArmor annotation not found in pod spec, '
+                               'retrying will not help. '
+                               f'Current annotations: {annotations}')
+                raise e
+
+            # Retry Pod creation without the AppArmor annotation
+            try:
+                pod = kubernetes.core_api(context).create_namespaced_pod(
+                    namespace, pod_spec)
+                logger.info(f'Pod {pod.metadata.name} created successfully '
+                            'without AppArmor annotation.')
+                return pod
+            except kubernetes.api_exception() as retry_exception:
+                logger.info('Failed to create Pod without AppArmor annotation: '
+                            f'{retry_exception}')
+                raise retry_exception
+        # Unlike other errors from resource lackage on CPU/GPU/Memory, TPU
+        # lackage error is raised when pod is attemtped to be created.
+        # TODO(Doyoung): Update the error message raised with the multi-host
+        # TPU support.
+        elif 'Invalid resource requests for google.com/tpu.' in error_message:
+            extra_message = ('Verify if the cluster has a TPU slice node with '
+                            'a topology matching the number of TPU(s) '
+                            'requested. Note that multi-host TPU podslices '
+                            'are currently not unsupported.')
+            raise config_lib.KubernetesError(_lack_resource_msg('TPU',
+                                    pod_spec,
+                                    details=error_msg,
+                                    extra_msg=extra_message))
+        else:
+            # Re-raise the exception if it's a different error
+            raise e
+
+
 def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
@@ -596,26 +674,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             }
             pod_spec['spec']['tolerations'] = [tpu_toleration]
 
-        try:
-            pod = kubernetes.core_api(context).create_namespaced_pod(
-                namespace, pod_spec)
-        except kubernetes.api_exception() as e:
-            error_msg = str(e)
-            # Unlike other errors from resource lackage on CPU/GPU/Memory, TPU
-            # lackage error is raised when pod is attemtped to be created.
-            # TODO(Doyoung): Update the error message raised
-            # with the multi-host TPU support.
-            if 'Invalid resource requests for google.com/tpu.' in error_msg:
-                extra_msg = ('Verify if the cluster has a TPU slice node with '
-                             'a topology matching the number of TPU(s) '
-                             'requested. Note that multi-host TPU podslices '
-                             'are currently not unsupported.')
-                raise config_lib.KubernetesError(
-                    _lack_resource_msg('TPU',
-                                       pod_spec,
-                                       details=error_msg,
-                                       extra_msg=extra_msg))
-            raise
+        pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
