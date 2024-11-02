@@ -4364,7 +4364,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # This will try to fetch the head node IP if it is not cached.
 
-        runners: List[command_runner.CommandRunner] = handle.get_command_runners()
+        runners: List[
+            command_runner.CommandRunner] = handle.get_command_runners()
         head_runner = runners[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
