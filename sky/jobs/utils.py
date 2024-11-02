@@ -307,13 +307,24 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_managed_job_task_logs(job_id: int,
                                  task_id: int,
                                  follow: bool = True) -> None:
-    # This method is specifically used for non-chain DAGs of managed jobs.
-    # Each task in the managed job DAG is similar to a replica in a
-    # serve application, and we follow a similar code path as
-    # `stream_replica_logs`. Initially, we print the launch log of the task,
-    # which is stored in the controller and redirected from sky.launch's
-    # stdout. Subsequently, we tail the task's run log from the task's log
-    # file.
+    """This method is specifically used for non-chain DAGs of managed jobs.
+    Each task in the managed job DAG is similar to a replica in a
+    serve application, and we follow a similar code path as
+    `stream_replica_logs`. Initially, we print the launch log of the task,
+    which is stored in the controller and redirected from sky.launch's
+    stdout. Subsequently, we tail the task's run log from the task's log
+    file.
+    """
+
+    jobs = managed_job_state.get_managed_jobs(job_id)
+    job = [job for job in jobs if job['task_id'] == task_id]
+    if len(job) == 0:
+        # Early exit if the job is not found.
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Job {job_id} not found.')
+    assert len(job) == 1, f'Expected 1 job, got {len(job)}'
+    run_timestamp = job[0]['run_timestamp']
+    assert run_timestamp is not None, 'Run timestamp is not set.'
 
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of task {task_id}.{colorama.Style.RESET_ALL}')
@@ -325,13 +336,15 @@ def stream_managed_job_task_logs(job_id: int,
                              f'for task {task_id} not found.')
 
     def finish_stream():
-        status = managed_job_state.get_task_id_status(
-            job_id, task_id)[1]
-        # which means the job is in job.INIT state, and provision has succeded.
-        # This way we will drop those 'Checking the job status' logs from
-        # the utils.py's polling loop, which is intended.
-        # Though three must be one 'Job status: JobStatus.SETTING_UP' log.
-        # Maybe we can check is there 'Managed job cluster launched.' in the output?
+        """Finish streaming logs when job has moved past JobStatus.INIT state,
+        i.e., ManagedJobStatus.STARTING or ManagedJobStatus.RECOVERING.
+        This filters out most polling logs ('Checking the job status') from
+        utils.py, but we'll still see at least one 'Job status:
+        JobStatus.SETTING_UP' message because we need to wait for the job to
+        move out of INIT state.
+        """
+        # TODO: Consider checking for 'Managed job cluster launched.' in output?
+        status = managed_job_state.get_task_id_status(job_id, task_id)[1]
         return (status is not None) and (status not in [
             managed_job_state.ManagedJobStatus.STARTING,
             managed_job_state.ManagedJobStatus.RECOVERING,
@@ -345,17 +358,6 @@ def stream_managed_job_task_logs(job_id: int,
     if not follow:
         # Early exit if not following the logs.
         return
-
-    jobs = managed_job_state.get_managed_jobs(job_id)
-    job = [job for job in jobs if job['task_id'] == task_id]
-    assert len(job) == 1, f'Expected 1 job, got {len(job)}'
-    run_timestamp = job[0]['run_timestamp']
-
-    if run_timestamp is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Job {job_id} not found.')
-        
-    print(f"run_timestamp: {run_timestamp}")
 
     remote_run_log_file_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                            run_timestamp)
@@ -412,10 +414,10 @@ def stream_logs_by_id(job_id: int,
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}') + ((
-                        '\nFailure reason: '
-                        f'{managed_job_state.get_failure_reason(job_id)}'
-                    ) if managed_job_status.is_failed() else '')
+                    f'{colorama.Style.RESET_ALL}') + (
+                        ('\nFailure reason: '
+                         f'{managed_job_state.get_failure_reason(job_id)}')
+                        if managed_job_status.is_failed() else '')
 
         def get_next_task_id_status(
             job_id: int, task_id: Optional[int]
