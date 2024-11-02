@@ -3709,7 +3709,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
                   follow: bool = True,
-                  number_of_lines: int = 0) -> int:
+                  tail: int = 0) -> int:
         """Tail the logs of a job.
 
         Args:
@@ -3717,13 +3717,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_id: The job ID to tail the logs of.
             managed_job_id: The managed job ID for display purpose only.
             follow: Whether to follow the logs.
-            number_of_lines: The number of lines to display from the end of the
+            tail: The number of lines to display from the end of the
                 log file. If 0, print all lines.
         """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
                                                follow=follow,
-                                               number_of_lines=number_of_lines)
+                                               tail=tail)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')

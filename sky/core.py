@@ -743,7 +743,7 @@ def cancel(
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool = True,
-              number_of_lines: int = 0) -> None:
+              tail: int = 0) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the logs of a job.
 
@@ -779,7 +779,7 @@ def tail_logs(cluster_name: str,
     backend.tail_logs(handle,
                       job_id,
                       follow=follow,
-                      number_of_lines=number_of_lines)
+                      tail=tail)
 
 
 @usage_lib.entrypoint

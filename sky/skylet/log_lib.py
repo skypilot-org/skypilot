@@ -383,7 +383,7 @@ def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
               follow: bool = True,
-              number_of_lines: int = 0) -> None:
+              tail: int = 0) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -392,8 +392,8 @@ def tail_logs(job_id: Optional[int],
         managed_job_id: The managed job id (for logging info only to avoid
             confusion).
         follow: Whether to follow the logs or print the logs so far and exit.
-        number_of_lines: The number of lines to display from the end of the
-            log file, if 0, print all lines.
+        tail: The number of lines to display from the end of the log file,
+            if 0, print all lines.
     """
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
@@ -444,8 +444,8 @@ def tail_logs(job_id: Optional[int],
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
-            if number_of_lines > 0:
-                lines = deque(log_file.readlines(), maxlen=number_of_lines)
+            if tail > 0:
+                lines = deque(log_file.readlines(), maxlen=tail)
                 for line in lines:
                     print(line, end='')
                 # Flush the last n lines
@@ -460,8 +460,8 @@ def tail_logs(job_id: Optional[int],
         try:
             start_stream = False
             with open(log_path, 'r', encoding='utf-8') as f:
-                if number_of_lines > 0:
-                    lines = deque(f.readlines(), maxlen=number_of_lines)
+                if tail > 0:
+                    lines = deque(f.readlines(), maxlen=tail)
                     start_stream = True
                 else:
                     lines = f.readlines()

@@ -880,7 +880,7 @@ class JobLibCodeGen:
                   job_id: Optional[int],
                   managed_job_id: Optional[int],
                   follow: bool = True,
-                  number_of_lines: int = 0) -> str:
+                  tail: int = 0) -> str:
         # pylint: disable=line-too-long
         code = [
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
@@ -888,7 +888,7 @@ class JobLibCodeGen:
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
             f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, '
             f'managed_job_id={managed_job_id!r}, follow={follow}, '
-            f'number_of_lines={number_of_lines})',
+            f'tail={tail})',
         ]
         return cls._build(code)
 
