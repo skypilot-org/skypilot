@@ -412,10 +412,10 @@ def stream_logs_by_id(job_id: int,
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}') + (
+                    f'{colorama.Style.RESET_ALL}') + ((
                         '\nFailure reason: '
                         f'{managed_job_state.get_failure_reason(job_id)}'
-                    ) if managed_job_status.is_failed() else ''
+                    ) if managed_job_status.is_failed() else '')
 
         def get_next_task_id_status(
             job_id: int, task_id: Optional[int]
