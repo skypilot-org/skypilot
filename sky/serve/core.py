@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import copy
 import re
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -186,7 +187,10 @@ def up(
         # Set VPN configuration on the controller, so the controller can
         # start the VPN service on the replicas.
         if task.vpn_config is not None:
-            controller_task.set_vpn_config(task.vpn_config)
+            controller_vpn_config = copy.copy(task.vpn_config)
+            if task.service is not None and task.service.expose_service:
+                controller_vpn_config.disable_vpn_ip()
+            controller_task.set_vpn_config(controller_vpn_config)
             controller_task.update_envs(task.vpn_config.get_setup_env_vars())
 
         # Set service_name so the backend will know to modify default ray
@@ -337,8 +341,9 @@ def update(
         f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
     )
 
-    vpn_check_result = vpn_utils.check_vpn_unchanged(task.vpn_config,
-                                                     handle.vpn_config)
+    vpn_check_result = vpn_utils.check_vpn_unchanged(
+        task.vpn_config, handle.vpn_config,
+        task.service.expose_service if task.service is not None else False)
     if vpn_check_result is not None:
         mismatch_str = (
             f'To fix: specify a new cluster name, or down the '

@@ -362,6 +362,9 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'expose_service': {
+                'type': 'boolean',
+            },
         }
     }
 

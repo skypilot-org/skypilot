@@ -8,6 +8,7 @@ import requests
 from sky import sky_logging
 from sky.provision import common
 from sky.utils import common_utils
+from sky.utils import schemas
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -21,14 +22,17 @@ class VPNConfig:
     into SkyPilot out of the box.
     """
 
+    def __init__(self) -> None:
+        # NOTE(yi): By default, we use the VPN IP address for all the
+        # instances. But in some cases (e.g. SkyServe controller), we
+        # may want to use the public IP address instead.
+        self._use_vpn_ip = True
+
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'VPNConfig':
         """Create a VPN configuration from a YAML configuration."""
-        if len(config) > 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('We only support one VPN configuration '
-                                 'in a cluster. Please check the YAML '
-                                 'configuration.')
+        common_utils.validate_schema(config, schemas.get_vpn_schema(),
+                                     'Invalid VPN YAML: ')
         if config.get('tailscale') is not None:
             return TailscaleConfig.from_env_vars()
         with ux_utils.print_exception_no_traceback():
@@ -59,6 +63,15 @@ class VPNConfig:
     def to_yaml_config(self) -> Dict[str, Any]:
         """Get the VPN configuration in YAML format."""
         return {}
+
+    def disable_vpn_ip(self) -> None:
+        """Disable using VPN IP address for the instances."""
+        self._use_vpn_ip = False
+
+    @property
+    def use_vpn_ip(self) -> bool:
+        """Whether to use the VPN IP address for the instances."""
+        return self._use_vpn_ip
 
     @staticmethod
     def from_backend_config(config: Dict[str, Any]) -> 'VPNConfig':
@@ -96,10 +109,13 @@ class TailscaleConfig(VPNConfig):
         auth_key: str,
         api_key: str,
         tailnet: str,
+        use_vpn_ip: bool = True,
     ) -> None:
+        super().__init__()
         self._auth_key = auth_key
         self._api_key = api_key
         self._tailnet = tailnet
+        self._use_vpn_ip = use_vpn_ip
 
     @staticmethod
     def from_env_vars() -> 'TailscaleConfig':
@@ -211,6 +227,7 @@ class TailscaleConfig(VPNConfig):
             'auth_key': self._auth_key,
             'api_key': self._api_key,
             'tailnet': self._tailnet,
+            'use_vpn_ip': self._use_vpn_ip,
         }
 
 
@@ -220,24 +237,30 @@ def rewrite_cluster_info_by_vpn(
     vpn_config: VPNConfig,
 ) -> None:
     """Rewrite the cluster info with the VPN configuration."""
+    if not vpn_config.use_vpn_ip:
+        return
     instance_list = cluster_info.get_instances()
     for (node_id, instance) in enumerate(instance_list):
         instance.external_ip = vpn_config.get_private_ip(cluster_name, node_id)
 
 
-def check_vpn_unchanged(
-        new_config: Optional[VPNConfig],
-        old_config_dict: Optional[Dict[str, Any]]) -> Optional[str]:
+def check_vpn_unchanged(new_config: Optional[VPNConfig],
+                        old_config_dict: Optional[Dict[str, Any]],
+                        expose_service: Optional[bool] = None) -> Optional[str]:
     """Check if the VPN configuration is unchanged.
     Args:
         vpn_config: The new VPN configuration to be launched.
         old_config: The old VPN configuration in the backend.
+        expose_service: Whether the service controller should use the public IP.
     Returns:
         None if the VPN configuration is unchanged, otherwise a string
         indicating the mismatch.
     """
-    new_config_dict = new_config.to_backend_config(
-    ) if new_config is not None else None
+    new_config_dict = None
+    if new_config is not None:
+        new_config_dict = new_config.to_backend_config()
+        if expose_service:
+            new_config_dict['use_vpn_ip'] = False
     use_or_not_mismatch_str = (
         '{} VPN, but current config requires the opposite')
     if old_config_dict is None:
