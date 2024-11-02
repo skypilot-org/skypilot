@@ -528,6 +528,24 @@ def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
 
+def get_task_status(job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
+    """Returns the status of a specific task in a job.
+
+    Args:
+        job_id: The ID of the job
+        task_id: The ID of the task within the job
+
+    Returns:
+        The status of the task, or None if not found
+    """
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        row = cursor.execute(
+            """\
+            SELECT status FROM spot
+            WHERE spot_job_id=(?) AND task_id=(?)""",
+            (job_id, task_id)).fetchone()
+        return ManagedJobStatus(row[0]) if row else None
+
 def get_latest_task_id_status(
         job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
     """Returns the (task id, status) of the latest task of a job.

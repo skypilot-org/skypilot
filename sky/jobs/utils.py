@@ -320,8 +320,7 @@ def wait_for_task_completion(
         cluster_name = generate_managed_job_cluster_name(task_name, job_id)
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
-        _, managed_job_status = managed_job_state.get_latest_task_id_status(
-            job_id)
+        managed_job_status = managed_job_state.get_task_status(job_id, task_id)
         assert managed_job_status is not None
 
         logger.info('=== Checking the job status... ===')
@@ -388,8 +387,7 @@ def wait_for_task_completion(
 
         # Finish early if the managed job status is already in terminal
         # state.
-        _, managed_job_status = managed_job_state.get_latest_task_id_status(
-            job_id)
+        managed_job_status = managed_job_state.get_task_status(job_id, task_id)
         assert managed_job_status is not None, job_id
         if managed_job_status.is_terminal():
             return False
