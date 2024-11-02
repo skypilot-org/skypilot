@@ -160,6 +160,11 @@ class JobsController:
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
                 self._backend.run_timestamp)
+        assert task.name is not None, task
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, self._job_id)
+        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+            cluster_name, self._backend, task, self._retry_until_up)
         managed_job_state.set_submitted(
             self._job_id,
             task_id,
@@ -167,15 +172,14 @@ class JobsController:
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(
                 task, is_managed_job=True),
+            specs={
+                'max_restarts_on_errors':
+                    self._strategy_executor.max_restarts_on_errors
+            },
             callback_func=callback_func)
         logger.info(
             f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
-        assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
-        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
         managed_job_state.set_starting(job_id=self._job_id,
@@ -215,7 +219,7 @@ class JobsController:
                                                 end_time=end_time,
                                                 callback_func=callback_func)
                 logger.info(
-                    f'Spot job {self._job_id} (task: {task_id}) SUCCEEDED. '
+                    f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
@@ -283,23 +287,35 @@ class JobsController:
                     failure_reason = (
                         'To see the details, run: '
                         f'sky jobs logs --controller {self._job_id}')
-
-                    managed_job_state.set_failed(
-                        self._job_id,
-                        task_id,
-                        failure_type=managed_job_status,
-                        failure_reason=failure_reason,
-                        end_time=end_time,
-                        callback_func=callback_func)
-                    return False
-                # Although the cluster is healthy, we fail to access the
-                # job status. Try to recover the job (will not restart the
-                # cluster, if the cluster is healthy).
-                assert job_status is None, job_status
-                logger.info('Failed to fetch the job status while the '
-                            'cluster is healthy. Try to recover the job '
-                            '(the cluster will not be restarted).')
-
+                    should_restart_on_failure = (
+                        self._strategy_executor.should_restart_on_failure())
+                    if should_restart_on_failure:
+                        max_restarts = (
+                            self._strategy_executor.max_restarts_on_errors)
+                        logger.info(
+                            f'User program crashed '
+                            f'({managed_job_status.value}). '
+                            f'Retry the job as max_restarts_on_errors is '
+                            f'set to {max_restarts}. '
+                            f'[{self._strategy_executor.restart_cnt_on_failure}'
+                            f'/{max_restarts}]')
+                    else:
+                        managed_job_state.set_failed(
+                            self._job_id,
+                            task_id,
+                            failure_type=managed_job_status,
+                            failure_reason=failure_reason,
+                            end_time=end_time,
+                            callback_func=callback_func)
+                        return False
+                else:
+                    # Although the cluster is healthy, we fail to access the
+                    # job status. Try to recover the job (will not restart the
+                    # cluster, if the cluster is healthy).
+                    assert job_status is None, job_status
+                    logger.info('Failed to fetch the job status while the '
+                                'cluster is healthy. Try to recover the job '
+                                '(the cluster will not be restarted).')
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources
@@ -340,48 +356,28 @@ class JobsController:
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
             logger.error(failure_reason)
-            managed_job_state.set_failed(
-                self._job_id,
-                task_id=task_id,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_PRECHECKS,
-                failure_reason=failure_reason,
-                callback_func=managed_job_utils.event_callback_func(
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    task=self._dag.tasks[task_id]))
+            self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_PRECHECKS,
+                failure_reason)
         except exceptions.ManagedJobReachedMaxRetriesError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
-            logger.error(common_utils.format_exception(e))
+            failure_reason = common_utils.format_exception(e)
+            logger.error(failure_reason)
             # The managed job should be marked as FAILED_NO_RESOURCE, as the
             # managed job may be able to launch next time.
-            managed_job_state.set_failed(
-                self._job_id,
-                task_id=task_id,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_NO_RESOURCE,
-                failure_reason=common_utils.format_exception(e),
-                callback_func=managed_job_utils.event_callback_func(
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    task=self._dag.tasks[task_id]))
+            self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_NO_RESOURCE,
+                failure_reason)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
                 logger.error(traceback.format_exc())
-            msg = ('Unexpected error occurred: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
+            msg = ('Unexpected error occurred: ' +
+                   common_utils.format_exception(e, use_bracket=True))
             logger.error(msg)
-            managed_job_state.set_failed(
-                self._job_id,
-                task_id=task_id,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_CONTROLLER,
-                failure_reason=msg,
-                callback_func=managed_job_utils.event_callback_func(
-                    job_id=self._job_id,
-                    task_id=task_id,
-                    task=self._dag.tasks[task_id]))
+            self._update_failed_task_state(
+                task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
+                msg)
         finally:
             # This will set all unfinished tasks to CANCELLING, and will not
             # affect the jobs in terminal states.
@@ -395,6 +391,21 @@ class JobsController:
                                              callback_func=callback_func)
             managed_job_state.set_cancelled(job_id=self._job_id,
                                             callback_func=callback_func)
+
+    def _update_failed_task_state(
+            self, task_id: int,
+            failure_type: managed_job_state.ManagedJobStatus,
+            failure_reason: str):
+        """Update the state of the failed task."""
+        managed_job_state.set_failed(
+            self._job_id,
+            task_id=task_id,
+            failure_type=failure_type,
+            failure_reason=failure_reason,
+            callback_func=managed_job_utils.event_callback_func(
+                job_id=self._job_id,
+                task_id=task_id,
+                task=self._dag.tasks[task_id]))
 
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):

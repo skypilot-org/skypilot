@@ -339,7 +339,6 @@ def _get_shell_complete_args(complete_fn):
 
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
-_RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
 
@@ -378,7 +377,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         cmd = '_SKY_COMPLETE=fish_source sky > \
                 ~/.config/fish/completions/sky.fish'
 
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
@@ -398,9 +399,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                        check=True,
                        executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
-        click.echo(
-            'Completion will take effect once you restart the terminal: ' +
-            click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Completion will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Installation failed with code {e.returncode}', fg='red')
     ctx.exit()
@@ -431,7 +433,9 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
 
     elif value == 'fish':
         cmd = 'rm -f ~/.config/fish/completions/sky.fish'
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.zshrc && \
@@ -447,8 +451,10 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion uninstalled for {value}', fg='green')
-        click.echo('Changes will take effect once you restart the terminal: ' +
-                   click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Changes will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Uninstallation failed with code {e.returncode}',
                     fg='red')
@@ -549,6 +555,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    fast: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -613,6 +620,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        fast=fast,
     )
 
 
@@ -1034,6 +1042,13 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--fast',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('[Experimental] If the cluster is already up and available, skip '
+          'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1065,6 +1080,7 @@ def launch(
     yes: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
+    fast: bool,
 ):
     """Launch a cluster or task.
 
@@ -1133,7 +1149,8 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         fast=fast)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -3056,7 +3073,8 @@ def show_gpus(
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    cloud_name = cloud_obj.canonical_name() if cloud_obj is not None else None
+    service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -3078,7 +3096,7 @@ def show_gpus(
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
         else:
-            qty_header = 'QTY_PER_NODE'
+            qty_header = 'REQUESTABLE_QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
@@ -3142,8 +3160,8 @@ def show_gpus(
         # Optimization - do not poll for Kubernetes API for fetching
         # common GPUs because that will be fetched later for the table after
         # common GPUs.
-        clouds_to_list = cloud
-        if cloud is None:
+        clouds_to_list = cloud_name
+        if cloud_name is None:
             clouds_to_list = [
                 c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
             ]
@@ -3153,7 +3171,8 @@ def show_gpus(
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+            if kubernetes_is_enabled and (cloud_name is None or
+                                          cloud_is_kubernetes):
                 if region:
                     context = region
                 else:
@@ -3263,8 +3282,8 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and
-                not show_all):
+        if (kubernetes_is_enabled and
+            (cloud_name is None or cloud_is_kubernetes) and not show_all):
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
@@ -3336,7 +3355,7 @@ def show_gpus(
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
+            cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
@@ -3511,7 +3530,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the spot job.'))
+              help=('Alias for --name, the name of the managed job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -3541,6 +3560,15 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(cooperc): remove this flag once --fast can robustly detect cluster
+# yaml config changes
+@click.option('--fast',
+              default=False,
+              is_flag=True,
+              help='[Experimental] Launch the job faster by skipping '
+              'controller initialization steps. If you update SkyPilot or '
+              'your local cloud credentials, they will not be reflected until '
+              'you run `sky jobs launch` at least once without this flag.')
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3567,6 +3595,7 @@ def jobs_launch(
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
+    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3650,7 +3679,8 @@ def jobs_launch(
     managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
-                        retry_until_up=retry_until_up)
+                        retry_until_up=retry_until_up,
+                        fast=fast)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)

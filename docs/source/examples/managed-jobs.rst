@@ -5,14 +5,17 @@ Managed Jobs
 
 .. tip::
 
-  This feature is great for scaling out: running a single job for long durations, or running many jobs (pipelines).
+  This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
 
-SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from any spot preemptions or hardware failures.
-It can be used in three modes:
+SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically recover from any underlying spot preemptions or hardware failures.
+Managed jobs can be used in three modes:
 
-#. :ref:`Managed Spot Jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This can **save significant costs** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
-#. :ref:`On-demand <on-demand>`: Jobs run on auto-recovering on-demand instances. This is useful for jobs that require guaranteed resources.
-#. :ref:`Pipelines <pipeline>`: Run pipelines that contain multiple tasks (which can have different resource requirements and ``setup``/``run`` commands). This is useful for running a sequence of tasks that depend on each other, e.g., data processing, training a model, and then running inference on it.
+#. :ref:`Managed spot jobs <spot-jobs>`: Jobs run on auto-recovering spot instances. This **saves significant costs** (e.g., ~70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
+#. :ref:`Managed on-demand/reserved jobs <on-demand>`: Jobs run on auto-recovering on-demand or reserved instances. Useful for jobs that require guaranteed resources.
+#. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks (which
+   can have different resource requirements and ``setup``/``run`` commands).
+   Useful for running a sequence of tasks that depend on each other, e.g., data
+   processing, training a model, and then running inference on it.
 
 
 .. _spot-jobs:
@@ -20,28 +23,12 @@ It can be used in three modes:
 Managed Spot Jobs
 -----------------
 
-In this mode, :code:`sky jobs launch --use-spot` is used to launch a managed spot job. SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
+In this mode, jobs run on spot instances, and preemptions are auto-recovered by SkyPilot.
+
+To launch a managed spot job, use :code:`sky jobs launch --use-spot`.
+SkyPilot automatically finds available spot instances across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
-
-Quick comparison between *unmanaged spot clusters* vs. *managed spot jobs*:
-
-.. list-table::
-   :widths: 30 18 12 35
-   :header-rows: 1
-
-   * - Command
-     - Managed?
-     - SSH-able?
-     - Best for
-   * - :code:`sky launch --use-spot`
-     - Unmanaged spot cluster
-     - Yes
-     - Interactive dev on spot instances (especially for hardware with low preemption rates)
-   * - :code:`sky jobs launch --use-spot`
-     - Managed spot job (auto-recovery)
-     - No
-     - Scaling out long-running jobs (e.g., data processing, training, batch inference)
 
 Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
@@ -58,6 +45,25 @@ To use managed spot jobs, there are two requirements:
 #. :ref:`Job YAML <job-yaml>`: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
 #. :ref:`Checkpointing <checkpointing>` (optional): For job recovery due to preemptions, the user application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can reload the latest checkpoint when restarted.
 
+
+Quick comparison between *managed spot jobs* vs. *launching spot clusters*:
+
+.. list-table::
+   :widths: 30 18 12 35
+   :header-rows: 1
+
+   * - Command
+     - Managed?
+     - SSH-able?
+     - Best for
+   * - :code:`sky jobs launch --use-spot`
+     - Yes, preemptions are auto-recovered
+     - No
+     - Scaling out long-running jobs (e.g., data processing, training, batch inference)
+   * - :code:`sky launch --use-spot`
+     - No, preemptions are not handled
+     - Yes
+     - Interactive dev on spot instances (especially for hardware with low preemption rates)
 
 .. _job-yaml:
 
@@ -93,7 +99,7 @@ We can launch it with the following:
   setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
-    # to pass the key in the command line, during `sky spot launch`.
+    # to pass the key in the command line, during `sky jobs launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
     pip install -e .
@@ -245,11 +251,11 @@ Real-World Examples
 
 .. _on-demand:
 
-Using On-Demand Instances
---------------------------------
+Managed On-Demand/Reserved Jobs
+-------------------------------
 
 The same ``sky jobs launch`` and YAML interfaces can run jobs on auto-recovering
-on-demand instances. This is useful to have SkyPilot monitor any underlying
+on-demand or reserved instances. This is useful to have SkyPilot monitor any underlying
 machine failures and transparently recover the job.
 
 To do so, simply set :code:`use_spot: false` in the :code:`resources` section, or override it with :code:`--use-spot false` in the CLI.
@@ -264,10 +270,10 @@ To do so, simply set :code:`use_spot: false` in the :code:`resources` section, o
   interface, while ``sky launch`` is a cluster interface (that you can launch
   tasks on, albeit not managed).
 
-Either Spot Or On-Demand
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Either Spot or On-Demand/Reserved
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can use ``any_of`` to specify either spot or on-demand instances as
+You can use ``any_of`` to specify either spot or on-demand/reserved instances as
 candidate resources for a job. See documentation :ref:`here
 <multiple-resources>` for more details.
 
@@ -280,11 +286,34 @@ candidate resources for a job. See documentation :ref:`here
       - use_spot: false
 
 In this example, SkyPilot will perform cost optimizations to select the resource to use, which almost certainly
-will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand instances.
+will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand/reserved instances.
+
+
+Jobs Restarts on User Code Failure
+-----------------------------------
+
+By default, SkyPilot will try to recover a job when its underlying cluster is preempted or failed. Any user code failures (non-zero exit codes) are not auto-recovered.
+
+In some cases, you may want a job to automatically restart on its own failures, e.g., when a training job crashes due to a Nvidia driver issue or NCCL timeouts. To specify this, you
+can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the job YAML file.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      # Restart the job up to 3 times on user code errors.
+      max_restarts_on_errors: 3
+
 
 More advanced policies for resource selection, such as the `Can't Be Late
 <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
 paper, may be supported in the future.
+
+Running Many Parallel Jobs
+--------------------------
+
+For batch jobs such as **data processing** or **hyperparameter sweeps**, you can launch many jobs in parallel. See :ref:`many-jobs`.
 
 Useful CLIs
 -----------
@@ -323,11 +352,10 @@ Cancel a managed job:
   If any failure happens for a managed job, you can check :code:`sky jobs queue -a` for the brief reason
   of the failure. For more details, it would be helpful to check :code:`sky jobs logs --controller <job_id>`.
 
-
 .. _pipeline:
 
-Job Pipelines
--------------
+Managed Pipelines
+-----------------
 
 A pipeline is a managed job that contains a sequence of tasks running one after another.
 
@@ -414,8 +442,8 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 
 
-Dashboard
----------
+Job Dashboard
+-------------
 
 Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
 

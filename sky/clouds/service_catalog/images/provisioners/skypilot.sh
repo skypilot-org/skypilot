@@ -36,20 +36,30 @@ echo PATH=$PATH
 python3 -m venv ~/skypilot-runtime
 PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python
 
-# Pip installs
-$PYTHON_EXEC -m pip install "setuptools<70"
-$PYTHON_EXEC -m pip install "grpcio!=1.48.0,<=1.51.3,>=1.42.0"
-$PYTHON_EXEC -m pip install "skypilot-nightly"
+# Install SkyPilot
+$PYTHON_EXEC -m pip install "skypilot-nightly[remote]"
 
-# Install ray
+# Install Ray
 RAY_ADDRESS=127.0.0.1:6380
-$PYTHON_EXEC -m pip install --exists-action w -U ray[default]==2.9.3
+$PYTHON_EXEC -m pip install --exists-action w -U "ray[default]==2.9.3"
 export PATH=$PATH:$HOME/.local/bin
 source ~/skypilot-runtime/bin/activate
 which ray > ~/.sky/ray_path || exit 1
 $PYTHON_EXEC -m pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
   $PYTHON_EXEC -c "from sky.skylet.ray_patches import patch; patch()" || exit 1
 }
+
+# Install cloud dependencies
+if [ "$CLOUD" = "azure" ]; then
+    $PYTHON_EXEC -m pip install "skypilot-nightly[azure]"
+elif [ "$CLOUD" = "gcp" ]; then
+    # We don't have to install the google-cloud-sdk since it is installed by default in GCP machines.
+    $PYTHON_EXEC -m pip install "skypilot-nightly[gcp]"
+elif [ "$CLOUD" = "aws" ]; then
+    $PYTHON_EXEC -m pip install "skypilot-nightly[aws]"
+else
+    echo "Error: Unknown cloud $CLOUD so not installing any cloud dependencies."
+fi
 
 # System configurations
 sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf'
@@ -67,3 +77,4 @@ sudo systemctl disable jupyter > /dev/null 2>&1 || true
 # Cleanup
 # Remove SkyPilot in OS image because when user sky launch we will install whatever version of SkyPilot user has on their local machine.
 $PYTHON_EXEC -m pip uninstall "skypilot-nightly" -y
+rm -rf ~/.sky
