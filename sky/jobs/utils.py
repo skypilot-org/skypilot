@@ -467,7 +467,7 @@ def stream_logs_by_id(job_id: int,
                     if specific_task_id is not None:
                         assert task_id == specific_task_id, (task_id,
                                                              specific_task_id)
-                        return '' # should not wait for the whole managed job to be finished
+                        break
                     if (task_id == num_tasks - 1 or not follow):
                         break
 
@@ -515,6 +515,15 @@ def stream_logs_by_id(job_id: int,
             # managed job state is updated.
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = managed_job_state.get_status(job_id)
+
+    if specific_task_id is not None:
+        if managed_job_status is not None and managed_job_status.is_terminal():
+            return (f'{colorama.Fore.YELLOW}'
+                    f'Task {specific_task_id} is already in terminal state '
+                    f'{managed_job_status.value}. Logs will not be shown.')
+
+        # We should not wait for the whole managed job to be finished.
+        return ''
 
     # The managed_job_status may not be in terminal status yet, since the
     # controller has not updated the managed job state yet. We wait for a while,
