@@ -657,11 +657,13 @@ def status(
 
 @dataclass
 class SyncLogFileArgs:
-    """Parameters for syncing a log file.
-    - source: remote file path of logs.
-    - target: local machine file path of logs.
-    - message: template message to print to user.
-    - message_args: arguments to fill in template.
+    """DataClass for syncing a log file.
+    
+    Attributes:
+        - source: remote file path of logs.
+        - target: local machine file path of logs.
+        - message: template message to print to user.
+        - message_args: arguments to fill in template.
     """
     source: str
     target: str
@@ -734,7 +736,7 @@ def sync_down_logs(service_name: str,
         serve_utils.ServiceComponent.LOAD_BALANCER
     ] if service_component is None else [service_component])
 
-    # Define all log files to be synced.
+    # Define all log files to be synced, later processed in loop.
     log_files_to_be_synced: List[SyncLogFileArgs] = []
     runner = controller_handle.get_command_runners()
 
