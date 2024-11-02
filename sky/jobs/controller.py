@@ -9,6 +9,7 @@ import typing
 from typing import Tuple
 
 import filelock
+import psutil
 
 from sky import exceptions
 from sky import sky_logging
@@ -34,6 +35,10 @@ if typing.TYPE_CHECKING:
 # `sky.jobs.controller` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.jobs.controller')
+
+# Since sky.launch is very resource demanding, we limit the number of
+# concurrent sky.launch process to avoid overloading the machine.
+_MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
 
 def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
@@ -182,6 +187,14 @@ class JobsController:
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
         logger.info('Started monitoring.')
+
+        while len(managed_job_state.get_starting_job_ids()) >= _MAX_NUM_LAUNCH:
+            logger.info('Number of concurrent launches reached the limit '
+                        f'({_MAX_NUM_LAUNCH}). Waiting for some launch process '
+                        'to finish...')
+            time.sleep(managed_job_utils.JOB_STARTING_STATUS_CHECK_GAP_SECONDS)
+
+        logger.info(f'Starting the job {self._job_id} (task: {task_id}).')
         managed_job_state.set_starting(job_id=self._job_id,
                                        task_id=task_id,
                                        callback_func=callback_func)
@@ -474,6 +487,11 @@ def start(job_id, dag_yaml, retry_until_up):
     controller_process = None
     cancelling = False
     try:
+        if (len(managed_job_state.get_nonterminal_job_ids_by_name(None)) >
+                managed_job_utils.NUM_JOBS_THRESHOLD):
+            raise exceptions.ManagedJobUserCancelledError(
+                'Too many concurrent managed jobs are running. '
+                'Please try again later or cancel some jobs.')
         _handle_signal(job_id)
         # TODO(suquark): In theory, we should make controller process a
         #  daemon process so it will be killed after this process exits,

@@ -498,12 +498,11 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
 
 
 # ======== utility functions ========
-def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
-    """Get non-terminal job ids by name."""
-    statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
-    field_values = [
-        status.value for status in ManagedJobStatus.terminal_statuses()
-    ]
+def _get_query_jobs_by_status_and_name(
+        statuses: List[ManagedJobStatus],
+        name: Optional[str]) -> Tuple[str, List[str]]:
+    statuses_str = ', '.join(['?'] * len(statuses))
+    field_values = [status.value for status in statuses]
 
     name_filter = ''
     if name is not None:
@@ -516,17 +515,31 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
 
     # Left outer join is used here instead of join, because the job_info does
     # not contain the managed jobs submitted before #1982.
+    return f"""\
+        SELECT DISTINCT spot.spot_job_id
+        FROM spot
+        LEFT OUTER JOIN job_info
+        ON spot.spot_job_id=job_info.spot_job_id
+        WHERE status NOT IN
+        ({statuses_str})
+        {name_filter}
+        ORDER BY spot.spot_job_id DESC""", field_values
+
+
+def get_starting_job_ids() -> List[int]:
+    """Get job ids that are starting."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            f"""\
-            SELECT DISTINCT spot.spot_job_id
-            FROM spot
-            LEFT OUTER JOIN job_info
-            ON spot.spot_job_id=job_info.spot_job_id
-            WHERE status NOT IN
-            ({statuses})
-            {name_filter}
-            ORDER BY spot.spot_job_id DESC""", field_values).fetchall()
+        rows = cursor.execute(*_get_query_jobs_by_status_and_name(
+            [ManagedJobStatus.STARTING], None)).fetchall()
+        job_ids = [row[0] for row in rows if row[0] is not None]
+        return job_ids
+
+
+def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
+    """Get non-terminal job ids by name."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(*_get_query_jobs_by_status_and_name(
+            ManagedJobStatus.terminal_statuses(), name)).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
 

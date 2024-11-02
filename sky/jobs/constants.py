@@ -15,6 +15,9 @@ JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES = {'cpus': '8+', 'memory': '3x', 'disk_size': 50}
 
+# Accordingly, we reserve 0.75 GB memory for each controller process.
+CONTROLLER_MEMORY_USAGE_GB = 0.75
+
 # Max length of the cluster name for GCP is 35, the user hash to be attached is
 # 4+1 chars, and we assume the maximum length of the job id is 4+1, so the max
 # length of the cluster name prefix is 25 to avoid the cluster name being too

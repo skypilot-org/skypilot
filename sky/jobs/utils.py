@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
+import psutil
 from typing_extensions import Literal
 
 from sky import backends
@@ -48,10 +49,19 @@ JOB_CONTROLLER_NAME: str = (
     f'sky-jobs-controller-{common_utils.get_user_hash()}')
 LEGACY_JOB_CONTROLLER_NAME: str = (
     f'sky-spot-controller-{common_utils.get_user_hash()}')
+
+_SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
+NUM_JOBS_THRESHOLD = (_SYSTEM_MEMORY_GB //
+                      managed_job_constants.CONTROLLER_MEMORY_USAGE_GB)
+
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
+
+# Controller checks if the job is valid to start every this many seconds.
+# Jobs will be started only if the controller has enough resources.
+JOB_STARTING_STATUS_CHECK_GAP_SECONDS = 5
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
