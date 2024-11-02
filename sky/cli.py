@@ -2013,7 +2013,6 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
           '[default: --follow]'))
 @click.option(
     '--tail',
-    '-n',
     default=0,
     type=int,
     help=('The number of lines to display from the end of the log file. '
