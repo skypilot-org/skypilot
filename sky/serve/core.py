@@ -658,7 +658,6 @@ def status(
 @dataclass
 class SyncLogFileArgs:
     """DataClass for syncing a log file.
-    
     Attributes:
         - source: remote file path of logs.
         - target: local machine file path of logs.
