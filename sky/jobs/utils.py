@@ -292,47 +292,60 @@ def cancel_job_by_name(job_name: str) -> str:
 
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
+
     controller_status = job_lib.get_status(job_id)
     status_msg = ux_utils.spinner_message(
         'Waiting for controller process to be RUNNING') + '{status_str}'
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
+
+    prev_msg: Optional[str] = None
+
+    def update_message(msg: str):
+        nonlocal prev_msg
+        if msg != prev_msg:
+            status_display.update(msg)
+            prev_msg = msg
+
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
+    is_state_stable = lambda status: (status == job_lib.JobStatus.RUNNING or (
+        status is not None and status.is_terminal()))
     with status_display:
-        prev_msg = None
-        while (controller_status != job_lib.JobStatus.RUNNING and
-               (controller_status is None or
-                not controller_status.is_terminal())):
-            status_str = 'None'
-            if controller_status is not None:
-                status_str = controller_status.value
-            msg = status_msg.format(status_str=f' (status: {status_str})')
-            if msg != prev_msg:
-                status_display.update(msg)
-                prev_msg = msg
-            time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
-            controller_status = job_lib.get_status(job_id)
 
-        msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
-        status_display.update(msg)
-        prev_msg = msg
-        managed_job_status = managed_job_state.get_status(job_id)
-        while managed_job_status is None:
+        while not is_state_stable(
+                controller_status := job_lib.get_status(job_id)):
+            status_str = ('None' if controller_status is None else
+                          controller_status.value)
+            update_message(
+                status_msg.format(status_str=f' (status: {status_str})'))
+            time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
+
+        update_message(
+            _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id))
+        while (managed_job_status :=
+               managed_job_state.get_status(job_id)) is None:
             time.sleep(1)
-            managed_job_status = managed_job_state.get_status(job_id)
 
         if managed_job_status.is_terminal():
-            job_msg = ''
-            if managed_job_status.is_failed():
-                job_msg = ('\nFailure reason: '
-                           f'{managed_job_state.get_failure_reason(job_id)}')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}{job_msg}')
+                    f'{colorama.Style.RESET_ALL}') + (
+                        ('\nFailure reason: '
+                         f'{managed_job_state.get_failure_reason(job_id)}')
+                        if managed_job_status.is_failed() else '')
+
+        def get_next_task_id_status(
+            job_id: int
+        ) -> Tuple[Optional[int],
+                   Optional['managed_job_state.ManagedJobStatus']]:
+            """Get the next task id and status of a job.
+            If task_id is not None, return the status of the specific task.
+            """
+            return managed_job_state.get_latest_task_id_status(job_id)
+
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
-            managed_job_state.get_latest_task_id_status(job_id))
+        task_id, managed_job_status = get_next_task_id_status(job_id)
 
         # task_id and managed_job_status can be None if the controller process
         # just started and the managed job status has not set to PENDING yet.
@@ -352,29 +365,30 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # the next round of status check.
             if (handle is None or managed_job_status !=
                     managed_job_state.ManagedJobStatus.RUNNING):
-                status_str = ''
-                if (managed_job_status is not None and managed_job_status !=
-                        managed_job_state.ManagedJobStatus.RUNNING):
-                    status_str = f' (status: {managed_job_status.value})'
+                status_str = (
+                    f' (status: {managed_job_status.value})'
+                    if managed_job_status is not None and managed_job_status !=
+                    managed_job_state.ManagedJobStatus.RUNNING else '')
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
-                                                         job_id=job_id)
-                if msg != prev_msg:
-                    status_display.update(msg)
-                    prev_msg = msg
+                update_message(
+                    _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
+                                                       job_id=job_id))
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
-                    managed_job_state.get_latest_task_id_status(job_id))
+                task_id, managed_job_status = get_next_task_id_status(job_id)
                 continue
-            assert managed_job_status is not None
+
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
-            returncode = backend.tail_logs(handle,
-                                           job_id=None,
-                                           managed_job_id=job_id,
-                                           follow=follow)
+
+            returncode = backend.tail_logs(
+                handle,
+                # The latest job runned on the
+                # handle is just the task.
+                job_id=None,
+                managed_job_id=job_id,
+                follow=follow)
             if returncode == 0:
                 # If the log tailing exit successfully (the real job can be
                 # SUCCEEDED or FAILED), we can safely break the loop. We use the
@@ -385,32 +399,32 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
                     assert task_id is not None, job_id
-                    if task_id < num_tasks - 1 and follow:
-                        # The log for the current job is finished. We need to
-                        # wait until next job to be started.
-                        logger.debug(
-                            f'INFO: Log for the current task ({task_id}) '
-                            'is finished. Waiting for the next task\'s log '
-                            'to be started.')
-                        status_display.update('Waiting for the next task: '
-                                              f'{task_id + 1}.')
-                        status_display.start()
-                        original_task_id = task_id
-                        while True:
-                            task_id, managed_job_status = (
-                                managed_job_state.get_latest_task_id_status(
-                                    job_id))
-                            if original_task_id != task_id:
-                                break
-                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                        continue
-                    else:
+                    if (task_id == num_tasks - 1 or not follow):
                         break
-                # The job can be cancelled by the user or the controller (when
-                # the cluster is partially preempted).
-                logger.debug(
-                    'INFO: Job is cancelled. Waiting for the status update in '
-                    f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+
+                    # The log for the current job is finished. We need to
+                    # wait until next job to be started.
+                    logger.debug(
+                        f'INFO: Log for the current task ({task_id}) '
+                        'is finished. Waiting for the next task\'s log '
+                        'to be started.')
+                    update_message(f'Waiting for the next task: {task_id + 1}.')
+                    status_display.start()
+
+                    original_task_id = task_id
+                    while True:
+                        task_id, managed_job_status = get_next_task_id_status(
+                            job_id)
+                        if original_task_id != task_id:
+                            break
+                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                    continue
+                else:
+                    # The job can be cancelled by the user or the controller
+                    # (when the cluster is partially preempted).
+                    logger.debug(
+                        'INFO: Job is cancelled. Waiting for the status '
+                        f'update in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             else:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '
@@ -423,9 +437,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 break
             logger.info(f'{colorama.Fore.YELLOW}The job cluster is preempted '
                         f'or failed.{colorama.Style.RESET_ALL}')
-            msg = _JOB_CANCELLED_MESSAGE
-            status_display.update(msg)
-            prev_msg = msg
+            update_message(_JOB_CANCELLED_MESSAGE)
             status_display.start()
             # If the tailing fails, it is likely that the cluster fails, so we
             # wait a while to make sure the managed job state is updated by the
@@ -441,12 +453,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     wait_seconds = 0
     managed_job_status = managed_job_state.get_status(job_id)
     assert managed_job_status is not None, job_id
-    while (not managed_job_status.is_terminal() and follow and
-           wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
-        time.sleep(1)
-        wait_seconds += 1
-        managed_job_status = managed_job_state.get_status(job_id)
-        assert managed_job_status is not None, job_id
+    if follow:
+        while (not managed_job_status.is_terminal() and
+               wait_seconds < _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS):
+            time.sleep(1)
+            wait_seconds += 1
+            managed_job_status = managed_job_state.get_status(job_id)
+            assert managed_job_status is not None, job_id
 
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
