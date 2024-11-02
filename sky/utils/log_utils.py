@@ -287,17 +287,44 @@ def readable_time_duration(start: Optional[float],
     return diff
 
 
-def follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
-                exit_if_stream_end: bool) -> Iterator[str]:
+def follow_logs(file: TextIO,
+                *,
+                finish_stream: Callable[[], bool],
+                exit_if_stream_end: bool = False,
+                line_handler: Optional[Callable[[str], Iterator[str]]] = None,
+                no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
+    """Follow and process logs line by line.
+
+    Args:
+        file: Text file to read logs from
+        finish_stream: Callback to determine if streaming should stop
+        exit_if_stream_end: Whether to exit when reaching end of file
+        line_handler: Optional callback to process each line
+        no_new_content_timeout: Seconds to wait before timing out on
+            no new content
+
+    Yields:
+        Lines of logs, or nested lines of logs if line_handler is provided.
+    """
     line = ''
+    no_new_content_cnt = 0
+
     while True:
         tmp = file.readline()
-        if tmp is not None and tmp != '':
+        if tmp:
+            no_new_content_cnt = 0
             line += tmp
             if '\n' in line or '\r' in line:
-                yield line
+                if line_handler:
+                    yield from line_handler(line)
+                else:
+                    yield line
                 line = ''
         else:
             if exit_if_stream_end or finish_stream():
                 break
+            if no_new_content_timeout is not None:
+                if no_new_content_cnt >= no_new_content_timeout:
+                    break
+                no_new_content_cnt += 1
             time.sleep(1)

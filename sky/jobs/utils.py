@@ -14,7 +14,7 @@ import shutil
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 import filelock
@@ -323,28 +323,40 @@ def stream_managed_job_task_launch_logs(job_id: int,
                              f'for task {task_id} not found.')
 
     def finish_stream():
-        """Finish streaming logs when job has moved past JobStatus.INIT state,
-        i.e., ManagedJobStatus.STARTING or ManagedJobStatus.RECOVERING.
-        This filters out most polling logs ('Checking the job status') from
-        utils.py, but we'll still see at least one 'Job status:
-        JobStatus.SETTING_UP' message because we need to wait for the job to
-        move out of INIT state.
+        """Finish streaming logs when either:
+        1. Job has moved past initialization phase (STARTING/RECOVERING), or
+        2. 'Managed job cluster launched.' message is detected
+
+        This filters out polling logs ('Checking the job status') from
+        utils.py, and ensures we capture the essential setup messages.
         """
-        # TODO: Consider checking for 'Managed job cluster launched.' in output?
         status = managed_job_state.get_task_id_status(job_id, task_id)[1]
         return (status is not None) and (status not in [
             managed_job_state.ManagedJobStatus.STARTING,
             managed_job_state.ManagedJobStatus.RECOVERING,
         ])
 
+    cluster_launched = False
+
+    def line_handler(line: str) -> Iterator[str]:
+        nonlocal cluster_launched
+        if 'Managed job cluster launched.' in line:
+            cluster_launched = True
+        yield line
+
+    def combined_finish_stream():
+        return finish_stream() or cluster_launched
+
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
         for line in log_utils.follow_logs(f,
-                                          finish_stream=finish_stream,
+                                          finish_stream=combined_finish_stream,
+                                          line_handler=line_handler,
                                           exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     if not follow:
         # Early exit if not following the logs.
         return
+
 
 def stream_logs_by_id(job_id: int,
                       specific_task_id: Optional[int],
@@ -448,12 +460,13 @@ def stream_logs_by_id(job_id: int,
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
 
-            returncode = backend.tail_logs(handle,
-                                           # The latest job runned on the
-                                           # handle is just the task.
-                                           job_id=None,
-                                           managed_job_id=job_id,
-                                           follow=follow)
+            returncode = backend.tail_logs(
+                handle,
+                # The latest job runned on the
+                # handle is just the task.
+                job_id=None,
+                managed_job_id=job_id,
+                follow=follow)
             if returncode == 0:
                 # If the log tailing exit successfully (the real job can be
                 # SUCCEEDED or FAILED), we can safely break the loop. We use the
