@@ -3419,7 +3419,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{ux_utils.BOLD}sky jobs cancel {job_id}'
                     f'{ux_utils.RESET_BOLD}'
                     f'{cluster_logs}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To stream job DAG logs:\t\t\t'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream job DAG logs:\t\t'
                     f'{ux_utils.BOLD}sky jobs logs {job_id} --task-id [TASK_ID]'
                     f'{ux_utils.RESET_BOLD}'
                     f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
@@ -4364,7 +4364,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # This will try to fetch the head node IP if it is not cached.
 
-        runners = handle.get_command_runners()
+        runners: List[command_runner.CommandRunner] = handle.get_command_runners()
         head_runner = runners[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
