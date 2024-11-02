@@ -719,22 +719,6 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
-def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
-                 exit_if_stream_end: bool) -> Iterator[str]:
-    line = ''
-    while True:
-        tmp = file.readline()
-        if tmp is not None and tmp != '':
-            line += tmp
-            if '\n' in line or '\r' in line:
-                yield line
-                line = ''
-        else:
-            if exit_if_stream_end or finish_stream():
-                break
-            time.sleep(1)
-
-
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
                               follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
@@ -753,9 +737,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 
     with open(os.path.expanduser(log_file), 'r', newline='',
               encoding='utf-8') as f:
-        for line in _follow_logs(f,
-                                 finish_stream=_service_is_terminal,
-                                 exit_if_stream_end=not follow):
+        for line in log_utils.follow_logs(f,
+                                          finish_stream=_service_is_terminal,
+                                          exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     return ''
 

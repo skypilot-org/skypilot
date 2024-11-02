@@ -223,6 +223,7 @@ def make_launch_log_dir_for_redirection(job_id: int):
     log_dir = get_launch_log_dir(job_id)
     log_dir.mkdir(exist_ok=True)
 
+
 # ======== user functions ========
 
 
@@ -303,6 +304,72 @@ def cancel_job_by_name(job_name: str) -> str:
     return f'Job {job_name!r} is scheduled to be cancelled.'
 
 
+def stream_managed_job_task_logs(job_id: int,
+                                 task_id: int,
+                                 follow: bool = True) -> None:
+    # This method is specifically used for non-chain DAGs of managed jobs.
+    # Each task in the managed job DAG is similar to a replica in a
+    # serve application, and we follow a similar code path as
+    # `stream_replica_logs`. Initially, we print the launch log of the task,
+    # which is stored in the controller and redirected from sky.launch's
+    # stdout. Subsequently, we tail the task's run log from the task's log
+    # file.
+
+    print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
+          f'of task {task_id}.{colorama.Style.RESET_ALL}')
+
+    launch_log_file_name = get_launch_log_file_name(job_id, task_id)
+    if not launch_log_file_name.exists():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Launch log file {launch_log_file_name} '
+                             f'for task {task_id} not found.')
+
+    def finish_stream():
+        status = managed_job_state.get_task_id_status(
+            job_id, task_id)[1]
+        # which means the job is in job.INIT state, and provision has succeded.
+        # This way we will drop those 'Checking the job status' logs from
+        # the utils.py's polling loop, which is intended.
+        # Though three must be one 'Job status: JobStatus.SETTING_UP' log.
+        # Maybe we can check is there 'Managed job cluster launched.' in the output?
+        return (status is not None) and (status not in [
+            managed_job_state.ManagedJobStatus.STARTING,
+            managed_job_state.ManagedJobStatus.RECOVERING,
+        ])
+
+    with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
+        for line in log_utils.follow_logs(f,
+                                          finish_stream=finish_stream,
+                                          exit_if_stream_end=not follow):
+            print(line, end='', flush=True)
+    if not follow:
+        # Early exit if not following the logs.
+        return
+
+    jobs = managed_job_state.get_managed_jobs(job_id)
+    job = [job for job in jobs if job['task_id'] == task_id]
+    assert len(job) == 1, f'Expected 1 job, got {len(job)}'
+    run_timestamp = job[0]['run_timestamp']
+
+    if run_timestamp is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Job {job_id} not found.')
+        
+    print(f"run_timestamp: {run_timestamp}")
+
+    remote_run_log_file_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                           run_timestamp)
+    # backend = backends.CloudVmRayBackend()
+    # backend.tail_logs(job_id=job_id,
+    #                   log_dir=remote_run_log_file_dir,
+    #                   managed_job_id=job_id,
+    #                   follow=follow)ackend = backends.CloudVmRayBackend()
+    # backend.tail_logs(job_id=job_id,
+    #                   log_dir=remote_run_log_file_dir,
+    #                   managed_job_id=job_id,
+    #                   follow=follow)
+
+
 def stream_logs_by_id(job_id: int,
                       specific_task_id: Optional[int],
                       follow: bool = True) -> str:
@@ -364,6 +431,10 @@ def stream_logs_by_id(job_id: int,
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = get_next_task_id_status(
             job_id, specific_task_id)
+
+        if specific_task_id is not None:
+            stream_managed_job_task_logs(job_id, specific_task_id, follow)
+            return ''
 
         # task_id and managed_job_status can be None if the controller process
         # just started and the managed job status has not set to PENDING yet.

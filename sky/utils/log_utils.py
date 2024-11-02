@@ -1,7 +1,8 @@
 """Logging utils."""
 import enum
+import time
 import types
-from typing import List, Optional, Type
+from typing import Callable, Iterator, List, Optional, TextIO, Type
 
 import colorama
 import pendulum
@@ -284,3 +285,19 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace('hour', 'hr')
 
     return diff
+
+
+def follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
+                exit_if_stream_end: bool) -> Iterator[str]:
+    line = ''
+    while True:
+        tmp = file.readline()
+        if tmp is not None and tmp != '':
+            line += tmp
+            if '\n' in line or '\r' in line:
+                yield line
+                line = ''
+        else:
+            if exit_if_stream_end or finish_stream():
+                break
+            time.sleep(1)
