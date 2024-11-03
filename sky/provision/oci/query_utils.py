@@ -46,7 +46,6 @@ def debug_enabled(log: Logger):
     return decorate
 
 
-# pylint: disable=line-too-long
 class QueryHelper:
     """Helper class for some OCI operations
     """
@@ -291,6 +290,7 @@ class QueryHelper:
         sg = None  # Service gateway
 
         try:
+            # pylint: disable=line-too-long
             create_vcn_response = net_client.create_vcn(
                 create_vcn_details=oci_adaptor.oci.core.models.CreateVcnDetails(
                     compartment_id=skypilot_compartment,

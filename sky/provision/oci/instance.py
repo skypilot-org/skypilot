@@ -23,8 +23,6 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# pylint: disable=line-too-long
-
 
 @query_utils.debug_enabled(logger)
 @common_utils.retry
@@ -82,6 +80,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'This is likely a resource leak. '
                 'Use "sky down" to terminate the cluster.')
 
+        # pylint: disable=line-too-long
         logger.debug(
             f'run_instances: Found {[inst["name"] for inst in existing_instances]} '
             'existing instances in cluster.')
@@ -145,9 +144,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         if ocpu_count > 0:
             mem = node_config['MemoryInGbs']
             if mem is not None and mem != 'None':
+                # pylint: disable=line-too-long
                 machine_shape_config = oci_adaptor.oci.core.models.LaunchInstanceShapeConfigDetails(
                     ocpus=ocpu_count, memory_in_gbs=mem)
             else:
+                # pylint: disable=line-too-long
                 machine_shape_config = oci_adaptor.oci.core.models.LaunchInstanceShapeConfigDetails(
                     ocpus=ocpu_count)
 
@@ -257,6 +258,7 @@ def stop_instances(
     worker_only: bool = False,
 ) -> None:
     """Stop running instances."""
+    # pylint: disable=line-too-long
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
 
     region = provider_config['region']
@@ -357,7 +359,8 @@ def get_cluster_info(
     )
 
 
-def _get_filtered_nodes(region, tag_filters):
+def _get_filtered_nodes(region: str,
+                        tag_filters: Dict[str, str]) -> List[Dict[str, Any]]:
     return_nodes = []
 
     try:
@@ -380,14 +383,11 @@ def _get_filtered_nodes(region, tag_filters):
             'oci_tags': inst.freeform_tags,
         })
 
-    return [
-        v for v in return_nodes
-        if v['status'] in ('PROVISIONING', 'STARTING', 'RUNNING', 'STOPPED',
-                           'STOPPING')
-    ]
+    return return_nodes
 
 
-def _get_inst_obj_with_ip(region, inst_info):
+def _get_inst_obj_with_ip(region: str, inst_info: Dict[str,
+                                                       Any]) -> Dict[str, Any]:
     get_vnic_response = query_helper.get_instance_primary_vnic(
         region, inst_info)
     internal_ip = get_vnic_response.private_ip
@@ -405,7 +405,7 @@ def _get_inst_obj_with_ip(region, inst_info):
     }
 
 
-def _get_head_instance_id(instances: List) -> Optional[str]:
+def _get_head_instance_id(instances: List[Dict[str, Any]]) -> Optional[str]:
     head_instance_id = None
     head_node_tags = tuple(constants.HEAD_NODE_TAGS.items())
     for inst in instances:

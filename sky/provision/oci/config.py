@@ -7,6 +7,7 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct.16, 2024: Initial implementation
 """
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
@@ -29,7 +30,11 @@ def bootstrap_instances(
 
     # Find the configured VCN, or create a new one.
     vcn = query_helper.find_create_vcn_subnet(region)
-    assert vcn is not None
+    if vcn is None:
+        # pylint: disable=line-too-long
+        raise exceptions.ResourcesUnavailableError(
+            'Failed to create a new VCN, possibly you hit the resource limitation.'
+        )
 
     node_config = config.node_config
 
