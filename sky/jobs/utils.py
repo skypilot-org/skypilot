@@ -397,13 +397,13 @@ def stream_logs_by_id(job_id: int,
             time.sleep(1)
 
         if managed_job_status.is_terminal():
+            failure_reason = (('\nFailure reason: '
+                               f'{managed_job_state.get_failure_reason(job_id)}'
+                              ) if managed_job_status.is_failed() else '')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}') + (
-                        ('\nFailure reason: '
-                         f'{managed_job_state.get_failure_reason(job_id)}')
-                        if managed_job_status.is_failed() else '')
+                    f'{colorama.Style.RESET_ALL}') + failure_reason
 
         def get_next_task_id_status(
             job_id: int, task_id: Optional[int]
@@ -442,10 +442,11 @@ def stream_logs_by_id(job_id: int,
             # the next round of status check.
             if (handle is None or managed_job_status !=
                     managed_job_state.ManagedJobStatus.RUNNING):
-                status_str = (
-                    f' (status: {managed_job_status.value})'
-                    if managed_job_status is not None and managed_job_status !=
-                    managed_job_state.ManagedJobStatus.RUNNING else '')
+                status_str = ''
+                if (managed_job_status is not None and managed_job_status !=
+                        managed_job_state.ManagedJobStatus.RUNNING):
+                    status_str = (f' (status: {managed_job_status.value})')
+
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')

@@ -439,10 +439,10 @@ class JobsController:
     def run(self) -> None:
         """Run controller logic and handle exceptions."""
         all_tasks_completed = lambda: self._num_tasks == len(self._task_status)
-        # TODO(andy): Serve has a logic to prevent from too many services running
-        # at the same time. We should have a similar logic here, but instead we
-        # should calculate the sum of the subtasks (an upper bound), instead of
-        # the number of jobs (dags).
+        # TODO(andy): Serve has a logic to prevent from too many services
+        # running at the same time. We should have a similar logic here, but
+        # instead we should calculate the sum of the subtasks (an upper bound),
+        # instead of the number of jobs (dags).
         # Further, we could try to calculate the maximum concurrency in the dag
         # (e.g. for a chain dag it is 1 instead of n), which could allow us to
         # run more dags in parallel.
