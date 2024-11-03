@@ -461,7 +461,7 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int, callback_func: CallbackType):
+def set_cancelling(job_id: int, callback_func: CallbackType) -> None:
     """Set tasks in the job as cancelling, if they are not running and in
     non-terminal states.
 
@@ -486,7 +486,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
             callback_func('CANCELLING')
 
 
-def set_cancelled(job_id: int, callback_func: CallbackType):
+def set_cancelled(job_id: int, callback_func: CallbackType) -> None:
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.

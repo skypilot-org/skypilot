@@ -384,8 +384,8 @@ class JobsController:
         try:
             succeeded = future.result()
         except exceptions.ProvisionPrechecksError as e:
-            # Please refer to the docstring of self._run for
-            # the cases when this exception can occur.
+            # Please refer to the docstring of self._run for the cases when
+            # this exception can occur.
             failure_reason = ('; '.join(
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))

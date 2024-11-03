@@ -210,16 +210,16 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
     return callback_func
 
 
-def get_launch_log_dir(job_id: int):
+def get_launch_log_dir(job_id: int) -> pathlib.Path:
     return (pathlib.Path(constants.SKY_LOGS_DIRECTORY) /
             f'managed_jobs_{job_id}').expanduser()
 
 
-def get_launch_log_file_name(job_id: int, task_id: int):
+def get_launch_log_file_name(job_id: int, task_id: int) -> pathlib.Path:
     return get_launch_log_dir(job_id) / f'task_{task_id}_launch.log'
 
 
-def make_launch_log_dir_for_redirection(job_id: int):
+def make_launch_log_dir_for_redirection(job_id: int) -> None:
     log_dir = get_launch_log_dir(job_id)
     log_dir.mkdir(exist_ok=True)
 
@@ -323,13 +323,6 @@ def stream_managed_job_task_launch_logs(job_id: int,
                              f'for task {task_id} not found.')
 
     def finish_stream() -> bool:
-        """Finish streaming logs when either:
-        1. Job has moved past initialization phase (STARTING/RECOVERING), or
-        2. 'Managed job cluster launched.' message is detected
-
-        This filters out polling logs ('Checking the job status') from
-        utils.py, and ensures we capture the essential setup messages.
-        """
         _, status = managed_job_state.get_task_id_status(job_id, task_id)
         return (status is not None) and (status not in [
             managed_job_state.ManagedJobStatus.STARTING,
@@ -344,7 +337,14 @@ def stream_managed_job_task_launch_logs(job_id: int,
             cluster_launched = True
         yield line
 
-    def combined_finish_stream():
+    def combined_finish_stream() -> bool:
+        """Finish streaming logs when either:
+        1. Job has moved past initialization phase (STARTING/RECOVERING), or
+        2. 'Managed job cluster launched.' message is detected
+
+        This filters out polling logs ('Checking the job status') from
+        utils.py, and ensures we capture the essential setup messages.
+        """
         return finish_stream() or cluster_launched
 
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
@@ -370,7 +370,7 @@ def stream_logs_by_id(job_id: int,
 
     prev_msg: Optional[str] = None
 
-    def update_message(msg: str):
+    def update_message(msg: str) -> None:
         nonlocal prev_msg
         if msg != prev_msg:
             status_display.update(msg)

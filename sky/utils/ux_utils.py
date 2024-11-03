@@ -19,6 +19,8 @@ if typing.TYPE_CHECKING:
     import logging
     import pathlib
 
+T = typing.TypeVar('T')
+
 console = rich_console.Console()
 
 INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
@@ -152,18 +154,14 @@ class RedirectOutputForThread:
                 return typing.cast(TextIO, self._thread_local.file)
             return self._original_output
 
-        def write(self, data: str):
-            output = self.resolve_output()
-            output.write(data)
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.resolve_output(), name)
 
-        def flush(self):
-            output = self.resolve_output()
-            output.flush()
-
-        def set_thread_local(self, thread_local: Optional[threading.local]):
+        def set_thread_local(self,
+                             thread_local: Optional[threading.local]) -> None:
             self._thread_local = thread_local
 
-    def __enter__(self):
+    def __enter__(self):  # -> Self:
         """Replaces global stdout/stderr with our thread-aware versions."""
         self._thread_aware_stdout, self._thread_aware_stderr = (
             self._ThreadAwareOutput(self._original_stdout),
@@ -172,18 +170,18 @@ class RedirectOutputForThread:
                                   self._thread_aware_stderr)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Restores original stdout/stderr."""
         sys.stdout, sys.stderr = (self._thread_aware_stdout,
                                   self._thread_aware_stderr)
 
     def run(self,
-            func: Callable,
+            func: Callable[..., T],
             filepath: Union[str, 'pathlib.Path'],
-            mode: str = 'w'):
+            mode: str = 'w') -> Callable[..., T]:
         """Wraps a function to redirect its output to a specific file."""
 
-        def wrapped(*args, **kwargs) -> Any:
+        def wrapped(*args, **kwargs) -> T:
             thread_local = threading.local()
             self._thread_aware_stdout.set_thread_local(thread_local)
             self._thread_aware_stderr.set_thread_local(thread_local)

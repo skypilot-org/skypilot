@@ -3867,10 +3867,11 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int],
-              task_id: Optional[int], follow: bool, controller: bool):
+              task_id: Optional[int], follow: bool, controller: bool) -> None:
     """Tail the log of a managed job."""
     if name is not None and job_id is not None:
-        raise ValueError('Cannot specify both name and job_id.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
 
     if task_id is not None:
         if job_id is None:
