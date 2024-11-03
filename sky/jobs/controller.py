@@ -361,7 +361,7 @@ class JobsController:
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
 
-    def _try_add_successors_to_queue(self, task_id: int):
+    def _try_add_successors_to_queue(self, task_id: int) -> None:
         """Tasks with multiple predecessors will only be queued once, as
         `_handle_future_completion` runs sequentially in the main thread via
         `futures.wait()`.
