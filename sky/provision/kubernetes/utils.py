@@ -732,6 +732,9 @@ def get_accelerator_label_key_value(
                                 assert topology_value is not None
                                 tpu_topology_chip_count = reduce_tpu_topology(
                                     topology_value)
+                                # For single-host TPUs, there aren't multiple
+                                # different topologies that maps to identical
+                                # number of TPU chips.
                                 if tpu_topology_chip_count == acc_count:
                                     return (label, value, topology_label_key,
                                             topology_value)
@@ -2217,6 +2220,8 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
+    assert not (GPU_RESOURCE_KEY in attribute_dict and
+                TPU_RESOURCE_KEY in attribute_dict)
     if GPU_RESOURCE_KEY in attribute_dict:
         return int(attribute_dict[GPU_RESOURCE_KEY])
     elif TPU_RESOURCE_KEY in attribute_dict:

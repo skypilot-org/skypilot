@@ -450,6 +450,9 @@ setup_commands:
   # 755 permissions, and the user of the provisioned pod is not necessarily
   # a root. Hence, we need to update the write permission so the logs can be
   # properly written.
+  # TODO(Doyoung): Investigate to see why TPU workload fails to run without
+  # execution permission, such as granting 766 to log file. Check if it's a
+  # must and see if there's a workaround to grant minimum permission. 
   - sudo chmod 777 /tmp/tpu_logs;
   {% endif %}
 

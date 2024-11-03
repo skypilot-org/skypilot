@@ -619,6 +619,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     if limits is not None:
         needs_gpus = limits.get(kubernetes_utils.GPU_RESOURCE_KEY, 0) > 0
 
+    # TPU pods provisioned on GKE use the default containerd runtime.
+    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 

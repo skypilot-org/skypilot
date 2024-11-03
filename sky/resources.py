@@ -596,7 +596,8 @@ class Resources:
                     accelerator_args = {}
 
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
-                if self.cloud.is_same_cloud(clouds.GCP()):
+                if (self.cloud.is_same_cloud(clouds.GCP()) and
+                        not kubernetes_utils.is_tpu_on_gke(acc)):
                     if 'runtime_version' not in accelerator_args:
 
                         def _get_default_runtime_version() -> str:
