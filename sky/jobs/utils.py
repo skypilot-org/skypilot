@@ -322,7 +322,7 @@ def stream_managed_job_task_launch_logs(job_id: int,
             raise ValueError(f'Launch log file {launch_log_file_name} '
                              f'for task {task_id} not found.')
 
-    def finish_stream():
+    def finish_stream() -> bool:
         """Finish streaming logs when either:
         1. Job has moved past initialization phase (STARTING/RECOVERING), or
         2. 'Managed job cluster launched.' message is detected

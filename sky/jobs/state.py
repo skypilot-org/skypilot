@@ -469,7 +469,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
     as a whole, and we should not cancel a single task.
     """
 
-    # TODO: https://github.com/skypilot-org/skypilot/issues/4195 - Current
+    # TODO(andy): https://github.com/skypilot-org/skypilot/issues/4195 - Current
     # implementation cancels all non-running tasks for simplicity. We should
     # evaluate flexible cancellation policies for DAG workflows in the future.
     with db_utils.safe_cursor(_DB_PATH) as cursor:
