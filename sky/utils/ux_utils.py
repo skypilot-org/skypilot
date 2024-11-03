@@ -147,19 +147,17 @@ class RedirectOutputForThread:
 
         def __init__(self, original_output: TextIO) -> None:
             self._original_output: TextIO = original_output
-            self._thread_local: Optional[threading.local] = None
+            self._thread_local: threading.local = threading.local()
 
         def resolve_output(self) -> TextIO:
-            if self._thread_local and hasattr(self._thread_local, 'file'):
-                return typing.cast(TextIO, self._thread_local.file)
-            return self._original_output
+            output: Optional[TextIO] = getattr(self._thread_local, 'file', None)
+            return output if output is not None else self._original_output
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self.resolve_output(), name)
 
-        def set_thread_local(self,
-                             thread_local: Optional[threading.local]) -> None:
-            self._thread_local = thread_local
+        def set_from(self, output: TextIO) -> None:
+            self._thread_local.file = output
 
     def __enter__(self):  # -> Self:
         """Replaces global stdout/stderr with our thread-aware versions."""
@@ -182,12 +180,10 @@ class RedirectOutputForThread:
         """Wraps a function to redirect its output to a specific file."""
 
         def wrapped(*args, **kwargs) -> T:
-            thread_local = threading.local()
-            self._thread_aware_stdout.set_thread_local(thread_local)
-            self._thread_aware_stderr.set_thread_local(thread_local)
-
             with open(filepath, mode, encoding='utf-8') as f:
-                thread_local.file = f
+                self._thread_aware_stdout.set_from(f)
+                self._thread_aware_stderr.set_from(f)
+
                 sky_logging.reload_logger()
                 logger: 'logging.Logger' = sky_logging.init_logger(__name__)
                 try:
