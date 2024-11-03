@@ -122,6 +122,14 @@ available_node_types:
           - path: /etc/apt/apt.conf.d/10cloudinit-disable
             content: |
               APT::Periodic::Enable "0";
+        bootcmd:
+          - systemctl stop apt-daily.timer apt-daily-upgrade.timer
+          - systemctl disable apt-daily.timer apt-daily-upgrade.timer
+          - systemctl mask apt-daily.service apt-daily-upgrade.service
+          - systemctl stop unattended-upgrades.service
+          - systemctl disable unattended-upgrades.service
+          - systemctl mask unattended-upgrades.service
+          - systemctl daemon-reload
       TagSpecifications:
         - ResourceType: instance
           Tags:
