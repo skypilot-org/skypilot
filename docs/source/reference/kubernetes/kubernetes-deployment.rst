@@ -147,10 +147,16 @@ Deploying on Google Cloud GKE
    .. code-block:: console
 
        $ sky show-gpus --cloud kubernetes
-       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       L4    1, 2, 3, 4    8           6
-       A100  1, 2          4           2
+       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       L4    1, 2, 4                   8           6
+       A100  1, 2                      4           2
 
+       Kubernetes per node GPU availability
+       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+       my-cluster-0               L4        4           4
+       my-cluster-1               L4        4           2
+       my-cluster-2               A100      2           2
+       my-cluster-3               A100      2           0
 
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
@@ -196,8 +202,12 @@ Deploying on Amazon EKS
    .. code-block:: console
 
        $ sky show-gpus --cloud kubernetes
-       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       A100  1, 2          4           2
+       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       A100  1, 2                      4           2
+
+       Kubernetes per node GPU availability
+       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+       my-cluster-0               A100      2           2
 
 .. _kubernetes-setup-onprem:
 

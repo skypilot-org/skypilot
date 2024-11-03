@@ -107,6 +107,10 @@ Available fields:
       #
       # default: EAGER_NEXT_REGION
       job_recovery: none
+      # Or, to allow up to 3 restarts (default: 0) on user code errors:
+      # job_recovery:
+      #   strategy: EAGER_NEXT_REGION
+      #   max_restarts_on_errors: 3
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.

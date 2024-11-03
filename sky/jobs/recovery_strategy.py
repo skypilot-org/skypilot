@@ -66,7 +66,8 @@ class StrategyExecutor:
     RETRY_INIT_GAP_SECONDS = 60
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool) -> None:
+                 task: 'task_lib.Task', retry_until_up: bool,
+                 max_restarts_on_errors: int) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -82,6 +83,8 @@ class StrategyExecutor:
         self.cluster_name = cluster_name
         self.backend = backend
         self.retry_until_up = retry_until_up
+        self.max_restarts_on_errors = max_restarts_on_errors
+        self.restart_cnt_on_failure = 0
 
     def __init_subclass__(cls, name: str, default: bool = False):
         RECOVERY_STRATEGIES[name] = cls
@@ -109,8 +112,17 @@ class StrategyExecutor:
         # set the new_task_resources to be the same type (list or set) as the
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
-        return RECOVERY_STRATEGIES[job_recovery](cluster_name, backend, task,
-                                                 retry_until_up)
+        if isinstance(job_recovery, dict):
+            job_recovery_name = job_recovery.pop('strategy',
+                                                 DEFAULT_RECOVERY_STRATEGY)
+            max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
+                                                      0)
+        else:
+            job_recovery_name = job_recovery
+            max_restarts_on_errors = 0
+        return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
+                                                      task, retry_until_up,
+                                                      max_restarts_on_errors)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -327,8 +339,7 @@ class StrategyExecutor:
                         'Failure happened before provisioning. Failover '
                         f'reasons: {reasons_str}')
                     if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(
-                            reasons=reasons)
+                        raise exceptions.ProvisionPrechecksError(reasons)
                     return None
                 logger.info('Failed to launch a cluster with error: '
                             f'{common_utils.format_exception(e)})')
@@ -368,6 +379,17 @@ class StrategyExecutor:
                         f'{gap_seconds:.1f} seconds.')
             time.sleep(gap_seconds)
 
+    def should_restart_on_failure(self) -> bool:
+        """Increments counter & checks if job should be restarted on a failure.
+
+        Returns:
+            True if the job should be restarted, otherwise False.
+        """
+        self.restart_cnt_on_failure += 1
+        if self.restart_cnt_on_failure > self.max_restarts_on_errors:
+            return False
+        return True
+
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                                default=False):
@@ -376,8 +398,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool) -> None:
-        super().__init__(cluster_name, backend, task, retry_until_up)
+                 task: 'task_lib.Task', retry_until_up: bool,
+                 max_restarts_on_errors: int) -> None:
+        super().__init__(cluster_name, backend, task, retry_until_up,
+                         max_restarts_on_errors)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is

@@ -70,7 +70,7 @@ _JOB_CANCELLED_MESSAGE = (
 # state, after the job finished. This is a safeguard to avoid the case where
 # the managed job status fails to be updated and keep the `sky jobs logs`
 # blocking for a long time.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 20
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 25
 
 
 class UserSignal(enum.Enum):
@@ -481,32 +481,56 @@ def stream_logs_by_id(job_id: int,
                         assert task_id == specific_task_id, (task_id,
                                                              specific_task_id)
                         break
-                    if (task_id == num_tasks - 1 or not follow):
-                        break
-
-                    # The log for the current job is finished. We need to
-                    # wait until next job to be started.
-                    logger.debug(
-                        f'INFO: Log for the current task ({task_id}) '
-                        'is finished. Waiting for the next task\'s log '
-                        'to be started.')
-                    update_message(f'Waiting for the next task: {task_id + 1}.')
-                    status_display.start()
-
-                    original_task_id = task_id
-                    while True:
-                        task_id, managed_job_status = get_next_task_id_status(
-                            job_id, specific_task_id)
-                        if original_task_id != task_id:
+                    if task_id < num_tasks - 1 and follow:
+                        # The log for the current job is finished. We need to
+                        # wait until next job to be started.
+                        logger.debug(
+                            f'INFO: Log for the current task ({task_id}) '
+                            'is finished. Waiting for the next task\'s log '
+                            'to be started.')
+                        # Add a newline to avoid the status display below
+                        # removing the last line of the task output.
+                        print()
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                f'Waiting for the next task: {task_id + 1}'))
+                        status_display.start()
+                        original_task_id = task_id
+                        while True:
+                            task_id, managed_job_status = (
+                                managed_job_state.get_latest_task_id_status(
+                                    job_id))
+                            if original_task_id != task_id:
+                                break
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
+                    else:
+                        task_specs = managed_job_state.get_task_specs(
+                            job_id, task_id)
+                        if task_specs.get('max_restarts_on_errors', 0) == 0:
+                            # We don't need to wait for the managed job status
+                            # update, as the job is guaranteed to be in terminal
+                            # state afterwards.
                             break
-                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    continue
-                else:
-                    # The job can be cancelled by the user or the controller
-                    # (when the cluster is partially preempted).
-                    logger.debug(
-                        'INFO: Job is cancelled. Waiting for the status '
-                        f'update in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                        print()
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                'Waiting for next restart for the failed task'))
+                        status_display.start()
+                        while True:
+                            _, managed_job_status = (
+                                managed_job_state.get_latest_task_id_status(
+                                    job_id))
+                            if (managed_job_status !=
+                                    managed_job_state.ManagedJobStatus.RUNNING):
+                                break
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
+                # The job can be cancelled by the user or the controller (when
+                # the cluster is partially preempted).
+                logger.debug(
+                    'INFO: Job is cancelled. Waiting for the status update in '
+                    f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             else:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '

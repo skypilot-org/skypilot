@@ -55,7 +55,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[str] = None,
+        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
@@ -111,6 +111,12 @@ class Resources:
             job to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
+            When a dict is provided, it can have the following fields:
+
+            - strategy: the recovery strategy to use.
+            - max_restarts_on_errors: the max number of restarts on user code
+              errors.
+
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
@@ -161,10 +167,20 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery = None
+        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
         if job_recovery is not None:
-            if job_recovery.strip().lower() != 'none':
-                self._job_recovery = job_recovery.upper()
+            if isinstance(job_recovery, str):
+                job_recovery = {'strategy': job_recovery}
+            if 'strategy' not in job_recovery:
+                job_recovery['strategy'] = None
+
+            strategy_name = job_recovery['strategy']
+            if strategy_name == 'none':
+                self._job_recovery = None
+            else:
+                if strategy_name is not None:
+                    job_recovery['strategy'] = strategy_name.upper()
+                self._job_recovery = job_recovery
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -225,6 +241,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
+        # TODO: move these out of init to prevent repeated calls.
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_managed_job_attributes()
@@ -391,7 +408,7 @@ class Resources:
 
     @property
     @functools.lru_cache(maxsize=1)
-    def accelerators(self) -> Optional[Dict[str, int]]:
+    def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
@@ -418,7 +435,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[str]:
+    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
         return self._job_recovery
 
     @property
@@ -585,6 +602,9 @@ class Resources:
                         # TPU V5 requires a newer runtime version.
                         if acc.startswith('tpu-v5'):
                             return 'v2-alpha-tpuv5'
+                        # TPU V6e requires a newer runtime version.
+                        if acc.startswith('tpu-v6e'):
+                            return 'v2-alpha-tpuv6e'
                         return 'tpu-vm-base'
 
                     accelerator_args['runtime_version'] = (
@@ -813,12 +833,13 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._job_recovery is None:
+        if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
-        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
+        if (self._job_recovery['strategy']
+                not in managed_jobs.RECOVERY_STRATEGIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery} '
+                    f'Spot recovery strategy {self._job_recovery["strategy"]} '
                     'is not supported. The strategy should be among '
                     f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
 

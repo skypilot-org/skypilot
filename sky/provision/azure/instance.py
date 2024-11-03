@@ -2,10 +2,8 @@
 import base64
 import copy
 import enum
-import json
 import logging
 from multiprocessing import pool
-import pathlib
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -17,13 +15,16 @@ from sky import status_lib
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
+from sky.provision.azure import config as config_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from azure.mgmt import compute as azure_compute
-    from azure.mgmt import resource as azure_resource
+    from azure.mgmt import network as azure_network
+    from azure.mgmt.compute import models as azure_compute_models
+    from azure.mgmt.network import models as azure_network_models
 
 logger = sky_logging.init_logger(__name__)
 
@@ -31,6 +32,8 @@ logger = sky_logging.init_logger(__name__)
 # https://github.com/Azure/azure-sdk-for-python/issues/9422
 azure_logger = logging.getLogger('azure')
 azure_logger.setLevel(logging.WARNING)
+Client = Any
+NetworkSecurityGroup = Any
 
 _RESUME_INSTANCE_TIMEOUT = 480  # 8 minutes
 _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
@@ -38,8 +41,21 @@ UNIQUE_ID_LEN = 4
 _TAG_SKYPILOT_VM_ID = 'skypilot-vm-id'
 _WAIT_CREATION_TIMEOUT_SECONDS = 600
 
+_RESOURCE_MANAGED_IDENTITY_TYPE = (
+    'Microsoft.ManagedIdentity/userAssignedIdentities')
+_RESOURCE_NETWORK_SECURITY_GROUP_TYPE = (
+    'Microsoft.Network/networkSecurityGroups')
+_RESOURCE_VIRTUAL_NETWORK_TYPE = 'Microsoft.Network/virtualNetworks'
+_RESOURCE_PUBLIC_IP_ADDRESS_TYPE = 'Microsoft.Network/publicIPAddresses'
+_RESOURCE_VIRTUAL_MACHINE_TYPE = 'Microsoft.Compute/virtualMachines'
+_RESOURCE_NETWORK_INTERFACE_TYPE = 'Microsoft.Network/networkInterfaces'
+
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
+# TODO(Doyoung): _LEGACY_NSG_NAME can be remove this after 0.8.0 to ignore
+# legacy nsg names.
+_LEGACY_NSG_NAME = 'ray-{cluster_name_on_cloud}-nsg'
+_SECOND_LEGACY_NSG_NAME = 'sky-{cluster_name_on_cloud}-nsg'
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -184,14 +200,131 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def _create_instances(
-        compute_client: 'azure_compute.ComputeManagementClient',
-        resource_client: 'azure_resource.ResourceManagementClient',
-        cluster_name_on_cloud: str, resource_group: str,
-        provider_config: Dict[str, Any], node_config: Dict[str, Any],
-        tags: Dict[str, str], count: int) -> List:
+def _create_network_interface(
+        network_client: 'azure_network.NetworkManagementClient', vm_name: str,
+        provider_config: Dict[str,
+                              Any]) -> 'azure_network_models.NetworkInterface':
+    network = azure.azure_mgmt_models('network')
+    compute = azure.azure_mgmt_models('compute')
+    logger.info(f'Start creating network interface for {vm_name}...')
+    if provider_config.get('use_internal_ips', False):
+        name = f'{vm_name}-nic-private'
+        ip_config = network.IPConfiguration(
+            name=f'ip-config-private-{vm_name}',
+            subnet=compute.SubResource(id=provider_config['subnet']),
+            private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC)
+    else:
+        name = f'{vm_name}-nic-public'
+        public_ip_address = network.PublicIPAddress(
+            location=provider_config['location'],
+            public_ip_allocation_method='Static',
+            public_ip_address_version='IPv4',
+            sku=network.PublicIPAddressSku(name='Basic', tier='Regional'))
+        ip_poller = network_client.public_ip_addresses.begin_create_or_update(
+            resource_group_name=provider_config['resource_group'],
+            public_ip_address_name=f'{vm_name}-ip',
+            parameters=public_ip_address)
+        logger.info(f'Created public IP address {ip_poller.result().name} '
+                    f'with address {ip_poller.result().ip_address}.')
+        ip_config = network.IPConfiguration(
+            name=f'ip-config-public-{vm_name}',
+            subnet=compute.SubResource(id=provider_config['subnet']),
+            private_ip_allocation_method=network.IPAllocationMethod.DYNAMIC,
+            public_ip_address=network.PublicIPAddress(id=ip_poller.result().id))
+
+    ni_poller = network_client.network_interfaces.begin_create_or_update(
+        resource_group_name=provider_config['resource_group'],
+        network_interface_name=name,
+        parameters=network.NetworkInterface(
+            location=provider_config['location'],
+            ip_configurations=[ip_config],
+            network_security_group=network.NetworkSecurityGroup(
+                id=provider_config['nsg'])))
+    logger.info(f'Created network interface {ni_poller.result().name}.')
+    return ni_poller.result()
+
+
+def _create_vm(
+        compute_client: 'azure_compute.ComputeManagementClient', vm_name: str,
+        node_tags: Dict[str, str], provider_config: Dict[str, Any],
+        node_config: Dict[str, Any],
+        network_interface_id: str) -> 'azure_compute_models.VirtualMachine':
+    compute = azure.azure_mgmt_models('compute')
+    logger.info(f'Start creating VM {vm_name}...')
+    hardware_profile = compute.HardwareProfile(
+        vm_size=node_config['azure_arm_parameters']['vmSize'])
+    network_profile = compute.NetworkProfile(network_interfaces=[
+        compute.NetworkInterfaceReference(id=network_interface_id, primary=True)
+    ])
+    public_key = node_config['azure_arm_parameters']['publicKey']
+    username = node_config['azure_arm_parameters']['adminUsername']
+    os_linux_custom_data = base64.b64encode(
+        node_config['azure_arm_parameters']['cloudInitSetupCommands'].encode(
+            'utf-8')).decode('utf-8')
+    os_profile = compute.OSProfile(
+        admin_username=username,
+        computer_name=vm_name,
+        admin_password=public_key,
+        linux_configuration=compute.LinuxConfiguration(
+            disable_password_authentication=True,
+            ssh=compute.SshConfiguration(public_keys=[
+                compute.SshPublicKey(
+                    path=f'/home/{username}/.ssh/authorized_keys',
+                    key_data=public_key)
+            ])),
+        custom_data=os_linux_custom_data)
+    community_image_id = node_config['azure_arm_parameters'].get(
+        'communityGalleryImageId', None)
+    if community_image_id is not None:
+        # Prioritize using community gallery image if specified.
+        image_reference = compute.ImageReference(
+            community_gallery_image_id=community_image_id)
+        logger.info(
+            f'Used community_image_id: {community_image_id} for VM {vm_name}.')
+    else:
+        image_reference = compute.ImageReference(
+            publisher=node_config['azure_arm_parameters']['imagePublisher'],
+            offer=node_config['azure_arm_parameters']['imageOffer'],
+            sku=node_config['azure_arm_parameters']['imageSku'],
+            version=node_config['azure_arm_parameters']['imageVersion'])
+    storage_profile = compute.StorageProfile(
+        image_reference=image_reference,
+        os_disk=compute.OSDisk(
+            create_option=compute.DiskCreateOptionTypes.FROM_IMAGE,
+            delete_option=compute.DiskDeleteOptionTypes.DELETE,
+            managed_disk=compute.ManagedDiskParameters(
+                storage_account_type=node_config['azure_arm_parameters']
+                ['osDiskTier']),
+            disk_size_gb=node_config['azure_arm_parameters']['osDiskSizeGB']))
+    vm_instance = compute.VirtualMachine(
+        location=provider_config['location'],
+        tags=node_tags,
+        hardware_profile=hardware_profile,
+        os_profile=os_profile,
+        storage_profile=storage_profile,
+        network_profile=network_profile,
+        identity=compute.VirtualMachineIdentity(
+            type='UserAssigned',
+            user_assigned_identities={provider_config['msi']: {}}))
+    vm_poller = compute_client.virtual_machines.begin_create_or_update(
+        resource_group_name=provider_config['resource_group'],
+        vm_name=vm_name,
+        parameters=vm_instance,
+    )
+    # This line will block until the VM is created or the operation times out.
+    vm = vm_poller.result()
+    logger.info(f'Created VM {vm.name}.')
+    return vm
+
+
+def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
+                      network_client: 'azure_network.NetworkManagementClient',
+                      cluster_name_on_cloud: str, resource_group: str,
+                      provider_config: Dict[str, Any], node_config: Dict[str,
+                                                                         Any],
+                      tags: Dict[str, str], count: int) -> List:
     vm_id = uuid4().hex[:UNIQUE_ID_LEN]
-    tags = {
+    all_tags = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
         **constants.WORKER_NODE_TAGS,
@@ -199,83 +332,19 @@ def _create_instances(
         **tags,
     }
     node_tags = node_config['tags'].copy()
-    node_tags.update(tags)
+    node_tags.update(all_tags)
 
-    # load the template file
-    current_path = pathlib.Path(__file__).parent
-    template_path = current_path.joinpath('azure-vm-template.json')
-    with open(template_path, 'r', encoding='utf-8') as template_fp:
-        template = json.load(template_fp)
+    # Create VM instances in parallel.
+    def create_single_instance(vm_i):
+        vm_name = f'{cluster_name_on_cloud}-{vm_id}-{vm_i}'
+        network_interface = _create_network_interface(network_client, vm_name,
+                                                      provider_config)
+        _create_vm(compute_client, vm_name, node_tags, provider_config,
+                   node_config, network_interface.id)
 
-    vm_name = f'{cluster_name_on_cloud}-{vm_id}'
-    use_internal_ips = provider_config.get('use_internal_ips', False)
+    subprocess_utils.run_in_parallel(create_single_instance, range(count))
 
-    template_params = node_config['azure_arm_parameters'].copy()
-    # We don't include 'head' or 'worker' in the VM name as on Azure the VM
-    # name is immutable and we may change the node type for existing VM in the
-    # multi-node cluster, due to manual termination of the head node.
-    template_params['vmName'] = vm_name
-    template_params['provisionPublicIp'] = not use_internal_ips
-    template_params['vmTags'] = node_tags
-    template_params['vmCount'] = count
-    template_params['msi'] = provider_config['msi']
-    template_params['nsg'] = provider_config['nsg']
-    template_params['subnet'] = provider_config['subnet']
-    # In Azure, cloud-init script must be encoded in base64. For more
-    # information, see:
-    # https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
-    template_params['cloudInitSetupCommands'] = (base64.b64encode(
-        template_params['cloudInitSetupCommands'].encode('utf-8')).decode(
-            'utf-8'))
-
-    if node_config.get('need_nvidia_driver_extension', False):
-        # pylint: disable=line-too-long
-        # Configure driver extension for A10 GPUs. A10 GPUs requires a
-        # special type of drivers which is available at Microsoft HPC
-        # extension. Reference: https://forums.developer.nvidia.com/t/ubuntu-22-04-installation-driver-error-nvidia-a10/285195/2
-        for r in template['resources']:
-            if r['type'] == 'Microsoft.Compute/virtualMachines':
-                # Add a nested extension resource for A10 GPUs
-                r['resources'] = [
-                    {
-                        'type': 'extensions',
-                        'apiVersion': '2015-06-15',
-                        'location': '[variables(\'location\')]',
-                        'dependsOn': [
-                            '[concat(\'Microsoft.Compute/virtualMachines/\', parameters(\'vmName\'), copyIndex())]'
-                        ],
-                        'name': 'NvidiaGpuDriverLinux',
-                        'properties': {
-                            'publisher': 'Microsoft.HpcCompute',
-                            'type': 'NvidiaGpuDriverLinux',
-                            'typeHandlerVersion': '1.9',
-                            'autoUpgradeMinorVersion': True,
-                            'settings': {},
-                        },
-                    },
-                ]
-                break
-
-    parameters = {
-        'properties': {
-            'mode': azure.deployment_mode().incremental,
-            'template': template,
-            'parameters': {
-                key: {
-                    'value': value
-                } for key, value in template_params.items()
-            },
-        }
-    }
-
-    create_or_update = _get_azure_sdk_function(
-        client=resource_client.deployments, function_name='create_or_update')
-    create_or_update(
-        resource_group_name=resource_group,
-        deployment_name=vm_name,
-        parameters=parameters,
-    ).wait()
-
+    # Update disk performance tier
     performance_tier = node_config.get('disk_performance_tier', None)
     if performance_tier is not None:
         disks = compute_client.disks.list_by_resource_group(resource_group)
@@ -286,12 +355,14 @@ def _create_instances(
                 f'az disk update -n {name} -g {resource_group} '
                 f'--set tier={performance_tier}')
 
+    # Validation
     filters = {
         constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
         _TAG_SKYPILOT_VM_ID: vm_id
     }
     instances = _filter_instances(compute_client, resource_group, filters)
     assert len(instances) == count, (len(instances), count)
+
     return instances
 
 
@@ -303,7 +374,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resource_group = provider_config['resource_group']
     subscription_id = provider_config['subscription_id']
     compute_client = azure.get_client('compute', subscription_id)
-
+    network_client = azure.get_client('network', subscription_id)
     instances_to_resume = []
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
@@ -439,12 +510,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     to_start_count -= len(resumed_instance_ids)
 
     if to_start_count > 0:
-        resource_client = azure.get_client('resource', subscription_id)
         logger.debug(f'run_instances: Creating {to_start_count} instances.')
         try:
             created_instances = _create_instances(
                 compute_client=compute_client,
-                resource_client=resource_client,
+                network_client=network_client,
                 cluster_name_on_cloud=cluster_name_on_cloud,
                 resource_group=resource_group,
                 provider_config=provider_config,
@@ -617,18 +687,30 @@ def terminate_instances(
 
     assert provider_config is not None, cluster_name_on_cloud
 
-    resource_group_client = azure.get_client('resource', subscription_id)
-    delete_resource_group = _get_azure_sdk_function(
-        client=resource_group_client.resource_groups, function_name='delete')
-
-    try:
-        delete_resource_group(resource_group, force_deletion_types=None)
-    except azure.exceptions().ResourceNotFoundError as e:
-        if 'ResourceGroupNotFound' in str(e):
-            logger.warning(f'Resource group {resource_group} not found. Skip '
-                           'terminating it.')
-            return
-        raise
+    use_external_resource_group = provider_config.get(
+        'use_external_resource_group', False)
+    # When user specified resource group through config.yaml to create a VM, we
+    # cannot remove the entire resource group as it may contain other resources
+    # unrelated to this VM being removed.
+    if use_external_resource_group:
+        delete_vm_and_attached_resources(subscription_id, resource_group,
+                                         cluster_name_on_cloud)
+    else:
+        # For SkyPilot default resource groups, delete entire resource group.
+        # This automatically terminates all resources within, including VMs
+        resource_group_client = azure.get_client('resource', subscription_id)
+        delete_resource_group = _get_azure_sdk_function(
+            client=resource_group_client.resource_groups,
+            function_name='delete')
+        try:
+            delete_resource_group(resource_group, force_deletion_types=None)
+        except azure.exceptions().ResourceNotFoundError as e:
+            if 'ResourceGroupNotFound' in str(e):
+                logger.warning(
+                    f'Resource group {resource_group} not found. Skip '
+                    'terminating it.')
+                return
+            raise
 
 
 def _get_instance_status(
@@ -690,6 +772,188 @@ def _filter_instances(
     return nodes
 
 
+def _delete_nic_with_retries(network_client,
+                             resource_group,
+                             nic_name,
+                             max_retries=15,
+                             retry_interval=20):
+    """Delete a NIC with retries.
+
+    When a VM is created, its NIC is reserved for 180 seconds, preventing its
+    immediate deletion. If the NIC is in this reserved state, we must retry
+    deletion with intervals until the reservation expires. This situation
+    commonly arises if a VM termination is followed by a failover to another
+    region due to provisioning failures.
+    """
+    delete_network_interfaces = _get_azure_sdk_function(
+        client=network_client.network_interfaces, function_name='begin_delete')
+    for _ in range(max_retries):
+        try:
+            delete_network_interfaces(resource_group_name=resource_group,
+                                      network_interface_name=nic_name).result()
+            return
+        except azure.exceptions().HttpResponseError as e:
+            if 'NicReservedForAnotherVm' in str(e):
+                # Retry when deletion fails with reserved NIC.
+                logger.warning(f'NIC {nic_name} is reserved. '
+                               f'Retrying in {retry_interval} seconds...')
+                time.sleep(retry_interval)
+            else:
+                raise e
+    logger.error(
+        f'Failed to delete NIC {nic_name} after {max_retries} attempts.')
+
+
+def delete_vm_and_attached_resources(subscription_id: str, resource_group: str,
+                                     cluster_name_on_cloud: str) -> None:
+    """Removes VM with attached resources and Deployments.
+
+    This function deletes a virtual machine and its associated resources
+    (public IP addresses, virtual networks, managed identities, network
+    interface and network security groups) that match cluster_name_on_cloud.
+    There is one attached resources that is not removed within this
+    method: OS disk. It is configured to be deleted when VM is terminated while
+    setting up storage profile from _create_vm.
+
+    Args:
+        subscription_id: The Azure subscription ID.
+        resource_group: The name of the resource group.
+        cluster_name_on_cloud: The name of the cluster to filter resources.
+    """
+    resource_client = azure.get_client('resource', subscription_id)
+    try:
+        list_resources = _get_azure_sdk_function(
+            client=resource_client.resources,
+            function_name='list_by_resource_group')
+        resources = list(list_resources(resource_group))
+    except azure.exceptions().ResourceNotFoundError as e:
+        if _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE in str(e):
+            return
+        raise
+
+    filtered_resources: Dict[str, List[str]] = {
+        _RESOURCE_VIRTUAL_MACHINE_TYPE: [],
+        _RESOURCE_MANAGED_IDENTITY_TYPE: [],
+        _RESOURCE_NETWORK_SECURITY_GROUP_TYPE: [],
+        _RESOURCE_VIRTUAL_NETWORK_TYPE: [],
+        _RESOURCE_PUBLIC_IP_ADDRESS_TYPE: [],
+        _RESOURCE_NETWORK_INTERFACE_TYPE: []
+    }
+
+    for resource in resources:
+        if (resource.type in filtered_resources and
+                cluster_name_on_cloud in resource.name):
+            filtered_resources[resource.type].append(resource.name)
+
+    network_client = azure.get_client('network', subscription_id)
+    msi_client = azure.get_client('msi', subscription_id)
+    compute_client = azure.get_client('compute', subscription_id)
+    auth_client = azure.get_client('authorization', subscription_id)
+
+    delete_virtual_machine = _get_azure_sdk_function(
+        client=compute_client.virtual_machines, function_name='delete')
+    delete_public_ip_addresses = _get_azure_sdk_function(
+        client=network_client.public_ip_addresses, function_name='begin_delete')
+    delete_virtual_networks = _get_azure_sdk_function(
+        client=network_client.virtual_networks, function_name='begin_delete')
+    delete_managed_identity = _get_azure_sdk_function(
+        client=msi_client.user_assigned_identities, function_name='delete')
+    delete_network_security_group = _get_azure_sdk_function(
+        client=network_client.network_security_groups,
+        function_name='begin_delete')
+    delete_role_assignment = _get_azure_sdk_function(
+        client=auth_client.role_assignments, function_name='delete')
+
+    for vm_name in filtered_resources[_RESOURCE_VIRTUAL_MACHINE_TYPE]:
+        try:
+            # Before removing Network Interface, we need to wait for the VM to
+            # be completely removed with .result() so the dependency of VM on
+            # Network Interface is disassociated. This takes abour ~30s.
+            delete_virtual_machine(resource_group_name=resource_group,
+                                   vm_name=vm_name).result()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete VM: {}'.format(e))
+
+    for nic_name in filtered_resources[_RESOURCE_NETWORK_INTERFACE_TYPE]:
+        try:
+            # Before removing Public IP Address, we need to wait for the
+            # Network Interface to be completely removed with .result() so the
+            # dependency of Network Interface on Public IP Address is
+            # disassociated. This takes about ~1s.
+            _delete_nic_with_retries(network_client, resource_group, nic_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete nic: {}'.format(e))
+
+    for public_ip_name in filtered_resources[_RESOURCE_PUBLIC_IP_ADDRESS_TYPE]:
+        try:
+            delete_public_ip_addresses(resource_group_name=resource_group,
+                                       public_ip_address_name=public_ip_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete public ip: {}'.format(e))
+
+    for vnet_name in filtered_resources[_RESOURCE_VIRTUAL_NETWORK_TYPE]:
+        try:
+            delete_virtual_networks(resource_group_name=resource_group,
+                                    virtual_network_name=vnet_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete vnet: {}'.format(e))
+
+    for msi_name in filtered_resources[_RESOURCE_MANAGED_IDENTITY_TYPE]:
+        user_assigned_identities = (
+            msi_client.user_assigned_identities.list_by_resource_group(
+                resource_group_name=resource_group))
+        for identity in user_assigned_identities:
+            if msi_name == identity.name:
+                # We use the principal_id to find the correct guid converted
+                # role assignment name because each managed identity has a
+                # unique principal_id, and role assignments are associated
+                # with security principals (like managed identities) via this
+                # principal_id.
+                target_principal_id = identity.principal_id
+                scope = (f'/subscriptions/{subscription_id}'
+                         f'/resourceGroups/{resource_group}')
+                role_assignments = auth_client.role_assignments.list_for_scope(
+                    scope)
+                for assignment in role_assignments:
+                    if target_principal_id == assignment.principal_id:
+                        guid_role_assignment_name = assignment.name
+                        try:
+                            delete_role_assignment(
+                                scope=scope,
+                                role_assignment_name=guid_role_assignment_name)
+                        except Exception as e:  # pylint: disable=broad-except
+                            logger.warning('Failed to delete role '
+                                           'assignment: {}'.format(e))
+                        break
+        try:
+            delete_managed_identity(resource_group_name=resource_group,
+                                    resource_name=msi_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete msi: {}'.format(e))
+
+    for nsg_name in filtered_resources[_RESOURCE_NETWORK_SECURITY_GROUP_TYPE]:
+        try:
+            delete_network_security_group(resource_group_name=resource_group,
+                                          network_security_group_name=nsg_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete nsg: {}'.format(e))
+
+    delete_deployment = _get_azure_sdk_function(
+        client=resource_client.deployments, function_name='begin_delete')
+    deployment_names = [
+        constants.EXTERNAL_RG_BOOTSTRAP_DEPLOYMENT_NAME.format(
+            cluster_name_on_cloud=cluster_name_on_cloud),
+        constants.EXTERNAL_RG_VM_DEPLOYMENT_NAME.format(
+            cluster_name_on_cloud=cluster_name_on_cloud)
+    ]
+    for deployment_name in deployment_names:
+        try:
+            delete_deployment(resource_group_name=resource_group,
+                              deployment_name=deployment_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to delete deployment: {}'.format(e))
+
+
 @common_utils.retry
 def query_instances(
     cluster_name_on_cloud: str,
@@ -722,6 +986,32 @@ def query_instances(
     return statuses
 
 
+# TODO(Doyoung): _get_cluster_nsg can be remove this after 0.8.0 to ignore
+# legacy nsg names.
+def _get_cluster_nsg(network_client: Client, resource_group: str,
+                     cluster_name_on_cloud: str) -> NetworkSecurityGroup:
+    """Retrieve the NSG associated with the given name of the cluster."""
+    list_network_security_groups = _get_azure_sdk_function(
+        client=network_client.network_security_groups, function_name='list')
+    legacy_nsg_name = _LEGACY_NSG_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    second_legacy_nsg_name = _SECOND_LEGACY_NSG_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    _, nsg_name = config_lib.get_cluster_id_and_nsg_name(
+        resource_group=resource_group,
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    possible_nsg_names = [nsg_name, legacy_nsg_name, second_legacy_nsg_name]
+    for nsg in list_network_security_groups(resource_group):
+        if nsg.name in possible_nsg_names:
+            return nsg
+
+    # Raise an error if no matching NSG is found
+    raise ValueError('Failed to find a matching NSG for cluster '
+                     f'{cluster_name_on_cloud!r} in resource group '
+                     f'{resource_group!r}. Expected NSG names were: '
+                     f'{possible_nsg_names}.')
+
+
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
@@ -738,56 +1028,65 @@ def open_ports(
         function_name='create_or_update')
     list_network_security_groups = _get_azure_sdk_function(
         client=network_client.network_security_groups, function_name='list')
-    for nsg in list_network_security_groups(resource_group):
-        try:
-            # Wait the NSG creation to be finished before opening a port. The
-            # cluster provisioning triggers the NSG creation, but it may not be
-            # finished yet.
-            backoff = common_utils.Backoff(max_backoff_factor=1)
-            start_time = time.time()
-            while True:
-                if nsg.provisioning_state not in ['Creating', 'Updating']:
-                    break
-                if time.time() - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
-                    logger.warning(
-                        f'Fails to wait for the creation of NSG {nsg.name} in '
-                        f'{resource_group} within '
-                        f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
-                        'Skip this NSG.')
-                backoff_time = backoff.current_backoff()
-                logger.info(f'NSG {nsg.name} is not created yet. Waiting for '
-                            f'{backoff_time} seconds before checking again.')
-                time.sleep(backoff_time)
 
-            # Azure NSG rules have a priority field that determines the order
-            # in which they are applied. The priority must be unique across
-            # all inbound rules in one NSG.
-            priority = max(rule.priority
-                           for rule in nsg.security_rules
-                           if rule.direction == 'Inbound') + 1
-            nsg.security_rules.append(
-                azure.create_security_rule(
-                    name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
-                    priority=priority,
-                    protocol='Tcp',
-                    access='Allow',
-                    direction='Inbound',
-                    source_address_prefix='*',
-                    source_port_range='*',
-                    destination_address_prefix='*',
-                    destination_port_ranges=ports,
-                ))
-            poller = update_network_security_groups(resource_group, nsg.name,
-                                                    nsg)
-            poller.wait()
-            if poller.status() != 'Succeeded':
+    for nsg in list_network_security_groups(resource_group):
+        # Given resource group can contain network security groups that are
+        # irrelevant to this provisioning especially with user specified
+        # resource group at ~/.sky/config. So we make sure to check for the
+        # completion of nsg relevant to the VM being provisioned.
+        if cluster_name_on_cloud in nsg.name:
+            try:
+                # Wait the NSG creation to be finished before opening a port.
+                # The cluster provisioning triggers the NSG creation, but it
+                # may not be finished yet.
+                backoff = common_utils.Backoff(max_backoff_factor=1)
+                start_time = time.time()
+                while True:
+                    if nsg.provisioning_state not in ['Creating', 'Updating']:
+                        break
+                    if time.time(
+                    ) - start_time > _WAIT_CREATION_TIMEOUT_SECONDS:
+                        logger.warning(
+                            f'Fails to wait for the creation of NSG {nsg.name}'
+                            f' in {resource_group} within '
+                            f'{_WAIT_CREATION_TIMEOUT_SECONDS} seconds. '
+                            'Skip this NSG.')
+                    backoff_time = backoff.current_backoff()
+                    logger.info(
+                        f'NSG {nsg.name} is not created yet. Waiting for '
+                        f'{backoff_time} seconds before checking again.')
+                    time.sleep(backoff_time)
+
+                # Azure NSG rules have a priority field that determines the
+                # order in which they are applied. The priority must be unique
+                # across all inbound rules in one NSG.
+                priority = max(rule.priority
+                               for rule in nsg.security_rules
+                               if rule.direction == 'Inbound') + 1
+                nsg.security_rules.append(
+                    azure.create_security_rule(
+                        name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
+                        priority=priority,
+                        protocol='Tcp',
+                        access='Allow',
+                        direction='Inbound',
+                        source_address_prefix='*',
+                        source_port_range='*',
+                        destination_address_prefix='*',
+                        destination_port_ranges=ports,
+                    ))
+                poller = update_network_security_groups(resource_group,
+                                                        nsg.name, nsg)
+                poller.wait()
+                if poller.status() != 'Succeeded':
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Failed to open ports {ports} in NSG '
+                                         f'{nsg.name}: {poller.status()}')
+            except azure.exceptions().HttpResponseError as e:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Failed to open ports {ports} in NSG '
-                                     f'{nsg.name}: {poller.status()}')
-        except azure.exceptions().HttpResponseError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to open ports {ports} in NSG {nsg.name}.') from e
+                    raise ValueError(
+                        f'Failed to open ports {ports} in NSG {nsg.name}.'
+                    ) from e
 
 
 def cleanup_ports(
