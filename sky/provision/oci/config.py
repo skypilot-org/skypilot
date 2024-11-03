@@ -26,7 +26,6 @@ def bootstrap_instances(
 
     # Find / create a compartment for creating instances.
     compartment = query_helper.find_compartment(region)
-    assert compartment is not None
 
     # Find the configured VCN, or create a new one.
     vcn = query_helper.find_create_vcn_subnet(region)
