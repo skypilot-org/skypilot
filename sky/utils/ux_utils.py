@@ -1,11 +1,12 @@
 """Utility functions for UX."""
 import contextlib
+import functools
 import os
 import sys
 import threading
 import traceback
 import typing
-from typing import Any, Callable, Optional, TextIO, Union
+from typing import Any, Callable, Literal, Optional, TextIO, Union
 
 import colorama
 import rich.console as rich_console
@@ -20,6 +21,11 @@ if typing.TYPE_CHECKING:
     import pathlib
 
 T = typing.TypeVar('T')
+
+# `TextOpenMode` emulates `_typeshed.OpenTextMode` to ensure `open()` returns
+# `TextIO` in text modes (e.g., "r", "w") without relying on private module
+# `_typeshed`.
+TextOpenMode = Literal['r', 'r+', 'w', 'w+', 'a', 'a+']
 
 console = rich_console.Console()
 
@@ -141,6 +147,10 @@ class RedirectOutputForThread:
     def __init__(self) -> None:
         self._original_stdout: TextIO = sys.stdout
         self._original_stderr: TextIO = sys.stderr
+        self._thread_aware_stdout = self._ThreadAwareOutput(
+            self._original_stdout)
+        self._thread_aware_stderr = self._ThreadAwareOutput(
+            self._original_stderr)
 
     class _ThreadAwareOutput:
         """A thread-aware output class that replaces sys.stdout/stderr."""
@@ -150,35 +160,32 @@ class RedirectOutputForThread:
             self._thread_local: threading.local = threading.local()
 
         def resolve_output(self) -> TextIO:
-            output: Optional[TextIO] = getattr(self._thread_local, 'file', None)
-            return output if output is not None else self._original_output
+            return getattr(self._thread_local, 'output', self._original_output)
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self.resolve_output(), name)
 
         def set_from(self, output: TextIO) -> None:
-            self._thread_local.file = output
+            self._thread_local.output = output
 
     def __enter__(self):  # -> Self:
         """Replaces global stdout/stderr with our thread-aware versions."""
-        self._thread_aware_stdout, self._thread_aware_stderr = (
-            self._ThreadAwareOutput(self._original_stdout),
-            self._ThreadAwareOutput(self._original_stderr))
-        sys.stdout, sys.stderr = (self._thread_aware_stdout,
-                                  self._thread_aware_stderr)
+        sys.stdout = self._thread_aware_stdout
+        sys.stderr = self._thread_aware_stderr
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, *_) -> None:
         """Restores original stdout/stderr."""
-        sys.stdout, sys.stderr = (self._thread_aware_stdout,
-                                  self._thread_aware_stderr)
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
 
     def run(self,
             func: Callable[..., T],
             filepath: Union[str, 'pathlib.Path'],
-            mode: str = 'w') -> Callable[..., T]:
+            mode: TextOpenMode = 'w') -> Callable[..., T]:
         """Wraps a function to redirect its output to a specific file."""
 
+        @functools.wraps(func)
         def wrapped(*args, **kwargs) -> T:
             with open(filepath, mode, encoding='utf-8') as f:
                 self._thread_aware_stdout.set_from(f)
