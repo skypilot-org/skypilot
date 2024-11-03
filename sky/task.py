@@ -442,6 +442,8 @@ class Task:
                                             mount_path),) + e.args[1:]
                 raise e
             task_storage_mounts[mount_path] = storage_obj
+        print(f"task_storage_mounts: {task_storage_mounts}")
+        print(f"file_mounts: {file_mounts}")
         task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
