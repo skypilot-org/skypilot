@@ -546,6 +546,7 @@ def get_task_status(job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
             (job_id, task_id)).fetchone()
         return ManagedJobStatus(row[0]) if row else None
 
+
 def get_latest_task_id_status(
         job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
     """Returns the (task id, status) of the latest task of a job.
