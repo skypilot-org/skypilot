@@ -3360,15 +3360,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
 
+        name = handle.cluster_name
+        controller = controller_utils.Controllers.from_name(name)
+
+        is_jobs_controller = (
+            controller == controller_utils.Controllers.JOBS_CONTROLLER)
+        is_log_dag_chain = (is_jobs_controller and
+                            managed_job_dag is not None and
+                            managed_job_dag.is_chain())
         try:
             if not detach_run:
-                to_launch_managed_jobs_controller = (
-                    handle.cluster_name in controller_utils.Controllers.
-                    JOBS_CONTROLLER.value.candidate_cluster_names)
-                if to_launch_managed_jobs_controller:
-                    is_dag_chain = (managed_job_dag is not None and
-                                    managed_job_dag.is_chain())
-                    if is_dag_chain:
+                if is_jobs_controller:
+                    if is_log_dag_chain:
                         self.tail_managed_job_logs(handle, job_id)
                     else:
                         # For non-chain DAGs, we avoid continuously polling
@@ -3385,13 +3388,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # ssh keep connected after ctrl-c.
                     self.tail_logs(handle, job_id)
         finally:
-            name = handle.cluster_name
-            controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 cluster_logs = (f'\n{ux_utils.INDENT_SYMBOL}To stream job logs '
                                 f'for chain workflow:\t\t\t'
                                 f'{ux_utils.BOLD}sky jobs logs {job_id}'
-                               ) if is_dag_chain else ''
+                               ) if is_log_dag_chain else ''
                 logger.info(
                     f'\n{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
