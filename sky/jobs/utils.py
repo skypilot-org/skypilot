@@ -330,7 +330,7 @@ def stream_managed_job_task_launch_logs(job_id: int,
         This filters out polling logs ('Checking the job status') from
         utils.py, and ensures we capture the essential setup messages.
         """
-        status = managed_job_state.get_task_id_status(job_id, task_id)[1]
+        _, status = managed_job_state.get_task_id_status(job_id, task_id)
         return (status is not None) and (status not in [
             managed_job_state.ManagedJobStatus.STARTING,
             managed_job_state.ManagedJobStatus.RECOVERING,
