@@ -725,6 +725,9 @@ def get_config_schema():
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
+                'workdir_bucket_name': {
+                    'type': 'string',
+                },
                 'security_group_name':
                     (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 **_LABELS_SCHEMA,
@@ -765,6 +768,9 @@ def get_config_schema():
                 'enable_gvnic': {
                     'type': 'boolean'
                 },
+                'workdir_bucket_name': {
+                    'type': 'string',
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -779,6 +785,29 @@ def get_config_schema():
                     'type': 'string',
                 },
                 'resource_group_vm': {
+                    'type': 'string',
+                },
+                'workdir_bucket_name': {
+                    'type': 'string',
+                },
+            }
+        },
+        'cloudflare': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'workdir_bucket_name': {
+                    'type': 'string',
+                },
+            }
+        },
+        'ibm': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'workdir_bucket_name': {
                     'type': 'string',
                 },
             }

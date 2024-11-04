@@ -905,7 +905,7 @@ class Task:
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
 
-    def _get_preferred_store(
+    def get_preferred_store(
             self) -> Tuple[storage_lib.StoreType, Optional[str]]:
         """Returns the preferred store type and region for this task."""
         # TODO(zhwu, romilb): The optimizer should look at the source and
@@ -959,7 +959,7 @@ class Task:
         """
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
-                store_type, store_region = self._get_preferred_store()
+                store_type, store_region = self.get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
             else:
