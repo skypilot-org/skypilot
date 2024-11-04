@@ -529,7 +529,7 @@ class Optimizer:
 
         # Prepare the constants.
         V = topo_order  # pylint: disable=invalid-name
-        E = graph.edges()  # pylint: disable=invalid-name
+        E: List[Tuple[Any, Any]] = list(graph.edges())  # pylint: disable=invalid-name
         k = {
             node: list(resource_cost_map.values())
             for node, resource_cost_map in node_to_cost_map.items()

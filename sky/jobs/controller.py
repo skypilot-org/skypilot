@@ -6,7 +6,7 @@ import pathlib
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import List, Tuple
 
 import filelock
 
@@ -28,6 +28,8 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import networkx as nx
+
     import sky
 
 # Use the explicit logger name so that the logger is under the
@@ -55,11 +57,11 @@ class JobsController:
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
-        job_id_env_vars = []
+        #   Example value:
+        #   sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
+        job_id_env_vars: List[str] = []
         for i, task in enumerate(self._dag.tasks):
             if len(self._dag.tasks) <= 1:
                 task_name = self._dag_name
@@ -416,7 +418,7 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     jobs_controller.run()
 
 
-def _handle_signal(job_id):
+def _handle_signal(job_id: int) -> None:
     """Handle the signal if the user sent it."""
     signal_file = pathlib.Path(
         managed_job_utils.SIGNAL_FILE_PREFIX.format(job_id))
@@ -426,9 +428,9 @@ def _handle_signal(job_id):
         # signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open(mode='r', encoding='utf-8') as f:
-                user_signal = f.read().strip()
+                user_signal_str = f.read().strip()
                 try:
-                    user_signal = managed_job_utils.UserSignal(user_signal)
+                    user_signal = managed_job_utils.UserSignal(user_signal_str)
                 except ValueError:
                     logger.warning(
                         f'Unknown signal received: {user_signal}. Ignoring.')
@@ -469,7 +471,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         backend.teardown_ephemeral_storage(task)
 
 
-def start(job_id, dag_yaml, retry_until_up):
+def start(job_id: int, dag_yaml: str, retry_until_up: bool) -> None:
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -493,6 +495,7 @@ def start(job_id, dag_yaml, retry_until_up):
         task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
+        assert task_id is not None
         managed_job_state.set_cancelling(
             job_id=job_id,
             callback_func=managed_job_utils.event_callback_func(
@@ -521,6 +524,7 @@ def start(job_id, dag_yaml, retry_until_up):
         _cleanup(job_id, dag_yaml=dag_yaml)
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
+        assert task_id is not None
         if cancelling:
             managed_job_state.set_cancelled(
                 job_id=job_id,

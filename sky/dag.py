@@ -2,7 +2,7 @@
 import pprint
 import threading
 import typing
-from typing import List, Optional
+from typing import Any, List, Optional
 
 if typing.TYPE_CHECKING:
     from sky import task
@@ -21,7 +21,7 @@ class Dag:
         self.tasks: List['task.Task'] = []
         import networkx as nx  # pylint: disable=import-outside-toplevel
 
-        self.graph = nx.DiGraph()
+        self.graph: nx.DiGraph = nx.DiGraph()
         self.name: Optional[str] = None
 
     def add(self, task: 'task.Task') -> None:
@@ -44,7 +44,8 @@ class Dag:
         push_dag(self)
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(self, exec_type: Any, exec_val: Any, exec_tb: Any) -> None:
+        """Exit the runtime context related to this object."""
         pop_dag()
 
     def __repr__(self) -> str:
@@ -60,6 +61,7 @@ class Dag:
         visited_zero_out_degree = False
         for node in self.graph.nodes:
             out_degree = self.graph.out_degree(node)
+            assert isinstance(out_degree, int)
             if out_degree > 1:
                 is_chain = False
                 break

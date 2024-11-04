@@ -237,7 +237,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         return 'No job to cancel.'
     job_id_str = ', '.join(map(str, job_ids))
     logger.info(f'Cancelling jobs {job_id_str}.')
-    cancelled_job_ids = []
+    cancelled_job_ids: List[int] = []
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -490,7 +490,8 @@ def stream_logs(job_id: Optional[int],
     if controller:
         if job_id is None:
             assert job_name is not None
-            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs: List[Dict[
+                str, Any]] = managed_job_state.get_managed_jobs()
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.

@@ -548,9 +548,9 @@ class ReplicaInfo:
                 f'{colorama.Style.RESET_ALL}')
         return self, False, probe_time
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]) -> None:
         """Set state from pickled state, for backward compatibility."""
-        version = state.pop('_version', None)
+        version: Optional[int] = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
             version = -1
@@ -1036,8 +1036,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             (2) the consecutive failure times.
         The replica will be terminated if any of the thresholds exceeded.
         """
-        probe_futures = []
-        replica_to_probe = []
+        # TODO(andyl): Define a TypeAlias for the return type of info.probe.
+        probe_futures: List[mp_pool.ApplyResult[Tuple[ReplicaInfo, bool,
+                                                      float]]] = []
+        replica_to_probe: List[str] = []
         with mp_pool.ThreadPool() as pool:
             infos = serve_state.get_replica_infos(self._service_name)
             for info in infos:
@@ -1160,7 +1162,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
+        ready_replica_urls: List[str] = []
         active_versions = set(record['active_versions'])
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
