@@ -3206,7 +3206,9 @@ def show_gpus(
                     if kubernetes_utils.multi_host_tpu_exists_in_cluster(
                             context):
                         k8s_per_node_acc_message += (
-                            '(Note: Multi-host TPUs are not supported.)')
+                            '(Note: Multi-host TPUs are detected and excluded '
+                            'from the display as multi-host TPUs are not '
+                            'supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                            f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
