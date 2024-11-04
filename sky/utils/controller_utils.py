@@ -677,19 +677,18 @@ def replace_skypilot_config_path_in_file_mounts(
 
 def _get_workdir_bucket_name_from_config(store_type: storage_lib.StoreType) -> None:
     nested_key = ('aws', 'workdir_bucket_name')
-    match store_type:
-        case storage_lib.StoreType.S3:
-            nested_key = (str(clouds.AWS()).lower(), 'workdir_bucket_name')
-        case storage_lib.StoreType.GCS:
-            nested_key = (str(clouds.GCP()).lower(), 'workdir_bucket_name')
-        case storage_lib.StoreType.AZURE:
-            nested_key = (str(clouds.Azure()).lower(), 'workdir_bucket_name')
-        case storage_lib.StoreType.R2:
-            nested_key = (cloudflare.NAME.lower(), 'workdir_bucket_name')
-        case storage_lib.StoreType.IBM:
-            nested_key = (str(clouds.IBM()).lower(), 'workdir_bucket_name')
-        case _:
-            raise ValueError(f"Unsupported store type: {store_type}")
+    if store_type == storage_lib.StoreType.S3:
+        nested_key = (str(clouds.AWS()).lower(), 'workdir_bucket_name')
+    elif store_type == storage_lib.StoreType.GCS:
+        nested_key = (str(clouds.GCP()).lower(), 'workdir_bucket_name')
+    elif store_type == storage_lib.StoreType.AZURE:
+        nested_key = (str(clouds.Azure()).lower(), 'workdir_bucket_name')
+    elif store_type == storage_lib.StoreType.R2:
+        nested_key = (cloudflare.NAME.lower(), 'workdir_bucket_name')
+    elif store_type == storage_lib.StoreType.IBM:
+        nested_key = (str(clouds.IBM()).lower(), 'workdir_bucket_name')
+    else:
+        raise ValueError(f"Unsupported store type: {store_type}")
     return skypilot_config.get_nested(nested_key, None)
 
 
