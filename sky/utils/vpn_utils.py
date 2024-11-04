@@ -74,11 +74,11 @@ class VPNConfig:
         return self._use_vpn_ip
 
     @staticmethod
-    def from_backend_config(config: Dict[str, Any]) -> 'VPNConfig':
+    def from_backend_config(**kwargs) -> 'VPNConfig':
         """Create a VPN configuration from the backend configuration."""
-        vpn_type = config.pop('type')
+        vpn_type = kwargs.pop('vpn_type')
         if vpn_type == 'tailscale':
-            return TailscaleConfig.from_backend_config(config)
+            return TailscaleConfig.from_backend_config(**kwargs)
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Unsupported VPN type. Please check the backend '
                              'configuration.')
@@ -213,17 +213,16 @@ class TailscaleConfig(VPNConfig):
         return {'tailscale': True}
 
     @staticmethod
-    def from_backend_config(config: Dict[str, Any]) -> 'TailscaleConfig':
-        assert config.get('auth_key') is not None and config.get(
-            'api_key') is not None and config.get('tailnet') is not None, (
+    def from_backend_config(**kwargs) -> 'TailscaleConfig':
+        assert kwargs.get('auth_key') is not None and kwargs.get(
+            'api_key') is not None and kwargs.get('tailnet') is not None, (
                 'Tailscale VPN configuration is missing required '
                 'fields. Please check the backend configuration.')
-
-        return TailscaleConfig(**config)
+        return TailscaleConfig(**kwargs)
 
     def to_backend_config(self) -> Dict[str, Any]:
         return {
-            'type': self._TYPE,
+            'vpn_type': self._TYPE,
             'auth_key': self._auth_key,
             'api_key': self._api_key,
             'tailnet': self._tailnet,
@@ -234,14 +233,25 @@ class TailscaleConfig(VPNConfig):
 def rewrite_cluster_info_by_vpn(
     cluster_info: common.ClusterInfo,
     cluster_name: str,
-    vpn_config: VPNConfig,
+    vpn_config_dict: Dict[str, Any],
 ) -> None:
     """Rewrite the cluster info with the VPN configuration."""
+    vpn_config = VPNConfig.from_backend_config(**vpn_config_dict)
     if not vpn_config.use_vpn_ip:
         return
     instance_list = cluster_info.get_instances()
     for (node_id, instance) in enumerate(instance_list):
         instance.external_ip = vpn_config.get_private_ip(cluster_name, node_id)
+
+
+def remove_nodes_from_vpn(
+    cluster_info: common.ClusterInfo,
+    cluster_name: str,
+    vpn_config_dict: Dict[str, Any],
+) -> None:
+    vpn_config = VPNConfig.from_backend_config(**vpn_config_dict)
+    for node_id in range(cluster_info.num_instances):
+        vpn_config.remove_node(cluster_name, node_id)
 
 
 def check_vpn_unchanged(new_config: Optional[VPNConfig],

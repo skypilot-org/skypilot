@@ -2226,8 +2226,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             max_attempts: int = 1,
             internal_ips: Optional[List[Optional[str]]] = None,
             external_ips: Optional[List[Optional[str]]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None,
-            vpn_config: Optional[vpn_utils.VPNConfig] = None) -> None:
+            cluster_info: Optional[provision_common.ClusterInfo] = None
+    ) -> None:
         """Updates the cluster IPs cached in the handle.
 
         We cache the cluster IPs in the handle to avoid having to retrieve
@@ -2259,12 +2259,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if cluster_info is not None:
             self.cached_cluster_info = cluster_info
             # Update cluster config by private IPs (if available).
-            if vpn_config is not None:
-                self._setup_vpn(vpn_config)
+            if self.vpn_config is not None:
                 vpn_utils.rewrite_cluster_info_by_vpn(self.cached_cluster_info,
                                                       self.cluster_name,
-                                                      vpn_config)
-                self.vpn_config = vpn_config.to_backend_config()
+                                                      self.vpn_config)
             cluster_feasible_ips = self.cached_cluster_info.get_feasible_ips()
             cluster_internal_ips = self.cached_cluster_info.get_feasible_ips(
                 force_internal_ips=True)
@@ -2462,15 +2460,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                                                     cluster_config_file)
         self.docker_user = docker_user
 
-    def _setup_vpn(self, vpn_config: vpn_utils.VPNConfig) -> None:
-        assert self.cached_cluster_info is not None, (
-            'cluster_info should be set before setting up VPN.')
+    def setup_vpn(self, vpn_config: vpn_utils.VPNConfig) -> None:
+        self.vpn_config = vpn_config.to_backend_config()
         runners = self.get_command_runners()
 
         def _run_setup_commands(id_runner):
             node_id, runner = id_runner
             command = vpn_config.get_setup_command(self.cluster_name, node_id)
-            returncode, stdout, stderr = runner.run([command],
+            returncode, stdout, stderr = runner.run(command,
                                                     require_outputs=True,
                                                     stream_logs=False)
             subprocess_utils.handle_returncode(
@@ -2915,9 +2912,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # from cluster_info.
                 handle.docker_user = cluster_info.docker_user
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          cluster_info=cluster_info,
-                                          vpn_config=task.vpn_config)
+                                          cluster_info=cluster_info)
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+
+                # If VPN is used, we need to reconfigure cluster IPs.
+                if task.vpn_config is not None:
+                    handle.setup_vpn(task.vpn_config)
+                    handle.update_cluster_ips(cluster_info=cluster_info)
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
@@ -4155,11 +4156,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
         if terminate and handle.vpn_config is not None:
             # Delete the VPN records when terminating the cluster.
-            vpn_config = vpn_utils.VPNConfig.from_backend_config(
-                handle.vpn_config)
             if handle.cached_cluster_info is not None:
-                for node_id in range(handle.cached_cluster_info.num_instances):
-                    vpn_config.remove_node(handle.cluster_name, node_id)
+                vpn_utils.remove_nodes_from_vpn(handle.cached_cluster_info,
+                                                handle.cluster_name,
+                                                handle.vpn_config)
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
