@@ -675,7 +675,8 @@ def replace_skypilot_config_path_in_file_mounts(
         logger.debug(f'Replaced {_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX} '
                      f'with the real path in file mounts: {file_mounts}')
 
-def _get_workdir_bucket_name_from_config(store_type: storage_lib.StoreType) -> Optional[str]:
+def _get_workdir_bucket_name_from_config(
+        store_type: storage_lib.StoreType) -> Optional[str]:
     nested_key = ('aws', 'workdir_bucket_name')
     if store_type == storage_lib.StoreType.S3:
         nested_key = (str(clouds.AWS()).lower(), 'workdir_bucket_name')
@@ -740,7 +741,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         fixed_bucket_name = _get_workdir_bucket_name_from_config(store_type)
         if fixed_bucket_name is None:
             bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(), id=run_id)
+                username=common_utils.get_cleaned_username(), id=run_id)
         else:
             bucket_name = fixed_bucket_name
 
@@ -752,11 +753,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
                 'workdir and file_mounts contains it as the target.')
         storage = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': workdir,
-                'persistent': False,
-                'mode': 'COPY',
-            })
+            'name': bucket_name,
+            'source': workdir,
+            'persistent': False,
+            'mode': 'COPY',
+        })
         if fixed_bucket_name is not None:
             # We load the bucket name from the config file nested under
             # specific cloud, in this case we only want get_preferred_store
@@ -764,9 +765,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             # times, we might get different store_type and store_region
             # in the future.
             storage.add_store(store_type, store_region)
-        new_storage_mounts[
-            constants.
-            SKY_REMOTE_WORKDIR] = storage
+        new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
         logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
