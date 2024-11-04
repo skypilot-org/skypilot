@@ -133,7 +133,7 @@ def main():
         except Exception as e:
             print(f"Error generating image to {copy_to_region}: {str(e)}")
             new_image_id = 'NEED_FALLBACK'
-            image_cache.append((new_image_id, copy_to_region))
+        image_cache.append((new_image_id, copy_to_region))
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.map(process_region, ALL_REGIONS)

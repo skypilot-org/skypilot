@@ -93,14 +93,15 @@ def get_regions() -> List[str]:
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
-# Some A10 instance types only contains a fractional of GPU. We temporarily
-# filter them out here to avoid using it as a whole A10 GPU.
-# TODO(zhwu,tian): support fractional GPUs, which can be done on
-# kubernetes as well.
+# Azure has those fractional A10 instance types, which still shows has 1 A10 GPU
+# in the API response. We manually changing the number of GPUs to a float here.
 # Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
-FILTERED_A10_INSTANCE_TYPES = [
-    f'Standard_NV{vcpu}ads_A10_v5' for vcpu in [6, 12, 18]
-]
+# TODO(zhwu,tian): Support fractional GPUs on k8s as well.
+# TODO(tian): Maybe we should support literally fractional count, i.e. A10:1/6
+# instead of float point count (A10:0.167).
+AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS = {
+    f'Standard_NV{vcpu}ads_A10_v5': round(vcpu / 36, 3) for vcpu in [6, 12, 18]
+}
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
@@ -274,6 +275,19 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         axis='columns',
     )
 
+    def _upd_a10_gpu_count(row):
+        new_gpu_cnt = AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS.get(
+            row['InstanceType'])
+        if new_gpu_cnt is not None:
+            return new_gpu_cnt
+        return row['AcceleratorCount']
+
+    # Manually update the GPU count for fractional A10 instance types.
+    # Those instance types have fractional GPU count, but Azure API returns
+    # 1 GPU count for them. We manually update the GPU count here.
+    df_ret['AcceleratorCount'] = df_ret.apply(_upd_a10_gpu_count,
+                                              axis='columns')
+
     # As of Dec 2023, a few H100 instance types fetched from Azure APIs do not
     # have pricing:
     #
@@ -298,10 +312,6 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
     print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
-
-    # Filter out instance types that only contain a fractional of GPU.
-    df_ret = df_ret.loc[~df_ret['InstanceType'].isin(FILTERED_A10_INSTANCE_TYPES
-                                                    )]
 
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]

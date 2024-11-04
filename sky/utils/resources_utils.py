@@ -2,9 +2,11 @@
 import dataclasses
 import enum
 import itertools
+import json
+import math
 import re
 import typing
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
 from sky import skypilot_config
 from sky.clouds import cloud_registry
@@ -161,6 +163,16 @@ def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                            launched_resource_str)
             return f'{handle.launched_nodes}x {launched_resource_str}'
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
+
+
+def make_ray_custom_resources_str(
+        resource_dict: Optional[Dict[str, Union[int, float]]]) -> Optional[str]:
+    """Convert resources to Ray custom resources format."""
+    if resource_dict is None:
+        return None
+    # Ray does not allow fractional resources, so we need to ceil the values.
+    ceiled_dict = {k: math.ceil(v) for k, v in resource_dict.items()}
+    return json.dumps(ceiled_dict, separators=(',', ':'))
 
 
 @dataclasses.dataclass
