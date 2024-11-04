@@ -675,6 +675,7 @@ def replace_skypilot_config_path_in_file_mounts(
         logger.debug(f'Replaced {_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX} '
                      f'with the real path in file mounts: {file_mounts}')
 
+
 def _get_workdir_bucket_name_from_config(
         store_type: storage_lib.StoreType) -> Optional[str]:
     nested_key = ('aws', 'workdir_bucket_name')
@@ -689,7 +690,7 @@ def _get_workdir_bucket_name_from_config(
     elif store_type == storage_lib.StoreType.IBM:
         nested_key = (str(clouds.IBM()).lower(), 'workdir_bucket_name')
     else:
-        raise ValueError(f"Unsupported store type: {store_type}")
+        raise ValueError(f'Unsupported store type: {store_type}')
     return skypilot_config.get_nested(nested_key, None)
 
 
