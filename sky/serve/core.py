@@ -687,10 +687,6 @@ def tail_logs(
     """
     if isinstance(target, str):
         target = serve_utils.ServiceComponent(target)
-    if not isinstance(target, serve_utils.ServiceComponent):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'`target` must be a string or '
-                             f'sky.serve.ServiceComponent, got {type(target)}.')
     if target == serve_utils.ServiceComponent.REPLICA:
         if replica_id is None:
             with ux_utils.print_exception_no_traceback():
