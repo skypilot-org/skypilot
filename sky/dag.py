@@ -4,6 +4,8 @@ import threading
 import typing
 from typing import Any, List, Optional
 
+import networkx as nx
+
 if typing.TYPE_CHECKING:
     from sky import task
 
@@ -19,7 +21,6 @@ class Dag:
 
     def __init__(self) -> None:
         self.tasks: List['task.Task'] = []
-        import networkx as nx  # pylint: disable=import-outside-toplevel
 
         self.graph: nx.DiGraph = nx.DiGraph()
         self.name: Optional[str] = None

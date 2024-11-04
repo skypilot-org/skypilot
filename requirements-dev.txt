@@ -9,7 +9,7 @@ toml==0.10.2
 isort==5.12.0
 
 # type checking
-mypy==0.991
+mypy==1.4.1
 types-PyYAML
 # 2.31 requires urlib3>2, which is incompatible with SkyPilot, IBM and
 # kubernetes packages, which require urllib3<2.

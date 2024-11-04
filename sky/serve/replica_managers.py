@@ -9,11 +9,12 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import colorama
 import psutil
 import requests
+import typing_extensions
 
 import sky
 from sky import backends
@@ -39,6 +40,9 @@ if typing.TYPE_CHECKING:
     from sky import resources
     from sky.serve import service_spec
 
+T = typing.TypeVar('T')
+P = typing_extensions.ParamSpec('P')
+R = typing.TypeVar('R')
 logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_FETCH_INTERVAL = 30
@@ -197,10 +201,19 @@ def _should_use_spot(task_yaml: str,
     return len(spot_use_resources) == len(task.resources)
 
 
-def with_lock(func):
+class HasLock(Protocol):
+    lock: threading.Lock
+
+
+L = typing.TypeVar('L', bound=HasLock)
+
+
+def with_lock(
+    func: Callable[typing_extensions.Concatenate[L, P], R]
+) -> Callable[typing_extensions.Concatenate[L, P], R]:
 
     @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: L, *args: P.args, **kwargs: P.kwargs) -> R:
         with self.lock:
             return func(self, *args, **kwargs)
 
@@ -563,7 +576,7 @@ class ReplicaInfo:
         self.__dict__.update(state)
 
 
-class ReplicaManager:
+class ReplicaManager(HasLock):
     """Each replica manager monitors one service."""
 
     def __init__(self, service_name: str,
