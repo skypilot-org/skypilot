@@ -74,11 +74,14 @@ def home():
     # Remove filler rows ([''], ..., ['-']).
     rows = [row for row in rows if ''.join(map(str, row)) != '']
 
+    # Get all unique status values.
+    status_values = sorted(list(set(row[-5] for row in rows)))
     rendered_html = flask.render_template(
         'index.html',
         columns=columns,
         rows=rows,
         last_updated_timestamp=timestamp,
+        status_values=status_values,
     )
     return rendered_html
 
