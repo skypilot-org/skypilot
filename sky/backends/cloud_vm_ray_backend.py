@@ -2475,10 +2475,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             num_ips = 1
         return num_ips
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]):
         self._version = self._VERSION
 
         version = state.pop('_version', None)
+        head_ip: Optional[str] = None
+
         if version is None:
             version = -1
             state.pop('cluster_region', None)
@@ -2502,7 +2504,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 9:
             # For backward compatibility, we should update the region of a
             # SkyPilot cluster on Kubernetes to the actual context it is using.
-            # pylint: disable=import-outside-toplevel
             launched_resources = state['launched_resources']
             if isinstance(launched_resources.cloud, clouds.Kubernetes):
                 yaml_config = common_utils.read_yaml(
@@ -3272,7 +3273,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3829,6 +3830,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
         cluster_status_fetched = False
+        prev_cluster_status = None
         if refresh_cluster_status:
             try:
                 prev_cluster_status, _ = (

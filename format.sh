@@ -23,7 +23,6 @@ builtin cd "$ROOT" || exit 1
 
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
-PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
@@ -37,7 +36,6 @@ tool_version_check() {
 
 tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
@@ -58,10 +56,6 @@ ISORT_YAPF_EXCLUDES=(
 
 BLACK_INCLUDES=(
     'sky/skylet/providers/ibm'
-)
-
-PYLINT_FLAGS=(
-    '--load-plugins'  'pylint_quotes'
 )
 
 # Format specified files

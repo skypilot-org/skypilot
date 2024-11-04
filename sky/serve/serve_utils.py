@@ -300,7 +300,9 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         json={
             'version': version,
             'mode': mode,
-        })
+        },
+        timeout=constants.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
+    )
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -342,7 +344,9 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
         json={
             'replica_id': replica_id,
             'purge': purge,
-        })
+        },
+        timeout=constants.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
+    )
 
     message: str = resp.json()['message']
     if resp.status_code != 200:

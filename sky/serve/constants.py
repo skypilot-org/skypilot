@@ -100,3 +100,7 @@ SERVE_VERSION = 2
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# Default timeout in seconds for HTTP requests to avoid hanging indefinitely.
+# This is used for internal service communication requests.
+DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS = 30
