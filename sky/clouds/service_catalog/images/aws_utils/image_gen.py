@@ -78,7 +78,7 @@ def copy_image_and_make_public(target_region):
     copy_command = (
         f"aws ec2 copy-image --source-region {args.region} "
         f"--source-image-id {args.image_id} --region {target_region} "
-        f"--name 'skypilot-aws-{args.processor}-{args.os_type}-{time.time()}'  --output json"
+        f"--name 'skypilot-aws-{args.processor}-{args.os_type}-{time.strftime('%y%m%d')}'  --output json"
     )
     print(copy_command)
     result = subprocess.run(copy_command,
