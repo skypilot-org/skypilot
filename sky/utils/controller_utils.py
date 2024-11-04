@@ -675,7 +675,7 @@ def replace_skypilot_config_path_in_file_mounts(
         logger.debug(f'Replaced {_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX} '
                      f'with the real path in file mounts: {file_mounts}')
 
-def _get_workdir_bucket_name_from_config(store_type: storage_lib.StoreType) -> None:
+def _get_workdir_bucket_name_from_config(store_type: storage_lib.StoreType) -> Optional[str]:
     nested_key = ('aws', 'workdir_bucket_name')
     if store_type == storage_lib.StoreType.S3:
         nested_key = (str(clouds.AWS()).lower(), 'workdir_bucket_name')
