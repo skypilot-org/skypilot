@@ -421,7 +421,19 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo DEBIAN_FRONTEND=noninteractive apt install lsof gcc patch pciutils rsync fuse curl -y;
+  - |
+    PACKAGES="lsof gcc patch pciutils rsync fuse curl";
+    MISSING_PACKAGES="";
+    for pkg in $PACKAGES; do
+      if ! dpkg -l | grep -q "^ii  $pkg "; then
+        MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+      fi
+    done;
+    if [ ! -z "$MISSING_PACKAGES" ]; then
+      echo "Installing missing packages: $MISSING_PACKAGES";
+      sudo DEBIAN_FRONTEND=noninteractive apt-get update;
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING_PACKAGES;
+    fi;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
