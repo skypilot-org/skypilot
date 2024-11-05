@@ -306,6 +306,33 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
+def _run_function_with_retries(operation_fn: callable,
+                               operation_name: str, 
+                               max_retries: int = _MAX_RETRIES,
+                               retry_delay: int = 5) -> Any:
+    """Runs a function with retries on Kubernetes errors.
+    
+    Args:
+        operation_fn: Function to retry
+        operation_name: Name of the operation for logging
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
+        
+    Raises:
+        The last exception encountered if all retries fail.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return operation_fn()
+        except config_lib.KubernetesError as e:
+            if attempt < max_retries:
+                logger.warning(f'Failed to {operation_name} - '
+                               f'retrying in {retry_delay} seconds.')
+                time.sleep(retry_delay)
+            else:
+                raise
+
+
 def _set_env_vars_in_pods(namespace: str, context: Optional[str],
                           new_pods: List):
     """Setting environment variables in pods.
@@ -326,31 +353,24 @@ def _set_env_vars_in_pods(namespace: str, context: Optional[str],
     set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
     def _set_env_vars_thread(new_pod):
-        logger.info(
-            f'{"-"*20}Start: Set up env vars in pod {new_pod.metadata.name!r} '
-            f'{"-"*20}')
+        pod_name = new_pod.metadata.name
+        logger.info(f'{"-"*20}Start: Set up env vars in pod {pod_name!r} '
+                   f'{"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), new_pod.metadata.name))
-        # Retry in case of transient errors
-        for attempt in range(_MAX_RETRIES + 1):
-            try:
-                rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
-                                           require_outputs=True,
-                                           stream_logs=False)
-                _raise_command_running_error('set env vars',
-                                             set_k8s_env_var_cmd,
-                                             new_pod.metadata.name, rc, stdout)
-                break
-            except Exception as e:
-                if attempt < _MAX_RETRIES:
-                    logger.warning('Failed to set env vars in pod '
-                                   '- retrying in 5 seconds.')
-                    time.sleep(5)
-                else:
-                    raise
-        logger.info(
-            f'{"-"*20}End: Set up env vars in pod {new_pod.metadata.name!r} '
-            f'{"-"*20}')
+            ((namespace, context), pod_name))
+
+        def _run_env_vars_cmd():
+            rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
+                                     require_outputs=True,
+                                     stream_logs=False)
+            _raise_command_running_error('set env vars',
+                                       set_k8s_env_var_cmd,
+                                       pod_name, rc, stdout)
+
+        _run_function_with_retries(_run_env_vars_cmd,
+                                   f'set env vars in pod {pod_name}')
+        logger.info(f'{"-"*20}End: Set up env vars in pod {pod_name!r} '
+                   f'{"-"*20}')
 
     subprocess_utils.run_in_parallel(_set_env_vars_thread, new_pods, NUM_THREADS)
 
@@ -372,35 +392,29 @@ def _check_user_privilege(namespace: str, context: Optional[str],
         '  fi; '
         'fi')
 
-
     # This check needs to run on a per-image basis, so running the check on
     # any one pod is sufficient.
     new_node = new_nodes[0]
+    pod_name = new_node.metadata.name
 
     runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), new_node.metadata.name))
-    logger.info(f'{"-"*20}Start: Check user privilege in pod '
-                f'{new_node.metadata.name!r} {"-"*20}')
+        ((namespace, context), pod_name))
+    logger.info(f'{"-"*20}Start: Check user privilege in pod {pod_name!r} '
+                f'{"-"*20}')
 
-    # Retry in case of transient errors
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                            require_outputs=True,
-                                            separate_stderr=True,
-                                            stream_logs=False)
-            _raise_command_running_error('check user privilege',
-                                         check_k8s_user_sudo_cmd,
-                                         new_node.metadata.name, rc,
-                                         stdout + stderr)
-            break
-        except Exception as e:  # config_lib.KubernetesError?
-            if attempt < _MAX_RETRIES:
-                logger.warning('Failed to check user privilege in pod '
-                               '- retrying in 5 seconds.')
-                time.sleep(5)
-            else:
-                raise
+    def _run_privilege_check():
+        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
+                                      require_outputs=True,
+                                      separate_stderr=True,
+                                      stream_logs=False)
+        _raise_command_running_error('check user privilege',
+                                   check_k8s_user_sudo_cmd,
+                                   pod_name, rc,
+                                   stdout + stderr)
+        return stdout
+
+    stdout = _run_function_with_retries(_run_privilege_check,
+                                        f'check user privilege in pod {pod_name!r}')
 
     if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
         raise config_lib.KubernetesError(
@@ -408,8 +422,8 @@ def _check_user_privilege(namespace: str, context: Optional[str],
             'Ensure the default user has root access or '
             '"sudo" is installed and the user is added to the sudoers '
             'from the image.')
-    logger.info(f'{"-"*20}End: Check user privilege in pod '
-                f'{new_node.metadata.name!r} {"-"*20}')
+    logger.info(f'{"-"*20}End: Check user privilege in pod {pod_name!r} '
+                f'{"-"*20}')
 
 
 def _setup_ssh_in_pods(namespace: str, context: Optional[str],
@@ -448,21 +462,15 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name))
         logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
-        for attempt in range(_MAX_RETRIES + 1):
-            try:
-                rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
-                                           require_outputs=True,
-                                           stream_logs=False)
-                _raise_command_running_error('setup ssh', set_k8s_ssh_cmd,
-                                             pod_name, rc, stdout)
-                break
-            except Exception as e:
-                if attempt < _MAX_RETRIES:
-                    logger.warning('Failed to setup SSH in pod '
-                                   '- retrying in 5 seconds.')
-                    time.sleep(5)
-                else:
-                    raise
+
+        def _run_ssh_setup():
+            rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
+                                     require_outputs=True,
+                                     stream_logs=False)
+            _raise_command_running_error('setup ssh', set_k8s_ssh_cmd,
+                                       pod_name, rc, stdout)
+
+        _run_function_with_retries(_run_ssh_setup, f'setup ssh in pod {pod_name!r}')
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
     subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes, NUM_THREADS)

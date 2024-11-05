@@ -238,7 +238,8 @@ class CommandRunner:
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
 
         def _get_remote_home_dir_with_retry():
-            backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+            backoff = common_utils.Backoff(initial_backoff=1,
+                                           max_backoff_factor=5)
             retries_left = max_retry
             assert retries_left > 0, f'max_retry {max_retry} must be positive.'
             while retries_left >= 0:
@@ -672,7 +673,7 @@ class SSHCommandRunner(CommandRunner):
 class KubernetesCommandRunner(CommandRunner):
     """Runner for Kubernetes commands."""
 
-    _MAX_RETRIES = 3
+    _MAX_RETRIES_FOR_RSYNC = 3
 
     def __init__(
         self,
@@ -816,7 +817,7 @@ class KubernetesCommandRunner(CommandRunner):
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
-        max_retry: int = _MAX_RETRIES,
+        max_retry: int = _MAX_RETRIES_FOR_RSYNC,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
