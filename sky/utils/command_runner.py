@@ -245,7 +245,7 @@ class CommandRunner:
             while retries_left >= 0:
                 try:
                     return get_remote_home_dir()
-                except Exception as e:
+                except Exception:  # pylint: disable=broad-except
                     if retries_left == 0:
                         raise
                     sleep_time = backoff.current_backoff()

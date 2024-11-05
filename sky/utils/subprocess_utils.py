@@ -50,7 +50,9 @@ def get_parallel_threads() -> int:
     return max(4, cpu_count - 1)
 
 
-def run_in_parallel(func: Callable, args: Iterable[Any], num_threads: Optional[int] = None) -> List[Any]:
+def run_in_parallel(func: Callable,
+                    args: Iterable[Any],
+                    num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
     The function 'func' should raise a CommandError if the command fails.
@@ -58,14 +60,16 @@ def run_in_parallel(func: Callable, args: Iterable[Any], num_threads: Optional[i
     Args:
         func: The function to run in parallel
         args: Iterable of arguments to pass to func
-        num_threads: Optional number of threads to use. If None, uses get_parallel_threads()
+        num_threads: Number of threads to use. If None, uses
+          get_parallel_threads()
 
     Returns:
       A list of the return values of the function func, in the same order as the
       arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    processes = num_threads if num_threads is not None else get_parallel_threads()
+    processes = num_threads if num_threads is not None else get_parallel_threads(
+    )
     with pool.ThreadPool(processes=processes) as p:
         # Run the function in parallel on the arguments, keeping the order.
         return list(p.imap(func, args))
