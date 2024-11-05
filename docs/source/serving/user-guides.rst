@@ -7,3 +7,4 @@ Serving User Guides
    update
    auth
    spot-policy
+   fast-replica-startup
