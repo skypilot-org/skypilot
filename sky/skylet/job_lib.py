@@ -182,12 +182,17 @@ class JobScheduler:
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
         jobs = self._get_jobs()
-        if len(jobs) > 0 or force_update_jobs:
+        if force_update_jobs:
             update_status()
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
         for job_id, run_cmd, submit, created_time in jobs:
+            if submit and not force_update_jobs:
+                # We only need to update the job status for the job that has
+                # been submitted, as the other jobs are not submitted yet and
+                # should not be affected by the ray job status.
+                update_job_status([job_id])
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = get_status_no_lock(job_id)
                 if (status not in _PRE_RESOURCE_STATUSES or
@@ -550,7 +555,7 @@ def update_job_status(job_ids: List[int],
             job_record = _get_jobs_by_ids([job_id])[0]
             original_status = job_record['status']
             job_submitted_at = job_record['submitted_at']
-            
+
             ray_job_query_time = time.time()
             if original_status == JobStatus.INIT:
                 if (job_submitted_at >= psutil.boot_time() and job_submitted_at
@@ -574,7 +579,6 @@ def update_job_status(job_ids: List[int],
             except RuntimeError:
                 # Job not found.
                 pass
-
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
