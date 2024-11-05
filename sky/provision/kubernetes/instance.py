@@ -25,6 +25,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
+NUM_THREADS = subprocess_utils.get_parallel_threads() * 2
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -351,7 +352,7 @@ def _set_env_vars_in_pods(namespace: str, context: Optional[str],
             f'{"-"*20}End: Set up env vars in pod {new_pod.metadata.name!r} '
             f'{"-"*20}')
 
-    subprocess_utils.run_in_parallel(_set_env_vars_thread, new_pods)
+    subprocess_utils.run_in_parallel(_set_env_vars_thread, new_pods, NUM_THREADS)
 
 
 def _check_user_privilege(namespace: str, context: Optional[str],
@@ -464,7 +465,7 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
                     raise
         logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
 
-    subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes)
+    subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes, NUM_THREADS)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -825,7 +826,7 @@ def terminate_instances(
         _terminate_node(namespace, context, pod_name)
 
     # Run pod termination in parallel
-    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items())
+    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(), NUM_THREADS)
 
 
 def get_cluster_info(
