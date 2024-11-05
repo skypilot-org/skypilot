@@ -550,6 +550,8 @@ def update_job_status(job_ids: List[int],
             job_record = _get_jobs_by_ids([job_id])[0]
             original_status = job_record['status']
             job_submitted_at = job_record['submitted_at']
+            
+            ray_job_query_time = time.time()
             if original_status == JobStatus.INIT:
                 if (job_submitted_at >= psutil.boot_time() and job_submitted_at
                         >= ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
@@ -560,7 +562,6 @@ def update_job_status(job_ids: List[int],
                     # The job id is reserved, but stale.
                     status = JobStatus.FAILED
 
-            ray_job_query_time = time.time()
             try:
                 # Querying status within the lock is safer than querying
                 # outside, as it avoids the race condition when job table is
@@ -569,10 +570,10 @@ def update_job_status(job_ids: List[int],
                 # when there are significant number of finished jobs.
                 # TODO: if too slow, directly query against redis.
                 ray_job_status = job_client.get_job_status(ray_job_id)
-            except RuntimeError:
-                ray_job_status = None
-            if ray_job_status is not None:
                 status = _RAY_TO_JOB_STATUS_MAP[ray_job_status.value]
+            except RuntimeError:
+                # Job not found.
+                pass
 
 
             pending_job = _get_pending_job(job_id)
