@@ -188,12 +188,12 @@ class JobScheduler:
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
         for job_id, run_cmd, submit, created_time in jobs:
-            if submit and not force_update_jobs:
-                # We only need to update the job status for the job that has
-                # been submitted, as the other jobs are not submitted yet and
-                # should not be affected by the ray job status.
-                update_job_status([job_id])
             with filelock.FileLock(_get_lock_path(job_id)):
+                # We don't have to refresh the job status before checking, as
+                # the job status will only be stale in rare cases where ray job
+                # crashes; or the job stays in INIT state for a long time.
+                # In those cases, the periodic JobSchedulerEvent event will
+                # update the job status every 300 seconds.
                 status = get_status_no_lock(job_id)
                 if (status not in _PRE_RESOURCE_STATUSES or
                         created_time < psutil.boot_time()):
