@@ -79,11 +79,6 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     '`use_spot: true` in resources for on-demand fallback.')
         requested_ports = list(
             resources_utils.port_ranges_to_set(requested_resources.ports))
-        if len(requested_ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
         service_port = requested_ports[0]
         if replica_ingress_port is None:
             replica_ingress_port = service_port
