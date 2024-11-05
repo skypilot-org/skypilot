@@ -142,7 +142,8 @@ Read the research:
    ../examples/auto-failover
    ../running-jobs/distributed-jobs
    ../running-jobs/many-jobs
-
+   ../examples/batch-inference
+   
 .. toctree::
    :hidden:
    :maxdepth: 1
