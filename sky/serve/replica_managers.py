@@ -177,7 +177,10 @@ def _get_resources_ports(task_yaml: str) -> str:
     # Already checked the resources have and only have one port
     # before upload the task yaml.
     assert task_resources.ports is not None
-    return task_resources.ports[0]
+    service_port_str = task_resources.ports[0]
+    if not service_port_str.isdigit():
+        service_port_str = service_port_str.split('-')[0]
+    return service_port_str
 
 
 def _should_use_spot(task_yaml: str,
