@@ -155,7 +155,7 @@ class JobStatus(enum.Enum):
 # to avoid race condition with `ray job` to make sure it job has been
 # correctly updated.
 # TODO(zhwu): This number should be tuned based on heuristics.
-_PENDING_SUBMIT_GRACE_PERIOD = 60
+_PENDING_SUBMIT_GRACE_PERIOD = 90
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
@@ -537,21 +537,8 @@ def update_job_status(job_ids: List[int],
     if len(job_ids) == 0:
         return []
 
-    # TODO: if too slow, directly query against redis.
     ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]
-
     job_client = _create_ray_job_submission_client()
-
-    # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
-    # which contains the job status (str) and submission_id (str).
-    ray_job_query_time = time.time()
-    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
-
-    job_details = {}
-    ray_job_ids_set = set(ray_job_ids)
-    for job_detail in job_detail_lists:
-        if job_detail.submission_id in ray_job_ids_set:
-            job_details[job_detail.submission_id] = job_detail
 
     statuses = []
     for job_id, ray_job_id in zip(job_ids, ray_job_ids):
@@ -560,9 +547,34 @@ def update_job_status(job_ids: List[int],
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
             status = None
-            if ray_job_id in job_details:
-                ray_status = job_details[ray_job_id].status
-                status = _RAY_TO_JOB_STATUS_MAP[ray_status]
+            job_record = _get_jobs_by_ids([job_id])[0]
+            original_status = job_record['status']
+            job_submitted_at = job_record['submitted_at']
+            if original_status == JobStatus.INIT:
+                if (job_submitted_at >= psutil.boot_time() and job_submitted_at
+                        >= ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                    # The job id is reserved, but the job is not submitted yet.
+                    # We should keep it in INIT.
+                    status = JobStatus.INIT
+                else:
+                    # The job id is reserved, but stale.
+                    status = JobStatus.FAILED
+
+            ray_job_query_time = time.time()
+            try:
+                # Querying status within the lock is safer than querying
+                # outside, as it avoids the race condition when job table is
+                # updated after the ray job status query.
+                # Also, getting per-job status is faster than querying all jobs,
+                # when there are significant number of finished jobs.
+                # TODO: if too slow, directly query against redis.
+                ray_job_status = job_client.get_job_status(ray_job_id)
+            except RuntimeError:
+                ray_job_status = None
+            if ray_job_status is not None:
+                status = _RAY_TO_JOB_STATUS_MAP[ray_job_status.value]
+
+
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
                 if pending_job['created_time'] < psutil.boot_time():
@@ -583,7 +595,6 @@ def update_job_status(job_ids: List[int],
                     # as stale.
                     status = JobStatus.PENDING
 
-            original_status = get_status_no_lock(job_id)
             assert original_status is not None, (job_id, status)
             if status is None:
                 status = original_status
