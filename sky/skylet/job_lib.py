@@ -155,7 +155,7 @@ class JobStatus(enum.Enum):
 # to avoid race condition with `ray job` to make sure it job has been
 # correctly updated.
 # TODO(zhwu): This number should be tuned based on heuristics.
-_PENDING_SUBMIT_GRACE_PERIOD = 90
+_PENDING_SUBMIT_GRACE_PERIOD = 60
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
