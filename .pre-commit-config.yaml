@@ -18,10 +18,10 @@ repos:
     hooks:
     -   id: isort
         exclude: sky/skylet/providers/ibm/.*
-        args: [“--profile”, “google”]
+        args: ["--profile", "google"]
     -   id: isort
         files: sky/skylet/providers/ibm/.*
-        args: [“--profile”, “black”, “-l”, “88", “-m”, “3"]
+        args: ["--profile", "black", "-l", "88", "-m", "3"]
         stages: [pre-commit]
 
 -   repo: https://github.com/google/yapf
@@ -42,8 +42,8 @@ repos:
             - pylint==2.14.5
             - pylint-quotes==0.2.3
         args: [
-            “--load-plugins=pylint_quotes”,
-            “--rcfile=.pylintrc”
+            "--load-plugins=pylint_quotes",
+            "--rcfile=.pylintrc"
         ]
         exclude: ^(build/.*|sky/skylet/providers/ibm/.*)$
 
