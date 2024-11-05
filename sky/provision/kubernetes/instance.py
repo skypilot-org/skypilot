@@ -418,7 +418,7 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
 def _check_rsync_installed(namespace: str, context: Optional[str],
                            new_nodes: List) -> None:
     """Check if rsync is installed on the cluster's nodes.
-    
+
     Checks only one node since all nodes use the same base image.
 
     Raises:
