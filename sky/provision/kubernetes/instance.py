@@ -817,11 +817,15 @@ def terminate_instances(
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
 
-    for pod_name, pod in pods.items():
-        logger.debug(f'Terminating instance {pod_name}: {pod}')
+    def _terminate_pod_thread(pod_info):
+        pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
-            continue
+            return
+        logger.debug(f'Terminating instance {pod_name}: {pod}')
         _terminate_node(namespace, context, pod_name)
+
+    # Run pod termination in parallel
+    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items())
 
 
 def get_cluster_info(
