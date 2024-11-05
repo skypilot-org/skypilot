@@ -838,7 +838,7 @@ def get_config_schema():
                         for type in kubernetes_enums.KubernetesAutoscalerType
                     ]
                 },
-        'disable_ssh': {
+                'disable_ssh': {
                     'type': 'boolean',
                 },
             }

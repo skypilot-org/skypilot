@@ -416,7 +416,7 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
 
 
 def _check_rsync_installed(namespace: str, context: Optional[str],
-                          new_nodes: List) -> None:
+                           new_nodes: List) -> None:
     """Check if rsync is installed on the cluster's nodes.
     
     Checks only one node since all nodes use the same base image.
@@ -434,10 +434,8 @@ def _check_rsync_installed(namespace: str, context: Optional[str],
                                     require_outputs=True,
                                     separate_stderr=True,
                                     stream_logs=False)
-    _raise_command_running_error('check rsync installation',
-                                 check_rsync_cmd,
-                                 new_node.metadata.name, rc,
-                                 stdout + stderr)
+    _raise_command_running_error('check rsync installation', check_rsync_cmd,
+                                 new_node.metadata.name, rc, stdout + stderr)
     # Only raise error if rsync is missing
     if stdout.strip() == 'missing':
         raise config_lib.KubernetesError(
@@ -867,11 +865,11 @@ def get_cluster_info(
         get_k8s_ssh_user_cmd = 'echo $(whoami)'
         assert head_pod_name is not None
         runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), head_pod_name))
+            ((namespace, context), head_pod_name))
         rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
-                                    require_outputs=True,
-                                    separate_stderr=True,
-                                    stream_logs=False)
+                                        require_outputs=True,
+                                        separate_stderr=True,
+                                        stream_logs=False)
         _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                      head_pod_name, rc, stdout + stderr)
         ssh_user = stdout.strip()

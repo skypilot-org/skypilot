@@ -434,9 +434,10 @@ def _post_provision_setup(
                 provision_logging.config.log_path)) as status:
 
         # Wait for SSH if it is enabled.
-        # Users can disable SSH for certain clouds, e.g., Kubernetes, in which 
+        # Users can disable SSH for certain clouds, e.g., Kubernetes, in which
         # case the provisioner is responsible for making sure the
         # pods are ready for handing off to _post_provision_setup.
+        assert provider_config is not None
         if not provider_config.get('disable_ssh', False):
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
