@@ -576,8 +576,8 @@ def update_job_status(job_ids: List[int],
                 # the pending table until appearing in ray jobs. For jobs
                 # submitted outside of the grace period, we will consider the
                 # ray job status.
-                if not (pending_job['submit'] > 0 and pending_job['submit'] <
-                        ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                if not (pending_job['submit'] > 0 and pending_job['submit']
+                        < ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
                     # Reset the job status to PENDING even though it may not
                     # appear in the ray jobs, so that it will not be considered
                     # as stale.
