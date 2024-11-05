@@ -2,7 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
-from collections import deque
+import collections
 import copy
 import io
 import multiprocessing.pool
@@ -27,6 +27,9 @@ from sky.utils import ux_utils
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
 _SKY_LOG_TAILING_GAP_SECONDS = 0.2
+# Peek the head of the lines to check if we need to start
+# streaming when tail > 0.
+PEEK_HEAD_LINES_FOR_START_STREAM = 20
 
 logger = sky_logging.init_logger(__name__)
 
@@ -445,13 +448,13 @@ def tail_logs(job_id: Optional[int],
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
             if tail > 0:
-                lines = deque(log_file.readlines(), maxlen=tail)
+                lines = collections.deque(log_file.readlines(), maxlen=tail)
                 for line in lines:
                     print(line, end='')
                 # Flush the last n lines
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
-            # if tail_f_lines > 0
+            # if tail > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
                                          start_streaming_at=start_stream_at):
@@ -461,8 +464,22 @@ def tail_logs(job_id: Optional[int],
             start_stream = False
             with open(log_path, 'r', encoding='utf-8') as f:
                 if tail > 0:
-                    lines = deque(f.readlines(), maxlen=tail)
+                    # If tail > 0, we need to read the last n lines.
+                    # We use double ended queue to rotate the last n lines.
+                    lines = collections.deque(f.readlines(), maxlen=tail)
+                    # Check the first few lines to decide if streaming should
+                    # start. If start_stream_at is within these lines, delay
+                    # streaming.
+                    # Example: tail=115, file lines=120, print lines 9 to 120.
+                    # We can't simply print the entire lines object, as
+                    # start_stream_at is still within the lines.
                     start_stream = True
+                    for index, line in enumerate(lines):
+                        if start_stream_at in line:
+                            start_stream = False
+                            break
+                        if index >= PEEK_HEAD_LINES_FOR_START_STREAM:
+                            break
                 else:
                     lines = f.readlines()
                 for line in lines:
