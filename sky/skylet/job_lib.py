@@ -882,6 +882,7 @@ class JobLibCodeGen:
                   follow: bool = True,
                   tail: int = 0) -> str:
         # pylint: disable=line-too-long
+
         code = [
             f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
