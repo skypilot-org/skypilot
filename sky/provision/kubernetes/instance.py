@@ -415,6 +415,38 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
     subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes)
 
 
+def _check_rsync_installed(namespace: str, context: Optional[str],
+                          new_nodes: List) -> None:
+    """Check if rsync is installed on the cluster's nodes.
+    
+    Checks only one node since all nodes use the same base image.
+
+    Raises:
+        config_lib.KubernetesError: If rsync is not installed.
+    """
+    check_rsync_cmd = ('command -v rsync >/dev/null 2>&1 && echo installed ||'
+                       ' echo missing')
+
+    new_node = new_nodes[0]
+    runner = command_runner.KubernetesCommandRunner(
+        ((namespace, context), new_node.metadata.name))
+    rc, stdout, stderr = runner.run(check_rsync_cmd,
+                                    require_outputs=True,
+                                    separate_stderr=True,
+                                    stream_logs=False)
+    _raise_command_running_error('check rsync installation',
+                                 check_rsync_cmd,
+                                 new_node.metadata.name, rc,
+                                 stdout + stderr)
+    # Only raise error if rsync is missing
+    if stdout.strip() == 'missing':
+        raise config_lib.KubernetesError(
+            'rsync is not installed in the container image. '
+            'File sync operations will fail. Please install rsync in '
+            'your container image or re-enable SSH, which will '
+            'install rsync for you.')
+
+
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
                label: Dict[str, str]) -> None:
     """Label a pod."""
@@ -668,7 +700,14 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # on most base images. E.g., do not use Python, since that may not
         # be installed by default.
         _check_user_privilege(namespace, context, uninitialized_pods_list)
-        _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
+        if not provider_config.get('disable_ssh', False):
+            _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
+        else:
+            # The SSH setup also install rsync. If we disable SSH, we need to
+            # check if rsync is installed in the pod.
+            # We do not auto-install rsync because apt update and apt install
+            # are relatively heavyweight operations.
+            _check_rsync_installed(namespace, context, uninitialized_pods_list)
         _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
 
         for pod in uninitialized_pods.values():
@@ -823,18 +862,19 @@ def get_cluster_info(
 
     assert cpu_request is not None, 'cpu_request should not be None'
 
-    ssh_user = 'sky'
-    get_k8s_ssh_user_cmd = 'echo $(whoami)'
-    assert head_pod_name is not None
-    runner = command_runner.KubernetesCommandRunner(
+    ssh_user = None
+    if not provider_config.get('disable_ssh', False):
+        get_k8s_ssh_user_cmd = 'echo $(whoami)'
+        assert head_pod_name is not None
+        runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name))
-    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
+        rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
                                     stream_logs=False)
-    _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
-                                 head_pod_name, rc, stdout + stderr)
-    ssh_user = stdout.strip()
+        _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
+                                     head_pod_name, rc, stdout + stderr)
+        ssh_user = stdout.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 

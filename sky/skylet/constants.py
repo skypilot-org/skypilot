@@ -276,6 +276,7 @@ OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
     ('nvidia_gpus', 'disable_ecc'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
+    ('kubernetes', 'disable_ssh'),
     ('gcp', 'managed_instance_group'),
 ]
 

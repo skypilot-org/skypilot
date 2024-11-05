@@ -566,6 +566,15 @@ Available fields and semantics:
     # Default: null (no autoscaler, autodetect label format for GPU nodes)
     autoscaler: gke
 
+    # Disable SSH in the pod (optional)
+    #
+    # Disabling SSH can speed up provisioning, especially for large multi-node
+    # clusters. However, if set to true, you will not be able to SSH into the pod
+    # with `ssh <cluster_name>`.
+    #
+    # Default: false
+    disable_ssh: false
+
     # Additional fields to override the pod fields used by SkyPilot (optional)
     #
     # Any key:value pairs added here would get added to the pod spec used to
