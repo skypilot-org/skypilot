@@ -627,6 +627,7 @@ def update_job_status(job_ids: List[int],
                 # DB) would already have that value. So we take the max here to
                 # keep it at later status.
                 status = max(status, original_status)
+                assert status is not None, (job_id, status, original_status)
                 if status != original_status:  # Prevents redundant update.
                     _set_status_no_lock(job_id, status)
                     if not silent:
