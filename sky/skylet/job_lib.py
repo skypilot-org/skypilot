@@ -564,7 +564,12 @@ def update_job_status(job_ids: List[int],
                     # We should keep it in INIT.
                     status = JobStatus.INIT
                 else:
-                    # The job id is reserved, but stale.
+                    # We always immediately submit job after the job id is
+                    # allocated, i.e. INIT -> PENDING, if a job stays in INIT
+                    # for too long, it is likely the job submission process
+                    # was killed before the job is submitted. We should set it
+                    # to FAILED then. Note, if ray job indicates the job is
+                    # running, we will change status to PENDING below.
                     status = JobStatus.FAILED
 
             try:
@@ -573,6 +578,8 @@ def update_job_status(job_ids: List[int],
                 # updated after the ray job status query.
                 # Also, getting per-job status is faster than querying all jobs,
                 # when there are significant number of finished jobs.
+                # Reference: getting 124 finished jobs takes 0.038s, while
+                # querying a single job takes 0.006s, 10 jobs takes 0.066s.
                 # TODO: if too slow, directly query against redis.
                 ray_job_status = job_client.get_job_status(ray_job_id)
                 status = _RAY_TO_JOB_STATUS_MAP[ray_job_status.value]
