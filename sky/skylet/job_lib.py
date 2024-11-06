@@ -181,13 +181,13 @@ class JobScheduler:
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
-        jobs = self._get_jobs()
         if force_update_jobs:
             update_status()
+        pending_jobs = self._get_pending_jobs()
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
-        for job_id, run_cmd, submit, created_time in jobs:
+        for job_id, run_cmd, submit, created_time in pending_jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 # We don't have to refresh the job status before checking, as
                 # the job status will only be stale in rare cases where ray job
@@ -207,7 +207,7 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
-    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+    def _get_pending_jobs(self) -> List[Tuple[int, str, int, int]]:
         """Returns the metadata for jobs in the pending jobs table
 
         The information contains job_id, run command, submit time,
@@ -219,7 +219,7 @@ class JobScheduler:
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
-    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+    def _get_pending_jobs(self) -> List[Tuple[int, str, int, int]]:
         return list(
             _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id'))
 
