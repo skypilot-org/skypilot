@@ -883,9 +883,11 @@ class JobLibCodeGen:
                   follow: bool = True,
                   tail: int = 0) -> str:
         # pylint: disable=line-too-long
+        # We use != instead of is not because 1 is not None will print a warning:
+        # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
 
         code = [
-            f'job_id = {job_id} if {job_id} is not None else job_lib.get_latest_job_id()',
+            f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
             f'tail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
