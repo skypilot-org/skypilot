@@ -378,7 +378,7 @@ def _set_env_vars_in_pods(namespace: str, context: Optional[str],
 def _check_user_privilege(namespace: str, context: Optional[str],
                           new_nodes: List) -> None:
     # Checks if the default user has sufficient privilege to set up
-    # the kubernetes instance pod.
+    # the kubernetes instance pod and creates an alias for sudo.
     check_k8s_user_sudo_cmd = (
         'if [ $(id -u) -eq 0 ]; then'
         # If user is root, create an alias for sudo used in skypilot setup
@@ -392,37 +392,40 @@ def _check_user_privilege(namespace: str, context: Optional[str],
         '  fi; '
         'fi')
 
-    # This check needs to run on a per-image basis, so running the check on
-    # any one pod is sufficient.
-    new_node = new_nodes[0]
-    pod_name = new_node.metadata.name
+    def _check_pod_privileges(new_node):
+        pod_name = new_node.metadata.name
+        runner = command_runner.KubernetesCommandRunner(
+            ((namespace, context), pod_name))
+        logger.info(f'{"-"*20}Start: Check user privilege in pod {pod_name!r} '
+                    f'{"-"*20}')
+        
 
-    runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), pod_name))
-    logger.info(f'{"-"*20}Start: Check user privilege in pod {pod_name!r} '
-                f'{"-"*20}')
+        def _run_privilege_check():
+            rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
+                                            require_outputs=True,
+                                            separate_stderr=True,
+                                            stream_logs=False)
+            _raise_command_running_error('check user privilege',
+                                        check_k8s_user_sudo_cmd, pod_name, rc,
+                                        stdout + stderr)
+            return stdout
 
-    def _run_privilege_check():
-        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                        require_outputs=True,
-                                        separate_stderr=True,
-                                        stream_logs=False)
-        _raise_command_running_error('check user privilege',
-                                     check_k8s_user_sudo_cmd, pod_name, rc,
-                                     stdout + stderr)
-        return stdout
+        op_name = f'check user privilege in pod {pod_name!r}'
+        # Retry the privilege check with defined retries and delays
+        stdout = _run_function_with_retries(_run_privilege_check, op_name)
+        
+        if stdout.strip() == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+            raise config_lib.KubernetesError(
+                'Insufficient system privileges detected. '
+                'Ensure the default user has root access or '
+                '"sudo" is installed and the user is added to the sudoers '
+                'from the image.')
+        
+        logger.info(f'{"-"*20}End: Check user privilege in pod {pod_name!r} '
+                    f'{"-"*20}')
 
-    stdout = _run_function_with_retries(
-        _run_privilege_check, f'check user privilege in pod {pod_name!r}')
-
-    if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
-        raise config_lib.KubernetesError(
-            'Insufficient system privileges detected. '
-            'Ensure the default user has root access or '
-            '"sudo" is installed and the user is added to the sudoers '
-            'from the image.')
-    logger.info(f'{"-"*20}End: Check user privilege in pod {pod_name!r} '
-                f'{"-"*20}')
+    # Run privilege checks in parallel for all new nodes
+    subprocess_utils.run_in_parallel(_check_pod_privileges, new_nodes, NUM_THREADS)
 
 
 def _setup_ssh_in_pods(namespace: str, context: Optional[str],
