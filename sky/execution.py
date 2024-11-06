@@ -160,14 +160,16 @@ def _execute(
     """
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    dag, _ = admin_policy_utils.apply(
-        dag,
-        request_options=admin_policy.RequestOptions(
-            cluster_name=cluster_name,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            down=down,
-            dryrun=dryrun,
-        ))
+    if not dag.policy_applied:
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster_name,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                    dryrun=dryrun,
+                ),
+        )
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 

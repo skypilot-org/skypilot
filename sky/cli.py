@@ -77,6 +77,8 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
+from sky import admin_policy
+from sky.utils import admin_policy_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -582,6 +584,15 @@ def _launch_with_confirm(
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
                                    f'{colorama.Style.RESET_ALL}') from e
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            ),
+        )
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -3667,6 +3678,8 @@ def jobs_launch(
 
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
                 fg='cyan')
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     dag = sky.optimize(dag)
 
     if not yes:
@@ -4145,6 +4158,7 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4261,6 +4275,7 @@ def serve_update(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
