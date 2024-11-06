@@ -208,6 +208,8 @@ class StorePrefix(enum.Enum):
             return StoreType.R2
         elif self == StorePrefix.IBM:
             return StoreType.IBM
+        else:
+            raise ValueError(f'Unknown store prefix: {self}')
 
 
 class StorageMode(enum.Enum):

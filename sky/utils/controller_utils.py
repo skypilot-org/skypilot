@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
 
@@ -677,7 +677,7 @@ def replace_skypilot_config_path_in_file_mounts(
 
 
 def _get_bucket_name_and_store_type_from_job_config(
-) -> tuple[Optional[str], Optional[str]]:
+) -> Tuple[Optional[str], Optional[str]]:
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
     if bucket_wth_prefix is None:
         return None, None
