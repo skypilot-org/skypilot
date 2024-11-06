@@ -36,6 +36,11 @@ DEFAULT_RECOVERY_STRATEGY = None
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
 MAX_JOB_CHECKING_RETRY = 10
 
+# Minutes to job cluster autodown. This should be significantly larger than
+# managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
+# cluster before its status can be updated by the job controller.
+AUTODOWN_MINUTES = 5
+
 
 def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
     """Terminate the cluster."""
@@ -308,7 +313,7 @@ class StrategyExecutor:
                     # We expect to tear down the cluster as soon as the job is
                     # finished. However, in case the controller dies, set
                     # autodown to try and avoid a resource leak.
-                    idle_minutes_to_autostop=5,
+                    idle_minutes_to_autostop=AUTODOWN_MINUTES,
                     down=True,
                     detach_setup=True,
                     detach_run=True,
