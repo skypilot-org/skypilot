@@ -433,20 +433,27 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         'set -ex; '
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-        # Check and report package status before installing
-        'echo "Checking for openssh-server..."; '
-        'if ! dpkg -l openssh-server 2>/dev/null | grep -q "^ii"; then echo '
-        '"openssh not found"; NEED_SSH=1; else echo "openssh found"; fi; '
-        'echo "Checking for rsync..."; '
-        'if ! command -v rsync >/dev/null 2>&1; then echo '
-        '"rsync not found"; NEED_RSYNC=1; else echo "rsync found"; fi; '
-        # Only run apt update/install if openssh-server or rsync is missing
-        'if [ "${NEED_SSH}" = "1" ] || [ "${NEED_RSYNC}" = "1" ]; then '
-        '  echo "Installing missing packages..."; '
-        '  export DEBIAN_FRONTEND=noninteractive;'
-        '  $(prefix_cmd) apt-get update;'
-        '  $(prefix_cmd) apt install openssh-server rsync -y; '
-        'fi;'
+        'export DEBIAN_FRONTEND=noninteractive;'
+        'echo "Installing missing packages..."; '
+        'for i in {1..5}; do '
+        '  output=$($(prefix_cmd) apt install openssh-server rsync -y 2>&1); '
+        '  rc=$?; '
+        '  if [ $rc -eq 0 ]; then '
+        '    break; '
+        '  fi; '
+        '  echo "$output" | grep -qi "could not get lock" || grep -qi "Unable to acquire the dpkg frontend lock"; '
+        '  if [ $? -eq 0 ]; then '
+        '    echo "apt install failed due to lock, retrying... (Attempt $i/5)"; '
+        '    sleep 5; '
+        '  else '
+        '    echo "apt install failed for a non-lock reason: $output"; '
+        '    exit $rc; '
+        '  fi; '
+        'done; '
+        'if [ $rc -ne 0 ]; then '
+        '    echo "apt install failed after multiple attempts due to lock errors."; '
+        '    exit $rc; '
+        'fi; '
         '$(prefix_cmd) mkdir -p /var/run/sshd; '
         '$(prefix_cmd) '
         'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
@@ -770,6 +777,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # on most base images. E.g., do not use Python, since that may not
         # be installed by default.
         _check_user_privilege(namespace, context, uninitialized_pods_list)
+        _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
         if not provider_config.get('disable_ssh', False):
             _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
         else:
@@ -778,7 +786,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             # We do not auto-install rsync because apt update and apt install
             # are relatively heavyweight operations.
             _check_rsync_installed(namespace, context, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
 
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
