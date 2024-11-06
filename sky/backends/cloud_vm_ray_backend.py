@@ -3278,9 +3278,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} '
-            '2> /dev/null"')
+            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
