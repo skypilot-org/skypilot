@@ -302,11 +302,17 @@ class StrategyExecutor:
                 usage_lib.messages.usage.set_internal()
                 # Detach setup, so that the setup failure can be detected
                 # by the controller process (job_status -> FAILED_SETUP).
-                sky.launch(self.dag,
-                           cluster_name=self.cluster_name,
-                           detach_setup=True,
-                           detach_run=True,
-                           _is_launched_by_jobs_controller=True)
+                sky.launch(
+                    self.dag,
+                    cluster_name=self.cluster_name,
+                    # We expect to tear down the cluster as soon as the job is
+                    # finished. However, in case the controller dies, set
+                    # autodown to try and avoid a resource leak.
+                    idle_minutes_to_autostop=5,
+                    down=True,
+                    detach_setup=True,
+                    detach_run=True,
+                    _is_launched_by_jobs_controller=True)
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,
                     exceptions.NoCloudAccessError,
