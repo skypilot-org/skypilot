@@ -435,9 +435,11 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
         # Check and report package status before installing
         'echo "Checking for openssh-server..."; '
-        'if ! dpkg -l openssh-server 2>/dev/null | grep -q "^ii"; then echo "openssh-server not found"; NEED_SSH=1; else echo "openssh-server found"; fi; '
+        'if ! dpkg -l openssh-server 2>/dev/null | grep -q "^ii"; then echo '
+        '"openssh not found"; NEED_SSH=1; else echo "openssh found"; fi; '
         'echo "Checking for rsync..."; '
-        'if ! command -v rsync >/dev/null 2>&1; then echo "rsync not found"; NEED_RSYNC=1; else echo "rsync found"; fi; '
+        'if ! command -v rsync >/dev/null 2>&1; then echo '
+        '"rsync not found"; NEED_RSYNC=1; else echo "rsync found"; fi; '
         # Only run apt update/install if openssh-server or rsync is missing
         'if [ "${NEED_SSH}" = "1" ] || [ "${NEED_RSYNC}" = "1" ]; then '
         '  echo "Installing missing packages..."; '
