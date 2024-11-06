@@ -688,6 +688,8 @@ def _get_bucket_name_and_store_type_from_job_config(
             store = prefix.to_store_type().value
             return bucket_name, store
 
+    raise ValueError(f'Invalid bucket name with prefix: {bucket_wth_prefix}')
+
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   path: str) -> None:
