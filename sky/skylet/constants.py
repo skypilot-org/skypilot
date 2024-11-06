@@ -241,9 +241,7 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
-WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
-FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
-FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{id}'
 FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
 FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 

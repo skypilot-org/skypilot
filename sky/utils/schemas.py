@@ -3,6 +3,7 @@
 Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
+import copy
 import enum
 from typing import Any, Dict, List, Tuple
 
@@ -707,6 +708,12 @@ def get_config_schema():
             },
         }
     }
+    jobs_configs = copy.deepcopy(controller_resources_schema)
+    jobs_configs['properties']['bucket'] = {
+        'type': 'string',
+        'pattern': '^(https|s3|gs|r2|cos)://.+',
+        'required': []
+    }
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -724,9 +731,6 @@ def get_config_schema():
                 },
                 'disk_encrypted': {
                     'type': 'boolean',
-                },
-                'workdir_bucket_name': {
-                    'type': 'string',
                 },
                 'security_group_name':
                     (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
@@ -768,9 +772,6 @@ def get_config_schema():
                 'enable_gvnic': {
                     'type': 'boolean'
                 },
-                'workdir_bucket_name': {
-                    'type': 'string',
-                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -785,29 +786,6 @@ def get_config_schema():
                     'type': 'string',
                 },
                 'resource_group_vm': {
-                    'type': 'string',
-                },
-                'workdir_bucket_name': {
-                    'type': 'string',
-                },
-            }
-        },
-        'cloudflare': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'workdir_bucket_name': {
-                    'type': 'string',
-                },
-            }
-        },
-        'ibm': {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'workdir_bucket_name': {
                     'type': 'string',
                 },
             }
@@ -956,7 +934,7 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'jobs': controller_resources_schema,
+            'jobs': jobs_configs,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,

@@ -189,6 +189,27 @@ class StoreType(enum.Enum):
         return bucket_endpoint_url
 
 
+class StorePrefix(enum.Enum):
+    """Enum for the prefix of different stores."""
+    S3 = 's3://'
+    GCS = 'gs://'
+    AZURE = 'https://'
+    R2 = 'r2://'
+    IBM = 'cos://'
+
+    def to_store_type(self) -> StoreType:
+        if self == StorePrefix.S3:
+            return StoreType.S3
+        elif self == StorePrefix.GCS:
+            return StoreType.GCS
+        elif self == StorePrefix.AZURE:
+            return StoreType.AZURE
+        elif self == StorePrefix.R2:
+            return StoreType.R2
+        elif self == StorePrefix.IBM:
+            return StoreType.IBM
+
+
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
