@@ -705,12 +705,13 @@ def stop_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instance_ids = [inst.id for inst in instances]
-    ec2 = _default_ec2_resource(region)
-    _ec2_call_with_retry(
-        ec2,
-        ec2_recreation_fn=lambda: _default_ec2_resource(region),
-        ec2_operation_fn=lambda ec2: ec2.instances.stop(InstanceIds=instance_ids
-                                                       ))
+    if instance_ids:
+        ec2 = _default_ec2_resource(region)
+        _ec2_call_with_retry(
+            ec2,
+            ec2_recreation_fn=lambda: _default_ec2_resource(region),
+            ec2_operation_fn=lambda ec2: ec2.instances.stop(InstanceIds=
+                                                            instance_ids))
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
@@ -749,12 +750,13 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instance_ids = [inst.id for inst in instances]
-    ec2 = _default_ec2_resource(region)
-    _ec2_call_with_retry(
-        ec2,
-        ec2_recreation_fn=lambda: _default_ec2_resource(region),
-        ec2_operation_fn=lambda ec2: ec2.instances.terminate(InstanceIds=
-                                                             instance_ids))
+    if instance_ids:
+        ec2 = _default_ec2_resource(region)
+        _ec2_call_with_retry(
+            ec2,
+            ec2_recreation_fn=lambda: _default_ec2_resource(region),
+            ec2_operation_fn=lambda ec2: ec2.instances.terminate(InstanceIds=
+                                                                 instance_ids))
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need
@@ -921,7 +923,6 @@ def cleanup_ports(
     del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
     managed_by_skypilot = provider_config['security_group'].get(
         'ManagedBySkyPilot', True)
@@ -931,7 +932,7 @@ def cleanup_ports(
         # We only want to delete the SG that is dedicated to this cluster (i.e.,
         # this cluster have opened some ports).
         return
-    sg = _get_sg_from_name(ec2, sg_name)
+    sg = _get_sg_from_name(region, sg_name)
     if sg is None:
         logger.warning(
             'Find security group failed. Skip cleanup security group.')
