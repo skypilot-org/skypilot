@@ -333,19 +333,20 @@ def _run_function_with_retries(func: Callable,
                 raise
 
 
-def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_config: Dict[str, Any]) -> None:
+def pre_init(namespace: str, context: Optional[str], new_nodes: List,
+             provider_config: Dict[str, Any]) -> None:
     """Pre-initialization step for SkyPilot pods.
 
     This step is run in the pod right after it is created and before the 
-    SkyPilot runtime is setup. 
+    SkyPilot runtime is setup.
 
     This step includes three key steps:
 
-    1. Privilege check: Checks if the default user has sufficient privilege 
+    1. Privilege check: Checks if the default user has sufficient privilege
     to set up the kubernetes instance pod.
     2. SSH setup: Sets up SSH for the pod instance.
     3. Environment variable setup to populate k8s env vars in the pod.
-    
+
     Make sure commands used in these methods are generic and work
     on most base images. E.g., do not use Python, since that may not
     be installed by default.
@@ -358,7 +359,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_c
         namespace (str): Kubernetes namespace.
         context (Optional[str]): Kubernetes context.
         new_nodes (List): List of new pod instances.
-    
+
     Raises:
         config_lib.KubernetesError: If user privileges are insufficient or setup fails.
     """
@@ -375,7 +376,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_c
         f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  fi; '
         'fi;')
-    
+
     install_ssh_k8s_cmd = (
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
@@ -419,13 +420,12 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_c
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
-    
 
-    # If user disables SSH installation, we still need to check if rsync is 
+    # If user disables SSH installation, we still need to check if rsync is
     # installed
-    check_rsync_cmd = ('command -v rsync >/dev/null 2>&1 && echo installed ||'
-                       f' ( echo missing; exit {exceptions.RSYNC_NOT_INSTALLED_CODE}; )')
-    
+    check_rsync_cmd = (
+        'command -v rsync >/dev/null 2>&1 && echo installed ||'
+        f' ( echo missing; exit {exceptions.RSYNC_NOT_INSTALLED_CODE}; )')
 
     # Kubernetes automatically populates containers with critical
     # environment variables, such as those for discovering services running
@@ -437,12 +437,12 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_c
     # /etc/profile.d/, making them available for all users in future
     # shell sessions.
     set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
-    
+
     if not provider_config.get('disable_ssh', False):
         ssh_install_cmd = install_ssh_k8s_cmd
     else:
         # Just check if rsync is installed if user disables SSH installation
-        ssh_install_cmd = check_rsync_cmd    
+        ssh_install_cmd = check_rsync_cmd
 
     pre_init_cmd = 'set -ex; ' + check_k8s_user_sudo_cmd + ssh_install_cmd + set_k8s_env_var_cmd
 
@@ -454,24 +454,25 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_c
 
         # Run the combined pre-init command
         rc, stdout, _ = runner.run(pre_init_cmd,
-                                    require_outputs=True,
-                                    stream_logs=False)
+                                   require_outputs=True,
+                                   stream_logs=False)
         if rc == exceptions.INSUFFICIENT_PRIVILEGES_CODE:
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
                 'Ensure the default user has root access or '
                 '"sudo" is installed and the user is added to the sudoers '
                 'from the image.')
-        
+
         if rc == exceptions.RSYNC_NOT_INSTALLED_CODE:
             raise config_lib.KubernetesError(
                 'rsync is not installed in the container image. '
                 'File sync operations will fail. Please install rsync in '
                 'your container image or re-enable SSH, which will '
                 'install rsync for you.')
-        
+
         op_name = 'pre-init'
-        _raise_command_running_error(op_name, pre_init_cmd, pod_name, rc, stdout)
+        _raise_command_running_error(op_name, pre_init_cmd, pod_name, rc,
+                                     stdout)
 
         logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
 
@@ -727,7 +728,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
 
-        # Run pre-init steps in the pod. 
+        # Run pre-init steps in the pod.
         pre_init(namespace, context, uninitialized_pods_list, provider_config)
 
         for pod in uninitialized_pods.values():
