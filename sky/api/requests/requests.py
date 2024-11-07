@@ -24,9 +24,9 @@ API_SERVER_DB_LOCK_PATH = '~/.sky/api_server/.tasks.db.lock'
 
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
-# Stores the mapping between cluster names and request IDs.
-# This includes clusters that have not been provisioned yet.
-CLUSTER_TABLE = 'clusters'
+# Stores all the active clusters,
+# not including terminated or stopped clusters.
+CLUSTER_TABLE = 'active_clusters'
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -319,6 +319,31 @@ def remove_clusters(cluster_names: Optional[List[str]] = None,
                 cursor.execute(
                     f'DELETE FROM {CLUSTER_TABLE} WHERE cluster_name IN ({names_str})'
                 )
+
+
+@init_db
+def remove_cluster_request(cluster_name: str, request_id: str):
+    """Remove a request ID from the clusters table in task.db."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
+            cursor.execute(
+                f'SELECT request_ids FROM {CLUSTER_TABLE} WHERE cluster_name = ?',
+                (cluster_name,))
+            row = cursor.fetchone()
+            if row is not None:
+                request_ids = json.loads(row[0])
+                if request_id in request_ids:
+                    request_ids.remove(request_id)
+                    if len(request_ids) == 0:
+                        cursor.execute(
+                            f'DELETE FROM {CLUSTER_TABLE} WHERE cluster_name = ?',
+                            (cluster_name,))
+                    else:
+                        cursor.execute(
+                            f'UPDATE {CLUSTER_TABLE} SET request_ids = ? WHERE cluster_name = ?',
+                            (json.dumps(request_ids), cluster_name))
 
 
 @init_db
