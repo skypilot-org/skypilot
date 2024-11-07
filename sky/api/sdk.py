@@ -720,10 +720,13 @@ def abort(request_id: Optional[str] = None,
           all_requests: bool = False,
           cluster_names: Optional[List[str]] = None,
           all_clusters: bool = False) -> str:
-    """Abort a request or all requests.
+    """Abort requests.
 
     Args:
-        request_id: the ID of the request to abort. If None, abort all requests.
+        request_id: the ID of a single request to abort.
+        all_requests: abort all requests.
+        cluster_names: abort the list of clusters' lifecycle requests.
+        all_clusters: abort all cluster lifecycle requests.
     """
     body = payloads.AbortBody(request_id=request_id,
                               all=all_requests,

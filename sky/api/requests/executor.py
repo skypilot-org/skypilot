@@ -190,10 +190,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to {e}')
-            if request_task.request_body.cluster_name:
-                requests.remove_cluster_request(
-                    request_task.request_body.cluster_name, request_id)
-            return None
+            return_value = None
         else:
             with requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
@@ -202,6 +199,16 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                     request_task.set_return_value(return_value)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
+
+        # Clean up cluster table.
+        with requests.update_request(request_id) as request_task:
+            assert request_task is not None, request_id
+            if request_task.request_body.cluster_name and request_task.status in (
+                    requests.RequestStatus.ABORTED,
+                    requests.RequestStatus.FAILED,
+                    requests.RequestStatus.SUCCEEDED):
+                requests.remove_cluster_request(
+                    request_task.request_body.cluster_name, request_id)
         return return_value
 
 

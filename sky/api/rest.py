@@ -297,6 +297,7 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
         func=execution.launch,
         schedule_type=executor.ScheduleType.BLOCKING,
     )
+
     requests_lib.add_cluster_request(launch_body.cluster_name, request_id)
 
 
@@ -643,6 +644,7 @@ async def stream(
 
 @app.post('/abort')
 async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
+    """Abort requests."""
     # Create a list of target abort requests.
     request_ids = []
     if abort_body.all:

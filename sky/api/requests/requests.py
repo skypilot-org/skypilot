@@ -19,14 +19,13 @@ from sky.api.requests.serializers import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
 
-TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
-API_SERVER_DB_LOCK_PATH = '~/.sky/api_server/.tasks.db.lock'
-
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
-# Stores all the active clusters,
-# not including terminated or stopped clusters.
-CLUSTER_TABLE = 'active_clusters'
+# Stores clusters that have any ongoing API requests.
+CLUSTER_TABLE = 'cluster_ongoing_requests'
+
+TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+CLUSTER_TABLE_LOCK_PATH = f'~/.sky/api_server/.{CLUSTER_TABLE}.lock'
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -283,7 +282,7 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 
 @init_db
 def add_cluster_request(cluster_name: str, request_id: str):
-    """Add a request ID to the clusters table in task.db."""
+    """Add a cluster request to the clusters table."""
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -307,7 +306,7 @@ def add_cluster_request(cluster_name: str, request_id: str):
 @init_db
 def remove_clusters(cluster_names: Optional[List[str]] = None,
                     all_clusters: bool = False):
-    """Remove a list of clusters from the clusters table in task.db."""
+    """Remove a list of clusters from the clusters table."""
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -323,7 +322,9 @@ def remove_clusters(cluster_names: Optional[List[str]] = None,
 
 @init_db
 def remove_cluster_request(cluster_name: str, request_id: str):
-    """Remove a request ID from the clusters table in task.db."""
+    """Remove a request from a cluster if exists.
+    After the removal if the cluster has no requests, remove the cluster.
+    """
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -349,14 +350,7 @@ def remove_cluster_request(cluster_name: str, request_id: str):
 @init_db
 def get_cluster_request_ids(cluster_names: Optional[List[str]] = None,
                             all_clusters: bool = False) -> List[str]:
-    """Get request IDs for a list of clusters.
-    
-    Args:
-        cluster_names: List of cluster names to get request IDs for.
-        
-    Returns:
-        List of request IDs associated with the clusters.
-    """
+    """Get all the request IDs of a given list of clusters."""
     assert _DB is not None
     request_ids = []
     with _DB.conn:
