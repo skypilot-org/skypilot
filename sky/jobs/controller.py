@@ -66,7 +66,8 @@ class JobsController:
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
         self._dag_graph = self._dag.get_graph()
-        self._ready_tasks: queue.Queue[int] = self._initialize_ready_tasks()
+        # TODO(andy): add type arguments, stuck by old pylint.
+        self._ready_tasks: queue.Queue = self._initialize_ready_tasks()
         self._task_status: Dict['sky.Task', TaskStatus] = {}
 
         # Add a unique identifier to the task environment variables, so that
@@ -100,10 +101,10 @@ class JobsController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
-    def _initialize_ready_tasks(self) -> queue.Queue[int]:
+    def _initialize_ready_tasks(self) -> queue.Queue:
         """Initialize a queue with tasks that are ready to execute
         (no dependencies)."""
-        ready_tasks: queue.Queue[int] = queue.Queue()
+        ready_tasks: queue.Queue = queue.Queue()
         for task in self._dag_graph.nodes():
             if self._dag_graph.in_degree(task) == 0:
                 task_id = self._dag.tasks.index(task)
@@ -378,7 +379,8 @@ class JobsController:
             if is_task_runnable(successor):
                 self._ready_tasks.put(successor_id)
 
-    def _handle_future_completion(self, future: futures.Future[bool],
+    # TODO(andy): add type arguments, stuck by old pylint.
+    def _handle_future_completion(self, future: futures.Future,
                                   task_id: int) -> None:
         succeeded = False
         try:
@@ -449,7 +451,7 @@ class JobsController:
         max_workers = self._num_tasks
         managed_job_utils.make_launch_log_dir_for_redirection(self._job_id)
         with futures.ThreadPoolExecutor(max_workers) as executor:
-            future_to_task: Dict[futures.Future[bool], int] = {}
+            future_to_task: Dict[futures.Future, int] = {}
             while not all_tasks_completed():
                 while not self._ready_tasks.empty():
                     task_id = self._ready_tasks.get()
