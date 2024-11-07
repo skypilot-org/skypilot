@@ -730,7 +730,6 @@ def terminate_instances(
     sg_name = provider_config['security_group']['GroupName']
     managed_by_skypilot = provider_config['security_group'].get(
         'ManagedBySkyPilot', True)
-    ec2 = _default_ec2_resource(region)
     filters = [
         {
             'Name': 'instance-state-name',
@@ -745,11 +744,12 @@ def terminate_instances(
             'Values': ['worker'],
         })
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
-    instances = _filter_instances(ec2,
+    instances = _filter_instances(region,
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
     instance_ids = [inst.id for inst in instances]
+    ec2 = _default_ec2_resource(region)
     _ec2_call_with_retry(
         ec2,
         ec2_recreation_fn=lambda: _default_ec2_resource(region),
