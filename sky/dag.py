@@ -1,4 +1,5 @@
 """DAGs: user applications to be run."""
+import tempfile
 import threading
 import typing
 from typing import Dict, List, Optional, Set, Union
@@ -257,6 +258,79 @@ class Dag:
             return False
 
         return nx.is_directed_acyclic_graph(self.graph)
+
+    def plot(self, to_file: Optional[str] = None) -> Optional[str]:
+        """Visualize the DAG structure and save or display it as an image.
+
+        Args:
+            to_file: Optional; the file path to save the DAG visualization.
+                    If not provided, a temporary file will be created.
+
+        Returns:
+            The file path to the saved image, or None if displayed in Jupyter.
+        """
+
+        # Import matplotlib at runtime to keep core installation lightweight.
+        # Raises ImportError if not installed, prompting user to install
+        # manually.
+        try:
+            # pylint: disable=import-outside-toplevel
+            import matplotlib.pyplot as plt
+        except ImportError:
+            with ux_utils.print_exception_no_traceback():
+                raise ImportError(
+                    'matplotlib is not required for DAG visualization. '
+                    'Please install it using `pip install matplotlib`.'
+                ) from None
+
+        pos = nx.spring_layout(self.graph, k=0.7, seed=42)
+        _, ax = plt.subplots(figsize=(10, 8))
+
+        nx.draw(self.graph,
+                pos,
+                ax=ax,
+                node_size=1000,
+                node_color='skyblue',
+                font_size=8,
+                font_weight='bold',
+                arrows=True)
+
+        labels: Dict['task.Task',
+                     str] = {node: str(node) for node in self.graph.nodes()}
+
+        nx.draw_networkx_labels(self.graph,
+                                pos,
+                                labels,
+                                font_size=7,
+                                ax=ax,
+                                verticalalignment='center',
+                                horizontalalignment='center',
+                                bbox=dict(facecolor='white',
+                                          edgecolor='gray',
+                                          boxstyle='round,pad=0.3'))
+
+        ax.margins(0.2)
+        plt.subplots_adjust(left=0.15, right=0.85, top=0.85, bottom=0.15)
+
+        if to_file is None:
+            tmp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            to_file = tmp_file.name
+            tmp_file.close()
+
+        plt.savefig(to_file, bbox_inches='tight')
+        plt.close()
+
+        try:
+            # Try to display the image in Jupyter Notebook
+            # pylint: disable=import-outside-toplevel
+            from IPython.display import display
+            from IPython.display import Image
+            display(Image(filename=to_file))
+            return None
+        except ImportError:
+            pass
+
+        return to_file
 
 
 class _DagContext(threading.local):
