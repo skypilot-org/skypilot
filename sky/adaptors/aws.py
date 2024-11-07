@@ -32,12 +32,17 @@ import functools
 import logging
 import threading
 import time
+import typing
 
 from sky.adaptors import common
 from sky.utils import common_utils
 
+if typing.TYPE_CHECKING:
+    import boto3 as boto3_lib
+
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
                          'Try pip install "skypilot[aws]"')
+
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
 botocore = common.LazyImport('botocore',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
@@ -88,12 +93,12 @@ def _assert_kwargs_builtin_type(kwargs):
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
-def session():
+def session() -> 'boto3_lib.session.Session':
     """Create an AWS session."""
     return boto3.session.Session()
 
 
-def get_session():
+def get_session() -> 'boto3_lib.session.Session':
     attempt = 0
     backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
     while True:
@@ -132,7 +137,8 @@ def get_session():
 # The creation of the resource/client is relatively fast (around 0.3s), so the
 # performance impact is negligible.
 # Reference: https://github.com/skypilot-org/skypilot/issues/2697
-def resource(service_name: str, **kwargs):
+def resource(service_name: str,
+             **kwargs) -> 'boto3_lib.resource.base.ServiceResource':
     """Create an AWS resource of a certain service.
 
     Args:
@@ -154,7 +160,7 @@ def resource(service_name: str, **kwargs):
     return get_session().resource(service_name, **kwargs)
 
 
-def client(service_name: str, **kwargs):
+def client(service_name: str, **kwargs) -> 'boto3_lib.client.Client':
     """Create an AWS client of a certain service.
 
     Args:

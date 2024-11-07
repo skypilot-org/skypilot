@@ -9,7 +9,8 @@ import logging
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+import typing
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from sky import sky_logging
 from sky import status_lib
@@ -22,6 +23,9 @@ from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import boto3
 
 logger = sky_logging.init_logger(__name__)
 
@@ -55,7 +59,8 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
 
 
-def _default_ec2_resource(region: str) -> Any:
+def _default_ec2_resource(
+        region: str) -> 'boto3.resources.base.ServiceResource':
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
         # imported before and stale. Used for, e.g., a live jobs controller
@@ -98,6 +103,11 @@ def _default_ec2_resource(region: str) -> Any:
                         max_attempts=BOTO_MAX_RETRIES)
 
 
+def _default_ec2_fail_fast(
+        region: str) -> 'boto3.resources.base.ServiceResource':
+    return aws.resource('ec2', region_name=region, max_attempts=0)
+
+
 def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     return [{
         'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
@@ -105,37 +115,77 @@ def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     }]
 
 
-def _ec2_call_with_retry_on_server_error(ec2_fail_fast_fn: Callable[..., _T],
-                                         log_level=logging.DEBUG,
-                                         **kwargs) -> _T:
+def _ec2_call_with_retry(
+    cached_ec2: 'boto3.resources.base.ServiceResource',
+    ec2_recreation_fn: Callable[[], 'boto3.resources.base.ServiceResource'],
+    ec2_operation_fn: Callable[['boto3.resources.base.ServiceResource'], _T],
+    log_level=logging.DEBUG
+) -> Tuple['boto3.resources.base.ServiceResource', _T]:
+    """Retry the ec2 operation with backoff.
+
+    This function is a wrapper around the ec2 operation function, and will
+    retry the operation with backoff.
+
+    It is responsible for:
+    - Handling 'RequestLimitExceeded' error by backing off.
+    - Refreshing the cached ec2 resource if credentials are expired (especially
+      for assumed role credential rotation).
+
+    Note: The operation function is expected to call the method that actually
+    reaches out to AWS, e.g. list(ec2.instances.filter(...)), instead of
+    ec2.instances.filter(...), where the latter only returns a lazy iterable
+    object without actually making any API calls.
+    """
     # Here we have to handle 'RequestLimitExceeded' error, so the provision
     # would not fail due to request limit issues.
     # Here the backoff config (5, 12) is picked at random and does not
     # have any special meaning.
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=12)
     ret = None
+    credentials_refreshed = False
     for _ in range(utils.BOTO_MAX_RETRIES):
         try:
-            ret = ec2_fail_fast_fn(**kwargs)
+            ret = ec2_operation_fn(cached_ec2)
             break
         except aws.botocore_exceptions().ClientError as e:
             # Retry server side errors, as they are likely to be transient.
             # https://docs.aws.amazon.com/AWSEC2/latest/APIReference/errors-overview.html#api-error-codes-table-server # pylint: disable=line-too-long
             error_code = e.response['Error']['Code']
             if error_code in [
-                    'RequestLimitExceeded', 'ServerInternal',
-                    'ServiceUnavailable', 'InternalError', 'Unavailable'
+                    'RequestLimitExceeded',
+                    'ServerInternal',
+                    'ServiceUnavailable',
+                    'InternalError',
+                    'Unavailable',
             ]:
                 time.sleep(backoff.current_backoff())
                 logger.debug(f'create_instances: {error_code}, retrying.')
                 continue
+            if error_code == 'UnauthorizedOperation' and not credentials_refreshed:
+                # Refresh the cached ec2 resource to get the latest credentials.
+                # We will retry until the credentials are refreshed in the
+                # underlying boto3 session.
+                cached_ec2 = ec2_recreation_fn()
+                logger.debug('create_instances: Credentials refreshed.')
+                credentials_refreshed = True
+                continue
             logger.log(log_level, f'create_instances: Attempt failed with {e}')
+            raise
+        except aws.botocore_exceptions().NoCredentialsError:
+            # Refresh the cached ec2 resource to get the latest credentials.
+            # We will retry until the credentials are refreshed in the
+            # underlying boto3 session.
+            if not credentials_refreshed:
+                cached_ec2 = ec2_recreation_fn()
+                logger.debug('create_instances: Credentials refreshed.')
+                credentials_refreshed = True
+                continue
             raise
     if ret is None:
         raise RuntimeError(
-            f'Failed to call ec2 function {ec2_fail_fast_fn} due to '
+            f'Failed to call ec2 function {ec2_operation_fn} due to '
             'RequestLimitExceeded. Max attempts exceeded.')
-    return ret
+    return cached_ec2, ret
 
 
 def _format_tags(tags: Dict[str, str]) -> List:
@@ -231,8 +281,11 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
             }]
             conf['NetworkInterfaces'] = network_interfaces
 
-            instances = _ec2_call_with_retry_on_server_error(
-                ec2_fail_fast.create_instances, **conf)
+            ec2_fail_fast, instances = _ec2_call_with_retry(
+                ec2_fail_fast,
+                ec2_recreation_fn=lambda: _default_ec2_fail_fast(
+                    ec2_fail_fast.meta.region_name),
+                ec2_operation_fn=lambda ec2: ec2.create_instances(**conf))
             return instances
         except aws.botocore_exceptions().ClientError as exc:
             echo = logger.debug
@@ -272,7 +325,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # NOTE: We set max_attempts=0 for fast failing when the resource is not
     # available (although the doc says it will only retry for network
     # issues, practically, it retries for capacity errors, etc as well).
-    ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
+    ec2_fail_fast = _default_ec2_fail_fast(region)
 
     region = ec2.meta.client.meta.region_name
     zone = None
@@ -288,7 +341,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         'Name': f'tag:{constants.TAG_RAY_CLUSTER_NAME}',
         'Values': [cluster_name_on_cloud],
     }]
-    exist_instances = list(ec2.instances.filter(Filters=filters))
+    ec2, exist_instances = _ec2_call_with_retry(
+        ec2,
+        ec2_recreation_fn=lambda: _default_ec2_resource(region),
+        ec2_operation_fn=lambda ec2: list(ec2.instances.filter(Filters=filters)
+                                         ))
     exist_instances.sort(key=lambda x: x.id)
     head_instance_id = _get_head_instance_id(exist_instances)
 
@@ -329,10 +386,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             tag for tag in target_instance.tags
             if not tag['Key'].startswith('aws:')
         ]
-        ec2.meta.client.create_tags(
-            Resources=[target_instance.id],
-            Tags=target_instance_tags + node_tag,
-        )
+        _ec2_call_with_retry(
+            ec2,
+            ec2_recreation_fn=lambda: _default_ec2_resource(region),
+            ec2_operation_fn=lambda ec2: ec2.meta.client.create_tags(
+                Resources=[target_instance.id],
+                Tags=target_instance_tags + node_tag,
+            ))
         return target_instance.id
 
     if head_instance_id is None:
@@ -415,14 +475,22 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         resumed_instances.sort(key=lambda x: x.id)
         resumed_instance_ids = [t.id for t in resumed_instances]
         logger.debug(f'Resuming stopped instances {resumed_instance_ids}.')
-        _ec2_call_with_retry_on_server_error(
-            ec2_fail_fast.meta.client.start_instances,
-            InstanceIds=resumed_instance_ids,
+        _ec2_call_with_retry(
+            ec2_fail_fast,
+            ec2_recreation_fn=lambda: _default_ec2_fail_fast(region),
+            ec2_operation_fn=lambda ec2_fail_fast: ec2_fail_fast.meta.client.
+            start_instances(InstanceIds=resumed_instance_ids,),
             log_level=logging.WARNING)
         if tags:
             # empty tags will result in error in the API call
-            ec2.meta.client.create_tags(Resources=resumed_instance_ids,
-                                        Tags=_format_tags(tags))
+            _ec2_call_with_retry(
+                ec2,
+                ec2_recreation_fn=lambda: _default_ec2_resource(region),
+                ec2_operation_fn=lambda ec2: ec2.meta.client.create_tags(
+                    Resources=resumed_instance_ids,
+                    Tags=_format_tags(tags),
+                ),
+                log_level=logging.WARNING)
             for inst in resumed_instances:
                 inst.tags = _format_tags(tags)  # sync the tags info
         placement_zone = resumed_instances[0].placement['AvailabilityZone']
@@ -550,21 +618,28 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                   created_instance_ids=created_instance_ids)
 
 
-def _filter_instances(ec2, filters: List[Dict[str, Any]],
-                      included_instances: Optional[List[str]],
-                      excluded_instances: Optional[List[str]]):
-    instances = ec2.instances.filter(Filters=filters)
+def _filter_instances(
+    region: str, filters: List[Dict[str, Any]],
+    included_instances: Optional[List[str]],
+    excluded_instances: Optional[List[str]]
+) -> List['boto3.resources.base.ServiceResource.Instance']:
+    ec2 = _default_ec2_resource(region)
+    _, instances = _ec2_call_with_retry(
+        ec2,
+        ec2_recreation_fn=lambda: _default_ec2_resource(region),
+        ec2_operation_fn=lambda ec2: list(ec2.instances.filter(Filters=filters)
+                                         ))
     if included_instances is not None and excluded_instances is not None:
         raise ValueError('"included_instances" and "exclude_instances"'
                          'cannot be specified at the same time.')
     if included_instances is not None:
-        instances = instances.filter(InstanceIds=included_instances)
-    elif excluded_instances is not None:
-        included_instances = []
-        for inst in list(instances):
-            if inst.id not in excluded_instances:
-                included_instances.append(inst.id)
-        instances = instances.filter(InstanceIds=included_instances)
+        instances = [
+            inst for inst in instances if inst.id in included_instances
+        ]
+    if excluded_instances is not None:
+        instances = [
+            inst for inst in instances if inst.id not in excluded_instances
+        ]
     return instances
 
 
@@ -581,9 +656,8 @@ def query_instances(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
-    ec2 = _default_ec2_resource(region)
     filters = _cluster_name_filter(cluster_name_on_cloud)
-    instances = _filter_instances(ec2,
+    instances = _filter_instances(region,
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
@@ -614,7 +688,6 @@ def stop_instances(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
-    ec2 = _default_ec2_resource(region)
     filters: List[Dict[str, Any]] = [
         {
             'Name': 'instance-state-name',
@@ -627,11 +700,17 @@ def stop_instances(
             'Name': f'tag:{constants.TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
-    instances = _filter_instances(ec2,
+    instances = _filter_instances(region,
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances.stop()
+    instance_ids = [inst.id for inst in instances]
+    ec2 = _default_ec2_resource(region)
+    _ec2_call_with_retry(
+        ec2,
+        ec2_recreation_fn=lambda: _default_ec2_resource(region),
+        ec2_operation_fn=lambda ec2: ec2.instances.stop(InstanceIds=instance_ids
+                                                       ))
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
@@ -670,7 +749,12 @@ def terminate_instances(
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
-    instances.terminate()
+    instance_ids = [inst.id for inst in instances]
+    _ec2_call_with_retry(
+        ec2,
+        ec2_recreation_fn=lambda: _default_ec2_resource(region),
+        ec2_operation_fn=lambda ec2: ec2.instances.terminate(InstanceIds=
+                                                             instance_ids))
     if (sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME or
             not managed_by_skypilot):
         # Using default AWS SG or user specified security group. We don't need
@@ -691,17 +775,22 @@ def terminate_instances(
 
 
 def _get_sg_from_name(
-    ec2: Any,
+    region: str,
     sg_name: str,
 ) -> Any:
     # GroupNames will only filter SGs in the default VPC, so we need to use
     # Filters here. Ref:
     # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
-    sgs = ec2.security_groups.filter(Filters=[{
-        'Name': 'group-name',
-        'Values': [sg_name]
-    }])
-    num_sg = len(list(sgs))
+    ec2 = _default_ec2_resource(region)
+    _, sgs = _ec2_call_with_retry(
+        ec2,
+        ec2_recreation_fn=lambda: _default_ec2_resource(region),
+        ec2_operation_fn=lambda ec2: list(
+            ec2.security_groups.filter(Filters=[{
+                'Name': 'group-name',
+                'Values': [sg_name]
+            }])))
+    num_sg = len(sgs)
     if num_sg == 0:
         logger.warning(f'Expected security group {sg_name} not found. ')
         return None
@@ -711,7 +800,7 @@ def _get_sg_from_name(
         # same name.
         logger.warning(f'Found {num_sg} security groups with name {sg_name}. ')
         return None
-    return list(sgs)[0]
+    return sgs[0]
 
 
 def _maybe_move_to_new_sg(
@@ -747,7 +836,6 @@ def open_ports(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
     filters = [
         {
@@ -757,7 +845,7 @@ def open_ports(
         },
         *_cluster_name_filter(cluster_name_on_cloud),
     ]
-    instances = _filter_instances(ec2,
+    instances = _filter_instances(region,
                                   filters,
                                   included_instances=None,
                                   excluded_instances=None)
@@ -766,7 +854,7 @@ def open_ports(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Instance with cluster name '
                              f'{cluster_name_on_cloud} not found.')
-    sg = _get_sg_from_name(ec2, sg_name)
+    sg = _get_sg_from_name(region, sg_name)
     if sg is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot find new security group '
@@ -871,7 +959,6 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     # TODO(suquark): unify state for different clouds
     # possible exceptions: https://github.com/boto/boto3/issues/176
     ec2 = _default_ec2_resource(region)
-    client = ec2.meta.client
 
     filters = [
         {
@@ -896,7 +983,12 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
         })
 
     # boto3 waiter would wait for an empty list forever
-    instances = list(ec2.instances.filter(Filters=filters))
+    ec2, instances = _ec2_call_with_retry(
+        ec2,
+        ec2_recreation_fn=lambda: _default_ec2_resource(region),
+        ec2_operation_fn=lambda ec2: list(ec2.instances.filter(Filters=filters)
+                                         ))
+    client = ec2.meta.client
     logger.debug(instances)
     if not instances:
         raise RuntimeError(
@@ -919,7 +1011,6 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    ec2 = _default_ec2_resource(region)
     filters = [
         {
             'Name': 'instance-state-name',
@@ -930,7 +1021,10 @@ def get_cluster_info(
             'Values': [cluster_name_on_cloud],
         },
     ]
-    running_instances = list(ec2.instances.filter(Filters=filters))
+    running_instances = _filter_instances(region,
+                                          filters,
+                                          included_instances=None,
+                                          excluded_instances=None)
     head_instance_id = _get_head_instance_id(running_instances)
 
     instances = {}
