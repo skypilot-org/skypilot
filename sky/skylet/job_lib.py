@@ -539,6 +539,7 @@ def update_job_status(job_ids: List[int],
 
     This function should only be run on the remote instance with ray>=2.4.0.
     """
+    echo = logger.info if not silent else logger.debug
     if len(job_ids) == 0:
         return []
 
@@ -570,6 +571,7 @@ def update_job_status(job_ids: List[int],
                     # was killed before the job is submitted. We should set it
                     # to FAILED then. Note, if ray job indicates the job is
                     # running, we will change status to PENDING below.
+                    echo(f'INIT job {job_id} is stale, setting to FAILED')
                     status = JobStatus.FAILED
 
             try:
@@ -590,9 +592,9 @@ def update_job_status(job_ids: List[int],
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
                 if pending_job['created_time'] < psutil.boot_time():
-                    logger.info(f'Job {job_id} is stale, setting to FAILED: '
-                                f'created_time={pending_job["created_time"]}, '
-                                f'boot_time={psutil.boot_time()}')
+                    echo(f'Job {job_id} is stale, setting to FAILED: '
+                         f'created_time={pending_job["created_time"]}, '
+                         f'boot_time={psutil.boot_time()}')
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
                     status = JobStatus.FAILED
@@ -612,16 +614,15 @@ def update_job_status(job_ids: List[int],
                 status = original_status
                 if (original_status is not None and
                         not original_status.is_terminal()):
-                    logger.info(f'Ray job status for job {job_id} is None, '
-                                'setting it to FAILED.')
+                    echo(f'Ray job status for job {job_id} is None, '
+                         'setting it to FAILED.')
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
                     # is RUNNING or PENDING.
                     status = JobStatus.FAILED
                     _set_status_no_lock(job_id, status)
-                    if not silent:
-                        logger.info(f'Updated job {job_id} status to {status}')
+                    echo(f'Updated job {job_id} status to {status}')
             else:
                 # Taking max of the status is necessary because:
                 # 1. It avoids race condition, where the original status has
@@ -637,8 +638,7 @@ def update_job_status(job_ids: List[int],
                 assert status is not None, (job_id, status, original_status)
                 if status != original_status:  # Prevents redundant update.
                     _set_status_no_lock(job_id, status)
-                    if not silent:
-                        logger.info(f'Updated job {job_id} status to {status}')
+                    echo(f'Updated job {job_id} status to {status}')
         statuses.append(status)
     return statuses
 
