@@ -67,12 +67,15 @@ def _thread_local_lru_cache(maxsize=32):
     local_cache = _ThreadLocalLRUCache(maxsize)
 
     def decorator(func):
+        cached_func = local_cache.cache(func)
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             # Use the thread-local LRU cache
-            return local_cache.cache(func)(*args, **kwargs)
+            return cached_func(*args, **kwargs)
 
+        # Expose cache_clear() method
+        wrapper.cache_clear = cached_func.cache_clear
         return wrapper
 
     return decorator
@@ -94,7 +97,8 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
         The created AWS object.
     """
     attempt = 0
-    backoff = common_utils.Backoff()
+    backoff = common_utils.Backoff(initial_backoff_seconds=0.1,
+                                   max_backoff_seconds=2)
     while True:
         try:
             # Creating the boto3 objects are not thread-safe,
@@ -106,6 +110,10 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
             # and we are not sure if the code inside 'session()' or
             # 'session().xx()' is thread-safe.
             with _session_creation_lock:
+                # Check if the credentials are valid, and we should retry
+                # if the credentials are not valid. The retry is needed because
+                # the credentials may be rotated for assumed roles.
+                session().get_credentials()
                 return creation_fn_or_cls()
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
@@ -115,6 +123,7 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
             time.sleep(backoff.current_backoff())
             logger.info(f'Retry creating AWS {object_name} due to '
                         f'{common_utils.format_exception(e)}.')
+            session.cache_clear()
 
 
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
