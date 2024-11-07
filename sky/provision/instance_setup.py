@@ -264,6 +264,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         f'--disable-usage-stats '
         f'--port={constants.SKY_REMOTE_RAY_PORT} '
         f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+        f'--min-worker-port 11002 '
         f'--object-manager-port=8076 '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
