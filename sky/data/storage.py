@@ -255,7 +255,8 @@ class AbstractStore:
                  source: Optional[SourceType],
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 sub_dir: Optional[str] = None):
         """Initialize AbstractStore
 
         Args:
@@ -269,6 +270,11 @@ class AbstractStore:
               there. This is set to false when the Storage object is created not
               for direct use, e.g. for 'sky storage delete', or the storage is
               being re-used, e.g., for `sky start` on a stopped cluster.
+            sub_dir: str; The prefix of the directory to be created in the
+              store, e.g. if sub_dir=my-dir, the files will be uploaded to
+              s3://<bucket>/my-dir/.
+              This only works if source is a local directory.
+              # TODO(zpoint): Add support for non-local source.
 
         Raises:
             StorageBucketCreateError: If bucket creation fails
@@ -280,6 +286,8 @@ class AbstractStore:
         self.region = region
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
+
+        self.sub_dir = sub_dir
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -481,7 +489,8 @@ class Storage(object):
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
-                 sync_on_reconstruction: bool = True) -> None:
+                 sync_on_reconstruction: bool = True,
+                 sub_dir: Optional[str] = None) -> None:
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -519,6 +528,8 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
+          sub_dir: Optional[str]; The subdirectory to use for the
+            storage object.
         """
         self.name: str
         self.source = source
@@ -526,6 +537,7 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
+        self.sub_dir = sub_dir
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
         # for spot. Once sky storage supports forced management for external
@@ -838,7 +850,9 @@ class Storage(object):
                                  'to be reconstructed while the corresponding '
                                  'bucket was externally deleted.')
                 continue
-
+            # This one can't be retrieved from metadata since its set every time
+            # we create a new storage object.
+            store.sub_dir = self.sub_dir
             self._add_store(store, is_reconstructed=True)
 
     @classmethod
@@ -894,6 +908,7 @@ class Storage(object):
                             f'storage account {storage_account_name!r}.')
             else:
                 logger.info(f'Storage type {store_type} already exists.')
+
             return self.stores[store_type]
 
         store_cls: Type[AbstractStore]
@@ -918,7 +933,8 @@ class Storage(object):
                 name=self.name,
                 source=self.source,
                 region=region,
-                sync_on_reconstruction=self.sync_on_reconstruction)
+                sync_on_reconstruction=self.sync_on_reconstruction,
+                sub_dir=self.sub_dir)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -1047,6 +1063,7 @@ class Storage(object):
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
+        sub_dir = config.pop('sub_dir', None)
         if force_delete is None:
             force_delete = False
 
@@ -1066,7 +1083,8 @@ class Storage(object):
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
-                          mode=mode)
+                          mode=mode,
+                          sub_dir=sub_dir)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
 
@@ -1112,11 +1130,12 @@ class S3Store(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-east-2',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True):
+                 sync_on_reconstruction: bool = True,
+                 sub_dir: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, sub_dir)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1314,9 +1333,10 @@ class S3Store(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
-                            f's3://{self.name}')
+                            f's3://{self.name}{sub_dir}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -1328,9 +1348,11 @@ class S3Store(AbstractStore):
                 for file_name in excluded_list
             ])
             src_dir_path = shlex.quote(src_dir_path)
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+                            f's3://{self.name}{sub_dir}/{dest_dir_name}')
+            print(sync_command)
             return sync_command
 
         # Generate message for upload
@@ -1544,11 +1566,12 @@ class GcsStore(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-central1',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 sub_dir: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: StorageHandle
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, sub_dir)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1782,9 +1805,10 @@ class GcsStore(AbstractStore):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -x \'^(?!{sync_format}$).*\' '
-                            f'{base_dir_path} gs://{self.name}')
+                            f'{base_dir_path} gs://{self.name}{sub_dir}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -1794,9 +1818,10 @@ class GcsStore(AbstractStore):
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+                            f'gs://{self.name}{sub_dir}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -2026,7 +2051,8 @@ class AzureBlobStore(AbstractStore):
                  storage_account_name: str = '',
                  region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True):
+                 sync_on_reconstruction: bool = True,
+                 sub_dir: Optional[str] = None):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.container_name: str
@@ -2038,7 +2064,7 @@ class AzureBlobStore(AbstractStore):
         if region is None:
             region = 'eastus'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, sub_dir)
 
     @classmethod
     def from_metadata(cls, metadata: AbstractStore.StoreMetadata,
@@ -2506,13 +2532,15 @@ class AzureBlobStore(AbstractStore):
             includes_list = ';'.join(file_names)
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
+            container_path = (f'{self.container_name}/{self.sub_dir}'
+                              if self.sub_dir else self.container_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
-                            f'--container {self.container_name}')
+                            f'--container {container_path}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
@@ -2523,8 +2551,9 @@ class AzureBlobStore(AbstractStore):
                 [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            container_path = (f'{self.container_name}/{dest_dir_name}'
-                              if dest_dir_name else self.container_name)
+            container_path = (
+                f'{self.container_name}/{self.sub_dir}/{dest_dir_name}'
+                if self.sub_dir else f'{self.container_name}/{dest_dir_name}')
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
@@ -2769,11 +2798,12 @@ class R2Store(AbstractStore):
                  source: str,
                  region: Optional[str] = 'auto',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 sub_dir: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, sub_dir)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2912,11 +2942,12 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
-                            f's3://{self.name} '
+                            f's3://{self.name}{sub_dir} '
                             f'--endpoint {endpoint_url} '
                             f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
@@ -2931,11 +2962,12 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name} '
+                            f's3://{self.name}{sub_dir}/{dest_dir_name} '
                             f'--endpoint {endpoint_url} '
                             f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
@@ -3154,11 +3186,12 @@ class IBMCosStore(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-east',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True):
+                 sync_on_reconstruction: bool = True,
+                 sub_dir: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, sub_dir)
         self.bucket_rclone_profile = \
           Rclone.generate_rclone_bucket_profile_name(
             self.name, Rclone.RcloneClouds.IBM)
@@ -3347,10 +3380,11 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = (
-                'rclone copy --exclude ".git/*" '
-                f'{src_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
+            sync_command = ('rclone copy --exclude ".git/*" '
+                            f'{src_dir_path} '
+                            f'{self.bucket_rclone_profile}:{self.name}{sub_dir}'
+                            f'/{dest_dir_name}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -3376,9 +3410,11 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('rclone copy '
-                            f'{includes} {base_dir_path} '
-                            f'{self.bucket_rclone_profile}:{self.name}')
+            sub_dir = f'/{self.sub_dir}' if self.sub_dir else ''
+            sync_command = (
+                'rclone copy '
+                f'{includes} {base_dir_path} '
+                f'{self.bucket_rclone_profile}:{self.name}{sub_dir}')
             return sync_command
 
         # Generate message for upload

@@ -300,6 +300,9 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            'sub_dir': {
+                'type': 'string',
+            },
             '_force_delete': {
                 'type': 'boolean',
             }
