@@ -603,7 +603,6 @@ class SSHCommandRunner(CommandRunner):
                                                skip_num_lines=skip_num_lines,
                                                source_bashrc=source_bashrc)
         command = base_ssh_command + [shlex.quote(command_str)]
-        # DEBUG: simulate the command being too long
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
