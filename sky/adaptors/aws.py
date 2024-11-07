@@ -85,7 +85,6 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
-
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
@@ -93,10 +92,10 @@ def session():
     """Create an AWS session."""
     return boto3.session.Session()
 
+
 def get_session():
     attempt = 0
-    backoff = common_utils.Backoff(initial_backoff=0.5,
-                                   max_backoff_factor=4)
+    backoff = common_utils.Backoff(initial_backoff=0.5, max_backoff_factor=4)
     while True:
         try:
             # Creating the boto3 objects are not thread-safe,
