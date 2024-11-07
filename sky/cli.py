@@ -3036,9 +3036,9 @@ def show_gpus(
     and spot instances. There may be multiple regions with the same lowest
     price.
 
-    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
-    of the GPU available on a single node and the real-time availability of
-    the GPU across all nodes in the Kubernetes cluster.
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
 
     Definitions of certain fields:
 
