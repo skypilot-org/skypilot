@@ -32,7 +32,6 @@ import functools
 import logging
 import threading
 import time
-from typing import Any, Callable
 
 from sky.adaptors import common
 from sky.utils import common_utils
@@ -86,19 +85,18 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
-def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
-                       object_name: str) -> Any:
-    """Create an AWS object.
 
-    Args:
-        creation_fn: The function to create the AWS object.
+# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# same session object, which is not guaranteed to be thread-safe.
+@_thread_local_lru_cache()
+def session():
+    """Create an AWS session."""
+    return boto3.session.Session()
 
-    Returns:
-        The created AWS object.
-    """
+def get_session():
     attempt = 0
-    backoff = common_utils.Backoff(initial_backoff_seconds=0.1,
-                                   max_backoff_seconds=2)
+    backoff = common_utils.Backoff(initial_backoff=0.5,
+                                   max_backoff_factor=4)
     while True:
         try:
             # Creating the boto3 objects are not thread-safe,
@@ -113,25 +111,18 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
                 # Check if the credentials are valid, and we should retry
                 # if the credentials are not valid. The retry is needed because
                 # the credentials may be rotated for assumed roles.
-                session().get_credentials()
-                return creation_fn_or_cls()
+                s = session()
+                s.get_credentials()
+                return s
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
             attempt += 1
             if attempt >= _MAX_ATTEMPT_FOR_CREATION:
                 raise
             time.sleep(backoff.current_backoff())
-            logger.info(f'Retry creating AWS {object_name} due to '
+            logger.info(f'Retry creating AWS session due to '
                         f'{common_utils.format_exception(e)}.')
             session.cache_clear()
-
-
-# The LRU cache needs to be thread-local to avoid multiple threads sharing the
-# same session object, which is not guaranteed to be thread-safe.
-@_thread_local_lru_cache()
-def session():
-    """Create an AWS session."""
-    return _create_aws_object(boto3.session.Session, 'session')
 
 
 # Avoid caching the resource/client objects. If we are using the assumed role,
@@ -161,8 +152,7 @@ def resource(service_name: str, **kwargs):
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
-    return _create_aws_object(
-        lambda: session().resource(service_name, **kwargs), 'resource')
+    return get_session().resource(service_name, **kwargs)
 
 
 def client(service_name: str, **kwargs):
@@ -176,9 +166,7 @@ def client(service_name: str, **kwargs):
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
-
-    return _create_aws_object(lambda: session().client(service_name, **kwargs),
-                              'client')
+    return get_session().client(service_name, **kwargs)
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
