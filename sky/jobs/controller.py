@@ -9,7 +9,7 @@ import queue
 import time
 import traceback
 import typing
-from typing import Dict, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import filelock
 
@@ -66,14 +66,14 @@ class JobsController:
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
         self._dag_graph = self._dag.get_graph()
-        self._ready_tasks = self._initialize_ready_tasks()
+        self._ready_tasks: queue.Queue[int] = self._initialize_ready_tasks()
         self._task_status: Dict['sky.Task', TaskStatus] = {}
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
         # Example value:
         #   sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
-        job_id_env_vars = []
+        job_id_env_vars: List[str] = []
         for i, task in enumerate(self._dag.tasks):
             if self._num_tasks <= 1:
                 task_name = self._dag_name
@@ -100,10 +100,10 @@ class JobsController:
                 job_id_env_vars)
             task.update_envs(task_envs)
 
-    def _initialize_ready_tasks(self) -> queue.Queue:
+    def _initialize_ready_tasks(self) -> queue.Queue[int]:
         """Initialize a queue with tasks that are ready to execute
         (no dependencies)."""
-        ready_tasks: queue.Queue = queue.Queue()
+        ready_tasks: queue.Queue[int] = queue.Queue()
         for task in self._dag_graph.nodes():
             if self._dag_graph.in_degree(task) == 0:
                 task_id = self._dag.tasks.index(task)
@@ -368,7 +368,7 @@ class JobsController:
         `_handle_future_completion` runs sequentially in the main thread via
         `futures.wait()`.
         """
-        is_task_runnable = lambda task: (all(
+        is_task_runnable: Callable[['sky.Task'], bool] = lambda task: (all(
             self._task_status.get(pred) == TaskStatus.COMPLETED
             for pred in self._dag_graph.predecessors(task)
         ) and self._task_status.get(task) != TaskStatus.CANCELLED)
@@ -378,7 +378,7 @@ class JobsController:
             if is_task_runnable(successor):
                 self._ready_tasks.put(successor_id)
 
-    def _handle_future_completion(self, future: futures.Future,
+    def _handle_future_completion(self, future: futures.Future[bool],
                                   task_id: int) -> None:
         succeeded = False
         try:
@@ -449,7 +449,7 @@ class JobsController:
         max_workers = self._num_tasks
         managed_job_utils.make_launch_log_dir_for_redirection(self._job_id)
         with futures.ThreadPoolExecutor(max_workers) as executor:
-            future_to_task = {}
+            future_to_task: Dict[futures.Future[bool], int] = {}
             while not all_tasks_completed():
                 while not self._ready_tasks.empty():
                     task_id = self._ready_tasks.get()
@@ -501,7 +501,7 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool) -> None:
     jobs_controller.run()
 
 
-def _handle_signal(job_id) -> None:
+def _handle_signal(job_id: int) -> None:
     """Handle the signal if the user sent it."""
     signal_file = pathlib.Path(
         managed_job_utils.SIGNAL_FILE_PREFIX.format(job_id))
@@ -554,7 +554,7 @@ def _cleanup(job_id: int, dag_yaml: str) -> None:
         backend.teardown_ephemeral_storage(task)
 
 
-def start(job_id, dag_yaml, retry_until_up) -> None:
+def start(job_id: int, dag_yaml: str, retry_until_up: bool) -> None:
     """Start the controller."""
     controller_process = None
     cancelling = False
