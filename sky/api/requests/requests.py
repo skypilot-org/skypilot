@@ -20,6 +20,13 @@ from sky.utils import common_utils
 from sky.utils import db_utils
 
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+API_SERVER_DB_LOCK_PATH = '~/.sky/api_server/.tasks.db.lock'
+
+# Tables in task.db.
+REQUEST_TABLE = 'requests'
+# Stores the mapping between cluster names and request IDs.
+# This includes clusters that have not been provisioned yet.
+CLUSTER_TABLE = 'clusters'
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -206,9 +213,9 @@ def create_table(cursor, conn):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Table for Clusters
+    # Table for Requests
     cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS requests (
+        CREATE TABLE IF NOT EXISTS {} (
         request_id TEXT PRIMARY KEY,
         name TEXT,
         entrypoint TEXT,
@@ -217,7 +224,13 @@ def create_table(cursor, conn):
         created_at REAL,
         return_value TEXT,
         error BLOB,
-        pid INTEGER)""")
+        pid INTEGER)""".format(REQUEST_TABLE))
+
+    # Table for Clusters
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS {} (
+        cluster_name TEXT PRIMARY KEY,
+        request_ids TEXT)""".format(CLUSTER_TABLE))
 
 
 _DB = None
@@ -242,9 +255,7 @@ def reset_db():
 
 
 def request_lock_path(request_id: str) -> str:
-    request_lock = os.path.join(os.path.dirname(_DB_PATH),
-                                f'.{request_id}.lock')
-    return request_lock
+    return os.path.join(os.path.dirname(_DB_PATH), f'.{request_id}.lock')
 
 
 @contextlib.contextmanager
@@ -262,7 +273,7 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM requests WHERE request_id LIKE ?',
+        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} WHERE request_id LIKE ?',
                        (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
@@ -271,14 +282,85 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 
 
 @init_db
+def add_cluster_request(cluster_name: str, request_id: str):
+    """Add a request ID to the clusters table in task.db."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
+            cursor.execute(
+                f'SELECT request_ids FROM {CLUSTER_TABLE} WHERE cluster_name = ?',
+                (cluster_name,))
+            row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    f'INSERT INTO {CLUSTER_TABLE} (cluster_name, request_ids) VALUES (?, ?)',
+                    (cluster_name, json.dumps([request_id])))
+            else:
+                request_ids = json.loads(row[0])
+                request_ids.append(request_id)
+                cursor.execute(
+                    f'UPDATE {CLUSTER_TABLE} SET request_ids = ? WHERE cluster_name = ?',
+                    (json.dumps(request_ids), cluster_name))
+
+
+@init_db
+def remove_clusters(cluster_names: Optional[List[str]] = None,
+                    all_clusters: bool = False):
+    """Remove a list of clusters from the clusters table in task.db."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
+            if all_clusters:
+                cursor.execute(f'DELETE FROM {CLUSTER_TABLE}')
+            elif cluster_names is not None:
+                names_str = ','.join(f"'{name}'" for name in cluster_names)
+                cursor.execute(
+                    f'DELETE FROM {CLUSTER_TABLE} WHERE cluster_name IN ({names_str})'
+                )
+
+
+@init_db
+def get_cluster_request_ids(cluster_names: Optional[List[str]] = None,
+                            all_clusters: bool = False) -> List[str]:
+    """Get request IDs for a list of clusters.
+    
+    Args:
+        cluster_names: List of cluster names to get request IDs for.
+        
+    Returns:
+        List of request IDs associated with the clusters.
+    """
+    assert _DB is not None
+    request_ids = []
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
+            if all_clusters:
+                cursor.execute(f'SELECT request_ids FROM {CLUSTER_TABLE}')
+            elif cluster_names is not None:
+                names_str = ','.join(f"'{name}'" for name in cluster_names)
+                cursor.execute(
+                    f'SELECT request_ids FROM {CLUSTER_TABLE} WHERE cluster_name IN ({names_str})'
+                )
+            for row in cursor.fetchall():
+                request_ids.extend(json.loads(row[0]))
+    return request_ids
+
+
+@init_db
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT request_id FROM requests ORDER BY created_at DESC LIMIT 1')
+        cursor.execute(
+            f'SELECT request_id FROM {REQUEST_TABLE} ORDER BY created_at DESC LIMIT 1'
+        )
         row = cursor.fetchone()
         return row[0] if row else None
+
 
 @init_db
 def get_request(request_id: str) -> Optional[Request]:
@@ -308,7 +390,7 @@ def get_request_tasks(
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'SELECT * FROM requests {status_filter}'
+        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} {status_filter}'
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:
@@ -327,8 +409,8 @@ def _dump_request_no_lock(request: Request):
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'INSERT OR REPLACE INTO requests VALUES ({fill_str})',
-                       row)
+        cursor.execute(
+            f'INSERT OR REPLACE INTO {REQUEST_TABLE} VALUES ({fill_str})', row)
 
 
 @init_db

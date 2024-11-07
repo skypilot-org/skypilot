@@ -257,6 +257,12 @@ class RequestIdBody(RequestBody):
     all: bool = False
 
 
+class AbortBody(RequestIdBody):
+    """The request body for the abort endpoint."""
+    cluster_names: Optional[List[str]] = None
+    all_clusters: bool = False
+
+
 class ServeUpBody(RequestBody):
     """The request body for the serve up endpoint."""
     task: str

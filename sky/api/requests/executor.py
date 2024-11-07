@@ -190,6 +190,9 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to {e}')
+            if request_task.name == 'launch':
+                requests.remove_clusters(
+                    [request_task.request_body.cluster_name])
             return None
         else:
             with requests.update_request(request_id) as request_task:

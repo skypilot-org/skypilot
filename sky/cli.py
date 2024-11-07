@@ -2844,6 +2844,13 @@ def _down_or_stop_clusters(
             option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
+    # Abort API requests for clusters.
+    if sdk == sdk_lib:
+        if apply_to_all:
+            sdk.abort(all_clusters=True)
+        elif len(names) > 0:
+            sdk.abort(cluster_names=names)
+
     if len(names) > 0:
         controllers = [
             name for name in names
@@ -5555,7 +5562,8 @@ def api_get(request_id: Optional[str], log_path: Optional[str]):
         # TODO(zhwu): get the latest request ID.
         raise click.BadParameter('Please provide the request ID or log path.')
     if request_id is not None and log_path is not None:
-        raise click.BadParameter('Only one of request ID and log path can be provided.')
+        raise click.BadParameter(
+            'Only one of request ID and log path can be provided.')
     sdk.stream_and_get(request_id, log_path)
 
 
@@ -5574,9 +5582,7 @@ def api_abort(request_id: Optional[str], all: bool):
     if request_id is None and not all:
         raise click.BadParameter('Either specify a request ID or use --all to '
                                  'abort all requests.')
-    if all:
-        request_id = None
-    sdk.abort(request_id)
+    sdk.abort(request_id=request_id, all_requests=all)
 
 
 @api.command('ls', cls=_DocumentedCodeCommand)

@@ -36,6 +36,7 @@ from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -288,7 +289,6 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     Args:
         task: The YAML string of the task to launch.
     """
-
     request_id = request.state.request_id
     executor.schedule_request(
         request_id,
@@ -297,6 +297,7 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
         func=execution.launch,
         schedule_type=executor.ScheduleType.BLOCKING,
     )
+    requests_lib.add_cluster_request(launch_body.cluster_name, request_id)
 
 
 @app.post('/exec')
@@ -371,6 +372,8 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
         func=core.start,
         schedule_type=executor.ScheduleType.BLOCKING,
     )
+    requests_lib.add_cluster_request(start_body.cluster_name,
+                                     request.state.request_id)
 
 
 @app.post('/autostop')
@@ -603,9 +606,10 @@ async def stream(
         plain_logs: bool = True) -> fastapi.responses.StreamingResponse:
 
     if request_id is not None and log_path is not None:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='Only one of request_id and log_path can be provided')
-    
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='Only one of request_id and log_path can be provided')
+
     if request_id is None and log_path is None:
         request_id = requests_lib.get_latest_request_id()
         if request_id is None:
@@ -616,15 +620,16 @@ async def stream(
         request_task = requests_lib.get_request(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}')
-            raise fastapi.HTTPException(status_code=404,
-                                        detail=f'Request {request_id} not found')
+            raise fastapi.HTTPException(
+                status_code=404, detail=f'Request {request_id} not found')
         log_path = request_task.log_path
     else:
         # Make sure the log path is under ~/sky_logs.
         resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
-        if not str(resolved_log_path).startswith(os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
-            raise fastapi.HTTPException(status_code=400,
-                                        detail=f'Unauthorized log path: {log_path}')
+        if not str(resolved_log_path).startswith(
+                os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
+            raise fastapi.HTTPException(
+                status_code=400, detail=f'Unauthorized log path: {log_path}')
         log_path = resolved_log_path
 
     return fastapi.responses.StreamingResponse(
@@ -637,10 +642,11 @@ async def stream(
 
 
 @app.post('/abort')
-async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
+async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
+    # Create a list of target abort requests.
     request_ids = []
-    if abort_body.request_id is None:
-        print('Aborting all requests')
+    if abort_body.all:
+        print('Aborting all requests...')
         request_ids = [
             request_task.request_id
             for request_task in requests_lib.get_request_tasks(status=[
@@ -648,19 +654,31 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
                 requests_lib.RequestStatus.PENDING
             ])
         ]
+    elif abort_body.all_clusters:
+        print('Aborting all cluster requests...')
+        request_ids = requests_lib.get_cluster_request_ids(all_clusters=True)
+        requests_lib.remove_clusters(all_clusters=True)
     else:
-        print(f'Aborting request ID: {abort_body.request_id}')
-        request_ids = [abort_body.request_id]
+        if abort_body.request_id is not None:
+            print(f'Aborting request ID: {abort_body.request_id}')
+            request_ids.append(abort_body.request_id)
+        if abort_body.cluster_names is not None:
+            print(
+                f'Aborting all requests for clusters {abort_body.cluster_names}'
+            )
+            request_ids = requests_lib.get_cluster_request_ids(
+                abort_body.cluster_names)
+            requests_lib.remove_clusters(abort_body.cluster_names)
 
+    # Abort the target requests.
     for request_id in request_ids:
         with requests_lib.update_request(request_id) as request_record:
             if request_record is None:
-                print(f'No task with request ID {request_id}')
-                raise fastapi.HTTPException(
-                    status_code=404, detail=f'Request {request_id} not found')
+                print(f'No request ID {request_id}')
+                continue
             if request_record.status > requests_lib.RequestStatus.RUNNING:
                 print(f'Request {request_id} already finished')
-                return
+                continue
             request_record.status = requests_lib.RequestStatus.ABORTED
             pid = request_record.pid
         if pid is not None:

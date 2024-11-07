@@ -609,7 +609,8 @@ def get(request_id: str) -> Any:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def stream_and_get(request_id: Optional[str] = None, log_path: Optional[str] = None) -> Any:
+def stream_and_get(request_id: Optional[str] = None,
+                   log_path: Optional[str] = None) -> Any:
     """Stream the logs of a request and get the final result.
 
     This will block until the request is finished. The request id can be a
@@ -715,14 +716,19 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 
 @usage_lib.entrypoint
-def abort(request_id: Optional[str] = None) -> str:
+def abort(request_id: Optional[str] = None,
+          all_requests: bool = False,
+          cluster_names: Optional[List[str]] = None,
+          all_clusters: bool = False) -> str:
     """Abort a request or all requests.
 
     Args:
         request_id: the ID of the request to abort. If None, abort all requests.
     """
-    body = payloads.RequestIdBody(request_id=request_id)
-    print(f'Sending abort request to API server for {request_id}')
+    body = payloads.AbortBody(request_id=request_id,
+                              all=all_requests,
+                              cluster_names=cluster_names,
+                              all_clusters=all_clusters)
     response = requests.post(f'{api_common.get_server_url()}/abort',
                              json=json.loads(body.model_dump_json()),
                              timeout=5)
