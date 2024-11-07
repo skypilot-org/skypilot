@@ -298,8 +298,6 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
         schedule_type=executor.ScheduleType.BLOCKING,
     )
 
-    requests_lib.add_cluster_request(launch_body.cluster_name, request_id)
-
 
 @app.post('/exec')
 # pylint: disable=redefined-builtin
@@ -373,8 +371,6 @@ async def start(request: fastapi.Request, start_body: payloads.StartBody):
         func=core.start,
         schedule_type=executor.ScheduleType.BLOCKING,
     )
-    requests_lib.add_cluster_request(start_body.cluster_name,
-                                     request.state.request_id)
 
 
 @app.post('/autostop')
@@ -647,19 +643,21 @@ async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
     """Abort requests."""
     # Create a list of target abort requests.
     request_ids = []
+    statuses = [
+        requests_lib.RequestStatus.RUNNING, requests_lib.RequestStatus.PENDING
+    ]
     if abort_body.all:
         print('Aborting all requests...')
         request_ids = [
             request_task.request_id
-            for request_task in requests_lib.get_request_tasks(status=[
-                requests_lib.RequestStatus.RUNNING,
-                requests_lib.RequestStatus.PENDING
-            ])
+            for request_task in requests_lib.get_request_tasks(status=statuses)
         ]
     elif abort_body.all_clusters:
         print('Aborting all cluster requests...')
-        request_ids = requests_lib.get_cluster_request_ids(all_clusters=True)
-        requests_lib.remove_clusters(all_clusters=True)
+        request_ids = [
+            request_task.request_id for request_task in
+            requests_lib.get_request_tasks(status=statuses, all_clusters=True)
+        ]
     else:
         if abort_body.request_id is not None:
             print(f'Aborting request ID: {abort_body.request_id}')
@@ -668,9 +666,11 @@ async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
             print(
                 f'Aborting all requests for clusters {abort_body.cluster_names}'
             )
-            request_ids = requests_lib.get_cluster_request_ids(
-                abort_body.cluster_names)
-            requests_lib.remove_clusters(abort_body.cluster_names)
+            request_ids.extend([
+                request_task.request_id
+                for request_task in requests_lib.get_request_tasks(
+                    status=statuses, cluster_names=abort_body.cluster_names)
+            ])
 
     # Abort the target requests.
     for request_id in request_ids:

@@ -21,11 +21,8 @@ from sky.utils import db_utils
 
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
-# Stores clusters that have any ongoing API requests.
-CLUSTER_TABLE = 'cluster_ongoing_requests'
-
+COL_CLUSTER_NAME = 'cluster_name'
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
-CLUSTER_TABLE_LOCK_PATH = f'~/.sky/api_server/.{CLUSTER_TABLE}.lock'
 
 # TODO(zhwu): For scalability, there are several TODOs:
 # [x] Have a way to queue requests.
@@ -57,6 +54,7 @@ REQUEST_COLUMNS = [
     'error',
     'pid',
     'created_at',
+    COL_CLUSTER_NAME,
 ]
 
 
@@ -128,11 +126,20 @@ class Request:
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
-        return cls.decode(RequestPayload(**dict(zip(REQUEST_COLUMNS, row))))
+        return cls.decode(RequestPayload(**dict(zip(REQUEST_COLUMNS, row[:-1]))))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
-        return tuple(getattr(payload, k) for k in REQUEST_COLUMNS)
+        row = []
+        for k in REQUEST_COLUMNS:
+            if k == COL_CLUSTER_NAME:
+                cluster_name = ''
+                if hasattr(self.request_body, COL_CLUSTER_NAME):
+                    cluster_name = self.request_body.cluster_name
+                row.append(cluster_name)
+            else:
+                row.append(getattr(payload, k))
+        return tuple(row)
 
     def readable_encode(self) -> RequestPayload:
         """Serialize the request task."""
@@ -223,13 +230,8 @@ def create_table(cursor, conn):
         created_at REAL,
         return_value TEXT,
         error BLOB,
-        pid INTEGER)""".format(REQUEST_TABLE))
-
-    # Table for Clusters
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS {} (
-        cluster_name TEXT PRIMARY KEY,
-        request_ids TEXT)""".format(CLUSTER_TABLE))
+        pid INTEGER,
+        {} TEXT)""".format(REQUEST_TABLE, COL_CLUSTER_NAME))
 
 
 _DB = None
@@ -281,94 +283,6 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
 
 
 @init_db
-def add_cluster_request(cluster_name: str, request_id: str):
-    """Add a cluster request to the clusters table."""
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
-            cursor.execute(
-                f'SELECT request_ids FROM {CLUSTER_TABLE} WHERE cluster_name = ?',
-                (cluster_name,))
-            row = cursor.fetchone()
-            if row is None:
-                cursor.execute(
-                    f'INSERT INTO {CLUSTER_TABLE} (cluster_name, request_ids) VALUES (?, ?)',
-                    (cluster_name, json.dumps([request_id])))
-            else:
-                request_ids = json.loads(row[0])
-                request_ids.append(request_id)
-                cursor.execute(
-                    f'UPDATE {CLUSTER_TABLE} SET request_ids = ? WHERE cluster_name = ?',
-                    (json.dumps(request_ids), cluster_name))
-
-
-@init_db
-def remove_clusters(cluster_names: Optional[List[str]] = None,
-                    all_clusters: bool = False):
-    """Remove a list of clusters from the clusters table."""
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
-            if all_clusters:
-                cursor.execute(f'DELETE FROM {CLUSTER_TABLE}')
-            elif cluster_names is not None:
-                names_str = ','.join(f"'{name}'" for name in cluster_names)
-                cursor.execute(
-                    f'DELETE FROM {CLUSTER_TABLE} WHERE cluster_name IN ({names_str})'
-                )
-
-
-@init_db
-def remove_cluster_request(cluster_name: str, request_id: str):
-    """Remove a request from a cluster if exists.
-    After the removal if the cluster has no requests, remove the cluster.
-    """
-    assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
-            cursor.execute(
-                f'SELECT request_ids FROM {CLUSTER_TABLE} WHERE cluster_name = ?',
-                (cluster_name,))
-            row = cursor.fetchone()
-            if row is not None:
-                request_ids = json.loads(row[0])
-                if request_id in request_ids:
-                    request_ids.remove(request_id)
-                    if len(request_ids) == 0:
-                        cursor.execute(
-                            f'DELETE FROM {CLUSTER_TABLE} WHERE cluster_name = ?',
-                            (cluster_name,))
-                    else:
-                        cursor.execute(
-                            f'UPDATE {CLUSTER_TABLE} SET request_ids = ? WHERE cluster_name = ?',
-                            (json.dumps(request_ids), cluster_name))
-
-
-@init_db
-def get_cluster_request_ids(cluster_names: Optional[List[str]] = None,
-                            all_clusters: bool = False) -> List[str]:
-    """Get all the request IDs of a given list of clusters."""
-    assert _DB is not None
-    request_ids = []
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        with filelock.FileLock(API_SERVER_DB_LOCK_PATH):
-            if all_clusters:
-                cursor.execute(f'SELECT request_ids FROM {CLUSTER_TABLE}')
-            elif cluster_names is not None:
-                names_str = ','.join(f"'{name}'" for name in cluster_names)
-                cursor.execute(
-                    f'SELECT request_ids FROM {CLUSTER_TABLE} WHERE cluster_name IN ({names_str})'
-                )
-            for row in cursor.fetchall():
-                request_ids.extend(json.loads(row[0]))
-    return request_ids
-
-
-@init_db
 def get_latest_request_id() -> Optional[str]:
     """Get the latest request ID."""
     assert _DB is not None
@@ -400,16 +314,37 @@ def create_if_not_exists(request: Request) -> bool:
 
 @init_db
 def get_request_tasks(
-        status: Optional[List[RequestStatus]] = None) -> List[Request]:
-    """Get a REST task."""
-    status_filter = ''
+        status: Optional[List[RequestStatus]] = None,
+        cluster_names: Optional[List[str]] = None,
+        all_clusters: bool = False) -> List[Request]:
+    """Get a list of requests that match the given filters.
+
+    Args:
+        status: a list of statuses of the requests to filter on.
+        cluster_names: a list of cluster names to filter the requests on.
+        all_clusters: if True, get all requests that have a valid cluster name.
+    """
+    filters = []
     if status is not None:
         status_list_str = ','.join(repr(status.value) for status in status)
-        status_filter = f'WHERE status IN ({status_list_str})'
+        filters.append(f'status IN ({status_list_str})')
+    if all_clusters:
+        filters.append(f"{COL_CLUSTER_NAME} IS NOT NULL AND {COL_CLUSTER_NAME} != ''")
+    elif cluster_names is not None:
+        cluster_names_str = ','.join(f"'{name}'" for name in cluster_names)
+        filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} {status_filter}'
+        filter_str = ''
+        for i in range(len(filters)):
+            if i == 0:
+                filter_str = 'WHERE ' + filters[i]
+            else:
+                filter_str += ' AND ' + filters[i]
+        print(f'YIKADEBUG SELECT * FROM {REQUEST_TABLE} {filter_str} '
+              'ORDER BY created_at DESC')
+        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} {filter_str} '
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:
@@ -430,17 +365,3 @@ def _dump_request_no_lock(request: Request):
         cursor = _DB.conn.cursor()
         cursor.execute(
             f'INSERT OR REPLACE INTO {REQUEST_TABLE} VALUES ({fill_str})', row)
-
-
-@init_db
-def dump_reqest(request: Request):
-    """Dump a REST task."""
-    with filelock.FileLock(request_lock_path(request.request_id)):
-        _dump_request_no_lock(request)
-
-
-# def _check_process_alive(pid: int) -> bool:
-#     """Check if a process is alive."""
-
-#     psutil_process = psutil.Process(pid)
-#     return psutil_process.is_running()
