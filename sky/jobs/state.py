@@ -35,6 +35,7 @@ def _get_db_path() -> str:
 
 _DB_PATH = _get_db_path()
 
+
 # === Database schema ===
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a managed job (called spot for legacy reason, as it is generalized
@@ -87,34 +88,34 @@ def create_table(cursor, conn):
     # The original `job_id` no longer has an actual meaning, but only a legacy
     # identifier for all tasks in database.
     db_utils.add_column_to_table(cursor,
-                                conn,
-                                'spot',
-                                'spot_job_id',
-                                'INTEGER',
-                                copy_from='job_id')
+                                 conn,
+                                 'spot',
+                                 'spot_job_id',
+                                 'INTEGER',
+                                 copy_from='job_id')
     db_utils.add_column_to_table(cursor,
-                                conn,
-                                'spot',
-                                'task_id',
-                                'INTEGER DEFAULT 0',
-                                value_to_replace_existing_entries=0)
+                                 conn,
+                                 'spot',
+                                 'task_id',
+                                 'INTEGER DEFAULT 0',
+                                 value_to_replace_existing_entries=0)
     db_utils.add_column_to_table(cursor,
-                                conn,
-                                'spot',
-                                'task_name',
-                                'TEXT',
-                                copy_from='job_name')
+                                 conn,
+                                 'spot',
+                                 'task_name',
+                                 'TEXT',
+                                 copy_from='job_name')
 
     # Specs is some useful information about the task, e.g., the
     # max_restarts_on_errors value. It is stored in JSON format.
     db_utils.add_column_to_table(cursor,
-                                conn,
-                                'spot',
-                                'specs',
-                                'TEXT',
-                                value_to_replace_existing_entries=json.dumps({
-                                    'max_restarts_on_errors': 0,
-                                }))
+                                 conn,
+                                 'spot',
+                                 'specs',
+                                 'TEXT',
+                                 value_to_replace_existing_entries=json.dumps({
+                                     'max_restarts_on_errors': 0,
+                                 }))
 
     # `job_info` contains the mapping from job_id to the job_name.
     # In the future, it may contain more information about each job.
@@ -123,6 +124,7 @@ def create_table(cursor, conn):
         spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT)""")
     conn.commit()
+
 
 # Module-level connection/cursor; thread-safe as the module is only imported
 # once.
