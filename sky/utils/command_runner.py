@@ -117,6 +117,14 @@ def ssh_options_list(
             'ControlMaster': 'auto',
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
             'ControlPersist': '300s',
+            # Send a keepalive message every 60 seconds to prevent the
+            # connection from being closed by the server. This is useful when
+            # a custom ssh_proxy_command is used, which may drop the connection
+            # if it is idle for the first master connection.
+            'ServerAliveInterval': 60,
+            # If no keepalive message is received within 5 * 60 seconds,
+            # the connection will be closed.
+            'ServerAliveCountMax': 5,
         })
     ssh_key_option = [
         '-i',
@@ -424,7 +432,7 @@ class SSHCommandRunner(CommandRunner):
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
         docker_user: Optional[str] = None,
-        disable_control_master: Optional[bool] = True,
+        disable_control_master: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
