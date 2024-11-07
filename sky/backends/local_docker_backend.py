@@ -131,13 +131,14 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         pass
 
     def _provision(
-            self,
-            task: 'task_lib.Task',
-            to_provision: Optional['resources.Resources'],
-            dryrun: bool,
-            stream_logs: bool,
-            cluster_name: str,
-            retry_until_up: bool = False
+        self,
+        task: 'task_lib.Task',
+        to_provision: Optional['resources.Resources'],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        retry_until_up: bool = False,
+        skip_if_config_hash_matches: Optional[str] = None
     ) -> Optional[LocalDockerResourceHandle]:
         """Builds docker image for the task and returns cluster name as handle.
 
@@ -153,6 +154,9 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
                 'Ignored the flag.')
+        if skip_if_config_hash_matches is not None:
+            logger.warning(f'Config hashing is not supported in backend: '
+                           f'{self.NAME}. Ignored skip_if_config_hash_matches.')
         if stream_logs:
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '

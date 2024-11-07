@@ -108,6 +108,7 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    skip_unecessary_provisioning: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
@@ -128,8 +129,9 @@ def _execute(
         Note that if errors occur during provisioning/data syncing/setting up,
         the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
-      handle: Optional[backends.ResourceHandle]; if provided, execution will use
-        an existing backend cluster handle instead of provisioning a new one.
+      handle: Optional[backends.ResourceHandle]; if provided, execution will
+        attempt to use an existing backend cluster handle instead of
+        provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
       retry_until_up: bool; whether to retry the provisioning until the cluster
@@ -150,6 +152,11 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
+      clone_disk_from: Optional[str]; if set, clone the disk from the specified
+        cluster.
+      skip_unecessary_provisioning: bool; if True, compare the calculated
+        cluster config to the current cluster's config. If they match, shortcut
+        provisioning even if we have Stage.PROVISION.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -179,9 +186,13 @@ def _execute(
             f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
+    existing_config_hash = None
     if cluster_name is not None:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_exists = cluster_record is not None
+        if cluster_record is not None:
+            cluster_exists = True
+            if skip_unecessary_provisioning:
+                existing_config_hash = cluster_record['config_hash']
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -279,13 +290,18 @@ def _execute(
 
     try:
         if Stage.PROVISION in stages:
-            if handle is None:
-                handle = backend.provision(task,
-                                           task.best_resources,
-                                           dryrun=dryrun,
-                                           stream_logs=stream_logs,
-                                           cluster_name=cluster_name,
-                                           retry_until_up=retry_until_up)
+            assert handle is None or skip_unecessary_provisioning, (
+                'Provisioning requested, but handle is already set. PROVISION '
+                'should be excluded from stages or '
+                'skip_unecessary_provisioning should be set. ')
+            handle = backend.provision(
+                task,
+                task.best_resources,
+                dryrun=dryrun,
+                stream_logs=stream_logs,
+                cluster_name=cluster_name,
+                retry_until_up=retry_until_up,
+                skip_if_config_hash_matches=existing_config_hash)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -459,6 +475,7 @@ def launch(
 
     handle = None
     stages = None
+    skip_unecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
         maybe_handle = global_user_state.get_handle_from_cluster_name(
@@ -472,14 +489,18 @@ def launch(
                     check_cloud_vm_ray_backend=False,
                     dryrun=dryrun)
                 handle = maybe_handle
-                # Get all stages
+                logger.info('provision')
                 stages = [
+                    # Provisioning will be short-circuited if the existing
+                    # cluster config hash matches the calculated one.
+                    Stage.PROVISION,
                     Stage.SYNC_WORKDIR,
                     Stage.SYNC_FILE_MOUNTS,
                     Stage.PRE_EXEC,
                     Stage.EXEC,
                     Stage.DOWN,
                 ]
+                skip_unecessary_provisioning = True
             except exceptions.ClusterNotUpError:
                 # Proceed with normal provisioning
                 pass
@@ -500,6 +521,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        skip_unecessary_provisioning=skip_unecessary_provisioning,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,

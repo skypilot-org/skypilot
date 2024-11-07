@@ -1314,6 +1314,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
+        skip_if_config_hash_matches: Optional[str],
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         # Get log_path name
@@ -1424,8 +1425,15 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
+
+            if skip_if_config_hash_matches == config_dict['config_hash']:
+                logger.info('Skipping provisioning of cluster with matching '
+                            'config hash.')
+                return config_dict
+
             if dryrun:
                 return config_dict
+
             cluster_config_file = config_dict['ray']
 
             launched_resources = to_provision.copy(region=region.name)
@@ -1937,6 +1945,7 @@ class RetryingVmProvisioner(object):
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
+        skip_if_config_hash_matches: Optional[str],
     ) -> Dict[str, Any]:
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
@@ -1986,7 +1995,8 @@ class RetryingVmProvisioner(object):
                     cloud_user_identity=cloud_user,
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
-                    prev_cluster_ever_up=prev_cluster_ever_up)
+                    prev_cluster_ever_up=prev_cluster_ever_up,
+                    skip_if_config_hash_matches=skip_if_config_hash_matches)
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2687,13 +2697,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return valid_resource
 
     def _provision(
-            self,
-            task: task_lib.Task,
-            to_provision: Optional[resources_lib.Resources],
-            dryrun: bool,
-            stream_logs: bool,
-            cluster_name: str,
-            retry_until_up: bool = False) -> Optional[CloudVmRayResourceHandle]:
+        self,
+        task: task_lib.Task,
+        to_provision: Optional[resources_lib.Resources],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        retry_until_up: bool = False,
+        skip_if_config_hash_matches: Optional[str] = None
+    ) -> Optional[CloudVmRayResourceHandle]:
         """Provisions using 'ray up'.
 
         Raises:
@@ -2779,7 +2791,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching', log_path))
                     config_dict = retry_provisioner.provision_with_retries(
-                        task, to_provision_config, dryrun, stream_logs)
+                        task, to_provision_config, dryrun, stream_logs,
+                        skip_if_config_hash_matches)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state
@@ -2829,6 +2842,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 return record['handle'] if record is not None else None
 
+            config_hash = config_dict['config_hash']
+
+            if skip_if_config_hash_matches is not None:
+                record = global_user_state.get_cluster_from_name(cluster_name)
+                if (record is not None and skip_if_config_hash_matches ==
+                        config_hash == record['config_hash']):
+                    logger.info('skip remaining')
+                    return record['handle']
+
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
                 handle = config_dict['handle']
@@ -2868,7 +2890,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, handle.external_ips(),
-                    handle.external_ssh_ports(), lock_path)
+                    handle.external_ssh_ports(), lock_path, config_hash)
                 return handle
 
             cluster_config_file = config_dict['ray']
@@ -2940,7 +2962,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, ip_list, ssh_port_list, lock_path)
+                prev_cluster_status, ip_list, ssh_port_list, lock_path,
+                config_hash)
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -2958,8 +2981,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            ip_list: List[str], ssh_port_list: List[int],
-            lock_path: str) -> None:
+            ip_list: List[str], ssh_port_list: List[int], lock_path: str,
+            config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -3019,6 +3042,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle,
                 set(task.resources),
                 ready=True,
+                config_hash=config_hash,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
