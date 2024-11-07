@@ -1,4 +1,5 @@
 """DAGs: user applications to be run."""
+import dataclasses
 import threading
 import typing
 from typing import Dict, List, Optional, Set, Union
@@ -12,6 +13,36 @@ if typing.TYPE_CHECKING:
     from sky import task
 
 TaskOrName = Union['task.Task', str]
+
+
+@dataclasses.dataclass
+class TaskEdge:
+    """Represents an edge between two tasks in a DAG.
+
+    Attributes:
+        source: The upstream task.
+        target: The downstream task.
+        data_path: Path where data will be stored on the target node.
+        data_size_gb: Estimated size of the data in gigabytes.
+    """
+    source: 'task.Task'
+    target: 'task.Task'
+    data_path: Optional[str] = None
+    data_size_gb: Optional[float] = None
+
+    def with_data(self, path: str, size_gb: float) -> 'TaskEdge':
+        """Specifies data transfer path and size for this edge.
+
+        Args:
+            path: Path where data will be stored on the target node.
+            size_gb: Estimated size of the data in gigabytes.
+
+        Returns:
+            self: The current edge for chaining.
+        """
+        self.data_path = path
+        self.data_size_gb = size_gb
+        return self
 
 
 class Dag:
@@ -113,12 +144,15 @@ class Dag:
         assert task.name is not None
         self._task_name_lookup.pop(task.name, None)
 
-    def add_edge(self, source: TaskOrName, target: TaskOrName) -> None:
+    def add_edge(self, source: TaskOrName, target: TaskOrName) -> 'TaskEdge':
         """Add an edge from source task to target task.
 
         Args:
             source: The upstream task.
             target: The downstream task to be added.
+
+        Returns:
+            A TaskEdge object representing the edge.
 
         Raises:
             ValueError: If a task is set as its own downstream task or if the
@@ -132,14 +166,20 @@ class Dag:
                 raise ValueError(f'Task {source.name} should not be its own '
                                  'downstream task.')
 
-        self.graph.add_edge(source, target)
+        edge = TaskEdge(source, target)
+        self.graph.add_edge(source, target, edge=edge)
+        return edge
 
-    def add_downstream(self, source: TaskOrName, target: TaskOrName) -> None:
-        """Add downstream tasks for a source task.
+    def add_downstream(self, source: TaskOrName,
+                       target: TaskOrName) -> 'TaskEdge':
+        """Add downstream tasks for a source task. Equivalent to add_edge.
 
         Args:
             source: The upstream task.
             target: The downstream task to be added.
+
+        Returns:
+            A TaskEdge object representing the edge.
         """
         return self.add_edge(source, target)
 
@@ -197,6 +237,32 @@ class Dag:
         """
         task = self._get_task(task)
         return set(self.graph.successors(task))
+
+    def get_edge(self, source: TaskOrName,
+                 target: TaskOrName) -> Optional[TaskEdge]:
+        """Get the edge between two tasks if it exists.
+
+        Args:
+            source: The upstream task.
+            target: The downstream task.
+
+        Returns:
+            The TaskEdge object if the edge exists, None otherwise.
+        """
+        source = self._get_task(source)
+        target = self._get_task(target)
+        try:
+            return self.graph[source][target]['edge']
+        except KeyError:
+            return None
+
+    def get_edges(self) -> List[TaskEdge]:
+        """Get all edges in the DAG.
+
+        Returns:
+            A list of TaskEdge objects.
+        """
+        return [data['edge'] for _, _, data in self.graph.edges(data=True)]
 
     def __len__(self) -> int:
         """Return the number of tasks in the DAG."""

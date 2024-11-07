@@ -1156,14 +1156,25 @@ class Task:
 
         return required_features
 
-    def __rshift__(self, b):
+    def __rshift__(self, b: 'Task') -> 'sky.dag.TaskEdge':
+        """Creates a directed edge from this task to another task.
+
+        Args:
+            b: The downstream task.
+
+        Returns:
+            A TaskEdge object representing the edge.
+
+        Raises:
+            ValueError: If no current DAG context is found.
+        """
         current_dag = sky.dag.get_current_dag()
         if current_dag is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('No current DAG context found. '
                                  'Use `with sky.Dag() as dag: ...` '
                                  'to define a DAG.')
-        current_dag.add_edge(self, b)
+        return current_dag.add_edge(self, b)
 
     def __repr__(self):
         if isinstance(self.run, str):
