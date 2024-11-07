@@ -15,6 +15,8 @@ RSYNC_FILE_NOT_FOUND_CODE = 23
 MOUNT_PATH_NON_EMPTY_CODE = 42
 # Arbitrarily chosen value. Used to provision Kubernetes instance in Skypilot
 INSUFFICIENT_PRIVILEGES_CODE = 52
+# Return code when rsync is not installed
+RSYNC_NOT_INSTALLED_CODE = 53
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
 

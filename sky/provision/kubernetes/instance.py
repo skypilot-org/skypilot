@@ -333,52 +333,36 @@ def _run_function_with_retries(func: Callable,
                 raise
 
 
-def _set_env_vars_in_pods(namespace: str, context: Optional[str],
-                          new_pods: List):
-    """Setting environment variables in pods.
+def pre_init(namespace: str, context: Optional[str], new_nodes: List, provider_config: Dict[str, Any]) -> None:
+    """Pre-initialization step for SkyPilot pods.
 
-    Once all containers are ready, we can exec into them and set env vars.
-    Kubernetes automatically populates containers with critical
-    environment variables, such as those for discovering services running
-    in the cluster and CUDA/nvidia environment variables. We need to
-    make sure these env vars are available in every task and ssh session.
-    This is needed for GPU support and service discovery.
-    See https://github.com/skypilot-org/skypilot/issues/2287 for
-    more details.
+    This step is run in the pod right after it is created and before the 
+    SkyPilot runtime is setup. 
 
-    To do so, we capture env vars from the pod's runtime and write them to
-    /etc/profile.d/, making them available for all users in future
-    shell sessions.
+    This step includes three key steps:
+
+    1. Privilege check: Checks if the default user has sufficient privilege 
+    to set up the kubernetes instance pod.
+    2. SSH setup: Sets up SSH for the pod instance.
+    3. Environment variable setup to populate k8s env vars in the pod.
+    
+    Make sure commands used in these methods are generic and work
+    on most base images. E.g., do not use Python, since that may not
+    be installed by default.
+
+    If you run any apt commands, be sure to check if the lock is available. 
+    It is possible the `apt update` run in the pod container args may still 
+    be running.
+
+    Args:
+        namespace (str): Kubernetes namespace.
+        context (Optional[str]): Kubernetes context.
+        new_nodes (List): List of new pod instances.
+    
+    Raises:
+        config_lib.KubernetesError: If user privileges are insufficient or setup fails.
     """
-    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
-    def _set_env_vars_thread(new_pod):
-        pod_name = new_pod.metadata.name
-        logger.info(f'{"-"*20}Start: Set up env vars in pod {pod_name!r} '
-                    f'{"-"*20}')
-        runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), pod_name))
-
-        def _run_env_vars_cmd():
-            rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
-                                       require_outputs=True,
-                                       stream_logs=False)
-            _raise_command_running_error('set env vars', set_k8s_env_var_cmd,
-                                         pod_name, rc, stdout)
-
-        _run_function_with_retries(_run_env_vars_cmd,
-                                   f'set env vars in pod {pod_name}')
-        logger.info(f'{"-"*20}End: Set up env vars in pod {pod_name!r} '
-                    f'{"-"*20}')
-
-    subprocess_utils.run_in_parallel(_set_env_vars_thread, new_pods,
-                                     NUM_THREADS)
-
-
-def _check_user_privilege(namespace: str, context: Optional[str],
-                          new_nodes: List) -> None:
-    # Checks if the default user has sufficient privilege to set up
-    # the kubernetes instance pod.
     check_k8s_user_sudo_cmd = (
         'if [ $(id -u) -eq 0 ]; then'
         # If user is root, create an alias for sudo used in skypilot setup
@@ -386,51 +370,13 @@ def _check_user_privilege(namespace: str, context: Optional[str],
         'else '
         '  if command -v sudo >/dev/null 2>&1; then '
         '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  else '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  fi; '
-        'fi')
-
-    # This check needs to run on a per-image basis, so running the check on
-    # any one pod is sufficient.
-    new_node = new_nodes[0]
-    pod_name = new_node.metadata.name
-
-    runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), pod_name))
-    logger.info(f'{"-"*20}Start: Check user privilege in pod {pod_name!r} '
-                f'{"-"*20}')
-
-    def _run_privilege_check():
-        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                        require_outputs=True,
-                                        separate_stderr=True,
-                                        stream_logs=False)
-        _raise_command_running_error('check user privilege',
-                                     check_k8s_user_sudo_cmd, pod_name, rc,
-                                     stdout + stderr)
-        return stdout
-
-    stdout = _run_function_with_retries(
-        _run_privilege_check, f'check user privilege in pod {pod_name!r}')
-
-    if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
-        raise config_lib.KubernetesError(
-            'Insufficient system privileges detected. '
-            'Ensure the default user has root access or '
-            '"sudo" is installed and the user is added to the sudoers '
-            'from the image.')
-    logger.info(f'{"-"*20}End: Check user privilege in pod {pod_name!r} '
-                f'{"-"*20}')
-
-
-def _setup_ssh_in_pods(namespace: str, context: Optional[str],
-                       new_nodes: List) -> None:
-    # Setting up ssh for the pod instance. This is already setup for
-    # the jump pod so it does not need to be run for it.
-    set_k8s_ssh_cmd = (
-        'set -ex; '
+        'fi;')
+    
+    install_ssh_k8s_cmd = (
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
         'export DEBIAN_FRONTEND=noninteractive;'
@@ -473,55 +419,64 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
+    
 
-    def _setup_ssh_thread(new_node):
+    # If user disables SSH installation, we still need to check if rsync is 
+    # installed
+    check_rsync_cmd = ('command -v rsync >/dev/null 2>&1 && echo installed ||'
+                       f' ( echo missing; exit {exceptions.RSYNC_NOT_INSTALLED_CODE}; )')
+    
+
+    # Kubernetes automatically populates containers with critical
+    # environment variables, such as those for discovering services running
+    # in the cluster and CUDA/nvidia environment variables. We need to
+    # make sure these env vars are available in every task and ssh session.
+    # This is needed for GPU support and service discovery.
+    # See https://github.com/skypilot-org/skypilot/issues/2287 for more details.
+    # To do so, we capture env vars from the pod's runtime and write them to
+    # /etc/profile.d/, making them available for all users in future
+    # shell sessions.
+    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
+    
+    if not provider_config.get('disable_ssh', False):
+        ssh_install_cmd = install_ssh_k8s_cmd
+    else:
+        # Just check if rsync is installed if user disables SSH installation
+        ssh_install_cmd = check_rsync_cmd    
+
+    pre_init_cmd = 'set -ex; ' + check_k8s_user_sudo_cmd + ssh_install_cmd + set_k8s_env_var_cmd
+
+    def _pre_init_thread(new_node):
         pod_name = new_node.metadata.name
+        logger.info(f'{"-"*20}Start: Pre-init in pod {pod_name!r} {"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name))
-        logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
 
-        def _run_ssh_setup():
-            rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
-                                       require_outputs=True,
-                                       stream_logs=False)
-            _raise_command_running_error('setup ssh', set_k8s_ssh_cmd, pod_name,
-                                         rc, stdout)
-
-        _run_function_with_retries(_run_ssh_setup,
-                                   f'setup ssh in pod {pod_name!r}')
-        logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
-
-    subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes, NUM_THREADS)
-
-
-def _check_rsync_installed(namespace: str, context: Optional[str],
-                           new_nodes: List) -> None:
-    """Check if rsync is installed on the cluster's nodes.
-
-    Checks only one node since all nodes use the same base image.
-
-    Raises:
-        config_lib.KubernetesError: If rsync is not installed.
-    """
-    check_rsync_cmd = ('command -v rsync >/dev/null 2>&1 && echo installed ||'
-                       ' echo missing')
-
-    new_node = new_nodes[0]
-    runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), new_node.metadata.name))
-    rc, stdout, stderr = runner.run(check_rsync_cmd,
+        # Run the combined pre-init command
+        rc, stdout, _ = runner.run(pre_init_cmd,
                                     require_outputs=True,
-                                    separate_stderr=True,
                                     stream_logs=False)
-    _raise_command_running_error('check rsync installation', check_rsync_cmd,
-                                 new_node.metadata.name, rc, stdout + stderr)
-    # Only raise error if rsync is missing
-    if stdout.strip() == 'missing':
-        raise config_lib.KubernetesError(
-            'rsync is not installed in the container image. '
-            'File sync operations will fail. Please install rsync in '
-            'your container image or re-enable SSH, which will '
-            'install rsync for you.')
+        if rc == exceptions.INSUFFICIENT_PRIVILEGES_CODE:
+            raise config_lib.KubernetesError(
+                'Insufficient system privileges detected. '
+                'Ensure the default user has root access or '
+                '"sudo" is installed and the user is added to the sudoers '
+                'from the image.')
+        
+        if rc == exceptions.RSYNC_NOT_INSTALLED_CODE:
+            raise config_lib.KubernetesError(
+                'rsync is not installed in the container image. '
+                'File sync operations will fail. Please install rsync in '
+                'your container image or re-enable SSH, which will '
+                'install rsync for you.')
+        
+        op_name = 'pre-init'
+        _raise_command_running_error(op_name, pre_init_cmd, pod_name, rc, stdout)
+
+        logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
+
+    # Run pre_init in parallel across all new_nodes
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, NUM_THREADS)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -772,20 +727,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
 
-        # Setup SSH and environment variables in pods.
-        # Make sure commands used in these methods are generic and work
-        # on most base images. E.g., do not use Python, since that may not
-        # be installed by default.
-        _check_user_privilege(namespace, context, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
-        if not provider_config.get('disable_ssh', False):
-            _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
-        else:
-            # The SSH setup also install rsync. If we disable SSH, we need to
-            # check if rsync is installed in the pod.
-            # We do not auto-install rsync because apt update and apt install
-            # are relatively heavyweight operations.
-            _check_rsync_installed(namespace, context, uninitialized_pods_list)
+        # Run pre-init steps in the pod. 
+        pre_init(namespace, context, uninitialized_pods_list, provider_config)
 
         for pod in uninitialized_pods.values():
             _label_pod(namespace,

@@ -330,10 +330,10 @@ available_node_types:
             - |
               # Helper function to conditionally use sudo
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
-
+              
               # Run apt update in background and log to a file
               (
-                $(prefix_cmd) DEBIAN_FRONTEND=noninteractive apt-get update > /tmp/apt-update.log 2>&1 || \
+                DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
               ) &
 
