@@ -11,39 +11,82 @@ SkyPilot is an open-source Sky Computing framework.
    :width: 60%
    :align: center
 
-Overview of Sky Computing
-----------------------
+Problem: Cloud Infra's Explosive Complexity
+-------------------------------------------
 
-Today's cloud ecosystem has significant cloud lock-in. Many workloads are forced to
-run on specific clouds. As a result, cloud users lose on cost savings, higher capacity, and
-portability.
+Today's cloud infra has exploded in complexity.
+Organizations are forced to deal with a growing number of locations, pricing models, and hardware types:
+
+- **Locations**: 10s of regions and 100s of zones within a single cloud. Moreover, teams are increasingly multicloud (3+ hyperscalers, 10+
+  specialized clouds) and multi-cluster.
+- **Pricing models**: On-demand, reserved, and preemptible spot instances, each with different pricing and availability.
+- **Hardware**: 500+ instance types per cloud; many new accelerators (e.g., GPUs, TPUs).
+
+The search space of ``(locations, pricing models, hardware)`` is combinatorially
+large and dynamic, **even within one cloud**.  Seemingly simple tasks like "run jobs in any of my US
+regions/clusters with the lowest cost" or "run on either AWS or GCP" become highly costly:
+
+- Valuable engineering hours are invested to abstract away a myriad of cloud infra choices.
+- Workloads are forced to run on suboptimal choices (to heuristically simplify the search space), wasting utilization, cost savings, and capacity.
+
+.. TODO: say something about 'abstracting away the infra choices while exploiting cost and capacity differences is hard.'
+
+.. The search space of ``(locations, pricing models, hardware)`` is huge and highly
+.. complex. For example, not all locations offer the same hardware; even when a region does,
+.. the pricing and availability may be dynamic, depending on the pricing model.
+
+.. As a result, tasks like "run my jobs in any of the US regions in the cheapest
+.. way" or "run my jobs on either my AWS or GCP account" become highly complex.
+.. Dealing with such **diverse compute** costs significant engineering hours.
+.. As heuristics workloads are often forced to run on suboptimal infra choices --- wasting utilization, cost savings, and capacity.
+
+.. Today's cloud ecosystem has significant cloud lock-in. Many workloads are forced to
+.. run on specific clouds. As a result, cloud users lose on cost savings, higher capacity, and
+.. portability.
+
+Sky Computing
+-------------------------
 
 To combat this, *Sky Computing* was recently proposed in two papers from UC Berkeley:
 `From Cloud Computing to Sky Computing <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ and
 `The Sky Above The Clouds <https://arxiv.org/abs/2205.07147>`_ (whitepaper).
 
-In a nutshell, Sky Computing is a **portable multicloud** paradigm: a Sky layer
-receives workloads from users and executes them in the "best" (e.g., cheapest
-and most available) cloud location and infra choice. It combines clouds into a "sky", a unified compute pool.
+In a nutshell, Sky Computing **combines a team's diverse infra choices into a unified pool**, a "sky".
+Sky has two key components to simplify---and exploit---the complex search space:
 
-As such, Sky Computing **enables cloud portability for (certain) workloads**, freeing users from
-manually porting across clouds and abstracting away their cumbersome differences.
+- A unified interface to run workloads on different cloud infra.
+- An optimizer to find the best  infra choice (cheapest & most available) for each workload.
+
+.. In a nutshell, Sky Computing is a **portable multicloud** paradigm: a Sky layer
+.. receives workloads from users and executes them in the "best" (e.g., cheapest
+.. and most available) cloud location and infra choice. It combines clouds into a "sky", a unified compute pool.
+
+Both components make using complex cloud infra simple:
+
+- The unified Sky interface allows workloads to be specified once with the same interface, and be able to run on different infra.
+- The Sky optimizer further saves costs and increases capacity by exploiting the (dynamically changing) pricing and availability differences in the search space.
+
+.. The unified Sky interface frees users from manually ensuring their workloads can run on diverse infra choices, saving valuable engineering time.
+.. Sky's optimizer further exploits the complex search space to automatically find infra choices with cheaper cost and higher capacity, cutting across a combinatorially large search space.
+
+.. As such, Sky Computing **enables cloud portability for (certain) workloads**, freeing users from
+.. manually porting across clouds and abstracting away their cumbersome differences.
 
 .. One definition of "best placement" is "cheapest and available", especially for
 .. AI workloads that need expensive GPU/TPU/accelerator compute.
 
 Cloud users and their workloads gain the following benefits:
 
-* **Portability** across regions or clouds: Cloud infra setup is simplified and multicloud ready.
-* **Lower costs**: Sky optimizes the cost of each workload. Users gain pricing leverage due to portability.
-* **Higher capacity**: Workloads can utilize diverse compute across locations, pricing models, and hardware.
+* **Portability**: Cloud infra setup is simplified and automatically multicloud ready.
+* **Lower costs**: Sky optimizes the cost of each workload. Users gain pricing leverage due to portability. Engineering time is saved from dealing with cloud infra.
+* **Higher capacity**: Workloads gain access to all diverse compute choices across locations, pricing models, and hardware.
 
 .. Sky can leverage, but differs from, today's multicloud systems. The latter are typically
 .. "partitioned multicloud": for example, in a multicloud organization, workload
 .. X always runs in cloud A and workload Y always runs in cloud B --- no portability is involved.
 
-Importantly, Sky Computing **also benefits single-cloud users**: Sky
-simplifies running workloads across a single cloud provider's regions/zones, pricing models, and hardware.
+.. Importantly, Sky Computing **also benefits single-cloud users**: Sky
+.. simplifies running workloads across a single cloud provider's regions/zones, pricing models, and hardware.
 
 .. can optimize across a single cloud provider's regions/zones, pricing models, and hardware.
 
@@ -52,13 +95,13 @@ SkyPilot and Sky Computing
 
 SkyPilot was born out of the same `UC Berkeley lab <https://sky.cs.berkeley.edu/>`_  that
 proposed the Sky Computing paradigm.
-SkyPilot is Sky's first instantiation, and it was started to showcase Sky Computing's benefits for AI and compute-intensive
+SkyPilot is Sky's first instantiation, and it was started to showcase that Sky Computing is critical for AI and compute-intensive
 workloads.
 
 Over the last few years, SkyPilot has grown to become widely adopted by AI teams in the industry. Today, it
-is being used by ~10s to 100s of leading organizations. While the initial development team
+is being used by ~100s of leading companies. While the initial development team
 consisted of Berkeley PhDs and researchers, the SkyPilot community today has
-grown to ~100 open-source contributors from various organizations.
+grown to 100+ open-source contributors from various organizations.
 
 SkyPilot operates in a BYOC (Bring Your Own Cloud) model, where all resources
 are launched in a user's existing cloud accounts, VPCs, and clusters.
@@ -159,7 +202,7 @@ produced several follow-up projects to enrich the Sky Computing stack:
 - `FogROS2 <https://berkeleyautomation.github.io/FogROS2/about>`_: Open-source cloud robotics platform leveraging Sky Computing via SkyPilot.
 - …and a few more in the pipeline.
 
-To learn more about SkyPilot, you can refer to the `SkyPilot NSDI 2023 paper
+To learn more about SkyPilot, refer to the `project announcement blog post <https://blog.skypilot.co/introducing-skypilot/>`_, or the   `SkyPilot NSDI 2023 paper
 <https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf>`_ and `talk
 <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_.
 
