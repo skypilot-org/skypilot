@@ -323,9 +323,8 @@ class Dag:
         try:
             # Try to display the image in Jupyter Notebook
             # pylint: disable=import-outside-toplevel
-            from IPython.display import display
-            from IPython.display import Image
-            display(Image(filename=to_file))
+            from IPython import display
+            display.display(display.Image(filename=to_file))
             return None
         except ImportError:
             pass
