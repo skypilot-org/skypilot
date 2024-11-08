@@ -396,7 +396,7 @@ def _peek_head_lines(log_file: TextIO) -> List[str]:
 def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
                                         tail_lines: Deque[str],
                                         start_stream_at: str) -> bool:
-    """Determine if start_stream_at is found before the tail_lines."""
+    """Check if the entire tail lines should be streamed."""
     # See comment:
     # https://github.com/skypilot-org/skypilot/pull/4241#discussion_r1833611567
     # for more details.
