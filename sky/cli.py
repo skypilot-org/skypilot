@@ -46,6 +46,7 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds as sky_clouds
@@ -67,6 +68,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -77,8 +79,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky import admin_policy
-from sky.utils import admin_policy_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -4158,7 +4158,8 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
-    dag, _ = admin_policy_utils.apply(dag, use_mutated_config_in_current_request=False)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4275,7 +4276,8 @@ def serve_update(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
-    dag, _ = admin_policy_utils.apply(dag, use_mutated_config_in_current_request=False)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:

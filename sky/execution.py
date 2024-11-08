@@ -167,8 +167,8 @@ def _execute(
                 cluster_name=cluster_name,
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
                 down=down,
-                    dryrun=dryrun,
-                ),
+                dryrun=dryrun,
+            ),
         )
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
