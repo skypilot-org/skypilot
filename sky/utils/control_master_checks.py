@@ -17,7 +17,10 @@ def is_tmp_9p_filesystem() -> bool:
 
     result = subprocess_utils.run(['df', '-T', '/tmp'],
                                   capture_output=True,
-                                  text=True)
+                                  text=True,
+                                  shell=None,
+                                  check=None,
+                                  executable=None)
 
     if result.returncode != 0:
         return False
