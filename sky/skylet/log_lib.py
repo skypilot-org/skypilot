@@ -393,28 +393,27 @@ def _peek_head_lines(log_file: TextIO) -> List[str]:
     return [line for line in lines if line != '' and line is not None]
 
 
-def _start_stream_before_tail_lines(head_lines_of_log_file: List[str],
-                                    tail_lines: Deque[str],
-                                    start_stream_at: str) -> bool:
+def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
+                                        tail_lines: Deque[str],
+                                        start_stream_at: str) -> bool:
     """Determine if start_stream_at is found before the tail_lines."""
     # See comment:
     # https://github.com/skypilot-org/skypilot/pull/4241#discussion_r1833611567
     # for more details.
-    # Case 1: If start_stream_at is found at the head of the deque,
-    # set start_stream to False.
+    # Case 1: If start_stream_at is found at the head of the tail lines,
+    # we should not stream the whole tail lines.
     for index, line in enumerate(tail_lines):
         if index >= PEEK_HEAD_LINES_FOR_START_STREAM:
             break
         if start_stream_at in line:
             return False
-    # Case 2/3: If start_stream_at is not in the deque, check the head of
-    # the current log file.
-    # Case 2: If start_stream_at is at the head, set start_stream to True.
-    # Only in this case we need to stream the whole tail lines.
+    # Case 2: If start_stream_at is found at the head of log file, but not at
+    # the tail lines, we need to stream the whole tail lines.
     for line in head_lines_of_log_file:
         if start_stream_at in line:
             return True
-    # Case 3: If start_stream_at is not at the head, set start_stream to False.
+    # Case 3: If start_stream_at is not at the head, and not found at the tail
+    # lines, we should not stream the whole tail lines.
     return False
 
 
@@ -489,7 +488,7 @@ def tail_logs(job_id: Optional[int],
             if tail > 0:
                 head_lines_of_log_file = _peek_head_lines(log_file)
                 lines = collections.deque(log_file.readlines(), maxlen=tail)
-                start_stream = _start_stream_before_tail_lines(
+                start_stream = _should_stream_the_whole_tail_lines(
                     head_lines_of_log_file, lines, start_stream_at)
                 for line in lines:
                     if start_stream_at in line:
@@ -514,7 +513,7 @@ def tail_logs(job_id: Optional[int],
                     # We use double ended queue to rotate the last n lines.
                     head_lines_of_log_file = _peek_head_lines(log_file)
                     lines = collections.deque(log_file.readlines(), maxlen=tail)
-                    start_stream = _start_stream_before_tail_lines(
+                    start_stream = _should_stream_the_whole_tail_lines(
                         head_lines_of_log_file, lines, start_stream_at)
                 else:
                     lines = log_file.readlines()
