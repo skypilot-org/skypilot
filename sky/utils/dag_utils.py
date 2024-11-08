@@ -136,7 +136,9 @@ def load_dag_from_yaml(
             task_edge = dag.add_edge(source, target)
             if 'data' in edge:
                 data = edge['data']
-                task_edge.with_data(data['path'], data['size_gb'])
+                task_edge.with_data(source_path=data['source_path'],
+                                    target_path=data['target_path'],
+                                    size_gb=data['size_gb'])
     else:
         # Implicit dependency
         for i in range(len(tasks) - 1):
@@ -158,17 +160,17 @@ def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     """
     header: Dict[str, Any] = {'name': dag.name}
 
-    # Collect all edge information
     edges: List[Dict[str, Any]] = []
     for edge in dag.get_edges():
         edge_dict: Dict[str, Any] = {
             'source': edge.source.name,
             'target': edge.target.name
         }
-        if edge.data_path is not None and edge.data_size_gb is not None:
+        if edge.data is not None:
             edge_dict['data'] = {
-                'path': edge.data_path,
-                'size_gb': edge.data_size_gb
+                'source_path': edge.data.source_path,
+                'target_path': edge.data.target_path,
+                'size_gb': edge.data.size_gb
             }
         edges.append(edge_dict)
 

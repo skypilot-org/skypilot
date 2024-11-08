@@ -16,32 +16,48 @@ TaskOrName = Union['task.Task', str]
 
 
 @dataclasses.dataclass
+class TaskData:
+    """Represents data transfer information between tasks.
+
+    Attributes:
+        source_path: Path where data is stored on the source node.
+        target_path: Path where data will be stored on the target node.
+        size_gb: Estimated size of the data in gigabytes.
+    """
+    source_path: str
+    target_path: str
+    size_gb: float
+
+
+@dataclasses.dataclass
 class TaskEdge:
     """Represents an edge between two tasks in a DAG.
 
     Attributes:
         source: The upstream task.
         target: The downstream task.
-        data_path: Path where data will be stored on the target node.
-        data_size_gb: Estimated size of the data in gigabytes.
+        data: Optional data transfer information between tasks.
+               If None, only represents task dependency.
     """
     source: 'task.Task'
     target: 'task.Task'
-    data_path: Optional[str] = None
-    data_size_gb: Optional[float] = None
+    data: Optional[TaskData] = None
 
-    def with_data(self, path: str, size_gb: float) -> 'TaskEdge':
-        """Specifies data transfer path and size for this edge.
+    def with_data(self, source_path: str, target_path: str,
+                  size_gb: float) -> 'TaskEdge':
+        """Specifies data transfer information for this edge.
 
         Args:
-            path: Path where data will be stored on the target node.
+            source_path: Path where data is stored on the source node.
+            target_path: Path where data will be stored on the target node.
             size_gb: Estimated size of the data in gigabytes.
 
         Returns:
             self: The current edge for chaining.
         """
-        self.data_path = path
-        self.data_size_gb = size_gb
+        self.data = TaskData(source_path=source_path,
+                             target_path=target_path,
+                             size_gb=size_gb)
         return self
 
 
