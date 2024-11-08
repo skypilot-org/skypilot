@@ -911,19 +911,18 @@ def get_cluster_info(
 
     assert cpu_request is not None, 'cpu_request should not be None'
 
-    ssh_user = None
-    if not provider_config.get('disable_ssh', False):
-        get_k8s_ssh_user_cmd = 'echo $(whoami)'
-        assert head_pod_name is not None
-        runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), head_pod_name))
-        rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
-                                        require_outputs=True,
-                                        separate_stderr=True,
-                                        stream_logs=False)
-        _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
-                                     head_pod_name, rc, stdout + stderr)
-        ssh_user = stdout.strip()
+    ssh_user = 'sky'
+    get_k8s_ssh_user_cmd = 'echo $(whoami)'
+    assert head_pod_name is not None
+    runner = command_runner.KubernetesCommandRunner(
+        ((namespace, context), head_pod_name))
+    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
+                                    require_outputs=True,
+                                    separate_stderr=True,
+                                    stream_logs=False)
+    _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
+                                 head_pod_name, rc, stdout + stderr)
+    ssh_user = stdout.strip()
     logger.debug(
         f'Using ssh user {ssh_user} for cluster {cluster_name_on_cloud}')
 

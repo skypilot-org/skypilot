@@ -396,12 +396,6 @@ class Kubernetes(clouds.Cloud):
         if resources.use_spot:
             spot_label_key, spot_label_value = kubernetes_utils.get_spot_label()
 
-        # Add flag to disable ssh in the pod
-        disable_ssh = skypilot_config.get_nested(
-            ('kubernetes', 'disable_ssh'),
-            False,
-            override_configs=resources.cluster_config_overrides)
-
         # Timeout for resource provisioning. This timeout determines how long to
         # wait for pod to be in pending status before giving up.
         # Larger timeout may be required for autoscaling clusters, since
@@ -434,7 +428,6 @@ class Kubernetes(clouds.Cloud):
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
-            'k8s_disable_ssh': disable_ssh,
             'image_id': image_id,
         }
 

@@ -41,10 +41,6 @@ provider:
 
     ssh_jump_image: {{k8s_ssh_jump_image}}
 
-    # Boolean flag to indicate if SSH should be disabled in the pod.
-    # This is useful for faster provisioning, especially for large multi-node clusters.
-    disable_ssh: {{k8s_disable_ssh}}
-
     # Namespace used to host SkyPilot system components, such as fuse device
     # manager.
     skypilot_system_namespace: {{k8s_skypilot_system_namespace}}

@@ -3022,16 +3022,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
-            provider_config = common_utils.read_yaml(
-                handle.cluster_yaml)['provider']
-            if not provider_config.get('disable_ssh', False):
-                auth_config = backend_utils.ssh_credential_from_yaml(
-                    handle.cluster_yaml,
-                    ssh_user=handle.ssh_user,
-                    docker_user=handle.docker_user)
-                backend_utils.SSHConfigHelper.add_cluster(
-                    handle.cluster_name, ip_list, auth_config, ssh_port_list,
-                    handle.docker_user, handle.ssh_user)
+            auth_config = backend_utils.ssh_credential_from_yaml(
+                handle.cluster_yaml,
+                ssh_user=handle.ssh_user,
+                docker_user=handle.docker_user)
+            backend_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
+                                                      ip_list, auth_config,
+                                                      ssh_port_list,
+                                                      handle.docker_user,
+                                                      handle.ssh_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
