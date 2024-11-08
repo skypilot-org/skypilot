@@ -167,7 +167,8 @@ def _ec2_call_with_retry(
                 # We will retry until the credentials are refreshed in the
                 # underlying boto3 session.
                 cached_ec2 = ec2_recreation_fn()
-                logger.debug('create_instances: Credentials refreshed.')
+                logger.warning('AWS: Credentials refreshed for temporary '
+                               'UnauthorizedOperation.')
                 credentials_refreshed = True
                 continue
             logger.log(log_level, f'create_instances: Attempt failed with {e}')
@@ -178,7 +179,8 @@ def _ec2_call_with_retry(
             # underlying boto3 session.
             if not credentials_refreshed:
                 cached_ec2 = ec2_recreation_fn()
-                logger.debug('create_instances: Credentials refreshed.')
+                logger.warning('AWS: Credentials refreshed for temporary '
+                            'NoCredentialsError.')
                 credentials_refreshed = True
                 continue
             raise
