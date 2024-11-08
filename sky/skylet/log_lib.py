@@ -315,11 +315,8 @@ def run_bash_command_with_log(bash_command: str,
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
 
-        subprocess_cmd: Union[str, List[str]]
-        subprocess_cmd = inner_command
-
         return run_with_log(
-            subprocess_cmd,
+            inner_command,
             log_path,
             stream_logs=stream_logs,
             with_ray=with_ray,
