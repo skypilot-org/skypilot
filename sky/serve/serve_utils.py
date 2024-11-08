@@ -724,7 +724,7 @@ def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
     line = ''
     while True:
         tmp = file.readline()
-        if tmp is not None and tmp != '':
+        if tmp:
             line += tmp
             if '\n' in line or '\r' in line:
                 yield line
@@ -779,8 +779,6 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None:
-        return '-'
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
@@ -808,7 +806,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
     service_table = log_utils.create_table(service_columns)
 
-    replica_infos = []
+    replica_infos: List[Dict[str, Any]] = []
     for record in service_records:
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
@@ -879,13 +877,12 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         zone = '-'
 
         replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
-        if replica_handle is not None:
-            resources_str = resources_utils.get_readable_resources_repr(
-                replica_handle, simplify=not show_all)
-            if replica_handle.launched_resources.region is not None:
-                region = replica_handle.launched_resources.region
-            if replica_handle.launched_resources.zone is not None:
-                zone = replica_handle.launched_resources.zone
+        resources_str = resources_utils.get_readable_resources_repr(
+            replica_handle, simplify=not show_all)
+        if replica_handle.launched_resources.region is not None:
+            region = replica_handle.launched_resources.region
+        if replica_handle.launched_resources.zone is not None:
+            zone = replica_handle.launched_resources.zone
 
         replica_values = [
             service_name,

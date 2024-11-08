@@ -2,7 +2,7 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -173,9 +173,12 @@ class SkyServiceSpec:
         return SkyServiceSpec.from_yaml_config(config['service'])
 
     def to_yaml_config(self) -> Dict[str, Any]:
-        config = dict()
+        config: Dict[str, Any] = {}
 
-        def add_if_not_none(section, key, value, no_empty: bool = False):
+        def add_if_not_none(section: str,
+                            key: Optional[str],
+                            value: Any,
+                            no_empty: bool = False):
             if no_empty and not value:
                 return
             if value is not None:
@@ -216,8 +219,8 @@ class SkyServiceSpec:
                    ' with custom headers')
         return f'{method}{headers}'
 
-    def spot_policy_str(self):
-        policy_strs = []
+    def spot_policy_str(self) -> str:
+        policy_strs: List[str] = []
         if (self.dynamic_ondemand_fallback is not None and
                 self.dynamic_ondemand_fallback):
             policy_strs.append('Dynamic on-demand fallback')
