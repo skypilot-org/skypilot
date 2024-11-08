@@ -829,7 +829,7 @@ class GCP(clouds.Cloud):
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if len(diffs) > 0:
+        if diffs:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '

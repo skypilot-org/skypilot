@@ -350,7 +350,7 @@ def update(
         raise RuntimeError(e.error_msg) from e
 
     service_statuses = serve_utils.load_service_status(serve_status_payload)
-    if len(service_statuses) == 0:
+    if not service_statuses:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find service {service_name!r}.'
                                f'To spin up a service, use {ux_utils.BOLD}'
@@ -470,9 +470,9 @@ def down(
         stopped_message='All services should have terminated.')
 
     service_names_str = ','.join(service_names)
-    if sum([len(service_names) > 0, all]) != 1:
-        argument_str = f'service_names={service_names_str}' if len(
-            service_names) > 0 else ''
+    if sum([bool(service_names), all]) != 1:
+        argument_str = (f'service_names={service_names_str}'
+                        if service_names else '')
         argument_str += ' all' if all else ''
         raise ValueError('Can only specify one of service_names or all. '
                          f'Provided {argument_str!r}.')

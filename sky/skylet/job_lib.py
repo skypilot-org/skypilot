@@ -540,7 +540,7 @@ def update_job_status(job_ids: List[int],
     This function should only be run on the remote instance with ray>=2.4.0.
     """
     echo = logger.info if not silent else logger.debug
-    if len(job_ids) == 0:
+    if not job_ids:
         return []
 
     ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]

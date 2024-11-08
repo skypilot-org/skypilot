@@ -89,7 +89,7 @@ def load_chain_dag_from_yaml(
     elif len(configs) == 1:
         dag_name = configs[0].get('name')
 
-    if len(configs) == 0:
+    if not configs:
         # YAML has only `name: xxx`. Still instantiate a task.
         configs = [{'name': dag_name}]
 

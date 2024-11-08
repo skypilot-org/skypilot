@@ -104,7 +104,7 @@ ValueType = TypeVar('ValueType')
 class ThreadSafeDict(Generic[KeyType, ValueType]):
     """A thread-safe dict."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
         self._lock = threading.Lock()
 
@@ -377,7 +377,7 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    service_statuses = []
+    service_statuses: List[Dict[str, Any]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
@@ -394,7 +394,7 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
     service_statuses_encoded = common_utils.decode_payload(payload)
-    service_statuses = []
+    service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
@@ -426,7 +426,7 @@ def _terminate_failed_services(
         A message indicating potential resource leak (if any). If no
         resource leak is detected, return None.
     """
-    remaining_replica_clusters = []
+    remaining_replica_clusters: List[str] = []
     # The controller should have already attempted to terminate those
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
@@ -453,8 +453,8 @@ def _terminate_failed_services(
 
 def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
-    terminated_service_names = []
-    messages = []
+    terminated_service_names: List[str] = []
+    messages: List[str] = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False)
@@ -500,7 +500,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     f.write(UserSignal.TERMINATE.value)
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
-    if len(terminated_service_names) == 0:
+    if not terminated_service_names:
         messages.append('No service to terminate.')
     else:
         identity_str = f'Service {terminated_service_names[0]} is'
@@ -610,7 +610,7 @@ def _follow_replica_logs(
 
     while True:
         tmp = file.readline()
-        if tmp is not None and tmp != '':
+        if tmp:
             no_new_content_cnt = 0
             line += tmp
             if '\n' in line or '\r' in line:

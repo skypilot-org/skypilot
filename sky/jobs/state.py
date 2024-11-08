@@ -558,7 +558,7 @@ def get_latest_task_id_status(
     If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
-    if len(id_statuses) == 0:
+    if not id_statuses:
         return None, None
     task_id, status = id_statuses[-1]
     for task_id, status in id_statuses:
@@ -584,7 +584,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
             WHERE spot_job_id=(?)
             ORDER BY task_id ASC""", (job_id,)).fetchall()
         reason = [r[0] for r in reason if r[0] is not None]
-        if len(reason) == 0:
+        if not reason:
             return None
         return reason[0]
 

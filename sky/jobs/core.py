@@ -329,8 +329,8 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'job_ids={job_id_str}' if job_ids else ''
         argument_str += f' name={name}' if name is not None else ''
         argument_str += ' all' if all else ''
         with ux_utils.print_exception_no_traceback():

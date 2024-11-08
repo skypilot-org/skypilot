@@ -133,7 +133,7 @@ class GcsCloudStorage(CloudStorage):
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
-        if len(key) == 0:
+        if not key:
             return True
         # Otherwise, gsutil ls -d url will return:
         #   --> url.rstrip('/')          if url is not a directory

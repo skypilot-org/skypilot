@@ -233,11 +233,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
     job_ids = list(set(job_ids))
-    if len(job_ids) == 0:
+    if not job_ids:
         return 'No job to cancel.'
     job_id_str = ', '.join(map(str, job_ids))
     logger.info(f'Cancelling jobs {job_id_str}.')
-    cancelled_job_ids = []
+    cancelled_job_ids: List[int] = []
     for job_id in job_ids:
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
@@ -267,7 +267,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             shutil.copy(str(signal_file), str(legacy_signal_file))
         cancelled_job_ids.append(job_id)
 
-    if len(cancelled_job_ids) == 0:
+    if not cancelled_job_ids:
         return 'No job to cancel.'
     identity_str = f'Job with ID {cancelled_job_ids[0]} is'
     if len(cancelled_job_ids) > 1:
@@ -280,7 +280,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
-    if len(job_ids) == 0:
+    if not job_ids:
         return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
@@ -500,7 +500,7 @@ def stream_logs(job_id: Optional[int],
                 for job in managed_jobs
                 if job['job_name'] == job_name
             }
-            if len(managed_job_ids) == 0:
+            if not managed_job_ids:
                 return f'No managed job found with name {job_name!r}.'
             if len(managed_job_ids) > 1:
                 job_ids_str = ', '.join(
@@ -526,7 +526,7 @@ def stream_logs(job_id: Optional[int],
     if job_id is None:
         assert job_name is not None
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
-        if len(job_ids) == 0:
+        if not job_ids:
             return f'No running managed job found with name {job_name!r}.'
         if len(job_ids) > 1:
             raise ValueError(

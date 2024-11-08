@@ -725,7 +725,7 @@ def cancel(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling latest running job on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
-    elif len(job_ids):
+    elif job_ids:
         # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
@@ -809,7 +809,7 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -858,7 +858,7 @@ def job_status(cluster_name: str,
             f'of type {backend.__class__.__name__!r}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     sky_logging.print(f'{colorama.Fore.YELLOW}'

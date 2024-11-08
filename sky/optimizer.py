@@ -186,7 +186,7 @@ class Optimizer:
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
         sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
-        if len(source) == len(sink) == 0:
+        if not source and not sink:
             return
         assert len(source) == len(sink) == 1, dag.tasks
         dag.remove(source[0])
@@ -1296,7 +1296,7 @@ def _fill_in_launchable_resources(
                 resources, num_nodes=task.num_nodes)
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
-            if len(feasible_resources.resources_list) > 0:
+            if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
                 # the underlying service_catalog filtering
@@ -1308,7 +1308,7 @@ def _fill_in_launchable_resources(
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)
-        if len(launchable[resources]) == 0:
+        if not launchable[resources]:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])
             num_node_str = ''

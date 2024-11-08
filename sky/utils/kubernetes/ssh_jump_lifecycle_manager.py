@@ -126,7 +126,7 @@ def manage_lifecycle():
                          f'error: {e}\n')
         raise
 
-    if len(ret.items) == 0:
+    if not ret.items:
         sys.stdout.write(
             f'[Lifecycle] Did not find pods with label '
             f'"{label_selector}" in namespace {current_namespace}\n')

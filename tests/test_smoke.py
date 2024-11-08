@@ -5563,7 +5563,7 @@ class TestYamlSpecs:
         for k, v in d1.items():
             if k not in d2:
                 if isinstance(v, list) or isinstance(v, dict):
-                    assert len(v) == 0, (k, v)
+                    assert not v, (k, v)
                 else:
                     assert False, (k, v)
             elif isinstance(v, dict):

@@ -139,7 +139,7 @@ def label():
             # Create the job for this node`
             batch_v1.create_namespaced_job(namespace, job_manifest)
             print(f'Created GPU labeler job for node {node_name}')
-    if len(gpu_nodes) == 0:
+    if not gpu_nodes:
         print('No GPU nodes found in the cluster. If you have GPU nodes, '
               'please ensure that they have the label '
               '`nvidia.com/gpu: <number of GPUs>`')

@@ -650,7 +650,7 @@ class Resources:
                     continue
                 valid_clouds.append(cloud)
 
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -762,7 +762,7 @@ class Resources:
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -997,7 +997,7 @@ class Resources:
                         f'Label rejected due to {cloud}: {err_msg}'
                     ])
                     break
-        if len(invalid_table.rows) > 0:
+        if invalid_table.rows:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'The following labels are invalid:'
@@ -1271,7 +1271,7 @@ class Resources:
             _cluster_config_overrides=override.pop(
                 '_cluster_config_overrides', self._cluster_config_overrides),
         )
-        assert len(override) == 0
+        assert not override
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:

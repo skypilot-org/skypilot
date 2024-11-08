@@ -71,7 +71,7 @@ class OCINodeProvider(NodeProvider):
                     k for k, v in tag_filters.items()
                     if k not in tags or v != tags[k]
                 ]
-                if len(unmatched_tags) == 0:
+                if not unmatched_tags:
                     return_nodes[k] = node
                     cache_hit |= True
 

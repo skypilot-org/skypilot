@@ -65,7 +65,7 @@ class Metadata:
         if value is None:
             if instance_id in metadata:
                 metadata.pop(instance_id)  # del entry
-            if len(metadata) == 0:
+            if not metadata:
                 if os.path.exists(self.path):
                     os.remove(self.path)
                 return
@@ -84,7 +84,7 @@ class Metadata:
         for instance_id in list(metadata.keys()):
             if instance_id not in instance_ids:
                 del metadata[instance_id]
-        if len(metadata) == 0:
+        if not metadata:
             os.remove(self.path)
             return
         with open(self.path, 'w', encoding='utf-8') as f:
@@ -410,7 +410,7 @@ class SCPClient:
             parameter.append('vpcId=' + vpc_id)
         if sg_name is not None:
             parameter.append('securityGroupName=' + sg_name)
-        if len(parameter) > 0:
+        if parameter:
             url = url + '?' + '&'.join(parameter)
         return self._get(url)
 

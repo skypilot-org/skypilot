@@ -572,7 +572,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
-    while (len(terminating_pods) > 0 and
+    while (terminating_pods and
            time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods. Waiting them to finish: '
@@ -581,7 +581,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         terminating_pods = kubernetes_utils.filter_pods(namespace, context,
                                                         tags, ['Terminating'])
 
-    if len(terminating_pods) > 0:
+    if terminating_pods:
         # If there are still terminating pods, we force delete them.
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods still in terminating state after '
@@ -719,7 +719,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         for pod_name, pod in running_pods.items()
         if pod_name not in initialized_pods
     }
-    if len(uninitialized_pods) > 0:
+    if uninitialized_pods:
         logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())

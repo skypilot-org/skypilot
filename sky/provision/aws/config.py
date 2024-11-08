@@ -260,7 +260,7 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
     logger.debug(f'subnet {subnet_id} route tables: {route_tables}')
     if _has_igw_route(route_tables):
         return True
-    if len(route_tables) > 0:
+    if route_tables:
         return False
 
     # Handle the case that a "main" route table is implicitly associated with
@@ -434,7 +434,7 @@ def _vpc_id_from_security_group_ids(ec2, sg_ids: List[str]) -> Any:
 
     no_sg_msg = ('Failed to detect a security group with id equal to any of '
                  'the configured SecurityGroupIds.')
-    assert len(vpc_ids) > 0, no_sg_msg
+    assert vpc_ids, no_sg_msg
 
     return vpc_ids[0]
 

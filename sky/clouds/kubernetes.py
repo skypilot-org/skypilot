@@ -136,7 +136,7 @@ class Kubernetes(clouds.Cloud):
         use the service account mounted in the pod.
         """
         all_contexts = kubernetes_utils.get_all_kube_config_context_names()
-        if len(all_contexts) == 0:
+        if not all_contexts:
             return []
         if all_contexts == [None]:
             # If only one context is found and it is None, we are running in a
