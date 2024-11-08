@@ -659,8 +659,6 @@ async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
             request_task.request_id for request_task in
             requests_lib.get_request_tasks(status=statuses, all_clusters=True)
         ]
-        lock_path = backend_utils.CLUSTER_STATUS_LOCK_PATH.format('*')
-        common_utils.remove_file_if_exists(lock_path)
     else:
         if abort_body.request_id is not None:
             print(f'Aborting request ID: {abort_body.request_id}')
@@ -674,32 +672,16 @@ async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
                 for request_task in requests_lib.get_request_tasks(
                     status=statuses, cluster_names=abort_body.cluster_names)
             ])
-            for cluster_name in abort_body.cluster_names:
-                lock_path = backend_utils.CLUSTER_STATUS_LOCK_PATH.format(
-                    cluster_name)
-                common_utils.remove_file_if_exists(lock_path)
 
     # Abort the target requests.
-    for request_id in request_ids:
-        with requests_lib.update_request(request_id) as request_record:
-            if request_record is None:
-                print(f'No request ID {request_id}')
-                continue
-            if request_record.status > requests_lib.RequestStatus.RUNNING:
-                print(f'Request {request_id} already finished')
-                continue
-            request_record.status = requests_lib.RequestStatus.ABORTED
-            pid = request_record.pid
-        if pid is not None:
-            print(f'Killing request process {pid}', flush=True)
-            executor.schedule_request(
-                request_id=request.state.request_id,
-                request_name='kill_children_processes',
-                request_body=payloads.KillChildrenProcessesBody(
-                    parent_pids=[pid], force=True),
-                func=subprocess_utils.kill_children_processes,
-                schedule_type=executor.ScheduleType.BLOCKING,
-            )
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='kill_request_processes',
+        request_body=payloads.KillRequestProcessesBody(
+            request_ids=request_ids),
+        func=requests_lib.kill_requests,
+        schedule_type=executor.ScheduleType.BLOCKING,
+    )
 
 
 @app.get('/requests')

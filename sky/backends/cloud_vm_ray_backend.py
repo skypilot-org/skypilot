@@ -4106,9 +4106,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
         if terminate:
-            cloud = handle.launched_resources.cloud
-            config = common_utils.read_yaml(handle.cluster_yaml)
             try:
+                cloud = handle.launched_resources.cloud
+                config = common_utils.read_yaml(handle.cluster_yaml)
                 cloud.check_features_are_supported(
                     handle.launched_resources,
                     {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -4119,6 +4119,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 pass
             except exceptions.PortDoesNotExistError:
                 logger.debug('Ports do not exist. Skipping cleanup.')
+            except FileNotFoundError:
+                # When switching to different region to provision,
+                # we delete the cluster yaml file of the previous region attempt.
+                pass
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
@@ -4128,13 +4132,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     raise
 
-        # The cluster file must exist because the cluster_yaml will only
-        # be removed after the cluster entry in the database is removed.
-        config = common_utils.read_yaml(handle.cluster_yaml)
-        auth_config = config['auth']
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
-            handle.cluster_name, handle.head_ip, auth_config,
-            handle.docker_user)
+        try:
+            config = common_utils.read_yaml(handle.cluster_yaml)
+            auth_config = config['auth']
+            sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
+                handle.cluster_name, handle.head_ip, auth_config,
+                handle.docker_user)
+        except FileNotFoundError:
+            pass
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

@@ -2847,7 +2847,6 @@ def _down_or_stop_clusters(
     # Abort API requests for clusters.
     if sdk == sdk_lib:
         if apply_to_all:
-            print('YIKADEBUG cli.py abort all clusters')
             sdk.abort(all_clusters=True)
         elif len(names) > 0:
             sdk.abort(cluster_names=names)

@@ -350,12 +350,9 @@ class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True
 
-
-class KillChildrenProcessesBody(RequestBody):
-    """The request body for the kill children processes endpoint."""
-    parent_pids: List[int]
-    force: bool = False
-
+class KillRequestProcessesBody(RequestBody):
+    """The request body for the kill request processes endpoint."""
+    request_ids: List[str]
 
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""

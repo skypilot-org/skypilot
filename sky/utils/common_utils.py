@@ -3,7 +3,6 @@
 import difflib
 import functools
 import getpass
-import glob
 import hashlib
 import inspect
 import os
@@ -462,9 +461,7 @@ def remove_file_if_exists(path: str):
         path: The path to the file.
     """
     try:
-        paths = glob.glob(path)
-        for path in paths:
-            os.remove(path)
+        os.remove(path)
     except FileNotFoundError:
         logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
         pass

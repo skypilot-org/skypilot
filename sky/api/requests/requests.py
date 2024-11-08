@@ -16,7 +16,7 @@ from sky.api import common
 from sky.api.requests import payloads
 from sky.api.requests.serializers import decoders
 from sky.api.requests.serializers import encoders
-from sky.utils import common_utils
+from sky.utils import common_utils, subprocess_utils
 from sky.utils import db_utils
 
 # Tables in task.db.
@@ -40,8 +40,8 @@ class RequestStatus(enum.Enum):
     ABORTED = 'ABORTED'
 
     def __gt__(self, other):
-        return (list(RequestStatus).index(self) >
-                list(RequestStatus).index(other))
+        return (list(RequestStatus).index(self)
+                > list(RequestStatus).index(other))
 
 
 REQUEST_COLUMNS = [
@@ -126,7 +126,8 @@ class Request:
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
-        return cls.decode(RequestPayload(**dict(zip(REQUEST_COLUMNS, row[:-1]))))
+        return cls.decode(
+            RequestPayload(**dict(zip(REQUEST_COLUMNS, row[:-1]))))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
@@ -197,6 +198,23 @@ class Request:
             pid=payload.pid,
             created_at=payload.created_at,
         )
+
+
+def kill_requests(request_ids: List[str]):
+    for request_id in request_ids:
+        with update_request(request_id) as request_record:
+            if request_record is None:
+                print(f'No request ID {request_id}')
+                continue
+            if request_record.status > RequestStatus.RUNNING:
+                print(f'Request {request_id} already finished')
+                continue
+            if request_record.pid is not None:
+                print(f'Killing request process {request_record.pid}',
+                      flush=True)
+                subprocess_utils.kill_children_processes(
+                    parent_pids=[request_record.pid], force=True)
+            request_record.status = RequestStatus.ABORTED
 
 
 _DB_PATH = os.path.expanduser(common.API_SERVER_REQUEST_DB_PATH)
@@ -313,10 +331,9 @@ def create_if_not_exists(request: Request) -> bool:
 
 
 @init_db
-def get_request_tasks(
-        status: Optional[List[RequestStatus]] = None,
-        cluster_names: Optional[List[str]] = None,
-        all_clusters: bool = False) -> List[Request]:
+def get_request_tasks(status: Optional[List[RequestStatus]] = None,
+                      cluster_names: Optional[List[str]] = None,
+                      all_clusters: bool = False) -> List[Request]:
     """Get a list of requests that match the given filters.
 
     Args:
@@ -329,7 +346,8 @@ def get_request_tasks(
         status_list_str = ','.join(repr(status.value) for status in status)
         filters.append(f'status IN ({status_list_str})')
     if all_clusters:
-        filters.append(f"{COL_CLUSTER_NAME} IS NOT NULL AND {COL_CLUSTER_NAME} != ''")
+        filters.append(
+            f"{COL_CLUSTER_NAME} IS NOT NULL AND {COL_CLUSTER_NAME} != ''")
     elif cluster_names is not None:
         cluster_names_str = ','.join(f"'{name}'" for name in cluster_names)
         filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
