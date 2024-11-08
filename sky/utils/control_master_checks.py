@@ -1,5 +1,4 @@
 """Utils to check if ssh control master should be disabled."""
-from subprocess import CalledProcessError
 
 from sky import sky_logging
 from sky.utils import subprocess_utils
@@ -7,6 +6,7 @@ from sky.utils import subprocess_utils
 from functools import lru_cache
 
 logger = sky_logging.init_logger(__name__)
+
 
 def is_tmp_9p_filesystem() -> bool:
     """Check if the /tmp filesystem is 9p.
@@ -16,12 +16,12 @@ def is_tmp_9p_filesystem() -> bool:
     """
 
     result = subprocess_utils.run(['df', '-T', '/tmp'],
-                                    capture_output=True,
-                                    text=True)
+                                  capture_output=True,
+                                  text=True)
 
     if result.returncode != 0:
         return False
-    
+
     filesystem_infos = result.stdout.strip().split('\n')
     if len(filesystem_infos) < 2:
         return False
@@ -29,6 +29,7 @@ def is_tmp_9p_filesystem() -> bool:
     if len(filesystem_types) < 2:
         return False
     return filesystem_types[1].lower() == '9p'
+
 
 @lru_cache
 def should_disable_control_master() -> bool:
