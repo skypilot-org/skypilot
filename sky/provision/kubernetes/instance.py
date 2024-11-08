@@ -337,7 +337,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
              provider_config: Dict[str, Any]) -> None:
     """Pre-initialization step for SkyPilot pods.
 
-    This step is run in the pod right after it is created and before the 
+    This step is run in the pod right after it is created and before the
     SkyPilot runtime is setup.
 
     This step includes three key steps:
@@ -351,8 +351,8 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
     on most base images. E.g., do not use Python, since that may not
     be installed by default.
 
-    If you run any apt commands, be sure to check if the lock is available. 
-    It is possible the `apt update` run in the pod container args may still 
+    If you run any apt commands, be sure to check if the lock is available.
+    It is possible the `apt update` run in the pod container args may still
     be running.
 
     Args:
@@ -361,7 +361,8 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         new_nodes (List): List of new pod instances.
 
     Raises:
-        config_lib.KubernetesError: If user privileges are insufficient or setup fails.
+        config_lib.KubernetesError: If user privileges are insufficient or
+          setup fails.
     """
 
     check_apt_update_complete_cmd = (
@@ -388,9 +389,11 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         'else '
         '  if command -v sudo >/dev/null 2>&1; then '
         '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  else '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  fi; '
         'fi;')
 
@@ -405,9 +408,10 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         '  if [ $rc -eq 0 ]; then '
         '    break; '
         '  fi; '
-        '  echo "$output" | grep -qi "could not get lock" || grep -qi "Unable to acquire the dpkg frontend lock"; '
+        '  echo "$output" | grep -qi "could not get lock" || '
+        '  grep -qi "Unable to acquire the dpkg frontend lock"; '
         '  if [ $? -eq 0 ]; then '
-        '    echo "apt install failed due to lock, retrying... (Attempt $i/5)"; '
+        '    echo "apt install failed due to lock, retrying. (Attempt $i/5)"; '
         '    sleep 5; '
         '  else '
         '    echo "apt install failed for a non-lock reason: $output"; '
@@ -415,7 +419,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         '  fi; '
         'done; '
         'if [ $rc -ne 0 ]; then '
-        '    echo "apt install failed after multiple attempts due to lock errors."; '
+        '    echo "apt install failed after 5 attempts due to lock errors."; '
         '    exit $rc; '
         'fi; '
         '$(prefix_cmd) mkdir -p /var/run/sshd; '
@@ -461,7 +465,9 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         # Just check if rsync is installed if user disables SSH installation
         ssh_install_cmd = check_rsync_cmd
 
-    pre_init_cmd = 'set -ex; ' + check_k8s_user_sudo_cmd + set_k8s_env_var_cmd + check_apt_update_complete_cmd + ssh_install_cmd
+    pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
+                    set_k8s_env_var_cmd + check_apt_update_complete_cmd +
+                    ssh_install_cmd)
 
     def _pre_init_thread(new_node):
         pod_name = new_node.metadata.name
