@@ -442,12 +442,6 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
-    # If user disables SSH installation, we still need to check if rsync is
-    # installed
-    check_rsync_cmd = (
-        'command -v rsync >/dev/null 2>&1 && echo installed ||'
-        f' ( echo missing; exit {exceptions.RSYNC_NOT_INSTALLED_CODE}; )')
-
     # Kubernetes automatically populates containers with critical
     # environment variables, such as those for discovering services running
     # in the cluster and CUDA/nvidia environment variables. We need to
@@ -459,15 +453,9 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
     # shell sessions.
     set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
-    if not provider_config.get('disable_ssh', False):
-        ssh_install_cmd = install_ssh_k8s_cmd
-    else:
-        # Just check if rsync is installed if user disables SSH installation
-        ssh_install_cmd = check_rsync_cmd
-
     pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
                     set_k8s_env_var_cmd + check_apt_update_complete_cmd +
-                    ssh_install_cmd)
+                    install_ssh_k8s_cmd)
 
     def _pre_init_thread(new_node):
         pod_name = new_node.metadata.name
@@ -485,13 +473,6 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
                 'Ensure the default user has root access or '
                 '"sudo" is installed and the user is added to the sudoers '
                 'from the image.')
-
-        if rc == exceptions.RSYNC_NOT_INSTALLED_CODE:
-            raise config_lib.KubernetesError(
-                'rsync is not installed in the container image. '
-                'File sync operations will fail. Please install rsync in '
-                'your container image or re-enable SSH, which will '
-                'install rsync for you.')
 
         op_name = 'pre-init'
         _raise_command_running_error(op_name, pre_init_cmd, pod_name, rc,
