@@ -23,19 +23,6 @@ CallbackType = Callable[[str], None]
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_db_path() -> str:
-    """Workaround to collapse multi-step Path ops for type checker.
-    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
-    """
-    path = pathlib.Path('~/.sky/spot_jobs.db')
-    path = path.expanduser().absolute()
-    path.parents[0].mkdir(parents=True, exist_ok=True)
-    return str(path)
-
-
-_DB_PATH = _get_db_path()
-
-
 # === Database schema ===
 # `spot` table contains all the finest-grained tasks, including all the
 # tasks of a managed job (called spot for legacy reason, as it is generalized
@@ -128,6 +115,17 @@ def create_table(cursor, conn):
 
 # Module-level connection/cursor; thread-safe as the module is only imported
 # once.
+def _get_db_path() -> str:
+    """Workaround to collapse multi-step Path ops for type checker.
+    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
+    """
+    path = pathlib.Path('~/.sky/spot_jobs.db')
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_PATH = _get_db_path()
 db_utils.SQLiteConn(_DB_PATH, create_table)
 
 # job_duration is the time a job actually runs (including the
