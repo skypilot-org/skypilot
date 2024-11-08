@@ -5,6 +5,7 @@ https://json-schema.org/
 """
 import enum
 from typing import Any, Dict, List, Tuple
+from sky.serve import load_balancing_policies
 
 from sky.skylet import constants
 
@@ -383,7 +384,8 @@ def get_service_schema():
                 'type': 'integer',
             },
             'load_balancing_policy': {
-                'type': 'string'
+                'type': 'string',
+                'case_insensitive_enum': list(load_balancing_policies.LB_POLICIES.keys())
             },
         }
     }
