@@ -226,9 +226,14 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
 def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
                       main: bool) -> List[Any]:
     """Get route tables associated with a VPC and region
-    :param region: region is mandatory to allow the lru cache
+    
+    Args:
+        region: region is mandatory to allow the lru cache
                    to return the corect results
+    Returns:
+        A list of route tables associated with a VPC and region
     """
+    del region # not used.
     filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
     if vpc_id is not None:
         filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
