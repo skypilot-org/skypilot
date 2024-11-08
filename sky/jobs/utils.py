@@ -311,8 +311,7 @@ def wait_for_task_completion(
         Optional[str]: Status message to display, or None when streaming logs
 
     Returns:
-        bool: True if task completed successfully, False if task failed or
-        cancelled
+        bool: True if task completed successfully, False if tailing logs failed
     """
     while True:
         # Get latest status
@@ -442,13 +441,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             time.sleep(1)
 
         if managed_job_status.is_terminal():
+            failure_reason = (('\nFailure reason: '
+                               f'{managed_job_state.get_failure_reason(job_id)}'
+                              ) if managed_job_status.is_failed() else '')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}') + (
-                        ('\nFailure reason: '
-                         f'{managed_job_state.get_failure_reason(job_id)}')
-                        if managed_job_status.is_failed() else '')
+                    f'{colorama.Style.RESET_ALL}') + failure_reason
 
         backend = backends.CloudVmRayBackend()
 
