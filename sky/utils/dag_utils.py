@@ -75,10 +75,12 @@ def load_dag_from_yaml(
     1. Tasks without explicit flow definition:
        - Single task
        - Multiple tasks separated, with implicit linear dependency
-    2. DAG with explicit 'downstream' field
-
-    Has special handling for an initial section in YAML that contains only the
-    'name' field, which is the DAG name.
+    2. DAG with explicit 'edges' field, each edge can specify:
+       - source: source task name
+       - target: target task name
+       - data: optional data transfer info
+         - path: data path on target node
+         - size_gb: estimated data size in GB
 
     'env_overrides' is a list of (key, value) pairs that will be used to update
     the task's 'envs' section. For multi-task DAGs, the envs will be updated
@@ -98,14 +100,15 @@ def load_dag_from_yaml(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Empty YAML file.')
 
-    has_header = set(configs[0].keys()) <= {'name', 'downstream'}
+    has_header = set(configs[0].keys()) <= {'name', 'edges'}
+    edges: List[Dict[str, Any]]
     if has_header:
         header = configs.pop(0)
         dag.name = header.get('name')
-        downstream = header.get('downstream', {})
+        edges = header.get('edges', [])
     else:
         dag.name = configs[0].get('name')
-        downstream = {}
+        edges = []
 
     # Handle YAML with only 'name'
     if not configs:
@@ -125,12 +128,17 @@ def load_dag_from_yaml(
         dag.add(task)
 
     # Handle dependencies
-    if downstream:
+    if edges:
         # Explicit dependencies
-        for upstream, downs in downstream.items():
-            downs = [downs] if not isinstance(downs, list) else downs
-            for down in downs:
-                dag.add_edge(upstream, down)
+        for edge in edges:
+            source = edge['source']
+            target = edge['target']
+            task_edge = dag.add_edge(source, target)
+            if 'data' in edge:
+                data = edge['data']
+                task_edge.with_data(source_path=data['source_path'],
+                                    target_path=data['target_path'],
+                                    size_gb=data['size_gb'])
     else:
         # Implicit dependency
         for i in range(len(tasks) - 1):
@@ -152,19 +160,25 @@ def dump_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
     """
     header: Dict[str, Any] = {'name': dag.name}
 
-    if not dag.is_chain():
-        downstream = {}
-        for task in dag.tasks:
-            downs = list(dag.get_downstream(task))
-            if downs:
-                downstream[task.name] = [down.name for down in downs]
-        if downstream:
-            header['downstream'] = downstream
+    edges: List[Dict[str, Any]] = []
+    for edge in dag.get_edges():
+        edge_dict: Dict[str, Any] = {
+            'source': edge.source.name,
+            'target': edge.target.name
+        }
+        if edge.data is not None:
+            edge_dict['data'] = {
+                'source_path': edge.data.source_path,
+                'target_path': edge.data.target_path,
+                'size_gb': edge.data.size_gb
+            }
+        edges.append(edge_dict)
+
+    if edges:
+        header['edges'] = edges
 
     task_configs = [task.to_yaml_config() for task in dag.tasks]
-
     configs = [header] + task_configs
-
     common_utils.dump_yaml(path, configs)
 
 
