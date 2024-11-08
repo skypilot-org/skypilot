@@ -1,8 +1,12 @@
 """Utils to check if ssh control master should be disabled."""
 from subprocess import CalledProcessError
 
+from sky import sky_logging
 from sky.utils import subprocess_utils
 
+from functools import lru_cache
+
+logger = sky_logging.init_logger(__name__)
 
 def is_tmp_9p_filesystem() -> bool:
     """Check if the /tmp filesystem is 9p.
@@ -10,27 +14,25 @@ def is_tmp_9p_filesystem() -> bool:
     Returns:
         bool: True if the /tmp filesystem is 9p, False otherwise.
     """
-    try:
-        result = subprocess_utils.run(['df', '-T', '/tmp'],
-                                      capture_output=True,
-                                      text=True)
 
-        if result.returncode != 0:
-            raise CalledProcessError(result.returncode, result.args,
-                                     result.stdout, result.stderr)
+    result = subprocess_utils.run(['df', '-T', '/tmp'],
+                                    capture_output=True,
+                                    text=True)
 
-        filesystem_info = result.stdout.strip().split('\n')[1]
-        filesystem_type = filesystem_info.split()[1]
-        return filesystem_type.lower() == '9p'
+    if result.returncode != 0:
+        return False
+    
+    filesystem_infos = result.stdout.strip().split('\n')
+    if len(filesystem_infos) < 2:
+        return False
+    filesystem_types = filesystem_infos[1].split()
+    if len(filesystem_types) < 2:
+        return False
+    return filesystem_types[1].lower() == '9p'
 
-    except CalledProcessError as e:
-        print(f'Error running "df" command: {e}')
-
-    return False
-
-
-def disable_control_master_checks() -> bool:
-    """Disable ssh control master checks if the /tmp filesystem is 9p.
+@lru_cache
+def should_disable_control_master() -> bool:
+    """Whether disable ssh control master based on file system.
 
     Returns:
         bool: True if the ssh control master should be disabled,
