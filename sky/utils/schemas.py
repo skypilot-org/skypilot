@@ -382,6 +382,19 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'tls': {
+                'type': 'object',
+                'required': ['keyfile', 'certfile'],
+                'additionalProperties': False,
+                'properties': {
+                    'keyfile': {
+                        'type': 'string',
+                    },
+                    'certfile': {
+                        'type': 'string',
+                    },
+                },
+            },
         }
     }
 
