@@ -924,6 +924,8 @@ class Storage(object):
                          f'store with name {self.name!r}.')
             raise
 
+        self._add_store(store)
+
         return store
 
     def initialize_and_sync_store(self, store: AbstractStore) -> None:

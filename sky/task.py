@@ -974,7 +974,7 @@ class Task:
                         store.sync_bucket(s_region)
                     else:
                         store.sync_bucket()
-                    storage.initialize_and_sync_store(new_store)
+                    storage.initialize_and_sync_store(store)
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
         storage_mounts = self.storage_mounts
