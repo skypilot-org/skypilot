@@ -14,6 +14,7 @@ import zipfile
 import colorama
 import fastapi
 from fastapi.middleware import cors
+from sky.backends import backend_utils
 import starlette.middleware.base
 
 from sky import check as sky_check
@@ -658,6 +659,8 @@ async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
             request_task.request_id for request_task in
             requests_lib.get_request_tasks(status=statuses, all_clusters=True)
         ]
+        lock_path = backend_utils.CLUSTER_STATUS_LOCK_PATH.format('*')
+        common_utils.remove_file_if_exists(lock_path)
     else:
         if abort_body.request_id is not None:
             print(f'Aborting request ID: {abort_body.request_id}')
@@ -671,6 +674,10 @@ async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
                 for request_task in requests_lib.get_request_tasks(
                     status=statuses, cluster_names=abort_body.cluster_names)
             ])
+            for cluster_name in abort_body.cluster_names:
+                lock_path = backend_utils.CLUSTER_STATUS_LOCK_PATH.format(
+                    cluster_name)
+                common_utils.remove_file_if_exists(lock_path)
 
     # Abort the target requests.
     for request_id in request_ids:

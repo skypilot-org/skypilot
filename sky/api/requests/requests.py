@@ -342,8 +342,6 @@ def get_request_tasks(
                 filter_str = 'WHERE ' + filters[i]
             else:
                 filter_str += ' AND ' + filters[i]
-        print(f'YIKADEBUG SELECT * FROM {REQUEST_TABLE} {filter_str} '
-              'ORDER BY created_at DESC')
         cursor.execute(f'SELECT * FROM {REQUEST_TABLE} {filter_str} '
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()

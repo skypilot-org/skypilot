@@ -2847,6 +2847,7 @@ def _down_or_stop_clusters(
     # Abort API requests for clusters.
     if sdk == sdk_lib:
         if apply_to_all:
+            print('YIKADEBUG cli.py abort all clusters')
             sdk.abort(all_clusters=True)
         elif len(names) > 0:
             sdk.abort(cluster_names=names)
@@ -5606,7 +5607,7 @@ def api_ls(request_id: Optional[str], all: bool):
     for request in request_list:
         r_id = request.request_id
         if not all:
-            r_id = common_utils.truncate_long_string(r_id, 8)
+            r_id = common_utils.truncate_long_string(r_id, 36)
         table.add_row([
             r_id, request.name,
             log_utils.readable_time_duration(request.created_at), request.status
