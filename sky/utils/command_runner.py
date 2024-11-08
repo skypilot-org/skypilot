@@ -11,7 +11,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
-from sky.utils import control_master_checks
+from sky.utils import control_master_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -445,7 +445,7 @@ class SSHCommandRunner(CommandRunner):
         self._ssh_proxy_command = ssh_proxy_command
         self.disable_control_master = (
             disable_control_master or
-            control_master_checks.should_disable_control_master())
+            control_master_utils.should_disable_control_master())
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
