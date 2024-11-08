@@ -1,4 +1,4 @@
-"""Utils to check if ssh control master should be disabled."""
+"""Utils to check if the ssh control master should be disabled."""
 
 from functools import lru_cache
 
