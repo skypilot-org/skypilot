@@ -264,7 +264,10 @@ class SkyServiceSpec:
                 f'{self.target_qps_per_replica})')
 
     def __repr__(self) -> str:
-        lb_policy_str = f'\n            Load balancing policy:           {self.load_balancing_policy}' if self.load_balancing_policy is not None else ''
+        lb_policy_str = ''
+        if self.load_balancing_policy is not None:
+            policy_name = self.load_balancing_policy
+            lb_policy_str = f'\nLoad balancing policy:           {policy_name}'
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
