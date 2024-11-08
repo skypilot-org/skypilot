@@ -80,7 +80,7 @@ Both components make using complex cloud infra simple:
 With Sky, cloud users and their workloads gain the following benefits:
 
 * **Cloud is easier to use**: With the unified interface, infra is simplified & multicloud ready.
-* **Lower costs**: Sky optimizes the cost of each workload.  Engineering time is saved from dealing with cloud infra. Users gain pricing leverage due to portability.
+* **Lower costs**: Sky optimizes the cost of each workload.  Engineering time is saved from dealing with cloud infra. Large organizations gain pricing leverage due to portability.
 * **Higher capacity**: Workloads gain access to all diverse compute choices across locations, pricing models, and hardware.
 
 .. * **Portability**: Cloud infra setup is simplified and automatically multicloud ready.
