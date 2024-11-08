@@ -484,16 +484,16 @@ def tail_logs(job_id: Optional[int],
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
-            start_stream = False
+            start_streaming = False
             if tail > 0:
                 head_lines_of_log_file = _peek_head_lines(log_file)
-                lines = collections.deque(log_file.readlines(), maxlen=tail)
-                start_stream = _should_stream_the_whole_tail_lines(
+                lines = collections.deque(log_file, maxlen=tail)
+                start_streaming = _should_stream_the_whole_tail_lines(
                     head_lines_of_log_file, lines, start_stream_at)
                 for line in lines:
                     if start_stream_at in line:
-                        start_stream = True
-                    if start_stream:
+                        start_streaming = True
+                    if start_streaming:
                         print(line, end='')
                 # Flush the last n lines
                 print(end='', flush=True)
@@ -501,26 +501,26 @@ def tail_logs(job_id: Optional[int],
             # if tail > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
-                                         start_streaming=start_stream,
+                                         start_streaming=start_streaming,
                                          start_streaming_at=start_stream_at):
                 print(line, end='', flush=True)
     else:
         try:
-            start_stream = False
+            start_streaming = False
             with open(log_path, 'r', encoding='utf-8') as log_file:
                 if tail > 0:
                     # If tail > 0, we need to read the last n lines.
                     # We use double ended queue to rotate the last n lines.
                     head_lines_of_log_file = _peek_head_lines(log_file)
-                    lines = collections.deque(log_file.readlines(), maxlen=tail)
-                    start_stream = _should_stream_the_whole_tail_lines(
+                    lines = collections.deque(log_file, maxlen=tail)
+                    start_streaming = _should_stream_the_whole_tail_lines(
                         head_lines_of_log_file, lines, start_stream_at)
                 else:
-                    lines = log_file.readlines()
+                    lines = log_file
                 for line in lines:
                     if start_stream_at in line:
-                        start_stream = True
-                    if start_stream:
+                        start_streaming = True
+                    if start_streaming:
                         print(line, end='', flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
