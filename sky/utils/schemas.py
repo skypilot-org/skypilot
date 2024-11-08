@@ -382,6 +382,10 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'load_balancing_policy': {
+                'type': 'string',
+                'enum': ['round_robin', 'least_connections', 'ip_hash']
+            },
         }
     }
 

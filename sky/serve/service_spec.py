@@ -62,7 +62,8 @@ class SkyServiceSpec:
                 load_balancing_policy not in serve.LB_POLICIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Unknown load balancing policy: {load_balancing_policy}')
+                    f'Unknown load balancing policy: {load_balancing_policy}. '
+                    f'Available policies: {list(serve.LB_POLICIES.keys())}')
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
@@ -263,12 +264,13 @@ class SkyServiceSpec:
                 f'{self.target_qps_per_replica})')
 
     def __repr__(self) -> str:
+        lb_policy_str = f'\n            Load balancing policy:           {self.load_balancing_policy}' if self.load_balancing_policy is not None else ''
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
-            Spot Policy:                      {self.spot_policy_str()}
+            Spot Policy:                      {self.spot_policy_str()}{lb_policy_str}
         """)
 
     @property
