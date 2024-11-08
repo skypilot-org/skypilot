@@ -485,6 +485,7 @@ def tail_logs(job_id: Optional[int],
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
+            start_stream = False
             if tail > 0:
                 head_lines_of_log_file = _peek_head_lines(log_file)
                 lines = collections.deque(log_file.readlines(), maxlen=tail)
@@ -507,7 +508,7 @@ def tail_logs(job_id: Optional[int],
     else:
         try:
             start_stream = False
-            with open(log_path, 'r', encoding='utf-8') as f:
+            with open(log_path, 'r', encoding='utf-8') as log_file:
                 if tail > 0:
                     # If tail > 0, we need to read the last n lines.
                     # We use double ended queue to rotate the last n lines.
@@ -516,7 +517,7 @@ def tail_logs(job_id: Optional[int],
                     start_stream = _start_stream_before_tail_lines(
                         head_lines_of_log_file, lines, start_stream_at)
                 else:
-                    lines = f.readlines()
+                    lines = log_file.readlines()
                 for line in lines:
                     if start_stream_at in line:
                         start_stream = True
