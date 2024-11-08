@@ -1,5 +1,7 @@
 """Utils to check if the ssh control master should be disabled."""
 
+import functools
+
 from sky import sky_logging
 from sky.utils import subprocess_utils
 
