@@ -104,13 +104,22 @@ def ssh_options_list(
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
+    #
+    # We disable ControlMaster when ssh_proxy_command is used, because the
+    # master connection will be idle although the connection might be shared
+    # by other ssh commands that is not idle. In that case, user's custom proxy
+    # command may drop the connection due to idle timeout, since it will only
+    # see the idle master connection. It is an issue even with the
+    # ServerAliveInterval set, since the keepalive message may not be recognized
+    # by the custom proxy command, such as AWS SSM Session Manager.
+    #
     # We also do not use ControlMaster when we use `kubectl port-forward`
     # to access Kubernetes pods over SSH+Proxycommand. This is because the
     # process running ProxyCommand is kept running as long as the ssh session
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            not disable_control_master):
+            ssh_proxy_command is None and not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
