@@ -226,7 +226,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
 def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
                       main: bool) -> List[Any]:
     """Get route tables associated with a VPC and region
-    
+
     Args:
         ec2: ec2 resource object
         vpc_id: vpc_id is optional, if not provided, all route tables in the
