@@ -36,29 +36,32 @@ The command can then be run as:
 
 
 def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
-    """Convert the entrypoint to a sky.Dag.
+    """Converts the entrypoint to a sky.Dag and applies the policy.
 
     Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
     """
     # Not suppressing stacktrace: when calling this via API user may want to
     # see their own program in the stacktrace. Our CLI impl would not trigger
     # these errors.
+    converted_dag: 'dag_lib.Dag'
     if isinstance(entrypoint, str):
         with ux_utils.print_exception_no_traceback():
             raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
     elif isinstance(entrypoint, dag_lib.Dag):
-        return copy.deepcopy(entrypoint)
+        converted_dag = copy.deepcopy(entrypoint)
     elif isinstance(entrypoint, task_lib.Task):
         entrypoint = copy.deepcopy(entrypoint)
         with dag_lib.Dag() as dag:
             dag.add(entrypoint)
             dag.name = entrypoint.name
-        return dag
+        converted_dag = dag
     else:
         with ux_utils.print_exception_no_traceback():
             raise TypeError(
                 'Expected a sky.Task or sky.Dag but received argument of type: '
                 f'{type(entrypoint)}')
+
+    return converted_dag
 
 
 def load_chain_dag_from_yaml(
@@ -140,11 +143,21 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
+        default_strategy = jobs.DEFAULT_RECOVERY_STRATEGY
+        assert default_strategy is not None
         for resources in list(task_.resources):
-            change_default_value: Dict[str, Any] = {}
-            if resources.job_recovery is None:
-                change_default_value[
-                    'job_recovery'] = jobs.DEFAULT_RECOVERY_STRATEGY
+            original_job_recovery = resources.job_recovery
+            job_recovery = {'strategy': default_strategy}
+            if isinstance(original_job_recovery, str):
+                job_recovery['strategy'] = original_job_recovery
+            elif isinstance(original_job_recovery, dict):
+                job_recovery.update(original_job_recovery)
+                strategy = job_recovery.get('strategy')
+                if strategy is None:
+                    job_recovery['strategy'] = default_strategy
+            change_default_value: Dict[str, Any] = {
+                'job_recovery': job_recovery
+            }
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)

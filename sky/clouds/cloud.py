@@ -9,8 +9,9 @@ reused across cloud object creation.
 """
 import collections
 import enum
+import math
 import typing
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
 from sky import skypilot_config
@@ -117,7 +118,7 @@ class Cloud:
 
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
-    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
+    _BEST_DISK_TIER = resources_utils.DiskTier.ULTRA
     _SUPPORTED_DISK_TIERS = {resources_utils.DiskTier.BEST}
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = False
 
@@ -176,6 +177,11 @@ class Cloud:
             `region.zones` is an empty list.
         """
         raise NotImplementedError
+
+    @classmethod
+    def optimize_by_zone(cls) -> bool:
+        """Returns whether to optimize this cloud by zone (default: region)."""
+        return False
 
     @classmethod
     def zones_provision_loop(
@@ -301,7 +307,7 @@ class Cloud:
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         raise NotImplementedError
 
@@ -436,11 +442,11 @@ class Cloud:
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        """(Advanced) Returns currently active user identity of this cloud.
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """(Advanced) Returns all available user identities of this cloud.
 
         The user "identity" is associated with each SkyPilot cluster they
-        creates. This is used in protecting cluster operations, such as
+        create. This is used in protecting cluster operations, such as
         provision, teardown and status refreshing, in a multi-identity
         scenario, where the same user/device can switch between different
         cloud identities. We check that the user identity matches before:
@@ -448,10 +454,16 @@ class Cloud:
             - Stopping/tearing down a cluster
             - Refreshing the status of a cluster
 
-        Design choice: we allow the operations that can correctly work with
-        a different user identity, as a user should have full control over
-        all their clusters (no matter which identity it belongs to), e.g.,
-        submitting jobs, viewing logs, auto-stopping, etc.
+        Design choices:
+          1. We allow the operations that can correctly work with a different
+             user identity, as a user should have full control over all their
+             clusters (no matter which identity it belongs to), e.g.,
+             submitting jobs, viewing logs, auto-stopping, etc.
+          2. A cloud implementation can optionally switch between different
+             identities if required for cluster operations. In this case,
+             the cloud implementation should return multiple identities
+             as a list. E.g., our Kubernetes implementation can use multiple
+             kubeconfig contexts to switch between different identities.
 
         The choice of what constitutes an identity is up to each cloud's
         implementation. In general, to suffice for the above purposes,
@@ -459,24 +471,34 @@ class Cloud:
         resources are used when the user invoked each cloud's default
         CLI/API.
 
-        The returned identity is a list of strings. The list is in the order of
+        An identity is a list of strings. The list is in the order of
         strictness, i.e., the first element is the most strict identity, and
         the last element is the least strict identity.
         When performing an identity check between the current active identity
         and the owner identity associated with a cluster, we compare the two
         lists in order: if a position does not match, we go to the next. To
-        see an example, see the docstring of the AWS.get_current_user_identity.
-
+        see an example, see the docstring of the AWS.get_user_identities.
 
         Example identities (see cloud implementations):
             - AWS: [UserId, AccountId]
             - GCP: [email address + project ID]
             - Azure: [email address + subscription ID]
+            - Kubernetes: [context name]
+
+        Example return values:
+            - AWS: [[UserId, AccountId]]
+            - GCP: [[email address + project ID]]
+            - Azure: [[email address + subscription ID]]
+            - Kubernetes: [[current active context], [context 2], ...]
 
         Returns:
             None if the cloud does not have a concept of user identity
             (access protection will be disabled for these clusters);
-            otherwise the currently active user identity.
+            otherwise a list of available identities with the current active
+            identity being the first element. Most clouds have only one identity
+            available, so the returned list will only have one element: the
+            current active identity.
+
         Raises:
             exceptions.CloudUserIdentityError: If the user identity cannot be
                 retrieved.
@@ -484,12 +506,25 @@ class Cloud:
         return None
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        """Returns a user friendly representation of the current identity."""
-        user_identity = cls.get_current_user_identity()
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        """Returns a user friendly representation of the active identity."""
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         return ', '.join(user_identity)
+
+    @classmethod
+    def get_active_user_identity(cls) -> Optional[List[str]]:
+        """Returns currently active user identity of this cloud
+
+        See get_user_identities for definition of user identity.
+
+        Returns:
+            None if the cloud does not have a concept of user identity;
+            otherwise the current active identity.
+        """
+        identities = cls.get_user_identities()
+        return identities[0] if identities is not None else None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
@@ -639,8 +674,9 @@ class Cloud:
         assert resources.is_launchable(), resources
 
         def _equal_accelerators(
-                acc_requested: Optional[Dict[str, int]],
-                acc_from_instance_type: Optional[Dict[str, int]]) -> bool:
+            acc_requested: Optional[Dict[str, Union[int, float]]],
+            acc_from_instance_type: Optional[Dict[str, Union[int,
+                                                             float]]]) -> bool:
             """Check the requested accelerators equals to the instance type
 
             Check the requested accelerators equals to the accelerators
@@ -655,12 +691,14 @@ class Cloud:
             for acc in acc_requested:
                 if acc not in acc_from_instance_type:
                     return False
-                if acc_requested[acc] != acc_from_instance_type[acc]:
+                # Avoid float point precision issue.
+                if not math.isclose(acc_requested[acc],
+                                    acc_from_instance_type[acc]):
                     return False
             return True
 
-        acc_from_instance_type = (cls.get_accelerators_from_instance_type(
-            resources.instance_type))
+        acc_from_instance_type = cls.get_accelerators_from_instance_type(
+            resources.instance_type)
         if not _equal_accelerators(resources.accelerators,
                                    acc_from_instance_type):
             with ux_utils.print_exception_no_traceback():
@@ -784,6 +822,10 @@ class Cloud:
         raise NotImplementedError
 
     # === End of image related methods ===
+
+    @classmethod
+    def canonical_name(cls) -> str:
+        return cls.__name__.lower()
 
     def __repr__(self):
         return self._REPR

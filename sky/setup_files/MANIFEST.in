@@ -6,7 +6,6 @@ include sky/setup_files/*
 include sky/skylet/*.sh
 include sky/skylet/LICENSE
 include sky/skylet/providers/ibm/*
-include sky/skylet/providers/lambda_cloud/*
 include sky/skylet/providers/oci/*
 include sky/skylet/providers/scp/*
 include sky/skylet/providers/*.py

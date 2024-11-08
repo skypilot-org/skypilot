@@ -8,11 +8,14 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
+
+logger = sky_logging.init_logger(__name__)
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -31,7 +34,16 @@ _image_df = common.read_catalog('kubernetes/images.csv',
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
-    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+    global _image_df
+    image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    if image_id is None:
+        # Refresh the image catalog and try again, if the image tag is not
+        # found.
+        logger.debug('Refreshing the image catalog and trying again.')
+        _image_df = common.read_catalog('kubernetes/images.csv',
+                                        pull_frequency_hours=0)
+        image_id = common.get_image_id_from_tag_impl(_image_df, tag, region)
+    return image_id
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
@@ -68,26 +80,35 @@ def list_accelerators_realtime(
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
+    # TODO(zhwu): this should return all accelerators in multiple kubernetes
+    # clusters defined by allowed_contexts.
+    if region_filter is None:
+        context = kubernetes_utils.get_current_kube_config_context_name()
+    else:
+        context = region_filter
+    if context is None:
+        return {}, {}, {}
+
     k8s_cloud = Kubernetes()
     if not any(
             map(k8s_cloud.is_same_cloud,
                 sky_check.get_cached_enabled_clouds_or_refresh())
-    ) or not kubernetes_utils.check_credentials()[0]:
+    ) or not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
-    has_gpu = kubernetes_utils.detect_gpu_resource()
+    has_gpu = kubernetes_utils.detect_gpu_resource(context)
     if not has_gpu:
         return {}, {}, {}
 
-    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter()
+    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(context)
     if not label_formatter:
         return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
     key = label_formatter.get_label_key()
-    nodes = kubernetes_utils.get_kubernetes_nodes()
+    nodes = kubernetes_utils.get_kubernetes_nodes(context)
     # Get the pods to get the real-time GPU usage
-    pods = kubernetes_utils.get_kubernetes_pods()
+    pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
@@ -111,8 +132,14 @@ def list_accelerators_realtime(
 
             # Generate the GPU quantities for the accelerators
             if accelerator_name and accelerator_count > 0:
-                for count in range(1, accelerator_count + 1):
+                count = 1
+                while count <= accelerator_count:
                     accelerators_qtys.add((accelerator_name, count))
+                    count *= 2
+                # Add the accelerator count if it's not already in the set
+                # (e.g., if there's 12 GPUs, we should have qtys 1, 2, 4, 8, 12)
+                if accelerator_count not in accelerators_qtys:
+                    accelerators_qtys.add((accelerator_name, accelerator_count))
 
             for pod in pods:
                 # Get all the pods running on the node
@@ -160,7 +187,7 @@ def list_accelerators_realtime(
                                     memory=None,
                                     price=0.0,
                                     spot_price=0.0,
-                                    region='kubernetes'))
+                                    region=context))
 
     df = pd.DataFrame(result,
                       columns=[
@@ -175,7 +202,6 @@ def list_accelerators_realtime(
     qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
                                              name_filter, region_filter,
                                              quantity_filter, case_sensitive)
-
     return qtys_map, total_accelerators_capacity, total_accelerators_available
 
 

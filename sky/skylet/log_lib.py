@@ -21,6 +21,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
@@ -185,20 +186,11 @@ def run_with_log(
             daemon_script = os.path.join(
                 os.path.dirname(os.path.abspath(job_lib.__file__)),
                 'subprocess_daemon.py')
-            if not hasattr(constants, 'SKY_GET_PYTHON_PATH_CMD'):
-                # Backward compatibility: for cluster started before #3326, this
-                # constant does not exist. Since we generate the job script
-                # in backends.cloud_vm_ray_backend with inspect, so the
-                # the lates `run_with_log` will be used, but the `constants` is
-                # not updated. We fallback to `python3` in this case.
-                # TODO(zhwu): remove this after 0.7.0.
-                python_path = 'python3'
-            else:
-                python_path = subprocess.check_output(
-                    constants.SKY_GET_PYTHON_PATH_CMD,
-                    shell=True,
-                    stderr=subprocess.DEVNULL,
-                    encoding='utf-8').strip()
+            python_path = subprocess.check_output(
+                constants.SKY_GET_PYTHON_PATH_CMD,
+                shell=True,
+                stderr=subprocess.DEVNULL,
+                encoding='utf-8').strip()
             daemon_cmd = [
                 python_path,
                 daemon_script,
@@ -208,9 +200,12 @@ def run_with_log(
                 str(proc.pid),
             ]
 
+            # We do not need to set `start_new_session=True` here, as the
+            # daemon script will detach itself from the parent process with
+            # fork to avoid being killed by ray job. See the reason we
+            # daemonize the process in `sky/skylet/subprocess_daemon.py`.
             subprocess.Popen(
                 daemon_cmd,
-                start_new_session=True,
                 # Suppress output
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -374,7 +369,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(f'INFO: Job finished (status: {status_str}).')
+                print(
+                    ux_utils.finishing_message(
+                        f'Job finished (status: {status_str}).'))
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
@@ -409,8 +406,6 @@ def tail_logs(job_id: Optional[int],
         return
     logger.debug(f'Tailing logs for job, real job_id {job_id}, managed_job_id '
                  f'{managed_job_id}.')
-    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
-                f'{colorama.Style.RESET_ALL}')
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
@@ -434,7 +429,7 @@ def tail_logs(job_id: Optional[int],
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
-    start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
+    start_stream_at = 'Waiting for task resources on '
     if follow and status in [
             job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,

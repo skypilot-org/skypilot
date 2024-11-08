@@ -7,6 +7,8 @@ import sky
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_IGNORE_FILE = '.skyignore'
+GIT_IGNORE_FILE = '.gitignore'
 
 # Default Ray port is 6379. Default Ray dashboard port is 8265.
 # Default Ray tempdir is /tmp/ray.
@@ -42,9 +44,6 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # We need to add SKY_PYTHON_CMD before ray executable because:
 # The ray executable is a python script with a header like:
 #   #!/opt/conda/bin/python3
-# When we create the skypilot-runtime venv, the previously installed ray
-# executable will be reused (due to --system-site-packages), and that will cause
-# running ray CLI commands to use the wrong python executable.
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
@@ -129,10 +128,15 @@ DISABLE_GPU_ECC_COMMAND = (
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
-    'bash Miniconda3-Linux-x86_64.sh -b && '
+    # We do not use && for installation of conda and the following init commands
+    # because for some images, conda is already installed, but not initialized.
+    # In this case, we need to initialize conda and set auto_activate_base to
+    # true.
+    '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
-    'conda config --set auto_activate_base true && '
-    f'conda activate base; }}; '
+    # Caller should replace {conda_auto_activate} with either true or false.
+    'conda config --set auto_activate_base {conda_auto_activate} && '
+    'conda activate base; }; }; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
     # If Python version is larger then equal to 3.12, create a new conda env
@@ -141,15 +145,16 @@ CONDA_INSTALLATION_COMMANDS = (
     # costly to create a new conda env, and venv should be a lightweight and
     # faster alternative when the python version satisfies the requirement.
     '[[ $(python3 --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
-    f'echo "Creating conda env with Python 3.10" && '
+    'echo "Creating conda env with Python 3.10" && '
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
-    # We use --system-site-packages to reuse the system site packages to avoid
-    # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{{ {SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages && '
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE}; }};'
+    # Do NOT use --system-site-packages here, because if users upgrade any
+    # packages in the base env, they interfere with skypilot dependencies.
+    # Reference: https://github.com/skypilot-org/skypilot/issues/4097
+    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV};'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
 _sky_version = str(version.parse(sky.__version__))

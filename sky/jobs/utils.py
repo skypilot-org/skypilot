@@ -14,7 +14,7 @@ import shutil
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -34,6 +34,7 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -57,17 +58,19 @@ JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
-_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the task to start'
-                               '{status_str}.[/] It may take a few minutes.')
+_JOB_WAITING_STATUS_MESSAGE = ux_utils.spinner_message(
+    'Waiting for task to start[/]'
+    '{status_str}. It may take a few minutes.\n'
+    '  [dim]View controller logs: sky jobs logs --controller {job_id}')
 _JOB_CANCELLED_MESSAGE = (
-    '[bold cyan]Waiting for the task status to be updated.'
-    '[/] It may take a minute.')
+    ux_utils.spinner_message('Waiting for task status to be updated.') +
+    ' It may take a minute.')
 
 # The maximum time to wait for the managed job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
 # the managed job status fails to be updated and keep the `sky jobs logs`
 # blocking for a long time.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 20
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 25
 
 
 class UserSignal(enum.Enum):
@@ -290,8 +293,8 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
-                  '{status_str}[/].')
+    status_msg = ux_utils.spinner_message(
+        'Waiting for controller process to be RUNNING') + '{status_str}'
     status_display = rich_utils.safe_status(status_msg.format(status_str=''))
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
@@ -310,7 +313,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
             controller_status = job_lib.get_status(job_id)
 
-        msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
+        msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
         status_display.update(msg)
         prev_msg = msg
         managed_job_status = managed_job_state.get_status(job_id)
@@ -356,7 +359,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str)
+                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
+                                                         job_id=job_id)
                 if msg != prev_msg:
                     status_display.update(msg)
                     prev_msg = msg
@@ -388,8 +392,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             f'INFO: Log for the current task ({task_id}) '
                             'is finished. Waiting for the next task\'s log '
                             'to be started.')
-                        status_display.update('Waiting for the next task: '
-                                              f'{task_id + 1}.')
+                        # Add a newline to avoid the status display below
+                        # removing the last line of the task output.
+                        print()
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                f'Waiting for the next task: {task_id + 1}'))
                         status_display.start()
                         original_task_id = task_id
                         while True:
@@ -401,7 +409,27 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         continue
                     else:
-                        break
+                        task_specs = managed_job_state.get_task_specs(
+                            job_id, task_id)
+                        if task_specs.get('max_restarts_on_errors', 0) == 0:
+                            # We don't need to wait for the managed job status
+                            # update, as the job is guaranteed to be in terminal
+                            # state afterwards.
+                            break
+                        print()
+                        status_display.update(
+                            ux_utils.spinner_message(
+                                'Waiting for next restart for the failed task'))
+                        status_display.start()
+                        while True:
+                            _, managed_job_status = (
+                                managed_job_state.get_latest_task_id_status(
+                                    job_id))
+                            if (managed_job_status !=
+                                    managed_job_state.ManagedJobStatus.RUNNING):
+                                break
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                        continue
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
                 logger.debug(
@@ -444,8 +472,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
-    logger.info(f'Logs finished for job {job_id} '
-                f'(status: {managed_job_status.value}).')
+    logger.info(
+        ux_utils.finishing_message(f'Managed job finished: {job_id} '
+                                   f'(status: {managed_job_status.value}).'))
     return ''
 
 
@@ -458,6 +487,7 @@ def stream_logs(job_id: Optional[int],
         job_id = managed_job_state.get_latest_job_id()
         if job_id is None:
             return 'No managed job found.'
+
     if controller:
         if job_id is None:
             assert job_name is not None
@@ -465,16 +495,22 @@ def stream_logs(job_id: Optional[int],
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.
-            managed_jobs = list(
-                filter(lambda job: job['job_name'] == job_name, managed_jobs))
-            if len(managed_jobs) == 0:
+            managed_job_ids: Set[int] = {
+                job['job_id']
+                for job in managed_jobs
+                if job['job_name'] == job_name
+            }
+            if len(managed_job_ids) == 0:
                 return f'No managed job found with name {job_name!r}.'
-            if len(managed_jobs) > 1:
-                job_ids_str = ', '.join(job['job_id'] for job in managed_jobs)
-                raise ValueError(
-                    f'Multiple managed jobs found with name {job_name!r} (Job '
-                    f'IDs: {job_ids_str}). Please specify the job_id instead.')
-            job_id = managed_jobs[0]['job_id']
+            if len(managed_job_ids) > 1:
+                job_ids_str = ', '.join(
+                    str(job_id) for job_id in managed_job_ids)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Multiple managed jobs found with name {job_name!r} '
+                        f'(Job IDs: {job_ids_str}). Please specify the job_id '
+                        'instead.')
+            job_id = managed_job_ids.pop()
         assert job_id is not None, (job_id, job_name)
         # TODO: keep the following code sync with
         # job_lib.JobLibCodeGen.tail_logs, we do not directly call that function
@@ -599,11 +635,20 @@ def format_job_table(
       a list of "rows" (each of which is a list of str).
     """
     jobs = collections.defaultdict(list)
+    # Check if the tasks have user information.
+    tasks_have_user = any([task.get('user') for task in tasks])
+    if max_jobs and tasks_have_user:
+        raise ValueError('max_jobs is not supported when tasks have user info.')
+
+    def get_hash(task):
+        if tasks_have_user:
+            return (task['user'], task['job_id'])
+        return task['job_id']
+
     for task in tasks:
         # The tasks within the same job_id are already sorted
         # by the task_id.
-        jobs[task['job_id']].append(task)
-    jobs = dict(jobs)
+        jobs[get_hash(task)].append(task)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
     for job_tasks in jobs.values():
@@ -611,17 +656,14 @@ def format_job_table(
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
 
-    if max_jobs is not None:
-        job_ids = sorted(jobs.keys(), reverse=True)
-        job_ids = job_ids[:max_jobs]
-        jobs = {job_id: jobs[job_id] for job_id in job_ids}
-
     columns = [
         'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
     ]
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
+    if tasks_have_user:
+        columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
 
     status_counts: Dict[str, int] = collections.defaultdict(int)
@@ -636,9 +678,9 @@ def format_job_table(
     for task in all_tasks:
         # The tasks within the same job_id are already sorted
         # by the task_id.
-        jobs[task['job_id']].append(task)
+        jobs[get_hash(task)].append(task)
 
-    for job_id, job_tasks in jobs.items():
+    for job_hash, job_tasks in jobs.items():
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
@@ -674,6 +716,7 @@ def format_job_table(
             if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
+            job_id = job_hash[1] if tasks_have_user else job_hash
             job_values = [
                 job_id,
                 '',
@@ -692,6 +735,8 @@ def format_job_table(
                     '-',
                     failure_reason if failure_reason is not None else '-',
                 ])
+            if tasks_have_user:
+                job_values.insert(0, job_tasks[0].get('user', '-'))
             job_table.add_row(job_values)
 
         for task in job_tasks:
@@ -724,6 +769,8 @@ def format_job_table(
                     task['failure_reason']
                     if task['failure_reason'] is not None else '-',
                 ])
+            if tasks_have_user:
+                values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
 
         if len(job_tasks) > 1:
@@ -809,6 +856,7 @@ class ManagedJobCodeGen:
 
         from sky.skylet import job_lib, log_lib
         from sky.skylet import constants
+        from sky.utils import ux_utils
         try:
             from sky.jobs.utils import stream_logs_by_id
         except ImportError:

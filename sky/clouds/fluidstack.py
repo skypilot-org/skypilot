@@ -1,8 +1,7 @@
 """Fluidstack Cloud."""
-import json
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
@@ -15,8 +14,7 @@ from sky.utils.resources_utils import DiskTier
 
 _CREDENTIAL_FILES = [
     # credential files for FluidStack,
-    fluidstack_utils.FLUIDSTACK_API_KEY_PATH,
-    fluidstack_utils.FLUIDSTACK_API_TOKEN_PATH,
+    fluidstack_utils.FLUIDSTACK_API_KEY_PATH
 ]
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -156,7 +154,7 @@ class Fluidstack(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='fluidstack')
 
@@ -185,24 +183,14 @@ class Fluidstack(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
-        cuda_installation_commands = """
-        sudo wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb -O /usr/local/cuda-keyring_1.1-1_all.deb;
-        sudo dpkg -i /usr/local/cuda-keyring_1.1-1_all.deb;
-        sudo apt-get update;
-        sudo apt-get -y install cuda-toolkit-12-3;
-        sudo apt-get install -y cuda-drivers;
-        sudo apt-get install -y python3-pip;
-        nvidia-smi || sudo reboot;"""
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
-            'fluidstack_username': self.default_username(region.name),
-            'cuda_installation_commands': cuda_installation_commands,
+            'fluidstack_username': 'ubuntu',
         }
 
     def _get_feasible_launchable_resources(
@@ -270,17 +258,26 @@ class Fluidstack(clouds.Cloud):
         try:
             assert os.path.exists(
                 os.path.expanduser(fluidstack_utils.FLUIDSTACK_API_KEY_PATH))
-            assert os.path.exists(
-                os.path.expanduser(fluidstack_utils.FLUIDSTACK_API_TOKEN_PATH))
+
+            with open(os.path.expanduser(
+                    fluidstack_utils.FLUIDSTACK_API_KEY_PATH),
+                      encoding='UTF-8') as f:
+                api_key = f.read().strip()
+                if not api_key.startswith('api_key'):
+                    return False, ('Invalid FluidStack API key format. '
+                                   'To configure credentials, go to:\n    '
+                                   '  https://dashboard.fluidstack.io \n    '
+                                   'to obtain an API key, '
+                                   'then add save the contents '
+                                   'to ~/.fluidstack/api_key \n')
         except AssertionError:
-            return False, (
-                'Failed to access FluidStack Cloud'
-                ' with credentials. '
-                'To configure credentials, go to:\n    '
-                '  https://console.fluidstack.io \n    '
-                'to obtain an API key and API Token, '
-                'then add save the contents '
-                'to ~/.fluidstack/api_key and ~/.fluidstack/api_token \n')
+            return False, ('Failed to access FluidStack Cloud'
+                           ' with credentials. '
+                           'To configure credentials, go to:\n    '
+                           '  https://dashboard.fluidstack.io \n    '
+                           'to obtain an API key, '
+                           'then add save the contents '
+                           'to ~/.fluidstack/api_key \n')
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify FluidStack Cloud credentials. '
                            'Check your network connection '
@@ -291,8 +288,8 @@ class Fluidstack(clouds.Cloud):
         return {filename: filename for filename in _CREDENTIAL_FILES}
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        # TODO(mjibril): Implement get_current_user_identity for Fluidstack
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        # TODO(mjibril): Implement get_active_user_identity for Fluidstack
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
@@ -302,21 +299,6 @@ class Fluidstack(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='fluidstack')
-
-    @classmethod
-    def default_username(cls, region: str) -> str:
-        return {
-            'norway_2_eu': 'ubuntu',
-            'calgary_1_canada': 'ubuntu',
-            'norway_3_eu': 'ubuntu',
-            'norway_4_eu': 'ubuntu',
-            'india_2': 'root',
-            'nevada_1_usa': 'fsuser',
-            'generic_1_canada': 'ubuntu',
-            'iceland_1_eu': 'ubuntu',
-            'new_york_1_usa': 'fsuser',
-            'illinois_1_usa': 'fsuser'
-        }.get(region, 'ubuntu')
 
     @classmethod
     def query_status(

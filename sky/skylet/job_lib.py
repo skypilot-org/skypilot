@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shlex
+import sqlite3
 import subprocess
 import time
 import typing
@@ -55,6 +56,20 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 
 def create_table(cursor, conn):
+    # Enable WAL mode to avoid locking issues.
+    # See: issue #3863, #1441 and PR #1509
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if not common_utils.is_wsl():
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
+
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,14 +181,19 @@ class JobScheduler:
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
-        jobs = self._get_jobs()
-        if len(jobs) > 0 or force_update_jobs:
+        if force_update_jobs:
             update_status()
+        pending_jobs = self._get_pending_jobs()
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
-        for job_id, run_cmd, submit, created_time in jobs:
+        for job_id, run_cmd, submit, created_time in pending_jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
+                # We don't have to refresh the job status before checking, as
+                # the job status will only be stale in rare cases where ray job
+                # crashes; or the job stays in INIT state for a long time.
+                # In those cases, the periodic JobSchedulerEvent event will
+                # update the job status every 300 seconds.
                 status = get_status_no_lock(job_id)
                 if (status not in _PRE_RESOURCE_STATUSES or
                         created_time < psutil.boot_time()):
@@ -187,7 +207,7 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
-    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+    def _get_pending_jobs(self) -> List[Tuple[int, str, int, int]]:
         """Returns the metadata for jobs in the pending jobs table
 
         The information contains job_id, run command, submit time,
@@ -199,7 +219,7 @@ class JobScheduler:
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
-    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+    def _get_pending_jobs(self) -> List[Tuple[int, str, int, int]]:
         return list(
             _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id'))
 
@@ -497,16 +517,13 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_pending_jobs():
-    rows = _CURSOR.execute(
-        'SELECT job_id, created_time, submit FROM pending_jobs')
-    rows = list(rows)
-    return {
-        job_id: {
-            'created_time': created_time,
-            'submit': submit
-        } for job_id, created_time, submit in rows
-    }
+def _get_pending_job(job_id: int) -> Optional[Dict[str, Any]]:
+    rows = _CURSOR.execute('SELECT created_time, submit FROM pending_jobs '
+                           f'WHERE job_id={job_id!r}')
+    for row in rows:
+        created_time, submit = row
+        return {'created_time': created_time, 'submit': submit}
+    return None
 
 
 def update_job_status(job_ids: List[int],
@@ -520,78 +537,92 @@ def update_job_status(job_ids: List[int],
     during job cancelling, we still need this to handle the staleness problem,
     caused by instance restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==2.4.0.
+    This function should only be run on the remote instance with ray>=2.4.0.
     """
+    echo = logger.info if not silent else logger.debug
     if len(job_ids) == 0:
         return []
 
-    # TODO: if too slow, directly query against redis.
     ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]
-
     job_client = _create_ray_job_submission_client()
 
-    # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
-    # which contains the job status (str) and submission_id (str).
-    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
-
-    pending_jobs = _get_pending_jobs()
-    job_details = {}
-    ray_job_ids_set = set(ray_job_ids)
-    for job_detail in job_detail_lists:
-        if job_detail.submission_id in ray_job_ids_set:
-            job_details[job_detail.submission_id] = job_detail
-    job_statuses: List[Optional[JobStatus]] = [None] * len(ray_job_ids)
-    for i, ray_job_id in enumerate(ray_job_ids):
-        job_id = job_ids[i]
-        if ray_job_id in job_details:
-            ray_status = job_details[ray_job_id].status
-            job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
-        if job_id in pending_jobs:
-            if pending_jobs[job_id]['created_time'] < psutil.boot_time():
-                logger.info(
-                    f'Job {job_id} is stale, setting to FAILED: '
-                    f'created_time={pending_jobs[job_id]["created_time"]}, '
-                    f'boot_time={psutil.boot_time()}')
-                # The job is stale as it is created before the instance
-                # is booted, e.g. the instance is rebooted.
-                job_statuses[i] = JobStatus.FAILED
-            # Gives a 60 second grace period between job being submit from
-            # the pending table until appearing in ray jobs.
-            if (pending_jobs[job_id]['submit'] > 0 and
-                    pending_jobs[job_id]['submit'] <
-                    time.time() - _PENDING_SUBMIT_GRACE_PERIOD):
-                # For jobs submitted outside of the grace period, we will
-                # consider the ray job status.
-                continue
-            else:
-                # Reset the job status to PENDING even though it may not appear
-                # in the ray jobs, so that it will not be considered as stale.
-                job_statuses[i] = JobStatus.PENDING
-
-    assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
-
     statuses = []
-    for job_id, status in zip(job_ids, job_statuses):
+    for job_id, ray_job_id in zip(job_ids, ray_job_ids):
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
         with filelock.FileLock(_get_lock_path(job_id)):
-            original_status = get_status_no_lock(job_id)
+            status = None
+            job_record = _get_jobs_by_ids([job_id])[0]
+            original_status = job_record['status']
+            job_submitted_at = job_record['submitted_at']
+
+            ray_job_query_time = time.time()
+            if original_status == JobStatus.INIT:
+                if (job_submitted_at >= psutil.boot_time() and job_submitted_at
+                        >= ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                    # The job id is reserved, but the job is not submitted yet.
+                    # We should keep it in INIT.
+                    status = JobStatus.INIT
+                else:
+                    # We always immediately submit job after the job id is
+                    # allocated, i.e. INIT -> PENDING, if a job stays in INIT
+                    # for too long, it is likely the job submission process
+                    # was killed before the job is submitted. We should set it
+                    # to FAILED then. Note, if ray job indicates the job is
+                    # running, we will change status to PENDING below.
+                    echo(f'INIT job {job_id} is stale, setting to FAILED')
+                    status = JobStatus.FAILED
+
+            try:
+                # Querying status within the lock is safer than querying
+                # outside, as it avoids the race condition when job table is
+                # updated after the ray job status query.
+                # Also, getting per-job status is faster than querying all jobs,
+                # when there are significant number of finished jobs.
+                # Reference: getting 124 finished jobs takes 0.038s, while
+                # querying a single job takes 0.006s, 10 jobs takes 0.066s.
+                # TODO: if too slow, directly query against redis.
+                ray_job_status = job_client.get_job_status(ray_job_id)
+                status = _RAY_TO_JOB_STATUS_MAP[ray_job_status.value]
+            except RuntimeError:
+                # Job not found.
+                pass
+
+            pending_job = _get_pending_job(job_id)
+            if pending_job is not None:
+                if pending_job['created_time'] < psutil.boot_time():
+                    echo(f'Job {job_id} is stale, setting to FAILED: '
+                         f'created_time={pending_job["created_time"]}, '
+                         f'boot_time={psutil.boot_time()}')
+                    # The job is stale as it is created before the instance
+                    # is booted, e.g. the instance is rebooted.
+                    status = JobStatus.FAILED
+                # Gives a 60 second grace period between job being submit from
+                # the pending table until appearing in ray jobs. For jobs
+                # submitted outside of the grace period, we will consider the
+                # ray job status.
+                if not (pending_job['submit'] > 0 and pending_job['submit'] <
+                        ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                    # Reset the job status to PENDING even though it may not
+                    # appear in the ray jobs, so that it will not be considered
+                    # as stale.
+                    status = JobStatus.PENDING
+
             assert original_status is not None, (job_id, status)
             if status is None:
                 status = original_status
                 if (original_status is not None and
                         not original_status.is_terminal()):
-                    logger.info(f'Ray job status for job {job_id} is None, '
-                                'setting it to FAILED.')
+                    echo(f'Ray job status for job {job_id} is None, '
+                         'setting it to FAILED.')
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
                     # is RUNNING or PENDING.
                     status = JobStatus.FAILED
                     _set_status_no_lock(job_id, status)
-                    if not silent:
-                        logger.info(f'Updated job {job_id} status to {status}')
+                    echo(f'Updated job {job_id} status to {status}')
             else:
                 # Taking max of the status is necessary because:
                 # 1. It avoids race condition, where the original status has
@@ -604,10 +635,10 @@ def update_job_status(job_ids: List[int],
                 # DB) would already have that value. So we take the max here to
                 # keep it at later status.
                 status = max(status, original_status)
+                assert status is not None, (job_id, status, original_status)
                 if status != original_status:  # Prevents redundant update.
                     _set_status_no_lock(job_id, status)
-                    if not silent:
-                        logger.info(f'Updated job {job_id} status to {status}')
+                    echo(f'Updated job {job_id} status to {status}')
         statuses.append(status)
     return statuses
 
@@ -812,14 +843,6 @@ class JobLibCodeGen:
         'import os',
         'import getpass',
         'from sky.skylet import job_lib, log_lib, constants',
-        # Backward compatibility for old skylet lib version on the remote
-        # machine. The `job_owner` argument was removed in #3037, and if the
-        # remote machine has an old SkyPilot version before that, we need to
-        # pass the `job_owner` argument to the job_lib functions.
-        # TODO(zhwu): Remove this in 0.7.0 release.
-        'job_owner_kwargs = {} '
-        'if getattr(constants, "SKYLET_LIB_VERSION", 0) >= 1 '
-        'else {"job_owner": getpass.getuser()}',
     ]
 
     @classmethod
@@ -846,7 +869,7 @@ class JobLibCodeGen:
 
     @classmethod
     def update_status(cls) -> str:
-        code = ['job_lib.update_status(**job_owner_kwargs)']
+        code = ['job_lib.update_status()']
         return cls._build(code)
 
     @classmethod
@@ -864,7 +887,7 @@ class JobLibCodeGen:
         """See job_lib.cancel_jobs()."""
         code = [
             (f'cancelled = job_lib.cancel_jobs_encoded_results('
-             f' {job_ids!r}, {cancel_all}, **job_owner_kwargs)'),
+             f' {job_ids!r}, {cancel_all})'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
@@ -887,7 +910,7 @@ class JobLibCodeGen:
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
             f'log_lib.tail_logs(job_id=job_id, log_dir=log_dir, '
-            f'managed_job_id={managed_job_id!r}, follow={follow}, **job_owner_kwargs)',
+            f'managed_job_id={managed_job_id!r}, follow={follow})',
         ]
         return cls._build(code)
 

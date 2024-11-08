@@ -92,7 +92,27 @@ def _get_single_resources_schema():
                 'type': 'string',
             },
             'job_recovery': {
-                'type': 'string',
+                # Either a string or a dict.
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'strategy': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'null',
+                            }],
+                        },
+                        'max_restarts_on_errors': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                    }
+                }],
             },
             'disk_size': {
                 'type': 'integer',
@@ -357,19 +377,6 @@ def get_service_schema():
                     'downscale_delay_seconds': {
                         'type': 'number',
                     },
-                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
-                    # `qps_lower_threshold` and `auto_restart` are deprecated.
-                    # Temporarily keep these fields for backward compatibility.
-                    # Remove after 2 minor release, i.e., 0.6.0.
-                    'auto_restart': {
-                        'type': 'boolean',
-                    },
-                    'qps_upper_threshold': {
-                        'type': 'number',
-                    },
-                    'qps_lower_threshold': {
-                        'type': 'number',
-                    },
                 }
             },
             'replicas': {
@@ -595,7 +602,7 @@ _NETWORK_CONFIG_SCHEMA = {
 
 _LABELS_SCHEMA = {
     # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.7.0.
+    # compatibility. Will be removed after 0.8.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -706,6 +713,15 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'prioritize_reservations': {
+                    'type': 'boolean',
+                },
+                'specific_reservations': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'disk_encrypted': {
                     'type': 'boolean',
                 },
@@ -746,6 +762,9 @@ def get_config_schema():
                 'force_enable_external_ips': {
                     'type': 'boolean'
                 },
+                'enable_gvnic': {
+                    'type': 'boolean'
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -759,6 +778,9 @@ def get_config_schema():
                 'storage_account': {
                     'type': 'string',
                 },
+                'resource_group_vm': {
+                    'type': 'string',
+                },
             }
         },
         'kubernetes': {
@@ -766,6 +788,12 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'allowed_contexts': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'networking': {
                     'type': 'string',
                     'case_insensitive_enum': [
@@ -839,6 +867,13 @@ def get_config_schema():
         },
     }
 
+    admin_policy_schema = {
+        'type': 'string',
+        # Check regex to be a valid python module path
+        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
+    }
+
     allowed_clouds = {
         # A list of cloud names that are allowed to be used
         'type': 'array',
@@ -896,6 +931,7 @@ def get_config_schema():
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
             **cloud_configs,
