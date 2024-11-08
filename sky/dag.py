@@ -259,15 +259,26 @@ class Dag:
 
         return nx.is_directed_acyclic_graph(self.graph)
 
-    def plot(self, to_file: Optional[str] = None) -> Optional[str]:
+    def plot(
+        self,
+        to_file: Optional[str] = None,
+        format: str = 'png'  # pylint: disable=redefined-builtin
+    ) -> Optional[str]:
         """Visualize the DAG structure and save or display it as an image.
 
         Args:
             to_file: Optional; the file path to save the DAG visualization.
                     If not provided, a temporary file will be created.
+            format: The output image format (e.g., 'png', 'pdf', 'svg').
+                   The supported formats depend on the matplotlib backend.
+                   Default is 'png'.
 
         Returns:
             The file path to the saved image, or None if displayed in Jupyter.
+
+        Raises:
+            ImportError: If matplotlib is not installed.
+            ValueError: If the format is not supported by the current backend.
         """
 
         # Import matplotlib at runtime to keep core installation lightweight.
@@ -279,7 +290,7 @@ class Dag:
         except ImportError:
             with ux_utils.print_exception_no_traceback():
                 raise ImportError(
-                    'matplotlib is not required for DAG visualization. '
+                    'matplotlib is required for DAG visualization. '
                     'Please install it using `pip install matplotlib`.'
                 ) from None
 
@@ -313,12 +324,20 @@ class Dag:
         plt.subplots_adjust(left=0.15, right=0.85, top=0.85, bottom=0.15)
 
         if to_file is None:
-            tmp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            tmp_file = tempfile.NamedTemporaryFile(suffix=f'.{format}',
+                                                   delete=False)
             to_file = tmp_file.name
             tmp_file.close()
 
-        plt.savefig(to_file, bbox_inches='tight')
-        plt.close()
+        try:
+            plt.savefig(to_file, bbox_inches='tight', format=format)
+        except Exception as e:
+            raise ValueError(
+                f'Failed to save figure: unexpected error occurred.'
+                f'May be due to an unsupported format "{format}".'
+                f'Error: {str(e)}') from e
+        finally:
+            plt.close()
 
         try:
             # Try to display the image in Jupyter Notebook
