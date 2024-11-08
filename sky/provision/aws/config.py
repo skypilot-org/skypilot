@@ -228,12 +228,17 @@ def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
     """Get route tables associated with a VPC and region
     
     Args:
+        ec2: ec2 resource object
+        vpc_id: vpc_id is optional, if not provided, all route tables in the
+                region will be returned
         region: region is mandatory to allow the lru cache
                    to return the corect results
+        main: if True, only main route tables will be returned otherwise
+                only non-main route tables will be returned
+
     Returns:
-        A list of route tables associated with a VPC and region
+        A list of route tables associated with the options VPC and region
     """
-    del region # not used.
     filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
     if vpc_id is not None:
         filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
