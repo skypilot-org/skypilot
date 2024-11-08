@@ -180,7 +180,7 @@ def _ec2_call_with_retry(
             if not credentials_refreshed:
                 cached_ec2 = ec2_recreation_fn()
                 logger.warning('AWS: Credentials refreshed for temporary '
-                            'NoCredentialsError.')
+                               'NoCredentialsError.')
                 credentials_refreshed = True
                 continue
             raise
