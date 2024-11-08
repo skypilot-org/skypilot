@@ -757,7 +757,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'persistent': False,
                 'mode': 'COPY',
                 'store': store,
-                'sub_dir': f'job-{run_id}/workdir',
+                'bucket_sub_path': f'job-{run_id}/workdir',
             })
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -782,7 +782,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             'persistent': False,
             'mode': 'COPY',
             'store': store,
-            'sub_dir': f'job-{run_id}/local-file-mounts/{i}',
+            'bucket_sub_path': f'job-{run_id}/local-file-mounts/{i}',
         })
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
@@ -809,7 +809,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'persistent': False,
                 'mode': 'MOUNT',
                 'store': store,
-                'sub_dir': f'job-{run_id}/tmp-files',
+                'bucket_sub_path': f'job-{run_id}/tmp-files',
             })
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():

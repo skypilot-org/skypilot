@@ -5772,3 +5772,22 @@ def test_kubernetes_context_failover():
             env={'SKYPILOT_CONFIG': f.name},
         )
         run_one_test(test)
+
+
+@pytest.mark.aws
+def test_intermediate_bucket():
+    name = _get_cluster_name()
+    bucket_name = 'sky-bucket-int'
+    test = Test(
+        'interm-resources',
+        [
+            '[ ! -f ~/.sky/config.yaml ] || mv ~/.sky/config.yaml ~/.sky/config.yaml.bak_intermediate_bucket_test',
+            f'echo "jobs:\n  bucket: \"s3://{bucket_name}\"" > ~/.sky/config.yaml',
+            f'sky jobs launch -n {name} tests/test_yamls/intermediate_bucket.yaml -y -d',
+            f'sky storage ls | grep {bucket_name}'  # the bucket name is created
+            '[ ! -f ~/.sky/config.yaml.bak_intermediate_bucket_test ] || mv ~/.sky/config.yaml.bak_intermediate_bucket_test ~/.sky/config.yaml'
+        ],
+        f'sky jobs cancel -y -n {name}',
+        timeout=25 * 60,
+    )
+    run_one_test(test)
