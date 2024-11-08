@@ -81,7 +81,7 @@ With Sky, cloud users and their workloads gain the following benefits:
 
 * **Cloud is easier to use**: With the unified interface, infra is simplified & multicloud ready.
 * **Lower costs**: Sky optimizes the cost of each workload.  Engineering time is saved from dealing with cloud infra. Large organizations gain pricing leverage due to portability.
-* **Higher capacity**: Workloads gain access to all diverse compute choices across locations, pricing models, and hardware.
+* **Higher capacity**: Workloads can now run on a bigger compute pool---all infra choices across locations, hardware, and pricing models.
 
 .. * **Portability**: Cloud infra setup is simplified and automatically multicloud ready.
 
@@ -99,13 +99,12 @@ SkyPilot and Sky Computing
 
 SkyPilot was born out of the same `UC Berkeley lab <https://sky.cs.berkeley.edu/>`_  that
 proposed the Sky Computing paradigm.
-SkyPilot is Sky's first instantiation, and it was started to implement Sky Computing for AI and compute-intensive
-workloads.
+SkyPilot is Sky's first instantiation, and it was started to implement Sky Computing for one important class of workloads: AI and compute-intensive workloads.
 
-Over the last few years, SkyPilot has grown to become widely adopted by AI teams in the industry. Today, it
-is being used by ~100s of leading companies. While the initial development team
-consisted of Berkeley PhDs and researchers, the SkyPilot community today has
-grown to 100+ open-source contributors from various organizations.
+Over the last few years, SkyPilot has been widely adopted by ~100s of leading companies and AI teams.
+While the initial development team
+consisted of Berkeley PhDs/researchers, the SkyPilot community today has grown to
+100+ contributors from various organizations.
 
 SkyPilot operates in a BYOC (Bring Your Own Cloud) model, where all resources
 are launched in a user's existing cloud accounts, VPCs, and clusters.
@@ -128,19 +127,38 @@ Why does AI benefit from Sky Computing?
 ..   types to save costs.
 
 AI is highly **capacity and cost intensive**, many orders of magnitude more so
-than prior cloud workloads. To increase capacity and reduce costs, AI teams
-use diverse compute across:
+than prior cloud workloads. To increase capacity and reduce costs, AI teams are using compute anywhere and in whatever forms they can.
 
-- Locations: Teams have access to a mix of hyperscalers (AWS/GCP/Azure/OCI), AI GPU clouds, different regions within a cloud, and/or several Kubernetes or Slurm clusters.
-- Pricing models: Teams use a mix of reserved, on-demand, spot instances to save costs.
-- Hardware: Teams use different accelerators (e.g., H100/A100, TPUs, Trainium/Inferentia).
+- Locations: AI teams use a mix of hyperscalers (AWS/GCP/Azure/..), GPU
+  clouds (CoreWeave/Lambda/..), many regions within a cloud, or several
+  Kubernetes clusters.
+- Hardware: Different GPU generations for different tasks (e.g., H100 for
+  training, A100/L4 for inference); accelerators on hyperscalers (e.g., TPUs, Trainium, Inferentia).
+- Pricing models: Teams use a mix of reserved, on-demand, spot GPUs to save costs.
+
+For example, it is common for AI teams
+to use reserved H100 on cloud X for training and on-demand/spot L4 on cloud Y
+for large-scale batch inference.
+
+As such, AI heavily requires diverse compute, and Sky Computing presents a natural solution.
+Sky allows AI teams to **use a single interface to easily and portably run AI** workloads on their diverse compute.
+Also, Sky cuts down the large AI bills and enlarges capacity by auto-optimizing workloads to the best compute choices.
+
+.. These benefits apply even if a team uses one cloud provider.
+
+..  without tedious infra burden on the AI and infra teams.
+
+.. Sky Computing naturally **unifies diverse compute** into a simple interface, solving this challenge.
+.. By running workloads with Sky's unified interface, users can *easily and portably* run AI workloads on diverse compute,
+.. thereby increasing capacity and lowering costs. Importantly, these benefits come
+.. without tedious infra burden on the AI and infra teams.
 
 .. Thus, utilizing diverse compute across locations, pricing
 .. models, and hardware is critical for AI workloads to increase capacity and reduce costs.
 
-However, the search space of (locations, pricing models, hardware) is large and
-complex to optimize, so using diverse compute across these dimensions is a difficult
-infra challenge.
+.. However, the search space of (locations, pricing models, hardware) is large and
+.. complex to optimize, so using diverse compute across these dimensions is a difficult
+.. infra challenge.
 
 .. However, using diverse compute across these dimensions is a hard infra
 .. challenge: the search space of (locations, pricing models, hardware) is large and
@@ -150,10 +168,7 @@ infra challenge.
 .. models, and hardware is critical for AI workloads to increase capacity and reduce costs. However,
 .. this is a hard infra challenge: the search space of (cloud(s), pricing models, hardware) is huge and difficult to optimize.
 
-Sky Computing naturally **unifies diverse compute** into a simple interface, solving this challenge.
-By running workloads with Sky's unified interface, users can *easily and portably* run AI workloads on diverse compute,
-thereby increasing capacity and lowering costs. Importantly, these benefits come
-without tedious infra burden on the AI and infra teams.
+
 
 .. It allows AI workloads to *easily and portably utilize diverse compute infra*,
 
