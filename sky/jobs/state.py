@@ -461,7 +461,9 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int, callback_func: CallbackType) -> None:
+def set_cancelling(job_id: int,
+                   callback_func: CallbackType,
+                   cancel_all: bool = False) -> None:
     """Set tasks in the job as cancelling, if they are not running and in
     non-terminal states.
 
@@ -469,18 +471,27 @@ def set_cancelling(job_id: int, callback_func: CallbackType) -> None:
     as a whole, and we should not cancel a single task.
     """
 
-    # TODO(andy): https://github.com/skypilot-org/skypilot/issues/4195 - Current
-    # implementation cancels all non-running tasks for simplicity. We should
-    # evaluate flexible cancellation policies for DAG workflows in the future.
+    # TODO(andy): https://github.com/skypilot-org/skypilot/issues/4195 - For
+    # DAG, current implementation cancels all non-running tasks for simplicity.
+    # We should evaluate flexible cancellation policies for DAG workflows in the
+    # future.
+    params = {
+        'status': ManagedJobStatus.CANCELLING.value,
+        'end_at': time.time(),
+        'job_id': job_id,
+    }
+
+    sql = """\
+        UPDATE spot SET
+        status=:status, end_at=:end_at
+        WHERE spot_job_id=:job_id AND end_at IS null"""
+
+    if cancel_all:
+        sql += ' AND status IS NOT :running_status'
+        params['running_status'] = ManagedJobStatus.RUNNING.value
+
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            UPDATE spot SET
-            status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND end_at IS null
-            AND status NOT IN (?, ?)""",
-            (ManagedJobStatus.CANCELLING.value, time.time(), job_id,
-             ManagedJobStatus.RUNNING.value, ManagedJobStatus.SUCCEEDED.value))
+        rows = cursor.execute(sql, params)
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
             callback_func('CANCELLING')

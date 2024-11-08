@@ -435,7 +435,7 @@ class JobsController:
 
         # Call set_cancelling before set_cancelled to make sure the table
         # entries are correctly set.
-        managed_job_state.set_cancelling(self._job_id, callback_func)
+        managed_job_state.set_cancelling(self._job_id, callback_func, True)
         managed_job_state.set_cancelled(self._job_id, callback_func)
 
     def run(self) -> None:
