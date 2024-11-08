@@ -58,6 +58,10 @@ class Dag:
         """Check if the DAG is a linear chain of tasks."""
 
         nodes = list(self.graph.nodes)
+
+        if len(nodes) == 0:
+            return True
+
         in_degrees = [self.graph.in_degree(node) for node in nodes]
         out_degrees = [self.graph.out_degree(node) for node in nodes]
 
