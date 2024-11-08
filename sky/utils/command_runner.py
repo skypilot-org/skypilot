@@ -237,6 +237,23 @@ class CommandRunner:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
 
+        def _get_remote_home_dir_with_retry():
+            backoff = common_utils.Backoff(initial_backoff=1,
+                                           max_backoff_factor=5)
+            retries_left = max_retry
+            assert retries_left > 0, f'max_retry {max_retry} must be positive.'
+            while retries_left >= 0:
+                try:
+                    return get_remote_home_dir()
+                except Exception:  # pylint: disable=broad-except
+                    if retries_left == 0:
+                        raise
+                    sleep_time = backoff.current_backoff()
+                    logger.warning(f'Failed to get remote home dir '
+                                   f'- retrying in {sleep_time} seconds.')
+                    retries_left -= 1
+                    time.sleep(sleep_time)
+
         # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
@@ -261,7 +278,7 @@ class CommandRunner:
         if up:
             resolved_target = target
             if target.startswith('~'):
-                remote_home_dir = get_remote_home_dir()
+                remote_home_dir = _get_remote_home_dir_with_retry()
                 resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -273,7 +290,7 @@ class CommandRunner:
         else:
             resolved_source = source
             if source.startswith('~'):
-                remote_home_dir = get_remote_home_dir()
+                remote_home_dir = _get_remote_home_dir_with_retry()
                 resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{node_destination}:{resolved_source!r}',
@@ -656,6 +673,8 @@ class SSHCommandRunner(CommandRunner):
 class KubernetesCommandRunner(CommandRunner):
     """Runner for Kubernetes commands."""
 
+    _MAX_RETRIES_FOR_RSYNC = 3
+
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
@@ -798,7 +817,7 @@ class KubernetesCommandRunner(CommandRunner):
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
-        max_retry: int = 1,
+        max_retry: int = _MAX_RETRIES_FOR_RSYNC,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 

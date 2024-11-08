@@ -1,18 +1,18 @@
 """Azure."""
 import functools
-import json
 import os
 import re
 import subprocess
 import textwrap
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
@@ -44,6 +44,8 @@ _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2'
 _DEFAULT_V1_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v1'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _FALLBACK_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
+# This is used by Azure GPU VMs that use grid drivers (e.g. A10).
+_DEFAULT_GPU_GRID_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-v2-grid'
 
 _COMMUNITY_IMAGE_PREFIX = '/CommunityGalleries'
 
@@ -173,7 +175,11 @@ class Azure(clouds.Cloud):
 
         # Process user-specified images.
         azure_utils.validate_image_id(image_id)
-        compute_client = azure.get_client('compute', cls.get_project_id())
+        try:
+            compute_client = azure.get_client('compute', cls.get_project_id())
+        except (azure.exceptions().AzureError, RuntimeError):
+            # Fallback to default image size if no credentials are available.
+            return 0.0
 
         # Community gallery image.
         if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
@@ -220,6 +226,8 @@ class Azure(clouds.Cloud):
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 return _DEFAULT_GPU_K80_IMAGE_ID
+            if acc_name == 'A10':
+                return _DEFAULT_GPU_GRID_IMAGE_ID
         # About Gen V1 vs V2:
         # In Azure, all instances with K80 (Standard_NC series), some
         # instances with M60 (Standard_NV series) and some cpu instances
@@ -272,7 +280,7 @@ class Azure(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
 
@@ -304,10 +312,9 @@ class Azure(clouds.Cloud):
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         acc_count = None
         if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
             acc_count = str(sum(acc_dict.values()))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         if (resources.image_id is None or
                 resources.extract_docker_image() is not None):
@@ -351,9 +358,12 @@ class Azure(clouds.Cloud):
                 'image_version': version,
             }
 
-        # Setup the A10 nvidia driver.
-        need_nvidia_driver_extension = (acc_dict is not None and
-                                        'A10' in acc_dict)
+        # Determine resource group for deploying the instance.
+        resource_group_name = skypilot_config.get_nested(
+            ('azure', 'resource_group_vm'), None)
+        use_external_resource_group = resource_group_name is not None
+        if resource_group_name is None:
+            resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
 
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
@@ -407,11 +417,11 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'need_nvidia_driver_extension': need_nvidia_driver_extension,
             'disk_tier': Azure._get_disk_type(disk_tier),
             'cloud_init_setup_commands': cloud_init_setup_commands,
             'azure_subscription_id': self.get_project_id(dryrun),
-            'resource_group': f'{cluster_name.name_on_cloud}-{region_name}',
+            'resource_group': resource_group_name,
+            'use_external_resource_group': use_external_resource_group,
         }
 
         # Setting disk performance tier for high disk tier.

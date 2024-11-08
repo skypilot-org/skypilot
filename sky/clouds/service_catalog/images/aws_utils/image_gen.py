@@ -78,7 +78,7 @@ def copy_image_and_make_public(target_region):
     copy_command = (
         f"aws ec2 copy-image --source-region {args.region} "
         f"--source-image-id {args.image_id} --region {target_region} "
-        f"--name 'skypilot-aws-{args.processor}-{args.os_type}-{time.time()}'  --output json"
+        f"--name 'skypilot-aws-{args.processor}-{args.os_type}-{time.strftime('%y%m%d')}'  --output json"
     )
     print(copy_command)
     result = subprocess.run(copy_command,
@@ -133,7 +133,7 @@ def main():
         except Exception as e:
             print(f"Error generating image to {copy_to_region}: {str(e)}")
             new_image_id = 'NEED_FALLBACK'
-            image_cache.append((new_image_id, copy_to_region))
+        image_cache.append((new_image_id, copy_to_region))
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.map(process_region, ALL_REGIONS)
