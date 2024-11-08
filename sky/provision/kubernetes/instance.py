@@ -364,6 +364,23 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         config_lib.KubernetesError: If user privileges are insufficient or setup fails.
     """
 
+    check_apt_update_complete_cmd = (
+        'echo "Checking if apt update from container init is complete..."; '
+        'timeout_secs=600; '
+        'start_time=$(date +%s); '
+        'while ! grep -q "Fetched" /tmp/apt-update.log 2>/dev/null; do '
+        '  echo "apt update still running. Logs:"; '
+        '  cat /tmp/apt-update.log; '
+        '  current_time=$(date +%s); '
+        '  elapsed=$((current_time - start_time)); '
+        '  if [ $elapsed -ge $timeout_secs ]; then '
+        '    echo "Timed out waiting for apt update"; '
+        '    exit 1; '
+        '  fi; '
+        '  sleep 5; '
+        'done; '
+        'echo "apt update complete."; ')
+
     check_k8s_user_sudo_cmd = (
         'if [ $(id -u) -eq 0 ]; then'
         # If user is root, create an alias for sudo used in skypilot setup
@@ -444,7 +461,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List,
         # Just check if rsync is installed if user disables SSH installation
         ssh_install_cmd = check_rsync_cmd
 
-    pre_init_cmd = 'set -ex; ' + check_k8s_user_sudo_cmd + ssh_install_cmd + set_k8s_env_var_cmd
+    pre_init_cmd = 'set -ex; ' + check_k8s_user_sudo_cmd + set_k8s_env_var_cmd + check_apt_update_complete_cmd + ssh_install_cmd
 
     def _pre_init_thread(new_node):
         pod_name = new_node.metadata.name
