@@ -732,7 +732,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         uninitialized_pods_list = list(uninitialized_pods.values())
 
         # Run pre-init steps in the pod.
-        pre_init(namespace, context, uninitialized_pods_list, provider_config)
+        pre_init(namespace, context, uninitialized_pods_list)
 
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
