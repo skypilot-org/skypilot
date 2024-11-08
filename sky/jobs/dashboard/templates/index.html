@@ -44,6 +44,22 @@
         .clickable {
            cursor: pointer; /* This makes the cursor a pointer when hovering over the element */
         }
+
+        .filter-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;  /* This ensures vertical alignment */
+            margin-top: 1rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Customize the select focus/hover states */
+        .form-select:focus {
+            border-color: #dee2e6;
+            box-shadow: 0 0 0 0.1rem rgba(0,0,0,0.1);
+        }
+
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
@@ -54,11 +70,20 @@
 <body>
     <div class="container">
         <header>
-            <h1>Managed jobs</h1>
+            <h1>SkyPilot managed jobs</h1>
             <p class="text-muted mt-4" id="last-updated"></p>
             <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" id="refresh-toggle" checked>
                 <label class="form-check-label" for="refresh-toggle">Auto-refresh (every 30s)</label>
+            </div>
+            <div class="filter-controls">
+                <span class="fw-medium fs-6">Filter by status:</span>
+                <select class="form-select" id="status-filter" style="width: auto;">
+                    <option value="">All statuses</option>
+                    {% for status in status_values %}
+                    <option value="{{ status }}">{{ status }}</option>
+                    {% endfor %}
+                </select>
             </div>
         </header>
 
@@ -204,17 +229,25 @@
     </script>
     <script>
         function filterStatus(status) {
-            var rows = document.querySelectorAll("#spot-jobs-table tbody tr");
-            rows.forEach(function (row) {
-                var statusCell = row.querySelector("td:nth-child(9)");
+            var rows = document.querySelectorAll("#jobs-table tbody tr");
+            rows.forEach(function(row) {
+                var statusCell = row.querySelector("td:nth-child(10)"); // Status is in the 10th column
+                var statusText = statusCell.textContent.trim().split(' ')[0]; // Get first word of status
 
-                if (status === '' || statusCell.textContent === status) {
+                if (status === '' || statusText === status) {
                     row.style.display = "";
                 } else {
                     row.style.display = "none";
                 }
             });
         }
+
+        // Add event listener for the status filter
+        document.addEventListener("DOMContentLoaded", function() {
+            document.getElementById("status-filter").addEventListener("change", function() {
+                filterStatus(this.value);
+            });
+        });
     </script>
 
 </body>

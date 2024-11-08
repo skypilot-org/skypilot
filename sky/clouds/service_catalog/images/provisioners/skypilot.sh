@@ -4,12 +4,17 @@
 sudo systemctl stop unattended-upgrades || true
 sudo systemctl disable unattended-upgrades || true
 sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true
+sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+sudo systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+sudo systemctl mask apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
+sudo systemctl daemon-reload
 
 # Configure dpkg
 sudo dpkg --configure --force-overwrite -a
 
 # Apt-get installs
 sudo apt-get install jq -y
+sudo apt install retry
 
 # Create necessary directories
 mkdir -p ~/sky_workdir

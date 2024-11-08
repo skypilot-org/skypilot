@@ -264,6 +264,7 @@ The :code:`~/.oci/config` file should contain the following fields:
   fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
   tenancy=ocid1.tenancy.oc1..aaaaaaaa
   region=us-sanjose-1
+  # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
   key_file=~/.oci/oci_api_key.pem
 
 

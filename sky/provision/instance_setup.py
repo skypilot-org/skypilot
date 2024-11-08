@@ -264,6 +264,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         f'--disable-usage-stats '
         f'--port={constants.SKY_REMOTE_RAY_PORT} '
         f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+        f'--min-worker-port 11002 '
         f'--object-manager-port=8076 '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
@@ -283,11 +284,27 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # the same credentials. Otherwise, `ray status` will fail to fetch the
     # available nodes.
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
-    cmd = (f'{constants.SKY_RAY_CMD} stop; '
-           'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
-           _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+    cmd = (
+        f'{constants.SKY_RAY_CMD} stop; '
+        'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        # worker_maximum_startup_concurrency controls the maximum number of
+        # workers that can be started concurrently. However, it also controls
+        # this warning message:
+        # https://github.com/ray-project/ray/blob/d5d03e6e24ae3cfafb87637ade795fb1480636e6/src/ray/raylet/worker_pool.cc#L1535-L1545
+        # maximum_startup_concurrency defaults to the number of CPUs given by
+        # multiprocessing.cpu_count() or manually specified to ray. (See
+        # https://github.com/ray-project/ray/blob/fab26e1813779eb568acba01281c6dd963c13635/python/ray/_private/services.py#L1622-L1624.)
+        # The warning will show when the number of workers is >4x the
+        # maximum_startup_concurrency, so typically 4x CPU count. However, the
+        # job controller uses 0.25cpu reservations, and each job can use two
+        # workers (one for the submitted job and one for remote actors),
+        # resulting in a worker count of 8x CPUs or more. Increase the
+        # worker_maximum_startup_concurrency to 3x CPUs so that we will only see
+        # the warning when the worker count is >12x CPUs.
+        'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
+        f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
+        _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = head_runner.run(

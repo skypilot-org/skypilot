@@ -3262,6 +3262,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
+        fore = colorama.Fore
 
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
@@ -3278,9 +3279,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} '
-            '2> /dev/null"')
+            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -3372,9 +3374,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 logger.info(
-                    f'\n📋 Useful Commands'
-                    f'\nManaged Job ID: '
+                    f'\n{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    f'\n📋 Useful Commands'
                     f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
                     f'{ux_utils.BOLD}sky jobs cancel {job_id}'
                     f'{ux_utils.RESET_BOLD}'
@@ -3391,8 +3393,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
                     f'{ux_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n📋 Useful Commands'
-                            f'\nJob ID: {job_id}'
+                logger.info(f'\n{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            f'\n📋 Useful Commands'
                             f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
                             f'{ux_utils.BOLD}sky cancel {name} {job_id}'
                             f'{ux_utils.RESET_BOLD}'
