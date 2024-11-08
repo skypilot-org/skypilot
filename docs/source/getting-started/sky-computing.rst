@@ -139,8 +139,8 @@ than prior cloud workloads. To increase capacity and reduce costs, AI teams are 
 For example, it is common for AI teams
 to use reserved H100 on cloud X for training and on-demand/spot L4 on cloud Y
 for large-scale batch inference.
+As such, AI compute is inherently complex and diverse, and Sky Computing presents a natural solution.
 
-As such, AI heavily requires diverse compute, and Sky Computing presents a natural solution.
 Sky allows AI teams to **use a single interface to easily and portably run AI** workloads on their diverse compute.
 Also, Sky cuts down the large AI bills and enlarges capacity by auto-optimizing workloads to the best compute choices.
 
