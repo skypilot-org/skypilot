@@ -37,7 +37,8 @@ def test_is_chain_linear():
         task3 = sky.Task()
         task1 >> task2
         task2 >> task3
-        assert dag.is_chain(), "Linear chain of tasks should be identified as chain"
+        assert dag.is_chain(
+        ), "Linear chain of tasks should be identified as chain"
 
 
 @pytest.mark.parametrize('create_dag,description', [
@@ -50,30 +51,28 @@ def test_is_chain_true_cases(create_dag, description):
         assert dag.is_chain(), f"Failed for case: {description}"
 
 
-@pytest.mark.parametrize('setup_dag,description', [
-    # Branching case
-    (lambda dag: (
-        setattr(dag, '_tasks', [sky.Task(), sky.Task(), sky.Task()]),
-        dag.add_edge(dag.tasks[0], dag.tasks[1]),
-        dag.add_edge(dag.tasks[0], dag.tasks[2])
-    ), "Branching DAG"),
-    
-    # Merging case
-    (lambda dag: (
-        setattr(dag, '_tasks', [sky.Task(), sky.Task(), sky.Task()]),
-        dag.add_edge(dag.tasks[0], dag.tasks[2]),
-        dag.add_edge(dag.tasks[1], dag.tasks[2])
-    ), "Merging DAG"),
-    
-    # Diamond case
-    (lambda dag: (
-        setattr(dag, '_tasks', [sky.Task() for _ in range(4)]),
-        dag.add_edge(dag.tasks[0], dag.tasks[1]),
-        dag.add_edge(dag.tasks[0], dag.tasks[2]),
-        dag.add_edge(dag.tasks[1], dag.tasks[3]),
-        dag.add_edge(dag.tasks[2], dag.tasks[3])
-    ), "Diamond DAG"),
-])
+@pytest.mark.parametrize(
+    'setup_dag,description',
+    [
+        # Branching case
+        (lambda dag:
+         (setattr(dag, '_tasks', [sky.Task(
+         ), sky.Task(), sky.Task()]), dag.add_edge(dag.tasks[0], dag.tasks[1]),
+          dag.add_edge(dag.tasks[0], dag.tasks[2])), "Branching DAG"),
+
+        # Merging case
+        (lambda dag:
+         (setattr(dag, '_tasks', [sky.Task(
+         ), sky.Task(), sky.Task()]), dag.add_edge(dag.tasks[0], dag.tasks[2]),
+          dag.add_edge(dag.tasks[1], dag.tasks[2])), "Merging DAG"),
+
+        # Diamond case
+        (lambda dag: (setattr(dag, '_tasks', [sky.Task() for _ in range(4)]),
+                      dag.add_edge(dag.tasks[0], dag.tasks[1]),
+                      dag.add_edge(dag.tasks[0], dag.tasks[2]),
+                      dag.add_edge(dag.tasks[1], dag.tasks[3]),
+                      dag.add_edge(dag.tasks[2], dag.tasks[3])), "Diamond DAG"),
+    ])
 def test_is_chain_false_cases(setup_dag, description):
     """Test cases where is_chain() should return False."""
     with sky.Dag() as dag:
@@ -84,6 +83,7 @@ def test_is_chain_false_cases(setup_dag, description):
 @pytest.mark.regression
 def test_is_chain_regression():
     """Regression test comparing new implementation with old behavior."""
+
     def old_is_chain(dag):
         # Old implementation
         is_chain = True
@@ -106,14 +106,16 @@ def test_is_chain_regression():
         task1 = sky.Task()
         task2 = sky.Task()
         task1 >> task2
-        assert dag.is_chain() == old_is_chain(dag), "New implementation differs from old for simple chain"
+        assert dag.is_chain() == old_is_chain(
+            dag), "New implementation differs from old for simple chain"
 
     # Test case where new implementation is more correct
     with sky.Dag() as dag:
         task1, task2, task3 = sky.Task(), sky.Task(), sky.Task()
         task1 >> task3
         task2 >> task3  # Multiple parents - should not be a chain
-        assert not dag.is_chain(), "New implementation correctly identifies non-chain DAG"
+        assert not dag.is_chain(
+        ), "New implementation correctly identifies non-chain DAG"
         # Note: old implementation might incorrectly return True here
 
 
