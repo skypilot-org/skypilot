@@ -13,7 +13,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Deque, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -334,6 +334,7 @@ def run_bash_command_with_log(bash_command: str,
 
 def _follow_job_logs(file,
                      job_id: int,
+                     start_stream: bool,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -342,7 +343,7 @@ def _follow_job_logs(file,
     # No need to lock the status here, as the while loop can handle
     # the older status.
     status = job_lib.get_status_no_lock(job_id)
-    start_streaming = False
+    start_streaming = start_stream
     wait_last_logs = True
     while True:
         tmp = file.readline()
@@ -380,6 +381,32 @@ def _follow_job_logs(file,
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status_no_lock(job_id)
+
+
+def _should_start_streaming(current_file_lines: List[str],
+                            tail_lines: Deque[str],
+                            start_stream_at: str) -> bool:
+    """Determine if streaming should start based on the presence of
+    start_stream_at."""
+    # See comment:
+    # https://github.com/skypilot-org/skypilot/pull/4241#discussion_r1833611567
+    # for more details.
+    # Case 1: If start_stream_at is found at the head of the deque,
+    # set start_stream to False.
+    for index, line in enumerate(tail_lines):
+        if index >= PEEK_HEAD_LINES_FOR_START_STREAM:
+            break
+        if start_stream_at in line:
+            return False
+    # Case 2/3: If start_stream_at is not in the deque, check the head of
+    # the current log file.
+    # Case 2: If start_stream_at is at the head, set start_stream to True.
+    peek_head_lines = current_file_lines[:PEEK_HEAD_LINES_FOR_START_STREAM]
+    for line in peek_head_lines:
+        if start_stream_at in line:
+            return True
+    # Case 3: If start_stream_at is not at the head, set start_stream to False.
+    return False
 
 
 def tail_logs(job_id: Optional[int],
@@ -437,6 +464,8 @@ def tail_logs(job_id: Optional[int],
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = 'Waiting for task resources on '
+    # Explicitly declare the type to avoid mypy warning.
+    lines: Iterable[str] = []
     if follow and status in [
             job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,
@@ -448,15 +477,22 @@ def tail_logs(job_id: Optional[int],
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
             if tail > 0:
-                lines = collections.deque(log_file.readlines(), maxlen=tail)
+                current_file_lines = log_file.readlines()
+                lines = collections.deque(current_file_lines, maxlen=tail)
+                start_stream = _should_start_streaming(current_file_lines,
+                                                       lines, start_stream_at)
                 for line in lines:
-                    print(line, end='')
+                    if start_stream_at in line:
+                        start_stream = True
+                    if start_stream:
+                        print(line, end='')
                 # Flush the last n lines
                 print(end='', flush=True)
             # Now, the cursor is at the end of the last lines
             # if tail > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
+                                         start_stream=start_stream,
                                          start_streaming_at=start_stream_at):
                 print(line, end='', flush=True)
     else:
@@ -466,20 +502,10 @@ def tail_logs(job_id: Optional[int],
                 if tail > 0:
                     # If tail > 0, we need to read the last n lines.
                     # We use double ended queue to rotate the last n lines.
-                    lines = collections.deque(f.readlines(), maxlen=tail)
-                    # Check the first few lines to decide if streaming should
-                    # start. If start_stream_at is within these lines, delay
-                    # streaming.
-                    # Example: tail=115, file lines=120, print lines 9 to 120.
-                    # We can't simply print the entire lines object, as
-                    # start_stream_at is still within the lines.
-                    start_stream = True
-                    for index, line in enumerate(lines):
-                        if start_stream_at in line:
-                            start_stream = False
-                            break
-                        if index >= PEEK_HEAD_LINES_FOR_START_STREAM:
-                            break
+                    current_file_lines = f.readlines()
+                    lines = collections.deque(current_file_lines, maxlen=tail)
+                    start_stream = _should_start_streaming(
+                        current_file_lines, lines, start_stream_at)
                 else:
                     lines = f.readlines()
                 for line in lines:

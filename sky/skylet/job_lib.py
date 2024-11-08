@@ -29,6 +29,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+_LINUX_NEW_LINE = '\n'
 _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 
 
@@ -883,16 +884,16 @@ class JobLibCodeGen:
                   follow: bool = True,
                   tail: int = 0) -> str:
         # pylint: disable=line-too-long
+
         code = [
             # We use != instead of is not because 1 is not None will print a warning:
             # <stdin>:1: SyntaxWarning: "is not" with a literal. Did you mean "!="?
-
             f'job_id = {job_id} if {job_id} != None else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             f'log_dir = None if run_timestamp is None else os.path.join({constants.SKY_LOGS_DIRECTORY!r}, run_timestamp)',
             f'tail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
-            f'\nif getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
-            '\nlog_lib.tail_logs(**tail_log_kwargs)',
+            f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
+            f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
         ]
         return cls._build(code)
 
