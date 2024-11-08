@@ -333,8 +333,7 @@ def _run_function_with_retries(func: Callable,
                 raise
 
 
-def pre_init(namespace: str, context: Optional[str], new_nodes: List,
-             provider_config: Dict[str, Any]) -> None:
+def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
 
     This step is run in the pod right after it is created and before the
