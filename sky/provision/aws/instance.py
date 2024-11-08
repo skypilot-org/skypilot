@@ -161,7 +161,8 @@ def _ec2_call_with_retry(
                 time.sleep(backoff.current_backoff())
                 logger.debug(f'create_instances: {error_code}, retrying.')
                 continue
-            if error_code == 'UnauthorizedOperation' and not credentials_refreshed:
+            if (error_code == 'UnauthorizedOperation' and
+                    not credentials_refreshed):
                 # Refresh the cached ec2 resource to get the latest credentials.
                 # We will retry until the credentials are refreshed in the
                 # underlying boto3 session.
