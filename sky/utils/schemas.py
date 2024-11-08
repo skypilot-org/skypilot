@@ -383,8 +383,7 @@ def get_service_schema():
                 'type': 'integer',
             },
             'load_balancing_policy': {
-                'type': 'string',
-                'enum': ['round_robin']
+                'type': 'string'
             },
         }
     }
