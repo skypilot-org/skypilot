@@ -15,18 +15,18 @@ Problem: Cloud Infra's Explosive Complexity
 -------------------------------------------
 
 Today's cloud infra has exploded in complexity.
-Organizations are forced to deal with a growing number of locations, pricing models, and hardware types:
+Organizations are forced to deal with a combinatorially large number of infra choices, across three dimensions:
 
-- **Locations**: 10s of regions and 100s of zones within a single cloud. Moreover, teams are increasingly multicloud (3+ hyperscalers, 10+
+- **Locations**: 10s of regions and 100s of zones within a single cloud. Teams are also increasingly multicloud (3+ hyperscalers, 10+
   specialized clouds) and multi-cluster.
-- **Pricing models**: On-demand, reserved, and preemptible spot instances, each with different pricing and availability.
 - **Hardware**: 500+ instance types per cloud; many new accelerators (e.g., GPUs, TPUs).
+- **Pricing models**: On-demand, reserved, and preemptible spot instances, each with different pricing and availability.
 
-The search space of ``(locations, pricing models, hardware)`` is combinatorially
+The search space of ``(locations, hardware, pricing models)`` is combinatorially
 large and dynamic, **even within one cloud**.  Seemingly simple tasks like "run jobs in any of my US
 regions/clusters with the lowest cost" or "run on either AWS or GCP" become highly costly:
 
-- Valuable engineering hours are invested to abstract away a myriad of cloud infra choices.
+- Valuable engineering hours are invested to mask the differences across infra choices.
 - Workloads are forced to run on suboptimal choices (to heuristically simplify the search space), wasting utilization, cost savings, and capacity.
 
 .. TODO: say something about 'abstracting away the infra choices while exploiting cost and capacity differences is hard.'
@@ -51,8 +51,8 @@ To combat this, *Sky Computing* was recently proposed in two papers from UC Berk
 `From Cloud Computing to Sky Computing <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ and
 `The Sky Above The Clouds <https://arxiv.org/abs/2205.07147>`_ (whitepaper).
 
-In a nutshell, Sky Computing **combines a team's diverse infra choices into a unified pool**, a "sky".
-Sky has two key components to simplify---and exploit---the complex search space:
+In a nutshell, Sky Computing **combines a team's diverse cloud infra into a unified pool**, a "sky".
+Sky comes with two components to simplify---and exploit---the complex search space:
 
 - A unified interface to run workloads on different cloud infra.
 - An optimizer to find the best  infra choice (cheapest & most available) for each workload.
@@ -64,7 +64,9 @@ Sky has two key components to simplify---and exploit---the complex search space:
 Both components make using complex cloud infra simple:
 
 - The unified Sky interface allows workloads to be specified once with the same interface, and be able to run on different infra.
-- The Sky optimizer further saves costs and increases capacity by exploiting the (dynamically changing) pricing and availability differences in the search space.
+- The Sky optimizer cuts across the search space to exploit the (dynamically changing) pricing and availability differences in the compute pool.
+
+.. - The Sky optimizer further saves costs and increases capacity by exploiting the (dynamically changing) pricing and availability differences in the search space.
 
 .. The unified Sky interface frees users from manually ensuring their workloads can run on diverse infra choices, saving valuable engineering time.
 .. Sky's optimizer further exploits the complex search space to automatically find infra choices with cheaper cost and higher capacity, cutting across a combinatorially large search space.
@@ -75,11 +77,13 @@ Both components make using complex cloud infra simple:
 .. One definition of "best placement" is "cheapest and available", especially for
 .. AI workloads that need expensive GPU/TPU/accelerator compute.
 
-Cloud users and their workloads gain the following benefits:
+With Sky, cloud users and their workloads gain the following benefits:
 
-* **Portability**: Cloud infra setup is simplified and automatically multicloud ready.
-* **Lower costs**: Sky optimizes the cost of each workload. Users gain pricing leverage due to portability. Engineering time is saved from dealing with cloud infra.
+* **Cloud is easier to use**: With the unified interface, infra is simplified & multicloud ready.
+* **Lower costs**: Sky optimizes the cost of each workload.  Engineering time is saved from dealing with cloud infra. Users gain pricing leverage due to portability.
 * **Higher capacity**: Workloads gain access to all diverse compute choices across locations, pricing models, and hardware.
+
+.. * **Portability**: Cloud infra setup is simplified and automatically multicloud ready.
 
 .. Sky can leverage, but differs from, today's multicloud systems. The latter are typically
 .. "partitioned multicloud": for example, in a multicloud organization, workload
@@ -95,7 +99,7 @@ SkyPilot and Sky Computing
 
 SkyPilot was born out of the same `UC Berkeley lab <https://sky.cs.berkeley.edu/>`_  that
 proposed the Sky Computing paradigm.
-SkyPilot is Sky's first instantiation, and it was started to showcase that Sky Computing is critical for AI and compute-intensive
+SkyPilot is Sky's first instantiation, and it was started to implement Sky Computing for AI and compute-intensive
 workloads.
 
 Over the last few years, SkyPilot has grown to become widely adopted by AI teams in the industry. Today, it
