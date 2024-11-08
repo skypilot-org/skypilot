@@ -384,7 +384,7 @@ def get_service_schema():
             },
             'load_balancing_policy': {
                 'type': 'string',
-                'enum': ['round_robin', 'least_connections', 'ip_hash']
+                'enum': ['round_robin']
             },
         }
     }
