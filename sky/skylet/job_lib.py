@@ -76,7 +76,9 @@ def create_table(cursor, conn):
         status TEXT,
         run_timestamp TEXT CANDIDATE KEY,
         start_at FLOAT DEFAULT -1,
-        pid INTEGER)""")
+        end_at FLOAT DEFAULT NULL,
+        resources TEXT DEFAULT NULL,
+        pid INTEGER DEFAULT NULL)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
