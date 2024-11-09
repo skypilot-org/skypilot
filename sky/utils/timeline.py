@@ -9,13 +9,18 @@ import json
 import os
 import threading
 import time
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import filelock
+import typing_extensions
+from typing_extensions import Self
 
 from sky.utils import common_utils
 
-_events = []
+_events: List[Dict[str, Any]] = []
+
+P = typing_extensions.ParamSpec('P')
+R = typing_extensions.TypeVar('R')
 
 
 class Event:
@@ -30,7 +35,7 @@ class Event:
         self._name = name
         self._message = message
         # See the module doc for the event format.
-        self._event = {
+        self._event: Dict[str, Any] = {
             'name': self._name,
             'cat': 'event',
             'pid': str(os.getpid()),
@@ -62,11 +67,11 @@ class Event:
             event_end['args'] = {'message': self._message}
         _events.append(event_end)
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self.begin()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exec_type: Any, exec_val: Any, exec_tb: Any) -> None:
         self.end()
 
 
