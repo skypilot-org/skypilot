@@ -3262,6 +3262,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
+        fore = colorama.Fore
 
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
@@ -3272,7 +3273,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
@@ -3358,28 +3359,50 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
+
+        name = handle.cluster_name
+        controller = controller_utils.Controllers.from_name(name)
+
+        is_jobs_controller = (
+            controller == controller_utils.Controllers.JOBS_CONTROLLER)
+        is_log_dag_chain = (is_jobs_controller and
+                            managed_job_dag is not None and
+                            managed_job_dag.is_chain())
         try:
             if not detach_run:
-                if (handle.cluster_name in controller_utils.Controllers.
-                        JOBS_CONTROLLER.value.candidate_cluster_names):
-                    self.tail_managed_job_logs(handle, job_id)
+                if is_jobs_controller:
+                    if is_log_dag_chain:
+                        self.tail_managed_job_logs(handle, job_id)
+                    else:
+                        # For non-chain DAGs, we avoid continuously polling
+                        # logs for each running task, as parallel tasks may
+                        # cause issues: either logs from shorter tasks might
+                        # be missed if they complete early, or logs from
+                        # multiple tasks could interleave, making them hard
+                        # to follow. Instead, we let the user do
+                        # `sky jobs logs <job_id> --task-id <task_id>`,
+                        # similar to sky serve.
+                        pass
                 else:
                     # Sky logs. Not using subprocess.run since it will make the
                     # ssh keep connected after ctrl-c.
                     self.tail_logs(handle, job_id)
         finally:
-            name = handle.cluster_name
-            controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
+                cluster_logs = (f'\n{ux_utils.INDENT_SYMBOL}To stream job logs '
+                                f'for chain workflow:\t\t\t'
+                                f'{ux_utils.BOLD}sky jobs logs {job_id}'
+                               ) if is_log_dag_chain else ''
                 logger.info(
-                    f'\n📋 Useful Commands'
-                    f'\nManaged Job ID: '
+                    f'\n{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    f'\n📋 Useful Commands'
                     f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
                     f'{ux_utils.BOLD}sky jobs cancel {job_id}'
                     f'{ux_utils.RESET_BOLD}'
-                    f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
-                    f'{ux_utils.BOLD}sky jobs logs {job_id}'
+                    f'{cluster_logs}'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream job DAG logs:\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs {job_id} --task-id [TASK_ID]'
                     f'{ux_utils.RESET_BOLD}'
                     f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
                     f'{ux_utils.BOLD}sky jobs logs --controller {job_id}'
@@ -3391,8 +3414,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
                     f'{ux_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n📋 Useful Commands'
-                            f'\nJob ID: {job_id}'
+                logger.info(f'\n{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            f'\n📋 Useful Commands'
                             f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
                             f'{ux_utils.BOLD}sky cancel {name} {job_id}'
                             f'{ux_utils.RESET_BOLD}'
@@ -3751,12 +3775,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
+                              task_id: Optional[int] = None,
                               controller: bool = False,
                               follow: bool = True) -> None:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller)
+            job_name, job_id, task_id, follow, controller)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -3829,6 +3854,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
         cluster_status_fetched = False
+        prev_cluster_status = None
         if refresh_cluster_status:
             try:
                 prev_cluster_status, _ = (
@@ -4260,7 +4286,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # This will try to fetch the head node IP if it is not cached.
 
-        runners = handle.get_command_runners()
+        runners: List[
+            command_runner.CommandRunner] = handle.get_command_runners()
         head_runner = runners[0]
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'

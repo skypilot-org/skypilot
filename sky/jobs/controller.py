@@ -1,12 +1,15 @@
 """Controller: handles the life cycle of a managed job."""
 import argparse
+from concurrent import futures
+import enum
 import multiprocessing
 import os
 import pathlib
+import queue
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import Callable, Dict, List, Tuple
 
 import filelock
 
@@ -43,6 +46,12 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
     return dag, dag_name
 
 
+class TaskStatus(enum.Enum):
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    CANCELLED = 'cancelled'
+
+
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
@@ -50,18 +59,24 @@ class JobsController:
                  retry_until_up: bool) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
+        self._num_tasks = len(self._dag.tasks)
         logger.info(self._dag)
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        # pylint: disable=line-too-long
+        self._dag_graph = self._dag.get_graph()
+        # TODO(andy): add type arguments, stuck by old pylint.
+        self._ready_tasks: queue.Queue = self._initialize_ready_tasks()
+        self._task_status: Dict['sky.Task', TaskStatus] = {}
+
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        #   Example value: sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
-        job_id_env_vars = []
+        # Example value:
+        #   sky-2022-10-04-22-46-52-467694_my-spot-name_spot_id-17-0
+        job_id_env_vars: List[str] = []
         for i, task in enumerate(self._dag.tasks):
-            if len(self._dag.tasks) <= 1:
+            if self._num_tasks <= 1:
                 task_name = self._dag_name
             else:
                 assert task.name is not None, task
@@ -85,6 +100,16 @@ class JobsController:
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
             task.update_envs(task_envs)
+
+    def _initialize_ready_tasks(self) -> queue.Queue:
+        """Initialize a queue with tasks that are ready to execute
+        (no dependencies)."""
+        ready_tasks: queue.Queue = queue.Queue()
+        for task in self._dag_graph.nodes():
+            if self._dag_graph.in_degree(task) == 0:
+                task_id = self._dag.tasks.index(task)
+                ready_tasks.put(task_id)
+        return ready_tasks
 
     def _download_log_and_stream(
             self,
@@ -163,7 +188,7 @@ class JobsController:
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
-        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+        strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
         managed_job_state.set_submitted(
             self._job_id,
@@ -174,7 +199,7 @@ class JobsController:
                 task, is_managed_job=True),
             specs={
                 'max_restarts_on_errors':
-                    self._strategy_executor.max_restarts_on_errors
+                    strategy_executor.max_restarts_on_errors
             },
             callback_func=callback_func)
         logger.info(
@@ -185,7 +210,7 @@ class JobsController:
         managed_job_state.set_starting(job_id=self._job_id,
                                        task_id=task_id,
                                        callback_func=callback_func)
-        remote_job_submitted_at = self._strategy_executor.launch()
+        remote_job_submitted_at = strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
         managed_job_state.set_started(job_id=self._job_id,
@@ -288,16 +313,16 @@ class JobsController:
                         'To see the details, run: '
                         f'sky jobs logs --controller {self._job_id}')
                     should_restart_on_failure = (
-                        self._strategy_executor.should_restart_on_failure())
+                        strategy_executor.should_restart_on_failure())
                     if should_restart_on_failure:
                         max_restarts = (
-                            self._strategy_executor.max_restarts_on_errors)
+                            strategy_executor.max_restarts_on_errors)
                         logger.info(
                             f'User program crashed '
                             f'({managed_job_status.value}). '
                             f'Retry the job as max_restarts_on_errors is '
                             f'set to {max_restarts}. '
-                            f'[{self._strategy_executor.restart_cnt_on_failure}'
+                            f'[{strategy_executor.restart_cnt_on_failure}'
                             f'/{max_restarts}]')
                     else:
                         managed_job_state.set_failed(
@@ -333,22 +358,33 @@ class JobsController:
             managed_job_state.set_recovering(job_id=self._job_id,
                                              task_id=task_id,
                                              callback_func=callback_func)
-            recovered_time = self._strategy_executor.recover()
+            recovered_time = strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
 
-    def run(self):
-        """Run controller logic and handle exceptions."""
-        task_id = 0
+    def _try_add_successors_to_queue(self, task_id: int) -> None:
+        """Tasks with multiple predecessors will only be queued once, as
+        `_handle_future_completion` runs sequentially in the main thread via
+        `futures.wait()`.
+        """
+        is_task_runnable: Callable[['sky.Task'], bool] = lambda task: (all(
+            self._task_status.get(pred) == TaskStatus.COMPLETED
+            for pred in self._dag_graph.predecessors(task)
+        ) and self._task_status.get(task) != TaskStatus.CANCELLED)
+        task = self._dag.tasks[task_id]
+        for successor in self._dag_graph.successors(task):
+            successor_id = self._dag.tasks.index(successor)
+            if is_task_runnable(successor):
+                self._ready_tasks.put(successor_id)
+
+    # TODO(andy): add type arguments, stuck by old pylint.
+    def _handle_future_completion(self, future: futures.Future,
+                                  task_id: int) -> None:
+        succeeded = False
         try:
-            succeeded = True
-            # We support chain DAGs only for now.
-            for task_id, task in enumerate(self._dag.tasks):
-                succeeded = self._run_one_task(task_id, task)
-                if not succeeded:
-                    break
+            succeeded = future.result()
         except exceptions.ProvisionPrechecksError as e:
             # Please refer to the docstring of self._run for the cases when
             # this exception can occur.
@@ -379,23 +415,74 @@ class JobsController:
                 task_id, managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
                 msg)
         finally:
-            # This will set all unfinished tasks to CANCELLING, and will not
-            # affect the jobs in terminal states.
-            # We need to call set_cancelling before set_cancelled to make sure
-            # the table entries are correctly set.
-            callback_func = managed_job_utils.event_callback_func(
-                job_id=self._job_id,
-                task_id=task_id,
-                task=self._dag.tasks[task_id])
-            managed_job_state.set_cancelling(job_id=self._job_id,
-                                             callback_func=callback_func)
-            managed_job_state.set_cancelled(job_id=self._job_id,
-                                            callback_func=callback_func)
+            task = self._dag.tasks[task_id]
+            if succeeded:
+                logger.info(
+                    f'Task {task_id} completed with result: {succeeded}')
+                self._task_status[task] = TaskStatus.COMPLETED
+                self._try_add_successors_to_queue(task_id)
+            else:
+                logger.info(f'Adding task {task_id} to failed tasks.')
+                self._task_status[task] = TaskStatus.FAILED
+                self._cancel_all_tasks(task_id)
+
+    def _cancel_all_tasks(self, task_id: int) -> None:
+        callback_func = managed_job_utils.event_callback_func(
+            job_id=self._job_id, task_id=task_id, task=self._dag.tasks[task_id])
+        for task in self._dag.tasks:
+            if task not in self._task_status:
+                self._task_status.setdefault(task, TaskStatus.CANCELLED)
+
+        # Call set_cancelling before set_cancelled to make sure the table
+        # entries are correctly set.
+        managed_job_state.set_cancelling(self._job_id, callback_func, True)
+        managed_job_state.set_cancelled(self._job_id, callback_func)
+
+    def run(self) -> None:
+        """Run controller logic and handle exceptions."""
+        all_tasks_completed = lambda: self._num_tasks == len(self._task_status)
+        # TODO(andy): Serve has a logic to prevent from too many services
+        # running at the same time. We should have a similar logic here, but
+        # instead we should calculate the sum of the subtasks (an upper bound),
+        # instead of the number of jobs (dags).
+        # Further, we could try to calculate the maximum concurrency in the dag
+        # (e.g. for a chain dag it is 1 instead of n), which could allow us to
+        # run more dags in parallel.
+        max_workers = self._num_tasks
+        managed_job_utils.make_launch_log_dir_for_redirection(self._job_id)
+        with futures.ThreadPoolExecutor(max_workers) as executor:
+            future_to_task: Dict[futures.Future, int] = {}
+            while not all_tasks_completed():
+                while not self._ready_tasks.empty():
+                    task_id = self._ready_tasks.get()
+                    log_file_name = managed_job_utils.get_launch_log_file_name(
+                        self._job_id, task_id)
+
+                    logger.info(
+                        f'Task {task_id} is submitted to run. To see logs: '
+                        f'{ux_utils.BOLD}sky jobs logs {self._job_id} '
+                        f'--task-id {task_id}{ux_utils.RESET_BOLD}')
+
+                    logger.info(f'Redirecting output to {log_file_name}.')
+
+                    with ux_utils.RedirectOutputForThread() as redirector:
+                        future = executor.submit(
+                            redirector.run(self._run_one_task, log_file_name),
+                            task_id, self._dag.tasks[task_id])
+                    future_to_task[future] = task_id
+
+                done, _ = futures.wait(future_to_task.keys(),
+                                       return_when='FIRST_COMPLETED')
+
+                for future in done:
+                    logger.info(f'Task {future_to_task[future]} completed.')
+                    task_id = future_to_task.pop(future)
+                    self._handle_future_completion(future, task_id)
 
     def _update_failed_task_state(
             self, task_id: int,
             failure_type: managed_job_state.ManagedJobStatus,
-            failure_reason: str):
+            failure_reason: str) -> None:
         """Update the state of the failed task."""
         managed_job_state.set_failed(
             self._job_id,
@@ -408,7 +495,7 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
+def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool) -> None:
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
@@ -416,7 +503,7 @@ def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     jobs_controller.run()
 
 
-def _handle_signal(job_id):
+def _handle_signal(job_id: int) -> None:
     """Handle the signal if the user sent it."""
     signal_file = pathlib.Path(
         managed_job_utils.SIGNAL_FILE_PREFIX.format(job_id))
@@ -426,9 +513,9 @@ def _handle_signal(job_id):
         # signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open(mode='r', encoding='utf-8') as f:
-                user_signal = f.read().strip()
+                user_signal_str = f.read().strip()
                 try:
-                    user_signal = managed_job_utils.UserSignal(user_signal)
+                    user_signal = managed_job_utils.UserSignal(user_signal_str)
                 except ValueError:
                     logger.warning(
                         f'Unknown signal received: {user_signal}. Ignoring.')
@@ -444,7 +531,7 @@ def _handle_signal(job_id):
         f'User sent {user_signal.value} signal.')
 
 
-def _cleanup(job_id: int, dag_yaml: str):
+def _cleanup(job_id: int, dag_yaml: str) -> None:
     """Clean up the cluster(s) and storages.
 
     (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -469,7 +556,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         backend.teardown_ephemeral_storage(task)
 
 
-def start(job_id, dag_yaml, retry_until_up):
+def start(job_id: int, dag_yaml: str, retry_until_up: bool) -> None:
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -485,12 +572,14 @@ def start(job_id, dag_yaml, retry_until_up):
                                                      args=(job_id, dag_yaml,
                                                            retry_until_up))
         controller_process.start()
+        logger.info(f'Controller process {controller_process.pid} started.')
         while controller_process.is_alive():
             _handle_signal(job_id)
             time.sleep(1)
     except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
         task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
+        assert task_id is not None, task_id
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
         managed_job_state.set_cancelling(
@@ -522,6 +611,7 @@ def start(job_id, dag_yaml, retry_until_up):
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
+            assert task_id is not None, task_id
             managed_job_state.set_cancelled(
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(

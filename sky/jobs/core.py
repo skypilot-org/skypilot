@@ -63,6 +63,7 @@ def launch(
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
+
     if not dag.is_connected_dag():
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -255,6 +256,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     stopped_message = ''
     if not refresh:
         stopped_message = 'No in-progress managed jobs.'
+    controller_status: Optional[status_lib.ClusterStatus] = None
     try:
         handle = backend_utils.is_controller_accessible(
             controller=jobs_controller_type, stopped_message=stopped_message)
@@ -369,8 +371,8 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool) -> None:
+def tail_logs(name: Optional[str], job_id: Optional[int],
+              task_id: Optional[int], follow: bool, controller: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -396,6 +398,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     backend.tail_managed_job_logs(handle,
                                   job_id=job_id,
                                   job_name=name,
+                                  task_id=task_id,
                                   follow=follow,
                                   controller=controller)
 

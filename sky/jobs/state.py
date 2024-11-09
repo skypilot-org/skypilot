@@ -461,25 +461,43 @@ def set_failed(
     logger.info(failure_reason)
 
 
-def set_cancelling(job_id: int, callback_func: CallbackType):
-    """Set tasks in the job as cancelling, if they are in non-terminal states.
+def set_cancelling(job_id: int,
+                   callback_func: CallbackType,
+                   cancel_all: bool = False) -> None:
+    """Set tasks in the job as cancelling, if they are not running and in
+    non-terminal states.
 
     task_id is not needed, because we expect the job should be cancelled
     as a whole, and we should not cancel a single task.
     """
+
+    # TODO(andy): https://github.com/skypilot-org/skypilot/issues/4195 - For
+    # DAG, current implementation cancels all non-running tasks for simplicity.
+    # We should evaluate flexible cancellation policies for DAG workflows in the
+    # future.
+    params = {
+        'status': ManagedJobStatus.CANCELLING.value,
+        'end_at': time.time(),
+        'job_id': job_id,
+    }
+
+    sql = """\
+        UPDATE spot SET
+        status=:status, end_at=:end_at
+        WHERE spot_job_id=:job_id AND end_at IS null"""
+
+    if cancel_all:
+        sql += ' AND status IS NOT :running_status'
+        params['running_status'] = ManagedJobStatus.RUNNING.value
+
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            UPDATE spot SET
-            status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND end_at IS null""",
-            (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
+        rows = cursor.execute(sql, params)
         if rows.rowcount > 0:
             logger.info('Cancelling the job...')
             callback_func('CANCELLING')
 
 
-def set_cancelled(job_id: int, callback_func: CallbackType):
+def set_cancelled(job_id: int, callback_func: CallbackType) -> None:
     """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
@@ -565,6 +583,19 @@ def get_latest_task_id_status(
         if not status.is_terminal():
             break
     return task_id, status
+
+
+def get_task_id_status(
+        job_id: int,
+        task_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
+    """Get the task id and status of a job."""
+
+    id_statuses = _get_all_task_ids_statuses(job_id)
+    if task_id >= len(id_statuses):
+        return None, None
+    result = id_statuses[task_id]
+    assert result[0] == task_id
+    return result
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
