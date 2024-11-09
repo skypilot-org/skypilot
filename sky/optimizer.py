@@ -140,6 +140,20 @@ class Optimizer:
                 # optimization fails.
                 Optimizer._remove_dummy_source_sink_nodes(dag)
             return dag
+        
+    @staticmethod
+    def _add_dummy_storage_nodes(dag: 'dag_lib.Dag'):
+        """Adds special nodes for storage buckets. Specifically, it adds dummy nodes
+        between nodes that are connected by with_data edges."""
+        graph = dag.get_graph()
+        edges = list(graph.edges())
+        for src, dst in edges:
+            if graph[src][dst].get('with_data', False):
+                dummy = task_lib.Task(f'{src.name}_to_{dst.name}_storage')
+                dummy.set_resources({DummyResources(DummyCloud(), None)})
+                dummy.set_time_estimator(lambda _: 0)
+                with dag:
+                    src >> dummy >> dst
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
