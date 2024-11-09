@@ -207,12 +207,15 @@ class JobScheduler:
                     # before the last reboot.
                     self.remove_job_no_lock(job_id)
                     continue
+
                 if submit:
                     pending_submit_cnt += 1
                 if pending_submit_cnt >= MAX_PENDING_SUBMIT:
                     # There are too many pending jobs, wait for a while.
                     return
-                self._run_job(job_id, run_cmd)
+                if not submit:
+                    self._run_job(job_id, run_cmd)
+                    pending_submit_cnt += 1
                 
 
     def _get_pending_job_ids(self) -> List[int]:
