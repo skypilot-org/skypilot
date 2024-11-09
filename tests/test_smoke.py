@@ -5777,7 +5777,7 @@ def test_kubernetes_context_failover():
 @pytest.mark.aws
 def test_intermediate_bucket():
     name = _get_cluster_name()
-    bucket_name = 'sky-bucket-int'
+    bucket_name = f'sky-bucket-{int(time.time())}'
     test = Test(
         'interm-resources',
         [
