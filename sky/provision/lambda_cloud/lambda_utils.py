@@ -82,7 +82,7 @@ def raise_lambda_error(response: requests.Response) -> None:
     if status_code == 200:
         return
     if status_code == 429:
-        # https://docs.lambdalabs.com/cloud/rate-limiting/
+        # https://docs.lambdalabs.com/public-cloud/cloud-api/
         raise LambdaCloudError('Your API requests are being rate limited.')
     try:
         resp_json = response.json()
@@ -145,7 +145,7 @@ class LambdaCloudClient:
         # Most API requests are rate limited at ~1 request every second but
         # launch requests are rate limited at ~1 request every 10 seconds.
         # So don't use launch requests to check availability.
-        # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
+        # See https://docs.lambdalabs.com/public-cloud/cloud-api/ for more.
         available_regions = (self.list_catalog()[instance_type]
                              ['regions_with_capacity_available'])
         available_regions = [reg['name'] for reg in available_regions]

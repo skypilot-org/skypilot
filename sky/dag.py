@@ -85,6 +85,7 @@ class Dag:
         self.name = name
         self._task_name_lookup: Dict[str, 'task.Task'] = {}
         self.graph = nx.DiGraph()
+        self.policy_applied: bool = False
 
     @property
     def tasks(self) -> List['task.Task']:
@@ -313,17 +314,25 @@ class Dag:
         return self.graph
 
     def is_chain(self) -> bool:
-        """Check if the DAG is a linear chain of tasks.
+        """Check if the DAG is a linear chain of tasks."""
 
-        Returns:
-            True if the DAG is a linear chain, False otherwise.
-        """
         nodes = list(self.graph.nodes)
+
+        if len(nodes) == 0:
+            return True
+
+        in_degrees = [self.graph.in_degree(node) for node in nodes]
         out_degrees = [self.graph.out_degree(node) for node in nodes]
 
-        return (len(nodes) <= 1 or
-                (all(degree <= 1 for degree in out_degrees) and
-                 sum(degree == 0 for degree in out_degrees) == 1))
+        # Check out-degrees: all <= 1 and exactly one node has out_degree == 0
+        out_degree_condition = (all(degree <= 1 for degree in out_degrees) and
+                                sum(degree == 0 for degree in out_degrees) == 1)
+
+        # Check in-degrees: all <= 1 and exactly one node has in_degree == 0
+        in_degree_condition = (all(degree <= 1 for degree in in_degrees) and
+                               sum(degree == 0 for degree in in_degrees) == 1)
+
+        return out_degree_condition and in_degree_condition
 
     def is_connected_dag(self) -> bool:
         """Check if the graph is a connected directed acyclic graph (DAG).

@@ -3279,9 +3279,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} '
-            '2> /dev/null"')
+            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -3732,7 +3733,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
-                  follow: bool = True) -> int:
+                  follow: bool = True,
+                  tail: int = 0) -> int:
         """Tail the logs of a job.
 
         Args:
@@ -3740,10 +3742,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_id: The job ID to tail the logs of.
             managed_job_id: The managed job ID for display purpose only.
             follow: Whether to follow the logs.
+            tail: The number of lines to display from the end of the
+                log file. If 0, print all lines.
         """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
-                                               follow=follow)
+                                               follow=follow,
+                                               tail=tail)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
