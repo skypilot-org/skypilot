@@ -183,7 +183,7 @@ class JobScheduler:
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
-        submit_cnt = 0
+        pending_submit_cnt = 0
         MAX_PENDING_SUBMIT = 2
         for job_id in pending_job_ids:
             with filelock.FileLock(_get_lock_path(job_id)):
@@ -207,8 +207,9 @@ class JobScheduler:
                     # before the last reboot.
                     self.remove_job_no_lock(job_id)
                     continue
-                submit_cnt += 1
-                if submit_cnt >= MAX_PENDING_SUBMIT:
+                if submit:
+                    pending_submit_cnt += 1
+                if pending_submit_cnt >= MAX_PENDING_SUBMIT:
                     # There are too many pending jobs, wait for a while.
                     return
                 self._run_job(job_id, run_cmd)
