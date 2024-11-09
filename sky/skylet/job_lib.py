@@ -48,6 +48,7 @@ class JobInfoLoc(enum.IntEnum):
     RESOURCES = 8
     PID = 9
 
+
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
@@ -121,7 +122,10 @@ class JobStatus(enum.Enum):
     # In the 'jobs' table, the `start_at` column will be set to the current
     # time, when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
-    # The job driver process failed.
+    # The job driver process failed. This happens when the job driver process
+    # finishes when the status in job table is still not set to terminal state.
+    # We should keep this state before the SUCCEEDED, as our job status update
+    # relies on the order of the statuses to keep the latest status.
     FAILED_DRIVER = 'FAILED_DRIVER'
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
@@ -180,8 +184,11 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-
+        subprocess.Popen(run_cmd,
+                         shell=True,
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL,
+                         start_new_session=True)
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
         if force_update_jobs:
@@ -240,30 +247,6 @@ _JOB_STATUS_TO_COLOR = {
     JobStatus.CANCELLED: colorama.Fore.YELLOW,
 }
 
-_RAY_TO_JOB_STATUS_MAP = {
-    # These are intentionally set this way, because:
-    # 1. when the ray status indicates the job is PENDING the generated
-    # python program has been `ray job submit` from the job queue
-    # and is now PENDING
-    # 2. when the ray status indicates the job is RUNNING the job can be in
-    # setup or resources may not be allocated yet, i.e. the job should be
-    # PENDING.
-    # For case 2, update_job_status() would compare this mapped PENDING to
-    # the status in our jobs DB and take the max. This is because the job's
-    # generated ray program is the only place that can determine a job has
-    # reserved resources and actually started running: it will set the
-    # status in the DB to SETTING_UP or RUNNING.
-    # If there is no setup specified in the task, as soon as it is started
-    # (ray's status becomes RUNNING), i.e. it will be very rare that the job
-    # will be set to SETTING_UP by the update_job_status, as our generated
-    # ray program will set the status to PENDING immediately.
-    'PENDING': JobStatus.PENDING,
-    'RUNNING': JobStatus.PENDING,
-    'SUCCEEDED': JobStatus.SUCCEEDED,
-    'FAILED': JobStatus.FAILED,
-    'STOPPED': JobStatus.CANCELLED,
-}
-
 
 def _create_ray_job_submission_client():
     """Import the ray job submission client."""
@@ -298,9 +281,10 @@ def add_job(job_name: str, username: str, run_timestamp: str,
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, null)',
-                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
-                     run_timestamp, None, resources_str))
+    _CURSOR.execute(
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, null)',
+        (job_name, username, job_submitted_at, JobStatus.INIT.value,
+         run_timestamp, None, resources_str))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -347,7 +331,8 @@ def set_job_started(job_id: int) -> None:
     with filelock.FileLock(_get_lock_path(job_id)):
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL, pid=(?) '
-            'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), os.getpid(), job_id))
+            'WHERE job_id=(?)',
+            (JobStatus.RUNNING.value, time.time(), os.getpid(), job_id))
         _CONN.commit()
 
 
