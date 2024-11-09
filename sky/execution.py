@@ -296,7 +296,8 @@ def _execute(
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
         do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
-                          task.file_mounts is not None)
+                          (task.file_mounts is not None or
+                           task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
             logger.info(ux_utils.starting_message('Mounting files.'))
 
