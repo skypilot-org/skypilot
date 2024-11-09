@@ -27,6 +27,8 @@ logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 
+_MAX_PENDING_SUBMIT = 2
+
 
 def _get_lock_path(job_id: int) -> str:
     lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
@@ -184,7 +186,6 @@ class JobScheduler:
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
         pending_submit_cnt = 0
-        MAX_PENDING_SUBMIT = 2
         for job_id in pending_job_ids:
             with filelock.FileLock(_get_lock_path(job_id)):
                 pending_job = _get_pending_job(job_id)
@@ -210,7 +211,7 @@ class JobScheduler:
 
                 if submit:
                     pending_submit_cnt += 1
-                if pending_submit_cnt >= MAX_PENDING_SUBMIT:
+                if pending_submit_cnt >= _MAX_PENDING_SUBMIT:
                     # There are too many pending jobs, wait for a while.
                     return
                 if not submit:
