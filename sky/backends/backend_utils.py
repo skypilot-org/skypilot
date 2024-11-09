@@ -706,6 +706,14 @@ def write_cluster_config(
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         excluded_clouds = [cloud]
+
+    for cloud_str, cloud_obj in cloud_registry.CLOUD_REGISTRY.items():
+        remote_identity_config = skypilot_config.get_nested(
+            (cloud_str.lower(), 'remote_identity'), None)
+        if remote_identity_config:
+            if remote_identity_config == schemas.RemoteIdentityOptions.SKIP.value:
+                excluded_clouds.append(cloud_obj)
+    
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
