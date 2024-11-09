@@ -46,6 +46,7 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds as sky_clouds
@@ -67,6 +68,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -582,6 +584,15 @@ def _launch_with_confirm(
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
                                    f'{colorama.Style.RESET_ALL}') from e
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            ),
+        )
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -2011,6 +2022,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2024,6 +2041,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -2090,7 +2108,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    core.tail_logs(cluster, job_id, follow, tail)
 
 
 @cli.command()
@@ -3678,6 +3696,8 @@ def jobs_launch(
 
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
                 fg='cyan')
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     dag = sky.optimize(dag)
 
     if not yes:
@@ -4156,6 +4176,8 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4272,6 +4294,8 @@ def serve_update(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:

@@ -445,6 +445,35 @@ def test_aws_region():
     run_one_test(test)
 
 
+@pytest.mark.aws
+def test_aws_with_ssh_proxy_command():
+    name = _get_cluster_name()
+    with tempfile.NamedTemporaryFile(mode='w') as f:
+        f.write(
+            textwrap.dedent(f"""\
+        aws:
+            ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
+        """))
+        f.flush()
+        test = Test(
+            'aws_with_ssh_proxy_command',
+            [
+                f'sky launch -y -c jump-{name} --cloud aws --cpus 2 --region us-east-1',
+                # Use jump config
+                f'export SKYPILOT_CONFIG={f.name}; '
+                f'sky launch -y -c {name} --cloud aws --cpus 2 --region us-east-1 echo hi',
+                f'sky logs {name} 1 --status',
+                f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
+                f'sky logs {name} 2 --status',
+                f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
+                'sleep 300',
+                f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
+            ],
+            f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
+        )
+        run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_gcp_region_and_service_account():
     name = _get_cluster_name()

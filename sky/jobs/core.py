@@ -59,8 +59,10 @@ def launch(
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
-
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
     if not dag.is_chain():

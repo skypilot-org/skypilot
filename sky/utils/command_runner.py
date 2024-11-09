@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import control_master_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -104,13 +105,22 @@ def ssh_options_list(
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
+    #
+    # We disable ControlMaster when ssh_proxy_command is used, because the
+    # master connection will be idle although the connection might be shared
+    # by other ssh commands that is not idle. In that case, user's custom proxy
+    # command may drop the connection due to idle timeout, since it will only
+    # see the idle master connection. It is an issue even with the
+    # ServerAliveInterval set, since the keepalive message may not be recognized
+    # by the custom proxy command, such as AWS SSM Session Manager.
+    #
     # We also do not use ControlMaster when we use `kubectl port-forward`
     # to access Kubernetes pods over SSH+Proxycommand. This is because the
     # process running ProxyCommand is kept running as long as the ssh session
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            not disable_control_master):
+            ssh_proxy_command is None and not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -459,7 +469,9 @@ class SSHCommandRunner(CommandRunner):
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
-        self.disable_control_master = disable_control_master
+        self.disable_control_master = (
+            disable_control_master or
+            control_master_utils.should_disable_control_master())
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
