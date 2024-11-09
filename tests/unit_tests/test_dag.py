@@ -119,7 +119,6 @@ def test_is_chain_regression():
         # Note: old implementation might incorrectly return True here
 
 
-@pytest.mark.xfail(reason="Known limitation with cycles")
 def test_is_chain_with_cycle():
     """Test is_chain() with cyclic graph (should raise or return False)."""
     with sky.Dag() as dag:
