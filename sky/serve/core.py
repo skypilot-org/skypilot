@@ -324,6 +324,8 @@ def update(
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
+    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
+    # will not apply the config.
     dag, _ = admin_policy_utils.apply(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
