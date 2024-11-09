@@ -228,7 +228,8 @@ class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
 
     def _get_pending_job_ids(self) -> List[int]:
-        rows = _CURSOR.execute('SELECT job_id FROM pending_jobs ORDER BY job_id').fetchall()
+        rows = _CURSOR.execute(
+            'SELECT job_id FROM pending_jobs ORDER BY job_id').fetchall()
         return [row[0] for row in rows]
 
 
@@ -526,11 +527,16 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 
 def _get_pending_job(job_id: int) -> Optional[Dict[str, Any]]:
-    rows = _CURSOR.execute('SELECT created_time, submit, run_cmd FROM pending_jobs '
-                           f'WHERE job_id={job_id!r}')
+    rows = _CURSOR.execute(
+        'SELECT created_time, submit, run_cmd FROM pending_jobs '
+        f'WHERE job_id={job_id!r}')
     for row in rows:
         created_time, submit, run_cmd = row
-        return {'created_time': created_time, 'submit': submit, 'run_cmd': run_cmd}
+        return {
+            'created_time': created_time,
+            'submit': submit,
+            'run_cmd': run_cmd
+        }
     return None
 
 
