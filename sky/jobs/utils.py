@@ -14,11 +14,7 @@ import shutil
 import textwrap
 import time
 import typing
-<<<<<<< HEAD
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
-=======
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
->>>>>>> origin/master
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
