@@ -3275,7 +3275,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         encoded_script = shlex.quote(codegen)
         create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
-            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path} '
+            # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
+            # with pid is the same driver process.
+            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
             # Do not use &>, which is not POSIX and may not work.
             # Note that the order of ">filename 2>&1" matters.
             f'> {remote_log_path} 2>&1')

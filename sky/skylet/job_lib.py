@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shlex
+import signal
 import sqlite3
 import subprocess
 import time
@@ -22,10 +23,15 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
+# JOB_CMD_IDENTIFIER is used for identifying the process retrieved
+# with pid is the same driver process to guard against the case where
+# the same pid is reused by a different process.
+JOB_CMD_IDENTIFIER = 'echo "SKYPILOT_JOB_ID <{}>"'
 
 
 def _get_lock_path(job_id: int) -> str:
@@ -183,15 +189,13 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        proc = subprocess.Popen(run_cmd,
-                                shell=True,
+        proc = subprocess.Popen(['/bin/bash', '-c', run_cmd],
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 start_new_session=True)
         _CURSOR.execute((f'UPDATE jobs SET pid={proc.pid} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
         if force_update_jobs:
@@ -244,6 +248,7 @@ _JOB_STATUS_TO_COLOR = {
     JobStatus.SETTING_UP: colorama.Fore.BLUE,
     JobStatus.PENDING: colorama.Fore.BLUE,
     JobStatus.RUNNING: colorama.Fore.GREEN,
+    JobStatus.FAILED_DRIVER: colorama.Fore.RED,
     JobStatus.SUCCEEDED: colorama.Fore.GREEN,
     JobStatus.FAILED: colorama.Fore.RED,
     JobStatus.FAILED_SETUP: colorama.Fore.RED,
@@ -334,8 +339,7 @@ def set_job_started(job_id: int) -> None:
     with filelock.FileLock(_get_lock_path(job_id)):
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-            'WHERE job_id=(?)',
-            (JobStatus.RUNNING.value, time.time(), job_id))
+            'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
         _CONN.commit()
 
 
@@ -561,13 +565,18 @@ def update_job_status(job_ids: List[int],
                     # was killed before the job is submitted. We should set it
                     # to FAILED then. Note, if ray job indicates the job is
                     # running, we will change status to PENDING below.
-                    echo(f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
+                    echo(
+                        f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
 
             try:
                 if job_pid is not None:
                     job_driver_process = psutil.Process(job_pid)
-                    if job_driver_process.is_running():
+                    # We check the cmdline to avoid the case where the same
+                    # pid is reused by a different process.
+                    if job_driver_process.is_running() and any(
+                            JOB_CMD_IDENTIFIER.format(job_id) in line
+                            for line in job_driver_process.cmdline()):
                         status = JobStatus.PENDING
                     else:
                         # By default, we set the job status to FAILED_DRIVER,
@@ -777,8 +786,10 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         with filelock.FileLock(_get_lock_path(job_id)):
             job = _get_jobs_by_ids([job_id])[0]
             if job['pid'] is not None:
-                job_driver_process = psutil.Process(job['pid'])
-                job_driver_process.terminate()
+                # Not use process.terminate() as that will only terminate the
+                # process shell process, not the ray driver process
+                # under the shell.
+                os.killpg(job['pid'], signal.SIGTERM)
 
             if job['status'] in [
                     JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
