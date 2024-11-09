@@ -216,7 +216,6 @@ class JobScheduler:
                 if not submit:
                     self._run_job(job_id, run_cmd)
                     pending_submit_cnt += 1
-                
 
     def _get_pending_job_ids(self) -> List[int]:
         """Returns the job ids in the pending jobs table
