@@ -11,7 +11,6 @@ import shlex
 import sqlite3
 import subprocess
 import time
-import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
