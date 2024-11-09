@@ -388,9 +388,9 @@ def _peek_head_lines(log_file: TextIO) -> List[str]:
     lines = [
         log_file.readline() for _ in range(PEEK_HEAD_LINES_FOR_START_STREAM)
     ]
-    # eset the file pointer to the beginning
+    # Reset the file pointer to the beginning
     log_file.seek(0, os.SEEK_SET)
-    return [line for line in lines if line != '' and line is not None]
+    return [line for line in lines if line]
 
 
 def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
