@@ -3275,14 +3275,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         encoded_script = shlex.quote(codegen)
         create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
-            f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-            f'{cd} && {constants.SKY_RAY_CMD} job submit '
-            '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
-            f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path} '
             # Do not use &>, which is not POSIX and may not work.
             # Note that the order of ">filename 2>&1" matters.
-            f'> {remote_log_path} 2>&1"')
+            f'> {remote_log_path} 2>&1')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
