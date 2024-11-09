@@ -276,23 +276,11 @@ def get_mounting_command(
     script = get_mounting_script(mount_path, mount_cmd, install_cmd,
                                  version_check_cmd)
 
-    # TODO(romilb): Get direct bash script to work like so:
-    # command = f'bash <<-\EOL' \
-    #           f'{script}' \
-    #           'EOL'
-
-    # TODO(romilb): This heredoc should have EOF after script, but it
-    #  fails with sky's ssh pipeline. Instead, we don't use EOF and use )
-    #  as the end of heredoc. This raises a warning (here-document delimited
-    #  by end-of-file) that can be safely ignored.
-
     # While these commands are run sequentially for each storage object,
     # we add random int to be on the safer side and avoid collisions.
     script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
-    first_line = r'(cat <<-\EOF > {}'.format(script_path)
-    command = (f'{first_line}'
-               f'{script}'
-               f') && chmod +x {script_path}'
-               f' && bash {script_path}'
-               f' && rm {script_path}')
+    command = (f'echo {shlex.quote(script)} > {script_path} && '
+               f'chmod +x {script_path} && '
+               f'bash {script_path} && '
+               f'rm {script_path}')
     return command
