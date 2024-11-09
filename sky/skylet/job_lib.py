@@ -11,8 +11,7 @@ import shlex
 import sqlite3
 import subprocess
 import time
-import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import colorama
 import filelock
@@ -23,9 +22,6 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
-
-if typing.TYPE_CHECKING:
-    from ray.dashboard.modules.job import pydantic_models as ray_pydantic
 
 logger = sky_logging.init_logger(__name__)
 
