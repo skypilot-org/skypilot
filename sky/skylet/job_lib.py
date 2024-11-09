@@ -557,8 +557,8 @@ def update_job_status(job_ids: List[int],
                     # was killed before the job is submitted. We should set it
                     # to FAILED then. Note, if ray job indicates the job is
                     # running, we will change status to PENDING below.
-                    echo(f'INIT job {job_id} is stale, setting to FAILED')
-                    status = JobStatus.FAILED
+                    echo(f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
+                    status = JobStatus.FAILED_DRIVER
 
             try:
                 if job_pid is not None:
@@ -570,18 +570,13 @@ def update_job_status(job_ids: List[int],
                         # unless the job driver process set the actual status,
                         # or a user can cancel the job.
                         status = JobStatus.FAILED_DRIVER
-                # Querying status within the lock is safer than querying
-                # outside, as it avoids the race condition when job table is
-                # updated after the ray job status query.
-                # Also, getting per-job status is faster than querying all jobs,
-                # when there are significant number of finished jobs.
-                # Reference: getting 124 finished jobs takes 0.038s, while
-                # querying a single job takes 0.006s, 10 jobs takes 0.066s.
-                # TODO: if too slow, directly query against redis.
             except psutil.NoSuchProcess:
                 # The job driver process is not found, which means the job has
                 # finished.
                 status = JobStatus.FAILED_DRIVER
+            # Although we set the status to FAILED_DRIVER, we can still revert
+            # it to PENDING in the following code, if the job is in PENDING
+            # state.
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
@@ -591,7 +586,7 @@ def update_job_status(job_ids: List[int],
                          f'boot_time={psutil.boot_time()}')
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
-                    status = JobStatus.FAILED
+                    status = JobStatus.FAILED_DRIVER
                 # Gives a 60 second grace period between job being submit from
                 # the pending table until appearing in ray jobs. For jobs
                 # submitted outside of the grace period, we will consider the
@@ -611,10 +606,10 @@ def update_job_status(job_ids: List[int],
                     echo(f'Ray job status for job {job_id} is None, '
                          'setting it to FAILED.')
                     # The job may be stale, when the instance is restarted
-                    # (the ray redis is volatile). We need to reset the
-                    # status of the task to FAILED if its original status
-                    # is RUNNING or PENDING.
-                    status = JobStatus.FAILED
+                    # (the process pid is volatile). We need to reset the
+                    # status of the task to FAILED_DRIVER if its original
+                    # status is RUNNING or PENDING.
+                    status = JobStatus.FAILED_DRIVER
                     _set_status_no_lock(job_id, status)
                     echo(f'Updated job {job_id} status to {status}')
             else:
