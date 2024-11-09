@@ -802,7 +802,9 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                     logger.warning(str(e))
                     continue
 
-            if job['status'] in [
+            # Get the job status again to avoid race condition.
+            job_status = get_status_no_lock(job['job_id'])
+            if job_status in [
                     JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
             ]:
                 _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
