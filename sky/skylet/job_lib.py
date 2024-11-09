@@ -183,11 +183,15 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        subprocess.Popen(run_cmd,
-                         shell=True,
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        proc = subprocess.Popen(run_cmd,
+                                shell=True,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        _CURSOR.execute((f'UPDATE jobs SET pid={proc.pid} '
+                         f'WHERE job_id={job_id!r}'))
+        _CONN.commit()
+
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
         if force_update_jobs:
@@ -329,9 +333,9 @@ def set_job_started(job_id: int) -> None:
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
         _CURSOR.execute(
-            'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL, pid=(?) '
+            'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
             'WHERE job_id=(?)',
-            (JobStatus.RUNNING.value, time.time(), os.getpid(), job_id))
+            (JobStatus.RUNNING.value, time.time(), job_id))
         _CONN.commit()
 
 
