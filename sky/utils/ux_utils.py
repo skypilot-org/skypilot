@@ -165,6 +165,17 @@ class RedirectOutputForThread:
         def __getattr__(self, name: str) -> Any:
             return getattr(self.resolve_output(), name)
 
+        # These methods must be explicitly defined because logging module calls
+        # them directly without triggering __getattr__. If not defined here,
+        # logging will fallback to original stdout/stderr, which breaks the
+        # redirection. This is likely due to logging's internal implementation
+        # that verifies stream capabilities before using them.
+        def flush(self) -> None:
+            return self.resolve_output().flush()
+
+        def write(self, s: str) -> int:
+            return self.resolve_output().write(s)
+
         def set_from(self, output: TextIO) -> None:
             self._thread_local.output = output
 
