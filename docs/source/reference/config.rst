@@ -244,9 +244,9 @@ Available fields and semantics:
     # instances. SkyPilot will auto-create and reuse a service account (IAM
     # role) for AWS instances.
     #
-    # SKIP: Skip setting the remote identity. No credentials will be uploaded to
-    # the instances. Useful for avoiding overriding any existing credentials
-    # that may be automounted on the cluster.
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
     #
     # Customized service account (IAM role): <string> or <list of single-element dict>
     # - <string>: apply the service account with the specified name to all instances.
@@ -410,9 +410,9 @@ Available fields and semantics:
     # instances. SkyPilot will auto-create and reuse a service account for GCP
     # instances.
     #
-    # SKIP: Skip setting the remote identity. No credentials will be uploaded to
-    # the instances. Useful for avoiding overriding any existing credentials
-    # that may be automounted on the cluster.
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
     #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
@@ -499,9 +499,9 @@ Available fields and semantics:
     # SkyPilot will auto-create and reuse a service account with necessary roles
     # in the user's namespace.
     #
-    # SKIP: Skip setting the remote identity. No credentials will be uploaded to
-    # the pods. Useful for avoiding overriding any existing credentials that may
-    # be automounted on the cluster.
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
     #
     # <string>: The name of a service account to use for all Kubernetes pods.
     # This service account must exist in the user's namespace and have all
