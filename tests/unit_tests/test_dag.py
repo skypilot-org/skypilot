@@ -50,6 +50,7 @@ def merging_dag():
         dag.add_edge(dag.tasks[1], dag.tasks[2])
         yield dag
 
+
 @pytest.fixture
 def multi_parent_dag():
     """Fixture for a DAG with two tasks merging into one task."""
@@ -82,6 +83,7 @@ def cyclic_dag():
         dag.add_edge(task2, task1)  # Create cycle
         yield dag
 
+
 @pytest.mark.parametrize('dag_fixture,description', [
     ('empty_dag', 'Empty DAG'),
     ('single_task_dag', 'Single task DAG'),
@@ -106,12 +108,14 @@ def test_is_chain_false_cases(request, dag_fixture, description):
 
 @pytest.mark.parametrize('dag_fixture,description,expected_old,expected_new', [
     ('linear_three_task_dag', 'Linear chain of three tasks', True, True),
-    ('multi_parent_dag', 'DAG with two tasks merging into one task', True, False),
+    ('multi_parent_dag', 'DAG with two tasks merging into one task', True,
+     False),
 ])
-def test_is_chain_regression(request, dag_fixture, description, expected_old, expected_new):
+def test_is_chain_regression(request, dag_fixture, description, expected_old,
+                             expected_new):
     """Regression test comparing new implementation with old behavior."""
     dag = request.getfixturevalue(dag_fixture)
-    
+
     def old_is_chain(dag):
         # Old implementation
         is_chain = True
@@ -131,6 +135,7 @@ def test_is_chain_regression(request, dag_fixture, description, expected_old, ex
 
     assert dag.is_chain() == expected_new, f"Failed for case: {description}"
     assert old_is_chain(dag) == expected_old, f"Failed for case: {description}"
+
 
 # TODO(andy): Currently cyclic DAGs are not detected and is_chain() simply
 # returns False. Once we implement cycle detection that raises an error,
