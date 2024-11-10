@@ -249,16 +249,17 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 job_lib.cancel_job_no_lock(job_id)
                 controller_process_status = job_lib.get_status_no_lock(job_id)
                 if controller_process_status == job_lib.JobStatus.CANCELLED:
-                    managed_job_state.set_cancelling(
-                        job_id,
-                        callback_func=event_callback_func(job_id,
-                                                          task_id=0,
-                                                          task=None))
-                    managed_job_state.set_cancelled(
-                        job_id,
-                        callback_func=event_callback_func(job_id,
-                                                          task_id=0,
-                                                          task=None))
+                    with sky_logging.silent():
+                        managed_job_state.set_cancelling(
+                            job_id,
+                            callback_func=event_callback_func(job_id,
+                                                            task_id=0,
+                                                            task=None))
+                        managed_job_state.set_cancelled(
+                            job_id,
+                            callback_func=event_callback_func(job_id,
+                                                            task_id=0,
+                                                            task=None))
                     cancelled_job_ids.append(job_id)
                     continue
 
