@@ -832,7 +832,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # TODO(zhwu): Backward compatibility, remove after 0.9.0.
                 # The job was submitted with ray job submit before #4318.
                 job_client = _create_ray_job_submission_client()
-                job_client.stop_job(job_id)
+                job_client.stop_job(make_ray_job_id(job['job_id']))
 
             # Get the job status again to avoid race condition.
             job_status = get_status_no_lock(job['job_id'])
