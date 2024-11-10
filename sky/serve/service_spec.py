@@ -273,7 +273,8 @@ class SkyServiceSpec:
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
-            Spot Policy:                      {self.spot_policy_str()}{lb_policy_str}
+            Spot Policy:                      {self.spot_policy_str()}
+            Load Balancing Policy:            {self.load_balancing_policy}
         """)
 
     @property
