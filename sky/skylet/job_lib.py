@@ -789,7 +789,11 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
-                os.killpg(job['pid'], signal.SIGTERM)
+                try:
+                    os.killpg(job['pid'], signal.SIGTERM)
+                except ProcessLookupError:
+                    # The process may have already finished.
+                    pass
 
             if job['status'] in [
                     JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
