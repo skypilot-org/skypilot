@@ -174,7 +174,7 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
-def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+def event_callback_func(job_id: int, task_id: int, task: Optional['sky.Task']):
     """Run event callback for the task."""
 
     def callback_func(status: str):
@@ -247,7 +247,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 if job_lib.cancel_job_no_lock(job_id):
                     managed_job_state.set_cancelled(
                         job_id,
-                        callback_func=event_callback_func(job_id, None, None))
+                        callback_func=event_callback_func(job_id,
+                                                          task_id=0,
+                                                          task=None))
                     cancelled_job_ids.append(job_id)
                     continue
 
