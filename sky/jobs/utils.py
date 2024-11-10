@@ -245,7 +245,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             controller_process = job_lib.get_status_no_lock(job_id)
             if controller_process == job_lib.JobStatus.PENDING:
                 if job_lib.cancel_job_no_lock(job_id):
-                    managed_job_state.set_cancelled(job_id)
+                    managed_job_state.set_cancelled(
+                        job_id,
+                        callback_func=event_callback_func(job_id, None, None))
                     cancelled_job_ids.append(job_id)
                     continue
 
