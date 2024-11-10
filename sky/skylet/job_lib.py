@@ -276,9 +276,6 @@ _JOB_STATUS_TO_COLOR = {
 }
 
 
-def make_ray_job_id(sky_job_id: int) -> str:
-    return f'{sky_job_id}-{getpass.getuser()}'
-
 
 def make_job_command_with_user_switching(username: str,
                                          command: str) -> List[str]:
@@ -781,6 +778,9 @@ def _create_ray_job_submission_client():
     return job_submission.JobSubmissionClient(
         address=f'http://127.0.0.1:{port}')
 
+def _make_ray_job_id(sky_job_id: int) -> str:
+    return f'{sky_job_id}-{getpass.getuser()}'
+
 
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                                 cancel_all: bool = False) -> str:
@@ -832,7 +832,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # TODO(zhwu): Backward compatibility, remove after 0.9.0.
                 # The job was submitted with ray job submit before #4318.
                 job_client = _create_ray_job_submission_client()
-                job_client.stop_job(make_ray_job_id(job['job_id']))
+                job_client.stop_job(_make_ray_job_id(job['job_id']))
 
             # Get the job status again to avoid race condition.
             job_status = get_status_no_lock(job['job_id'])
