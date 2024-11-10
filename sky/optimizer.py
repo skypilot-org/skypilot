@@ -167,8 +167,8 @@ class Optimizer:
         with dag:
             for src, dummy, dst in edges_to_add:
                 dag.remove_edge(src, dst)
-                src >> dummy
-                dummy >> dst
+                src >> dummy  # pylint: disable=pointless-statement
+                dummy >> dst  # pylint: disable=pointless-statement
                 logger.info(
                     f'Adding dummy node between {src.name} and {dst.name}')
 
