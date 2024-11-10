@@ -11,6 +11,7 @@ import shlex
 import signal
 import sqlite3
 import subprocess
+import textwrap
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,7 +24,6 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
-from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -95,7 +95,12 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
-    db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid', 'INTEGER DEFAULT 0', value_to_replace_existing_entries=-1)
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'jobs',
+                                 'pid',
+                                 'INTEGER DEFAULT 0',
+                                 value_to_replace_existing_entries=-1)
     conn.commit()
 
 
@@ -254,7 +259,6 @@ _JOB_STATUS_TO_COLOR = {
     JobStatus.FAILED_SETUP: colorama.Fore.RED,
     JobStatus.CANCELLED: colorama.Fore.YELLOW,
 }
-
 
 
 def make_ray_job_id(sky_job_id: int) -> str:
@@ -738,6 +742,25 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+def _create_ray_job_submission_client():
+    """Import the ray job submission client."""
+    try:
+        import ray  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        logger.error('Failed to import ray')
+        raise
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ray import job_submission
+    except ImportError:
+        logger.error(
+            f'Failed to import job_submission with ray=={ray.__version__}')
+        raise
+    port = get_job_submission_port()
+    return job_submission.JobSubmissionClient(
+        address=f'http://127.0.0.1:{port}')
+
+
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                                 cancel_all: bool = False) -> str:
     """Cancel jobs.
@@ -775,7 +798,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         # it is being cancelled
         with filelock.FileLock(_get_lock_path(job_id)):
             job = _get_jobs_by_ids([job_id])[0]
-            if job['pid'] is not None:
+            if job['pid'] > 0:
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
@@ -784,6 +807,11 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 except ProcessLookupError:
                     # The process may have already finished.
                     pass
+            elif job['pid'] < 0:
+                # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                # The job was submitted with ray job submit before #4318.
+                job_client = _create_ray_job_submission_client()
+                job_client.stop_job(job_id)
 
             if job['status'] in [
                     JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
@@ -855,9 +883,19 @@ class JobLibCodeGen:
 
     @classmethod
     def queue_job(cls, job_id: int, cmd: str) -> str:
-        code = ['job_lib.scheduler.queue('
+        code = [
+            # We disallow job submission when SKYLET_VERSION is older than 9, as
+            # it was using ray job submit before #4318, and switched to raw
+            # process. Using the old skylet version will cause the job status
+            # to be stuck in PENDING state or transition to FAILED_DRIVER state.
+            textwrap.dedent(f"""\
+            \nif constants.SKYLET_VERSION < 9:
+                raise RuntimeError("SkyPilot runtime is too old, which does not
+                support submitting jobs.")
+            job_lib.scheduler.queue('
                 f'{job_id!r},'
-                f'{cmd!r})']
+                f'{cmd!r})"""),
+        ]
         return cls._build(code)
 
     @classmethod

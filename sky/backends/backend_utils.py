@@ -2612,6 +2612,14 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n')
+        if 'SkyPilot runtime is too old' in stderr:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot runtime is too old on '
+                    f'remote cluster {cluster_name}, which does not support '
+                    'submitting new jobs. To update, run (existing jobs are '
+                    f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
+                    f'{cluster_name}{colorama.Style.RESET_ALL}') from None
 
 
 def get_endpoints(cluster: str,
