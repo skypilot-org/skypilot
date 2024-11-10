@@ -379,9 +379,6 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
-    with open('@temp/skus.json', 'w') as f:
-        import json
-        json.dump(skus, f, indent=2)
     # TODO(woosuk): Make this more efficient.
     def get_vm_price(row: pd.Series, spot: bool) -> Optional[float]:
         series = row['InstanceType'].split('-')[0].lower()
