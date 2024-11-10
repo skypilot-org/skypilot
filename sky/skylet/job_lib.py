@@ -84,7 +84,7 @@ def create_table(cursor, conn):
         start_at FLOAT DEFAULT -1,
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
-        pid INTEGER DEFAULT NULL)""")
+        pid INTEGER DEFAULT 0)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -95,7 +95,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
-    db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid', 'INTEGER')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid', 'INTEGER DEFAULT 0', value_to_replace_existing_entries=-1)
     conn.commit()
 
 
@@ -255,24 +255,6 @@ _JOB_STATUS_TO_COLOR = {
     JobStatus.CANCELLED: colorama.Fore.YELLOW,
 }
 
-
-def _create_ray_job_submission_client():
-    """Import the ray job submission client."""
-    try:
-        import ray  # pylint: disable=import-outside-toplevel
-    except ImportError:
-        logger.error('Failed to import ray')
-        raise
-    try:
-        # pylint: disable=import-outside-toplevel
-        from ray import job_submission
-    except ImportError:
-        logger.error(
-            f'Failed to import job_submission with ray=={ray.__version__}')
-        raise
-    port = get_job_submission_port()
-    return job_submission.JobSubmissionClient(
-        address=f'http://127.0.0.1:{port}')
 
 
 def make_ray_job_id(sky_job_id: int) -> str:
@@ -570,7 +552,11 @@ def update_job_status(job_ids: List[int],
                     status = JobStatus.FAILED_DRIVER
 
             try:
-                if job_pid is not None:
+                # job_pid is 0 if the job is not submitted yet.
+                # job_pid is -1 if the job is submitted with SkyPilot older than
+                # #4318, using ray job submit. We skip the checking for those
+                # jobs.
+                if job_pid > 0:
                     job_driver_process = psutil.Process(job_pid)
                     # We check the cmdline to avoid the case where the same
                     # pid is reused by a different process.
@@ -583,6 +569,12 @@ def update_job_status(job_ids: List[int],
                         # unless the job driver process set the actual status,
                         # or a user can cancel the job.
                         status = JobStatus.FAILED_DRIVER
+                elif job_pid < 0:
+                    # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                    # We set the job status to PENDING instead of actually
+                    # checking ray job status and let the status in job table
+                    # take effect in the later max.
+                    status = JobStatus.PENDING
             except psutil.NoSuchProcess:
                 # The job driver process is not found, which means the job has
                 # finished.
@@ -773,8 +765,6 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
             # Cancel jobs with specified IDs.
             job_records = _get_jobs_by_ids(jobs)
 
-    # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
-    # when the memory is not enough, this will keep waiting.
     cancelled_ids = []
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
