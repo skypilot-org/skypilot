@@ -199,8 +199,14 @@ class JobScheduler:
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 start_new_session=True)
-        _CURSOR.execute((f'UPDATE jobs SET pid={proc.pid} '
-                         f'WHERE job_id={job_id!r}'))
+        # TODO(zhwu): Backward compatibility, remove this check after 0.9.0.
+        # This is for the case where the job is submitted with SkyPilot older
+        # than #4318, using ray job submit.
+        pid = proc.pid
+        if 'job submit' in run_cmd:
+            pid = -1
+        _CURSOR.execute((f'UPDATE jobs SET pid={pid} '
+                        f'WHERE job_id={job_id!r}'))
         _CONN.commit()
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
