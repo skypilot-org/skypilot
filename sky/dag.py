@@ -59,6 +59,7 @@ class TaskEdge:
         self.data = TaskData(source_path=source_path,
                              target_path=target_path,
                              size_gb=size_gb)
+        self.source.set_outputs(source_path, estimated_size_gigabytes=size_gb)
         return self
 
 
