@@ -465,6 +465,9 @@ def test_aws_with_ssh_proxy_command():
                 f'sky logs {name} 1 --status',
                 f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
                 f'sky logs {name} 2 --status',
+                # Wait other tests to create the job controller first, so that
+                # the job controller is not launched with proxy command.
+                'timeout 300s bash -c "until sky status sky-jobs-controller* | grep UP; do sleep 1; done"',
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
                 'sleep 300',
                 f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
