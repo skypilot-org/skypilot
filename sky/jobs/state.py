@@ -66,8 +66,7 @@ def create_table(cursor, conn):
         spot_job_id INTEGER,
         task_id INTEGER DEFAULT 0,
         task_name TEXT,
-        specs TEXT,
-                   pid)""")
+        specs TEXT)""")
     conn.commit()
 
     db_utils.add_column_to_table(cursor, conn, 'spot', 'failure_reason', 'TEXT')
