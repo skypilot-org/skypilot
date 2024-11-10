@@ -131,7 +131,6 @@ class Optimizer:
             Optimizer._add_dummy_source_sink_nodes(dag)
             Optimizer._add_dummy_storage_nodes(dag)
             logger.info('Add dummy nodes for storage')
-            dag.plot('dag_with_dummy_nodes.png')
 
             try:
                 unused_best_plan = Optimizer._optimize_dag(
@@ -1153,7 +1152,6 @@ class Optimizer:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
                                            node_to_cost_map, minimize_cost)
-            dag.plot('optimized_dag.png')
             Optimizer._print_candidates(local_node_to_candidate_map)
         return best_plan
 
