@@ -144,32 +144,34 @@ class Optimizer:
                 # optimization fails.
                 Optimizer._remove_dummy_source_sink_nodes(dag)
             return dag
-        
+
     @staticmethod
     def _add_dummy_storage_nodes(dag: 'dag_lib.Dag'):
-        """Adds special nodes for storage buckets. Specifically, it adds dummy nodes
-        between nodes that are connected by with_data edges."""
+        """Adds special nodes for storage buckets. Specifically, it adds dummy
+        nodes between nodes that are connected by with_data edges."""
         graph = dag.get_graph()
         edges_to_add = []
 
+        # todo(wenjie): this is a hacky way to use the compute resources to
+        # represent the storage resources. We should have a separate class for
+        # storage resources. Also, we should add the logic of selecting 
+        # available bucket resources before optimizing the DAG.
         for src, dst, edge_data in graph.edges(data=True):
-            # Check if src and dst are Task objects and if edge needs a dummy node
-            # assert isinstance(edge, TaskEdge)
-            # logger.info(f'Checking edge {src.name} -> {dst.name} with data {edge_data}')
-            if isinstance(src, task_lib.Task) and isinstance(dst, task_lib.Task) and edge_data['edge'].data:
+            if isinstance(src, task_lib.Task) and isinstance(
+                    dst, task_lib.Task) and edge_data['edge'].data:
                 dummy = task_lib.Task(f'{src.name}_to_{dst.name}_storage')
-                dummy.set_outputs(src.get_outputs(), src.get_estimated_outputs_size_gigabytes())
+                data = edge_data['edge'].data
+                dummy.set_outputs(data.source_path, data.size_gb)
                 dummy.set_resources({resources_lib.Resources()})
                 dummy.set_time_estimator(lambda _: 0)
-                
-                # Instead of modifying the dag, add the edge modifications to the list
                 edges_to_add.append((src, dummy, dst))
         with dag:
             for src, dummy, dst in edges_to_add:
                 dag.remove_edge(src, dst)
                 src >> dummy
                 dummy >> dst
-                logger.info(f'Adding dummy node between {src.name} and {dst.name}')
+                logger.info(
+                    f'Adding dummy node between {src.name} and {dst.name}')
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
@@ -715,7 +717,9 @@ class Optimizer:
         for parent, child in graph.edges():
             src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
                 parent, plan[parent], child, plan[child])
-            logger.info(f'{parent.name} -> {child.name} {src_cloud} -> {dst_cloud} {nbytes}')
+            logger.info(
+                f'{parent.name} -> {child.name} {src_cloud} -> {dst_cloud} {nbytes}'
+            )
             if not nbytes:
                 # nbytes can be None, if the task has no inputs/outputs.
                 continue
