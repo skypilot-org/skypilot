@@ -154,7 +154,7 @@ class Optimizer:
 
         # todo(wenjie): this is a hacky way to use the compute resources to
         # represent the storage resources. We should have a separate class for
-        # storage resources. Also, we should add the logic of selecting 
+        # storage resources. Also, we should add the logic of selecting
         # available bucket resources before optimizing the DAG.
         for src, dst, edge_data in graph.edges(data=True):
             if isinstance(src, task_lib.Task) and isinstance(
@@ -717,9 +717,6 @@ class Optimizer:
         for parent, child in graph.edges():
             src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
                 parent, plan[parent], child, plan[child])
-            logger.info(
-                f'{parent.name} -> {child.name} {src_cloud} -> {dst_cloud} {nbytes}'
-            )
             if not nbytes:
                 # nbytes can be None, if the task has no inputs/outputs.
                 continue
