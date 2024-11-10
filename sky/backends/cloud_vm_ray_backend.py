@@ -3343,10 +3343,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True)
 
-        # Happens when someone calls `sky exec` but remote is outdated
-        # necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout,
-                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3416,6 +3412,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True,
                                                           separate_stderr=True)
+        # Happens when someone calls `sky exec` but remote is outdated
+        # necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         subprocess_utils.handle_returncode(returncode, code,

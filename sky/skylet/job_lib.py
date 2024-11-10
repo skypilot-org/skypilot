@@ -872,10 +872,17 @@ class JobLibCodeGen:
         if job_name is None:
             job_name = '-'
         code = [
-            'job_id = job_lib.add_job('
-            f'{job_name!r}, '
-            f'{username!r}, '
-            f'{run_timestamp!r}, '
+            # We disallow job submission when SKYLET_VERSION is older than 9, as
+            # it was using ray job submit before #4318, and switched to raw
+            # process. Using the old skylet version will cause the job status
+            # to be stuck in PENDING state or transition to FAILED_DRIVER state.
+            '\nif int(constants.SKYLET_VERSION) < 9: '
+            'raise RuntimeError("SkyPilot runtime is too old, which does not'
+            'support submitting jobs.")',
+            '\njob_id = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
             f'{resources_str!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
@@ -884,17 +891,9 @@ class JobLibCodeGen:
     @classmethod
     def queue_job(cls, job_id: int, cmd: str) -> str:
         code = [
-            # We disallow job submission when SKYLET_VERSION is older than 9, as
-            # it was using ray job submit before #4318, and switched to raw
-            # process. Using the old skylet version will cause the job status
-            # to be stuck in PENDING state or transition to FAILED_DRIVER state.
-            textwrap.dedent(f"""\
-            \nif constants.SKYLET_VERSION < 9:
-                raise RuntimeError("SkyPilot runtime is too old, which does not
-                support submitting jobs.")
-            job_lib.scheduler.queue('
-                f'{job_id!r},'
-                f'{cmd!r})"""),
+            'job_lib.scheduler.queue('
+            f'{job_id!r},'
+            f'{cmd!r})',
         ]
         return cls._build(code)
 
