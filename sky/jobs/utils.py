@@ -242,10 +242,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         # Check the status of the controller process. If it is not running,
         # we can cancel the controller process directly.
         with filelock.FileLock(job_lib.get_lock_path(job_id)):
-            controller_process = job_lib.get_status_no_lock(job_id)
-            if controller_process in [job_lib.JobStatus.PENDING,
+            controller_process_status = job_lib.get_status_no_lock(job_id)
+            if controller_process_status in [job_lib.JobStatus.PENDING,
                                      job_lib.JobStatus.CANCELLED]:
-                if job_lib.cancel_job_no_lock(job_id):
+                job_lib.cancel_job_no_lock(job_id)
+                controller_process_status = job_lib.get_status_no_lock(job_id)
+                if controller_process_status == job_lib.JobStatus.CANCELLED:
                     managed_job_state.set_cancelling(
                         job_id,
                         callback_func=event_callback_func(job_id,
