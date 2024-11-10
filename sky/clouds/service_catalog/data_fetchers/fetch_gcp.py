@@ -379,8 +379,11 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
+    with open('@temp/skus.json', 'w') as f:
+        import json
+        json.dump(skus, f, indent=2)
     # TODO(woosuk): Make this more efficient.
-    def get_vm_price(row: pd.Series, spot: bool) -> float:
+    def get_vm_price(row: pd.Series, spot: bool) -> Optional[float]:
         series = row['InstanceType'].split('-')[0].lower()
 
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
@@ -431,12 +434,16 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         if series in ['f1', 'g1']:
             memory_price = 0.0
 
-        assert cpu_price is not None, row
-        assert memory_price is not None, row
+        # TODO(tian): (2024/11/10) Some SKUs are missing in the SKUs API. We
+        # skip them in the catalog for now. We should investigate why they are
+        # missing and add them back.
+        if cpu_price is None or memory_price is None:
+            return None
         return cpu_price + memory_price
 
     df['Price'] = df.apply(lambda row: get_vm_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_vm_price(row, spot=True), axis=1)
+    df = df.dropna(subset=['Price', 'SpotPrice'])
     df = df.reset_index(drop=True)
     df = df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'])
     return df
