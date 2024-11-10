@@ -34,7 +34,7 @@ _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 JOB_CMD_IDENTIFIER = 'echo "SKYPILOT_JOB_ID <{}>"'
 
 
-def _get_lock_path(job_id: int) -> str:
+def get_lock_path(job_id: int) -> str:
     lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     return lock_path
@@ -212,7 +212,7 @@ class JobScheduler:
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
         for job_id in pending_job_ids:
-            with filelock.FileLock(_get_lock_path(job_id)):
+            with filelock.FileLock(get_lock_path(job_id)):
                 pending_job = _get_pending_job(job_id)
                 if pending_job is None:
                     # Pending job can be removed by another thread, due to the
@@ -322,14 +322,14 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
 def set_status(job_id: int, status: JobStatus) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_get_lock_path(job_id)):
+    with filelock.FileLock(get_lock_path(job_id)):
         _set_status_no_lock(job_id, status)
 
 
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_get_lock_path(job_id)):
+    with filelock.FileLock(get_lock_path(job_id)):
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
             'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
@@ -356,7 +356,7 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
 def get_status(job_id: int) -> Optional[JobStatus]:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_get_lock_path(job_id)):
+    with filelock.FileLock(get_lock_path(job_id)):
         return get_status_no_lock(job_id)
 
 
@@ -542,7 +542,7 @@ def update_job_status(job_ids: List[int],
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
-        with filelock.FileLock(_get_lock_path(job_id)):
+        with filelock.FileLock(get_lock_path(job_id)):
             status = None
             job_record = _get_jobs_by_ids([job_id])[0]
             original_status = job_record['status']
@@ -778,6 +778,38 @@ def _make_ray_job_id(sky_job_id: int) -> str:
     return f'{sky_job_id}-{getpass.getuser()}'
 
 
+def cancel_job_no_lock(job_id: int) -> bool:
+    """Cancel a single job without lock.
+
+    Returns:
+        True if the job is cancelled, False otherwise.
+    """
+    job = _get_jobs_by_ids([job_id])[0]
+    if job['pid'] > 0:
+        # Not use process.terminate() as that will only terminate the
+        # process shell process, not the ray driver process
+        # under the shell.
+        try:
+            os.killpg(job['pid'], signal.SIGTERM)
+        except ProcessLookupError:
+            # The process may have already finished.
+            pass
+    elif job['pid'] < 0:
+        # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+        # The job was submitted with ray job submit before #4318.
+        job_client = _create_ray_job_submission_client()
+        job_client.stop_job(_make_ray_job_id(job['job_id']))
+
+    # Get the job status again to avoid race condition.
+    job_status = get_status_no_lock(job['job_id'])
+    if job_status in [
+            JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
+    ]:
+        _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
+        return True
+    return False
+
+
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                                 cancel_all: bool = False) -> str:
     """Cancel jobs.
@@ -813,30 +845,9 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         job_id = job_record['job_id']
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
-        with filelock.FileLock(_get_lock_path(job_id)):
-            job = _get_jobs_by_ids([job_id])[0]
-            if job['pid'] > 0:
-                # Not use process.terminate() as that will only terminate the
-                # process shell process, not the ray driver process
-                # under the shell.
-                try:
-                    os.killpg(job['pid'], signal.SIGTERM)
-                except ProcessLookupError:
-                    # The process may have already finished.
-                    pass
-            elif job['pid'] < 0:
-                # TODO(zhwu): Backward compatibility, remove after 0.9.0.
-                # The job was submitted with ray job submit before #4318.
-                job_client = _create_ray_job_submission_client()
-                job_client.stop_job(_make_ray_job_id(job['job_id']))
-
-            # Get the job status again to avoid race condition.
-            job_status = get_status_no_lock(job['job_id'])
-            if job_status in [
-                    JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
-            ]:
-                _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
-                cancelled_ids.append(job['job_id'])
+        with filelock.FileLock(get_lock_path(job_id)):
+            if cancel_job_no_lock(job_id):
+                cancelled_ids.append(job_id)
 
         scheduler.schedule_step()
     return common_utils.encode_payload(cancelled_ids)

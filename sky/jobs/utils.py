@@ -239,6 +239,16 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     logger.info(f'Cancelling jobs {job_id_str}.')
     cancelled_job_ids = []
     for job_id in job_ids:
+        # Check the status of the controller process. If it is not running,
+        # we can cancel the controller process directly.
+        with filelock.FileLock(job_lib.get_lock_path(job_id)):
+            controller_process = job_lib.get_status_no_lock(job_id)
+            if controller_process == job_lib.JobStatus.PENDING:
+                if job_lib.cancel_job_no_lock(job_id):
+                    managed_job_state.set_cancelled(job_id)
+                    cancelled_job_ids.append(job_id)
+                    continue
+
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
         job_status = managed_job_state.get_status(job_id)
