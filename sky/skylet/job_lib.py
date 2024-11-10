@@ -100,8 +100,7 @@ def create_table(cursor, conn):
                                  conn,
                                  'jobs',
                                  'pid',
-                                 'INTEGER DEFAULT 0',
-                                 value_to_replace_existing_entries=-1)
+                                 'INTEGER DEFAULT -1')
     conn.commit()
 
 
@@ -292,7 +291,7 @@ def add_job(job_name: str, username: str, run_timestamp: str,
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _CURSOR.execute(
-        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, null)',
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
         (job_name, username, job_submitted_at, JobStatus.INIT.value,
          run_timestamp, None, resources_str))
     _CONN.commit()
