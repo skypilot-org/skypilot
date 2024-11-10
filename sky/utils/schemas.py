@@ -6,7 +6,6 @@ https://json-schema.org/
 import enum
 from typing import Any, Dict, List, Tuple
 
-from sky.serve import load_balancing_policies
 from sky.skylet import constants
 
 
@@ -309,6 +308,9 @@ def get_storage_schema():
 
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import load_balancing_policies
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
