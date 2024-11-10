@@ -2022,6 +2022,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2035,6 +2041,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -2101,7 +2108,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    core.tail_logs(cluster, job_id, follow, tail)
 
 
 @cli.command()
