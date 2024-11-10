@@ -11,7 +11,6 @@ import shlex
 import signal
 import sqlite3
 import subprocess
-import textwrap
 import time
 from typing import Any, Dict, List, Optional
 
@@ -96,10 +95,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
-    db_utils.add_column_to_table(cursor,
-                                 conn,
-                                 'jobs',
-                                 'pid',
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
                                  'INTEGER DEFAULT -1')
     conn.commit()
 
@@ -205,7 +201,7 @@ class JobScheduler:
         if 'job submit' in run_cmd:
             pid = -1
         _CURSOR.execute((f'UPDATE jobs SET pid={pid} '
-                        f'WHERE job_id={job_id!r}'))
+                         f'WHERE job_id={job_id!r}'))
         _CONN.commit()
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
@@ -274,7 +270,6 @@ _JOB_STATUS_TO_COLOR = {
     JobStatus.FAILED_SETUP: colorama.Fore.RED,
     JobStatus.CANCELLED: colorama.Fore.YELLOW,
 }
-
 
 
 def make_job_command_with_user_switching(username: str,
@@ -777,6 +772,7 @@ def _create_ray_job_submission_client():
     port = get_job_submission_port()
     return job_submission.JobSubmissionClient(
         address=f'http://127.0.0.1:{port}')
+
 
 def _make_ray_job_id(sky_job_id: int) -> str:
     return f'{sky_job_id}-{getpass.getuser()}'
