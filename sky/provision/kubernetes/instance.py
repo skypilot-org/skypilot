@@ -364,6 +364,32 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
           setup fails.
     """
 
+    check_k8s_user_sudo_cmd = (
+        'if [ $(id -u) -eq 0 ]; then'
+        # If user is root, create an alias for sudo used in skypilot setup
+        '  echo \'alias sudo=""\' >> ~/.bashrc; echo succeed;'
+        'else '
+        '  if command -v sudo >/dev/null 2>&1; then '
+        '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
+        '  else '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
+        '  fi; '
+        'fi;')
+
+    # Kubernetes automatically populates containers with critical
+    # environment variables, such as those for discovering services running
+    # in the cluster and CUDA/nvidia environment variables. We need to
+    # make sure these env vars are available in every task and ssh session.
+    # This is needed for GPU support and service discovery.
+    # See https://github.com/skypilot-org/skypilot/issues/2287 for more details.
+    # To do so, we capture env vars from the pod's runtime and write them to
+    # /etc/profile.d/, making them available for all users in future
+    # shell sessions.
+    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
+
     check_apt_update_complete_cmd = (
         'echo "Checking if apt update from container init is complete..."; '
         'timeout_secs=600; '
@@ -380,21 +406,6 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         '  sleep 5; '
         'done; '
         'echo "apt update complete."; ')
-
-    check_k8s_user_sudo_cmd = (
-        'if [ $(id -u) -eq 0 ]; then'
-        # If user is root, create an alias for sudo used in skypilot setup
-        '  echo \'alias sudo=""\' >> ~/.bashrc; echo succeed;'
-        'else '
-        '  if command -v sudo >/dev/null 2>&1; then '
-        '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
-        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
-        '  else '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
-        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
-        '  fi; '
-        'fi;')
 
     install_ssh_k8s_cmd = (
         'prefix_cmd() '
@@ -440,17 +451,6 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         # `mesg: ttyname failed: inappropriate ioctl for device`.
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
-
-    # Kubernetes automatically populates containers with critical
-    # environment variables, such as those for discovering services running
-    # in the cluster and CUDA/nvidia environment variables. We need to
-    # make sure these env vars are available in every task and ssh session.
-    # This is needed for GPU support and service discovery.
-    # See https://github.com/skypilot-org/skypilot/issues/2287 for more details.
-    # To do so, we capture env vars from the pod's runtime and write them to
-    # /etc/profile.d/, making them available for all users in future
-    # shell sessions.
-    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
     pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
                     set_k8s_env_var_cmd + check_apt_update_complete_cmd +

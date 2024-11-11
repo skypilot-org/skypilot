@@ -427,7 +427,7 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - |
-    PACKAGES="lsof gcc patch pciutils rsync fuse curl";
+    PACKAGES="gcc patch pciutils rsync fuse curl";
     MISSING_PACKAGES="";
     for pkg in $PACKAGES; do
       if ! dpkg -l | grep -q "^ii  $pkg "; then
