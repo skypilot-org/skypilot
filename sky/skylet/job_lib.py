@@ -819,6 +819,10 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
+                # No need to use `subprocess_utils.kill_children_processes`,
+                # as the underlying ray driver process will handle the
+                # termination of user programs (we use SIGTERM to allow ray
+                # driver to gracefully exit).
                 try:
                     os.killpg(job['pid'], signal.SIGTERM)
                 except ProcessLookupError:
