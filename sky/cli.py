@@ -3073,6 +3073,7 @@ def show_gpus(
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+    no_permissions_str = '<no permissions>'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3117,7 +3118,8 @@ def show_gpus(
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
-            available_qty = available[gpu] if available[gpu] != -1 else 'NA'
+            available_qty = available[gpu] if available[gpu] != -1 else (
+                no_permissions_str)
             realtime_gpu_table.add_row([
                 gpu,
                 _list_to_str(counts.pop(gpu)), capacity[gpu], available_qty
@@ -3131,7 +3133,7 @@ def show_gpus(
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
             available = node_info.free['nvidia.com/gpu'] if node_info.free[
-                'nvidia.com/gpu'] != -1 else 'NA'
+                'nvidia.com/gpu'] != -1 else no_permissions_str
             node_table.add_row([
                 node_name, node_info.gpu_type,
                 node_info.total['nvidia.com/gpu'], available
