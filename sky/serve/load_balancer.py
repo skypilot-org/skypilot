@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 import aiohttp
 import fastapi
@@ -27,18 +27,24 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self, controller_url: str, load_balancer_port: int) -> None:
+    def __init__(self,
+                 controller_url: str,
+                 load_balancer_port: int,
+                 load_balancing_policy_name: Optional[str] = None) -> None:
         """Initialize the load balancer.
 
         Args:
             controller_url: The URL of the controller.
             load_balancer_port: The port where the load balancer listens to.
+            load_balancing_policy_name: The name of the load balancing policy
+                to use. Defaults to None.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
         self._load_balancer_port: int = load_balancer_port
-        self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
-            lb_policies.RoundRobinPolicy())
+        # Use the registry to create the load balancing policy
+        self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
+            load_balancing_policy_name)
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
@@ -223,9 +229,21 @@ class SkyServeLoadBalancer:
         uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
 
 
-def run_load_balancer(controller_addr: str, load_balancer_port: int):
-    load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port)
+def run_load_balancer(controller_addr: str,
+                      load_balancer_port: int,
+                      load_balancing_policy_name: Optional[str] = None) -> None:
+    """ Run the load balancer.
+
+    Args:
+        controller_addr: The address of the controller.
+        load_balancer_port: The port where the load balancer listens to.
+        policy_name: The name of the load balancing policy to use. Defaults to
+            None.
+    """
+    load_balancer = SkyServeLoadBalancer(
+        controller_url=controller_addr,
+        load_balancer_port=load_balancer_port,
+        load_balancing_policy_name=load_balancing_policy_name)
     load_balancer.run()
 
 
@@ -241,5 +259,13 @@ if __name__ == '__main__':
                         required=True,
                         default=8890,
                         help='The port where the load balancer listens to.')
+    available_policies = list(lb_policies.LB_POLICIES.keys())
+    parser.add_argument(
+        '--load-balancing-policy',
+        choices=available_policies,
+        default='round_robin',
+        help=f'The load balancing policy to use. Available policies: '
+        f'{", ".join(available_policies)}.')
     args = parser.parse_args()
-    run_load_balancer(args.controller_addr, args.load_balancer_port)
+    run_load_balancer(args.controller_addr, args.load_balancer_port,
+                      args.load_balancing_policy)
