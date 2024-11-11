@@ -26,9 +26,11 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 
+@timeline.event
 @usage_lib.entrypoint
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
