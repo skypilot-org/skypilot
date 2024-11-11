@@ -98,6 +98,8 @@ _JOB_WAIT_NOT_RUNNING = (
     'sleep 10; s=$(sky jobs queue);'
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
 
+# Cluster functions
+
 _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     # A while loop to wait until the cluster status
     # becomes certain status, with timeout.
@@ -142,7 +144,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     '{{for (i=1; i<=NF; i++) if (\$i ~ /^(INIT|PENDING|SETTING_UP|RUNNING|SUCCEEDED|FAILED|FAILED_SETUP|CANCELLED)$/) print \$i}}"); '
     'found=0; '  # Initialize found variable outside the loop
     'while read -r line; do '  # Read line by line
-    '  if [ "$line" == "{job_status}" ]; then '  # Check each line
+    '  if [[ "$line" =~ {job_status} ]]; then '  # Check each line
     '    echo "Target job status {job_status} reached."; '
     '    found=1; '
     '    break; '  # Break inner loop
@@ -153,11 +155,17 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'sleep 15; '
     'done')
 
-_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "')
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
+
+# Managed job functions
+
+_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
+    'sky queue {cluster_name}',
+    'sky jobs queue').replace('awk "\\$2 == ', 'awk "\\$3 == ')
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -1053,7 +1061,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME.format(
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
                 cluster_name=name,
                 job_status=JobStatus.FAILED.value,
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
@@ -1086,7 +1094,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME.format(
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
                 cluster_name=name,
                 job_status=JobStatus.FAILED.value,
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
@@ -2814,14 +2822,21 @@ def test_managed_jobs(generic_cloud: str):
         [
             f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
-            'sleep 5',
-            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep "PENDING\|SUBMITTED\|STARTING\|RUNNING"',
-            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "PENDING\|SUBMITTED\|STARTING\|RUNNING"',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=f'{name}-1',
+                job_status=
+                f'({JobStatus.PENDING.value}|{JobStatus.INIT.value}|{JobStatus.RUNNING.value})',
+                timeout=60),
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=f'{name}-2',
+                job_status=
+                f'({JobStatus.PENDING.value}|{JobStatus.INIT.value}|{JobStatus.RUNNING.value})',
+                timeout=60),
             f'sky jobs cancel -y -n {name}-1',
-            'sleep 5',
-            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            'sleep 200',
-            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep CANCELLED',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=f'{name}-2',
+                job_status=f'{JobStatus.CANCELLED.value}',
+                timeout=230),
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
@@ -2891,9 +2906,11 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
         'managed_jobs_failed_setup',
         [
             f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
-            'sleep 330',
             # Make sure the job failed quickly.
-            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "FAILED_SETUP"',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=name,
+                job_status=f'{JobStatus.FAILED_SETUP.value}',
+                timeout=330),
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
