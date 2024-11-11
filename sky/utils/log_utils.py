@@ -304,8 +304,8 @@ def follow_logs(file: TextIO,
     Yields:
         Lines of logs, or nested lines of logs if line_handler is provided.
     """
-    line = ''
-    no_new_content_cnt = 0
+    line: str = ''
+    no_new_content_cnt: int = 0
 
     while True:
         tmp = file.readline()
@@ -313,7 +313,7 @@ def follow_logs(file: TextIO,
             no_new_content_cnt = 0
             line += tmp
             if '\n' in line or '\r' in line:
-                if line_handler:
+                if line_handler is not None:
                     yield from line_handler(line)
                 else:
                     yield line

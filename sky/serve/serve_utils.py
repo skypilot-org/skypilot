@@ -608,32 +608,41 @@ def _follow_replica_logs(
     def handle_line(line: str) -> Iterator[str]:
         # Tailing detailed progress for user. All logs in skypilot is
         # of format `To view detailed progress: tail -n100 -f *.log`.
-        match_provision = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-        if match_provision:
-            log_file = os.path.expanduser(match_provision.group(1))
-            yield line
+        # Check if the line is directing users to view logs
+        is_provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN,
+                                           line)
+        is_other_log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
+        if is_provision_log_prompt is not None:
+            log_file = os.path.expanduser(is_provision_log_prompt.group(1))
             with open(log_file, 'r', newline='', encoding='utf-8') as f:
                 # We still exit if more than 10 seconds without new
                 # content to avoid any internal bug that causes
                 # the launch failed and cluster status remains INIT.
+                # Originally, we output the next line first before printing
+                # the launching logs. Since the next line is always
+                # `Launching on <cloud> <region> (<zone>)`, we output it first
+                # to indicate the process is starting.
+                # TODO(andyl): After refactor #4323, the above logic is broken,
+                # but coincidentally with the new UX 3.0, the `Cluster launched`
+                # message is printed first, making the output appear correct.
+                # Explaining this since it's technically a breaking change
+                # for this refactor PR #4323. Will remove soon in a fix PR
+                # for adapting the serve.follow_logs to the new UX.
                 yield from _follow_replica_logs(
                     f,
                     cluster_name,
                     finish_stream=cluster_is_up,
                     exit_if_stream_end=exit_if_stream_end,
                     no_new_content_timeout=10)
-        elif not re.match(_SKYPILOT_LOG_PATTERN, line):
-            # Not print other logs (file sync logs) since we lack
+        elif is_other_log_prompt is not None:
+            # Now we skip other logs (file sync logs) since we lack
             # utility to determine when these log files are finished
             # writing.
-            # TODO(tian): Not skip these logs since there are small
-            # chance that error will happen in file sync. Need to find
-            # a better way to do this.
-
-            # Output next line first since it indicates the process is
-            # starting. For our launching logs, it's always:
-            # Launching on <cloud> <region> (<zone>)
-            yield line
+            # TODO(tian): We should not skip these logs since there are
+            # small chance that error will happen in file sync. Need to
+            # find a better way to do this.
+            return
+        yield line
 
     return log_utils.follow_logs(file,
                                  finish_stream=finish_stream,
