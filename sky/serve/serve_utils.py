@@ -12,7 +12,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, Set, TextIO, Type, TypeVar)
 import uuid
 
 import colorama
@@ -599,6 +599,7 @@ def _follow_replica_logs(
     should_stop: Callable[[], bool],
     stop_on_eof: bool = False,
     idle_timeout_seconds: Optional[int] = None,
+    _visited_logs: Optional[Set[str]] = None,
 ) -> Iterator[str]:
     """Follows logs for a replica, handling nested log files.
 
@@ -609,10 +610,13 @@ def _follow_replica_logs(
         stop_on_eof: If True, stop when reaching end of file.
         idle_timeout_seconds: If set, stop after these many seconds without
             new content.
+        _visited_logs: Internal parameter to prevent infinite recursion.
 
     Yields:
         Log lines from the main file and any nested log files.
     """
+    visited_logs: Set[
+        str] = _visited_logs if _visited_logs is not None else set()
 
     def cluster_is_up() -> bool:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
@@ -629,15 +633,26 @@ def _follow_replica_logs(
 
         if provision_log_prompt is not None:
             nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
-            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
-                # We still exit if more than 10 seconds without new content
-                # to avoid any internal bug that causes the launch to fail
-                # while cluster status remains INIT.
-                yield from _follow_replica_logs(f,
-                                                cluster_name,
-                                                should_stop=cluster_is_up,
-                                                stop_on_eof=stop_on_eof,
-                                                idle_timeout_seconds=10)
+
+            if nested_log_path in visited_logs:
+                return
+            visited_logs.add(nested_log_path)
+
+            try:
+                with open(nested_log_path, 'r', newline='',
+                          encoding='utf-8') as f:
+                    # We still exit if more than 10 seconds without new content
+                    # to avoid any internal bug that causes the launch to fail
+                    # while cluster status remains INIT.
+                    yield from _follow_replica_logs(f,
+                                                    cluster_name,
+                                                    should_stop=cluster_is_up,
+                                                    stop_on_eof=stop_on_eof,
+                                                    idle_timeout_seconds=10,
+                                                    _visited_logs=visited_logs)
+            except FileNotFoundError:
+                # Ignore missing log files
+                pass
             return
 
         if log_prompt is not None:
