@@ -11,10 +11,10 @@ import sky
 from sky import admin_policy
 from sky import backends
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -463,28 +463,34 @@ def launch(
     stages = None
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
-        maybe_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
-        if maybe_handle is not None:
-            try:
-                # This will throw if the cluster is not available
-                backend_utils.check_cluster_available(
+        cluster_status, maybe_handle = (
+            backend_utils.refresh_cluster_status_handle(cluster_name))
+        if cluster_status == status_lib.ClusterStatus.INIT:
+            # If the cluster is provisioning we should actually hard refresh the
+            # state with the appropriate lock.
+            cluster_status, maybe_handle = (
+                backend_utils.refresh_cluster_status_handle(
                     cluster_name,
-                    operation='executing tasks',
-                    check_cloud_vm_ray_backend=False,
-                    dryrun=dryrun)
-                handle = maybe_handle
-                # Get all stages
-                stages = [
-                    Stage.SYNC_WORKDIR,
-                    Stage.SYNC_FILE_MOUNTS,
-                    Stage.PRE_EXEC,
-                    Stage.EXEC,
-                    Stage.DOWN,
-                ]
-            except exceptions.ClusterNotUpError:
-                # Proceed with normal provisioning
-                pass
+                    force_refresh_statuses=[
+                        # If the cluster is INIT, we want to try to grab the
+                        # status lock, which should block until initialization
+                        # is finished.
+                        status_lib.ClusterStatus.INIT,
+                    ],
+                    # Wait indefinitely to obtain the lock, so that we don't
+                    # have multiple processes launching the same cluster at
+                    # once.
+                    cluster_status_lock_timeout=-1,
+                ))
+        if cluster_status == status_lib.ClusterStatus.UP:
+            handle = maybe_handle
+            stages = [
+                Stage.SYNC_WORKDIR,
+                Stage.SYNC_FILE_MOUNTS,
+                Stage.PRE_EXEC,
+                Stage.EXEC,
+                Stage.DOWN,
+            ]
 
     return _execute(
         entrypoint=entrypoint,
