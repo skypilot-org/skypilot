@@ -108,10 +108,10 @@ _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     'fi; '
     'current_status=$(sky status {cluster_name} --refresh | '
     'awk "/^{cluster_name}/ '
-    '{{for (i=1; i<=NF; i++) if (\$i ~ /^{cluster_status}$/) print \$i}}"); '
+    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(INIT|UP|STOPPED)$/) print \$i}}"); '
     'if [[ "$current_status" =~ {cluster_status} ]]; '
-    'then echo "Target cluster status \'{cluster_status}\' reached."; break; fi; '
-    'echo "Waiting for cluster status to become \'{cluster_status}\', current status: $current_status"; '
+    'then echo "Target cluster status {cluster_status} reached."; break; fi; '
+    'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
     'sleep 15; '
     'done')
 
@@ -143,21 +143,21 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'found=0; '  # Initialize found variable outside the loop
     'while read -r line; do '  # Read line by line
     '  if [ "$line" == "{job_status}" ]; then '  # Check each line
-    '    echo "Target job status \'{job_status}\' reached."; '
+    '    echo "Target job status {job_status} reached."; '
     '    found=1; '
     '    break; '  # Break inner loop
     '  fi; '
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
-    'echo "Waiting for job status to contains \'{job_status}\', current status: $current_status"; '
+    'echo "Waiting for job status to contains {job_status}, current status: $current_status"; '
     'sleep 15; '
     'done')
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
-    'awk "\\$1 == \\"{job_name}\\"', 'awk "')
+    'awk "\\$1 == \\"{job_id}\\"', 'awk "')
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
-    'awk "\\$1 == \\"{job_name}\\"', 'awk "\\$2 == \\"{job_name}\\"')
+    'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -2489,9 +2489,12 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            'sleep 260',
-            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep "INIT\|STOPPED"'
-            f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=
+                f'({ClusterStatus.STOPPED.value}|{ClusterStatus.INIT.value})',
+                timeout=280) +
+            f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -2527,8 +2530,10 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            f'sleep {autostop_timeout}',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=autostop_timeout),
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
             f'sky start -y {name}',
@@ -2544,8 +2549,10 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            f'sleep {autostop_timeout}',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=autostop_timeout),
 
             # Test restarting the idleness timer via exec:
             f'sky start -y {name}',
@@ -2555,8 +2562,10 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            f'sleep {autostop_timeout}',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=autostop_timeout),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -2773,15 +2782,19 @@ def test_stop_gcp_spot():
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 2 --status',
             f'sky autostop {name} -i0 -y',
-            'sleep 90',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=90),
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            'sleep 120',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=120),
         ],
         f'sky down -y {name}',
     )
