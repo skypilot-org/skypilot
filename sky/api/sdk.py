@@ -296,9 +296,9 @@ def download_logs(cluster_name: str,
                              json=json.loads(body.model_dump_json()))
     remote_path_dict = stream_and_get(api_common.get_request_id(response))
     remote2local_path_dict = {
-        remote_path:
-        remote_path.replace(str(api_common.api_server_logs_dir_prefix()),
-                            constants.SKY_LOGS_DIRECTORY)
+        remote_path: remote_path.replace(
+            str(api_common.api_server_logs_dir_prefix()),
+            constants.SKY_LOGS_DIRECTORY)
         for remote_path in remote_path_dict.values()
     }
     body = payloads.DownloadBody(folder_paths=list(remote_path_dict.values()),)
@@ -716,22 +716,13 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 
 @usage_lib.entrypoint
-def abort(request_id: Optional[str] = None,
-          all_requests: bool = False,
-          cluster_names: Optional[List[str]] = None,
-          all_clusters: bool = False) -> str:
-    """Abort requests.
-
-    Args:
-        request_id: the ID of a single request to abort.
-        all_requests: abort all requests.
-        cluster_names: abort the list of clusters' lifecycle requests.
-        all_clusters: abort all cluster lifecycle requests.
+def abort(request_id: Optional[str] = None) -> str:
+    """Abort a request or all requests.
+        Args:
+        request_id: the ID of the request to abort. If None, abort all requests.
     """
-    body = payloads.AbortBody(request_id=request_id,
-                              all=all_requests,
-                              cluster_names=cluster_names,
-                              all_clusters=all_clusters)
+    body = payloads.RequestIdBody(request_id=request_id)
+    print(f'Sending abort request to API server for {request_id}')
     response = requests.post(f'{api_common.get_server_url()}/abort',
                              json=json.loads(body.model_dump_json()),
                              timeout=5)

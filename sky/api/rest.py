@@ -14,7 +14,6 @@ import zipfile
 import colorama
 import fastapi
 from fastapi.middleware import cors
-from sky.backends import backend_utils
 import starlette.middleware.base
 
 from sky import check as sky_check
@@ -36,8 +35,6 @@ from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
-from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -640,45 +637,28 @@ async def stream(
 
 
 @app.post('/abort')
-async def abort(request: fastapi.Request, abort_body: payloads.AbortBody):
+async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     """Abort requests."""
     # Create a list of target abort requests.
     request_ids = []
-    statuses = [
-        requests_lib.RequestStatus.RUNNING, requests_lib.RequestStatus.PENDING
-    ]
     if abort_body.all:
         print('Aborting all requests...')
         request_ids = [
             request_task.request_id
-            for request_task in requests_lib.get_request_tasks(status=statuses)
-        ]
-    elif abort_body.all_clusters:
-        print('Aborting all cluster requests...')
-        request_ids = [
-            request_task.request_id for request_task in
-            requests_lib.get_request_tasks(status=statuses, all_clusters=True)
-        ]
-    else:
-        if abort_body.request_id is not None:
-            print(f'Aborting request ID: {abort_body.request_id}')
-            request_ids.append(abort_body.request_id)
-        if abort_body.cluster_names is not None:
-            print(
-                f'Aborting all requests for clusters {abort_body.cluster_names}'
-            )
-            request_ids.extend([
-                request_task.request_id
-                for request_task in requests_lib.get_request_tasks(
-                    status=statuses, cluster_names=abort_body.cluster_names)
+            for request_task in requests_lib.get_request_tasks(status=[
+                requests_lib.RequestStatus.RUNNING,
+                requests_lib.RequestStatus.PENDING
             ])
+        ]
+    if abort_body.request_id is not None:
+        print(f'Aborting request ID: {abort_body.request_id}')
+        request_ids.append(abort_body.request_id)
 
     # Abort the target requests.
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='kill_request_processes',
-        request_body=payloads.KillRequestProcessesBody(
-            request_ids=request_ids),
+        request_body=payloads.KillRequestProcessesBody(request_ids=request_ids),
         func=requests_lib.kill_requests,
         schedule_type=executor.ScheduleType.BLOCKING,
     )

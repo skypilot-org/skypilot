@@ -135,7 +135,8 @@ class Request:
         for k in REQUEST_COLUMNS:
             if k == COL_CLUSTER_NAME:
                 cluster_name = ''
-                if hasattr(self.request_body, COL_CLUSTER_NAME):
+                if hasattr(self.request_body, COL_CLUSTER_NAME) and \
+                        self.request_body.cluster_name is not None:
                     cluster_name = self.request_body.cluster_name
                 row.append(cluster_name)
             else:
@@ -200,6 +201,16 @@ class Request:
         )
 
 
+def kill_requests_for_clusters(cluster_name: str):
+    request_ids = [
+        request_task.request_id for request_task in get_request_tasks(
+            cluster_names=[cluster_name],
+            status=[RequestStatus.RUNNING],
+            exclude_request_names=['down', 'stop'])
+    ]
+    kill_requests(request_ids)
+
+
 def kill_requests(request_ids: List[str]):
     for request_id in request_ids:
         with update_request(request_id) as request_record:
@@ -238,8 +249,8 @@ def create_table(cursor, conn):
             # is not critical and is likely to be enabled by other processes.
 
     # Table for Requests
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS {} (
+    cursor.execute(f"""\
+        CREATE TABLE IF NOT EXISTS {REQUEST_TABLE} (
         request_id TEXT PRIMARY KEY,
         name TEXT,
         entrypoint TEXT,
@@ -249,7 +260,7 @@ def create_table(cursor, conn):
         return_value TEXT,
         error BLOB,
         pid INTEGER,
-        {} TEXT)""".format(REQUEST_TABLE, COL_CLUSTER_NAME))
+        {COL_CLUSTER_NAME} TEXT)""")
 
 
 _DB = None
@@ -331,36 +342,36 @@ def create_if_not_exists(request: Request) -> bool:
 
 
 @init_db
-def get_request_tasks(status: Optional[List[RequestStatus]] = None,
-                      cluster_names: Optional[List[str]] = None,
-                      all_clusters: bool = False) -> List[Request]:
+def get_request_tasks(
+        status: Optional[List[RequestStatus]] = None,
+        cluster_names: Optional[List[str]] = None,
+        exclude_request_names: Optional[List[str]] = None) -> List[Request]:
     """Get a list of requests that match the given filters.
 
     Args:
         status: a list of statuses of the requests to filter on.
         cluster_names: a list of cluster names to filter the requests on.
         all_clusters: if True, get all requests that have a valid cluster name.
+        exclude_request_names: a list of request names to exclude from the results.
     """
     filters = []
     if status is not None:
         status_list_str = ','.join(repr(status.value) for status in status)
         filters.append(f'status IN ({status_list_str})')
-    if all_clusters:
-        filters.append(
-            f"{COL_CLUSTER_NAME} IS NOT NULL AND {COL_CLUSTER_NAME} != ''")
-    elif cluster_names is not None:
-        cluster_names_str = ','.join(f"'{name}'" for name in cluster_names)
+    if exclude_request_names is not None:
+        exclude_request_names_str = ','.join(
+            repr(name) for name in exclude_request_names)
+        filters.append(f'name NOT IN ({exclude_request_names_str})')
+    if cluster_names is not None:
+        cluster_names_str = ','.join(repr(name) for name in cluster_names)
         filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        filter_str = ''
-        for i in range(len(filters)):
-            if i == 0:
-                filter_str = 'WHERE ' + filters[i]
-            else:
-                filter_str += ' AND ' + filters[i]
-        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} {filter_str} '
+        filter_str = ' AND '.join(filters)
+        if filter_str:
+            filter_str = f' WHERE {filter_str}'
+        cursor.execute(f'SELECT * FROM {REQUEST_TABLE}{filter_str} '
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:

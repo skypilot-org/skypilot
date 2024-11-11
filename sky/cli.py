@@ -2844,13 +2844,6 @@ def _down_or_stop_clusters(
             option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
-    # Abort API requests for clusters.
-    if sdk == sdk_lib:
-        if apply_to_all:
-            sdk.abort(all_clusters=True)
-        elif len(names) > 0:
-            sdk.abort(cluster_names=names)
-
     if len(names) > 0:
         controllers = [
             name for name in names

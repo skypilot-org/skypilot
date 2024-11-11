@@ -96,7 +96,7 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
 # Filelocks for the cluster status change.
-CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.cluster.lock')
+CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Filelocks for updating cluster's file_mounts.

@@ -66,6 +66,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.api.requests import requests as requests_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -3528,9 +3529,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 is_identity_mismatch_and_purge = True
             else:
                 raise
-
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+        # In case other cluster operations are still holding the lock.
+        common_utils.remove_file_if_exists(lock_path)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
@@ -3807,6 +3809,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        # Kill all running requests for the cluster.
+        requests_lib.kill_requests_for_clusters(handle.cluster_name)
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:

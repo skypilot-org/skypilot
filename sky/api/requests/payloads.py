@@ -257,12 +257,6 @@ class RequestIdBody(RequestBody):
     all: bool = False
 
 
-class AbortBody(RequestIdBody):
-    """The request body for the abort endpoint."""
-    cluster_names: Optional[List[str]] = None
-    all_clusters: bool = False
-
-
 class ServeUpBody(RequestBody):
     """The request body for the serve up endpoint."""
     task: str
@@ -350,12 +344,14 @@ class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True
 
-class KillRequestProcessesBody(RequestBody):
-    """The request body for the kill request processes endpoint."""
-    request_ids: List[str]
 
 class ServeTerminateReplicaBody(RequestBody):
     """The request body for the serve terminate replica endpoint."""
     service_name: str
     replica_id: int
     purge: bool = False
+
+
+class KillRequestProcessesBody(RequestBody):
+    """The request body for the kill request processes endpoint."""
+    request_ids: List[str]

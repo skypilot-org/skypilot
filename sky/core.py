@@ -497,7 +497,6 @@ def down(cluster_name: str, purge: bool = False) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
     backend.teardown(handle, terminate=True, purge=purge)
