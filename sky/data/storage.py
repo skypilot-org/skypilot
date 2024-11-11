@@ -287,7 +287,10 @@ class AbstractStore:
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
 
-        self.bucket_sub_path = bucket_sub_path
+        if bucket_sub_path is not None:
+            self.bucket_sub_path: Optional[str] = bucket_sub_path.strip('/')
+        else:
+            self.bucket_sub_path = None
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -1465,6 +1468,7 @@ class S3Store(AbstractStore):
         """
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
         mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
+                                                    self.bucket_sub_path,
                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
@@ -1925,6 +1929,7 @@ class GcsStore(AbstractStore):
         """
         install_cmd = mounting_utils.get_gcs_mount_install_cmd()
         mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
+                                                     self.bucket_sub_path,
                                                      mount_path)
         version_check_cmd = (
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
@@ -2557,10 +2562,11 @@ class AzureBlobStore(AbstractStore):
                 [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            container_path = (
-                f'{self.container_name}/{self.bucket_sub_path}/{dest_dir_name}'
-                if self.bucket_sub_path else
-                f'{self.container_name}/{dest_dir_name}')
+            container_path = (f'{self.container_name}/{self.bucket_sub_path}'
+                              if self.bucket_sub_path else
+                              f'{self.container_name}')
+            if dest_dir_name:
+                container_path = f'{container_path}/{dest_dir_name}'
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
@@ -2704,6 +2710,7 @@ class AzureBlobStore(AbstractStore):
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
         mount_cmd = mounting_utils.get_az_mount_cmd(self.container_name,
+                                                    self.bucket_sub_path,
                                                     self.storage_account_name,
                                                     mount_path,
                                                     self.storage_account_key)
@@ -3101,11 +3108,9 @@ class R2Store(AbstractStore):
         endpoint_url = cloudflare.create_endpoint()
         r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
         r2_profile_name = cloudflare.R2_PROFILE_NAME
-        mount_cmd = mounting_utils.get_r2_mount_cmd(r2_credential_path,
-                                                    r2_profile_name,
-                                                    endpoint_url,
-                                                    self.bucket.name,
-                                                    mount_path)
+        mount_cmd = mounting_utils.get_r2_mount_cmd(
+            r2_credential_path, r2_profile_name, endpoint_url, self.bucket.name,
+            self.bucket_sub_path, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -3551,6 +3556,7 @@ class IBMCosStore(AbstractStore):
                                                      Rclone.RCLONE_CONFIG_PATH,
                                                      self.bucket_rclone_profile,
                                                      self.bucket.name,
+                                                     self.bucket_sub_path,
                                                      mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)

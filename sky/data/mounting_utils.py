@@ -30,12 +30,17 @@ def get_s3_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_s3_mount_cmd(bucket_name: str, mount_path: str) -> str:
+def get_s3_mount_cmd(bucket_name: str, bucket_sub_path: Optional[str],
+                     mount_path: str) -> str:
     """Returns a command to mount an S3 bucket using goofys."""
+    if bucket_sub_path is None:
+        bucket_sub_path = ''
+    else:
+        bucket_sub_path = f':{bucket_sub_path}'
     mount_cmd = ('goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'{bucket_name} {mount_path}')
+                 f'{bucket_name}{bucket_sub_path} {mount_path}')
     return mount_cmd
 
 
@@ -49,15 +54,18 @@ def get_gcs_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
+def get_gcs_mount_cmd(bucket_name: str, bucket_sub_path: Optional[str],
+                      mount_path: str) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
-
+    bucket_sub_path_arg = f'--only-dir {bucket_sub_path} '\
+        if bucket_sub_path else ''
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--rename-dir-limit {_RENAME_DIR_LIMIT} '
+                 f'{bucket_sub_path_arg}'
                  f'{bucket_name} {mount_path}')
     return mount_cmd
 
@@ -79,6 +87,7 @@ def get_az_mount_install_cmd() -> str:
 
 
 def get_az_mount_cmd(container_name: str,
+                     bucket_sub_path: Optional[str],
                      storage_account_name: str,
                      mount_path: str,
                      storage_account_key: Optional[str] = None) -> str:
@@ -86,6 +95,7 @@ def get_az_mount_cmd(container_name: str,
 
     Args:
         container_name: Name of the mounting container.
+        bucket_sub_path: Sub path of the mounting container.
         storage_account_name: Name of the storage account the given container
             belongs to.
         mount_path: Path where the container will be mounting.
@@ -106,25 +116,34 @@ def get_az_mount_cmd(container_name: str,
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
+    if bucket_sub_path is None:
+        bucket_sub_path_arg = ''
+    else:
+        bucket_sub_path_arg = f'--subdirectory={bucket_sub_path}/ '
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  '-o umask=022 -o default_permissions '
                  f'--tmp-path {cache_path} '
+                 f'{bucket_sub_path_arg}'
                  f'--container-name {container_name}')
     return mount_cmd
 
 
 def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
                      endpoint_url: str, bucket_name: str,
-                     mount_path: str) -> str:
+                     bucket_sub_path: Optional[str], mount_path: str) -> str:
     """Returns a command to install R2 mount utility goofys."""
+    if bucket_sub_path is None:
+        bucket_sub_path = ''
+    else:
+        bucket_sub_path = f':{bucket_sub_path}'
     mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                  f'AWS_PROFILE={r2_profile_name} goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--endpoint {endpoint_url} '
-                 f'{bucket_name} {mount_path}')
+                 f'{bucket_name}{bucket_sub_path} {mount_path}')
     return mount_cmd
 
 
@@ -138,7 +157,7 @@ def get_cos_mount_install_cmd() -> str:
 
 def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                       bucket_rclone_profile: str, bucket_name: str,
-                      mount_path: str) -> str:
+                      bucket_sub_path: Optional[str], mount_path: str) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # creates a fusermount soft link on older (<22) Ubuntu systems for
     # rclone's mount utility.
@@ -150,10 +169,14 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                                 'mkdir -p ~/.config/rclone/ && '
                                 f'echo "{rclone_config_data}" >> '
                                 f'{rclone_config_path}')
+    if bucket_sub_path is None:
+        sub_path_arg = f'{bucket_name}/{bucket_name}'
+    else:
+        sub_path_arg = f'/{bucket_name}'
     # --daemon will keep the mounting process running in the background.
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
-                 f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
+                 f'{bucket_rclone_profile}:{sub_path_arg} {mount_path} '
                  '--daemon')
     return mount_cmd
 
@@ -209,7 +232,7 @@ def get_mounting_script(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
-                             
+
         {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
