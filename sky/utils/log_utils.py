@@ -287,42 +287,51 @@ def readable_time_duration(start: Optional[float],
     return diff
 
 
-def follow_logs(file: TextIO,
-                *,
-                finish_stream: Callable[[], bool],
-                exit_if_stream_end: bool = False,
-                line_handler: Optional[Callable[[str], Iterator[str]]] = None,
-                no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
-    """Follow and process logs line by line.
+def follow_logs(
+    file: TextIO,
+    *,
+    should_stop: Callable[[], bool],
+    stop_on_eof: bool = False,
+    process_line: Optional[Callable[[str], Iterator[str]]] = None,
+    idle_timeout_seconds: Optional[int] = None,
+) -> Iterator[str]:
+    """Streams and processes logs line by line from a file.
+
     Args:
-        file: Text file to read logs from
-        finish_stream: Callback to determine if streaming should stop
-        exit_if_stream_end: Whether to exit when reaching end of file
-        line_handler: Optional callback to process each line
-        no_new_content_timeout: Seconds to wait before timing out on
-            no new content
+        file: File object to read logs from.
+        should_stop: Callback that returns True when streaming should stop.
+        stop_on_eof: If True, stop when reaching end of file.
+        process_line: Optional callback to transform/filter each line.
+        idle_timeout_seconds: If set, stop after these many seconds without
+            new content.
+
     Yields:
-        Lines of logs, or nested lines of logs if line_handler is provided.
+        Log lines, possibly transformed by process_line if provided.
     """
-    line: str = ''
-    no_new_content_cnt: int = 0
+    current_line: str = ''
+    seconds_without_content: int = 0
 
     while True:
-        tmp = file.readline()
-        if tmp:
-            no_new_content_cnt = 0
-            line += tmp
-            if '\n' in line or '\r' in line:
-                if line_handler is not None:
-                    yield from line_handler(line)
-                else:
-                    yield line
-                line = ''
-        else:
-            if exit_if_stream_end or finish_stream():
+        content = file.readline()
+
+        if not content:
+            if stop_on_eof or should_stop():
                 break
-            if no_new_content_timeout is not None:
-                if no_new_content_cnt >= no_new_content_timeout:
+
+            if idle_timeout_seconds is not None:
+                if seconds_without_content >= idle_timeout_seconds:
                     break
-                no_new_content_cnt += 1
+                seconds_without_content += 1
+
             time.sleep(1)
+            continue
+
+        seconds_without_content = 0
+        current_line += content
+
+        if '\n' in current_line or '\r' in current_line:
+            if process_line is not None:
+                yield from process_line(current_line)
+            else:
+                yield current_line
+            current_line = ''
