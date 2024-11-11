@@ -3286,6 +3286,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
+        fore = colorama.Fore
 
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
@@ -3302,9 +3303,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{cd} && {constants.SKY_RAY_CMD} job submit '
             '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
             f'--submission-id {job_id}-$(whoami) --no-wait '
-            # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} '
-            '2> /dev/null"')
+            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -3396,9 +3398,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 logger.info(
-                    f'\n📋 Useful Commands'
-                    f'\nManaged Job ID: '
+                    f'\n{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    f'\n📋 Useful Commands'
                     f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
                     f'{ux_utils.BOLD}sky jobs cancel {job_id}'
                     f'{ux_utils.RESET_BOLD}'
@@ -3415,8 +3417,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
                     f'{ux_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n📋 Useful Commands'
-                            f'\nJob ID: {job_id}'
+                logger.info(f'\n{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            f'\n📋 Useful Commands'
                             f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
                             f'{ux_utils.BOLD}sky cancel {name} {job_id}'
                             f'{ux_utils.RESET_BOLD}'
@@ -3732,7 +3735,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
-                  follow: bool = True) -> int:
+                  follow: bool = True,
+                  tail: int = 0) -> int:
         """Tail the logs of a job.
 
         Args:
@@ -3740,10 +3744,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_id: The job ID to tail the logs of.
             managed_job_id: The managed job ID for display purpose only.
             follow: Whether to follow the logs.
+            tail: The number of lines to display from the end of the
+                log file. If 0, print all lines.
         """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
-                                               follow=follow)
+                                               follow=follow,
+                                               tail=tail)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
@@ -3996,25 +4003,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stdout = ''
                 stderr = str(e)
 
-        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-        # May, 2023 by Hysun: Allow terminate INIT cluster which may have
-        # some instances provisioning in background but not completed.
-        elif (isinstance(cloud, clouds.OCI) and terminate and
-              prev_cluster_status in (status_lib.ClusterStatus.STOPPED,
-                                      status_lib.ClusterStatus.INIT)):
-            region = config['provider']['region']
-
-            # pylint: disable=import-outside-toplevel
-            from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-
-            from sky.skylet.providers.oci.query_helper import oci_query_helper
-
-            # 0: All terminated successfully, failed count otherwise
-            returncode = oci_query_helper.terminate_instances_by_tags(
-                {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}, region)
-
-            # To avoid undefined local variables error.
-            stdout = stderr = ''
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',

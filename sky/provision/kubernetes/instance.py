@@ -333,52 +333,37 @@ def _run_function_with_retries(func: Callable,
                 raise
 
 
-def _set_env_vars_in_pods(namespace: str, context: Optional[str],
-                          new_pods: List):
-    """Setting environment variables in pods.
+def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
+    """Pre-initialization step for SkyPilot pods.
 
-    Once all containers are ready, we can exec into them and set env vars.
-    Kubernetes automatically populates containers with critical
-    environment variables, such as those for discovering services running
-    in the cluster and CUDA/nvidia environment variables. We need to
-    make sure these env vars are available in every task and ssh session.
-    This is needed for GPU support and service discovery.
-    See https://github.com/skypilot-org/skypilot/issues/2287 for
-    more details.
+    This step is run in the pod right after it is created and before the
+    SkyPilot runtime is setup.
 
-    To do so, we capture env vars from the pod's runtime and write them to
-    /etc/profile.d/, making them available for all users in future
-    shell sessions.
+    This step includes three key steps:
+
+    1. Privilege check: Checks if the default user has sufficient privilege
+    to set up the kubernetes instance pod.
+    2. SSH setup: Sets up SSH for the pod instance.
+    3. Environment variable setup to populate k8s env vars in the pod.
+
+    Make sure commands used in these methods are generic and work
+    on most base images. E.g., do not use Python, since that may not
+    be installed by default.
+
+    If you run any apt commands, be sure to check if the lock is available.
+    It is possible the `apt update` run in the pod container args may still
+    be running.
+
+    Args:
+        namespace (str): Kubernetes namespace.
+        context (Optional[str]): Kubernetes context.
+        new_nodes (List): List of new pod instances.
+
+    Raises:
+        config_lib.KubernetesError: If user privileges are insufficient or
+          setup fails.
     """
-    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
-    def _set_env_vars_thread(new_pod):
-        pod_name = new_pod.metadata.name
-        logger.info(f'{"-"*20}Start: Set up env vars in pod {pod_name!r} '
-                    f'{"-"*20}')
-        runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), pod_name))
-
-        def _run_env_vars_cmd():
-            rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
-                                       require_outputs=True,
-                                       stream_logs=False)
-            _raise_command_running_error('set env vars', set_k8s_env_var_cmd,
-                                         pod_name, rc, stdout)
-
-        _run_function_with_retries(_run_env_vars_cmd,
-                                   f'set env vars in pod {pod_name}')
-        logger.info(f'{"-"*20}End: Set up env vars in pod {pod_name!r} '
-                    f'{"-"*20}')
-
-    subprocess_utils.run_in_parallel(_set_env_vars_thread, new_pods,
-                                     NUM_THREADS)
-
-
-def _check_user_privilege(namespace: str, context: Optional[str],
-                          new_nodes: List) -> None:
-    # Checks if the default user has sufficient privilege to set up
-    # the kubernetes instance pod.
     check_k8s_user_sudo_cmd = (
         'if [ $(id -u) -eq 0 ]; then'
         # If user is root, create an alias for sudo used in skypilot setup
@@ -386,56 +371,67 @@ def _check_user_privilege(namespace: str, context: Optional[str],
         'else '
         '  if command -v sudo >/dev/null 2>&1; then '
         '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  else '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  fi; '
-        'fi')
+        'fi;')
 
-    # This check needs to run on a per-image basis, so running the check on
-    # any one pod is sufficient.
-    new_node = new_nodes[0]
-    pod_name = new_node.metadata.name
+    # Kubernetes automatically populates containers with critical
+    # environment variables, such as those for discovering services running
+    # in the cluster and CUDA/nvidia environment variables. We need to
+    # make sure these env vars are available in every task and ssh session.
+    # This is needed for GPU support and service discovery.
+    # See https://github.com/skypilot-org/skypilot/issues/2287 for more details.
+    # To do so, we capture env vars from the pod's runtime and write them to
+    # /etc/profile.d/, making them available for all users in future
+    # shell sessions.
+    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
-    runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), pod_name))
-    logger.info(f'{"-"*20}Start: Check user privilege in pod {pod_name!r} '
-                f'{"-"*20}')
+    check_apt_update_complete_cmd = (
+        'echo "Checking if apt update from container init is complete..."; '
+        'timeout_secs=600; '
+        'start_time=$(date +%s); '
+        'while ! grep -q "Fetched" /tmp/apt-update.log 2>/dev/null; do '
+        '  echo "apt update still running. Logs:"; '
+        '  cat /tmp/apt-update.log; '
+        '  current_time=$(date +%s); '
+        '  elapsed=$((current_time - start_time)); '
+        '  if [ $elapsed -ge $timeout_secs ]; then '
+        '    echo "Timed out waiting for apt update"; '
+        '    exit 1; '
+        '  fi; '
+        '  sleep 5; '
+        'done; '
+        'echo "apt update complete."; ')
 
-    def _run_privilege_check():
-        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                        require_outputs=True,
-                                        separate_stderr=True,
-                                        stream_logs=False)
-        _raise_command_running_error('check user privilege',
-                                     check_k8s_user_sudo_cmd, pod_name, rc,
-                                     stdout + stderr)
-        return stdout
-
-    stdout = _run_function_with_retries(
-        _run_privilege_check, f'check user privilege in pod {pod_name!r}')
-
-    if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
-        raise config_lib.KubernetesError(
-            'Insufficient system privileges detected. '
-            'Ensure the default user has root access or '
-            '"sudo" is installed and the user is added to the sudoers '
-            'from the image.')
-    logger.info(f'{"-"*20}End: Check user privilege in pod {pod_name!r} '
-                f'{"-"*20}')
-
-
-def _setup_ssh_in_pods(namespace: str, context: Optional[str],
-                       new_nodes: List) -> None:
-    # Setting up ssh for the pod instance. This is already setup for
-    # the jump pod so it does not need to be run for it.
-    set_k8s_ssh_cmd = (
-        'set -ex; '
+    install_ssh_k8s_cmd = (
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
         'export DEBIAN_FRONTEND=noninteractive;'
-        '$(prefix_cmd) apt-get update;'
-        '$(prefix_cmd) apt install openssh-server rsync -y; '
+        'echo "Installing missing packages..."; '
+        'for i in {1..5}; do '
+        '  output=$($(prefix_cmd) apt install openssh-server rsync -y 2>&1); '
+        '  rc=$?; '
+        '  if [ $rc -eq 0 ]; then '
+        '    break; '
+        '  fi; '
+        '  echo "$output" | grep -qi "could not get lock" || '
+        '  grep -qi "Unable to acquire the dpkg frontend lock"; '
+        '  if [ $? -eq 0 ]; then '
+        '    echo "apt install failed due to lock, retrying. (Attempt $i/5)"; '
+        '    sleep 5; '
+        '  else '
+        '    echo "apt install failed for a non-lock reason: $output"; '
+        '    exit $rc; '
+        '  fi; '
+        'done; '
+        'if [ $rc -ne 0 ]; then '
+        '    echo "apt install failed after 5 attempts due to lock errors."; '
+        '    exit $rc; '
+        'fi; '
         '$(prefix_cmd) mkdir -p /var/run/sshd; '
         '$(prefix_cmd) '
         'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
@@ -456,24 +452,35 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
-    def _setup_ssh_thread(new_node):
+    pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
+                    set_k8s_env_var_cmd + check_apt_update_complete_cmd +
+                    install_ssh_k8s_cmd)
+
+    def _pre_init_thread(new_node):
         pod_name = new_node.metadata.name
+        logger.info(f'{"-"*20}Start: Pre-init in pod {pod_name!r} {"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name))
-        logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
 
-        def _run_ssh_setup():
-            rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
-                                       require_outputs=True,
-                                       stream_logs=False)
-            _raise_command_running_error('setup ssh', set_k8s_ssh_cmd, pod_name,
-                                         rc, stdout)
+        # Run the combined pre-init command
+        rc, stdout, _ = runner.run(pre_init_cmd,
+                                   require_outputs=True,
+                                   stream_logs=False)
+        if rc == exceptions.INSUFFICIENT_PRIVILEGES_CODE:
+            raise config_lib.KubernetesError(
+                'Insufficient system privileges detected. '
+                'Ensure the default user has root access or '
+                '"sudo" is installed and the user is added to the sudoers '
+                'from the image.')
 
-        _run_function_with_retries(_run_ssh_setup,
-                                   f'setup ssh in pod {pod_name!r}')
-        logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
+        op_name = 'pre-init'
+        _raise_command_running_error(op_name, pre_init_cmd, pod_name, rc,
+                                     stdout)
 
-    subprocess_utils.run_in_parallel(_setup_ssh_thread, new_nodes, NUM_THREADS)
+        logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
+
+    # Run pre_init in parallel across all new_nodes
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, NUM_THREADS)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -724,13 +731,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
 
-        # Setup SSH and environment variables in pods.
-        # Make sure commands used in these methods are generic and work
-        # on most base images. E.g., do not use Python, since that may not
-        # be installed by default.
-        _check_user_privilege(namespace, context, uninitialized_pods_list)
-        _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
+        # Run pre-init steps in the pod.
+        pre_init(namespace, context, uninitialized_pods_list)
 
         for pod in uninitialized_pods.values():
             _label_pod(namespace,

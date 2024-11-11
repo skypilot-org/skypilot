@@ -1,56 +1,75 @@
-"""
-Helper class for some OCI operations methods which needs to be shared/called 
-by multiple places. 
+"""OCI query helper class
 
 History:
- - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
- 
+ - Hysun He (hysun.he@oracle.com) @ Oct.16, 2024: Code here mainly
+   migrated from the old provisioning API.
+ - Hysun He (hysun.he@oracle.com) @ Oct.18, 2024: Enhancement.
+   find_compartment: allow search subtree when find a compartment.
 """
-
 from datetime import datetime
-import logging
+import functools
+from logging import Logger
 import re
 import time
 import traceback
 import typing
 from typing import Optional
 
+from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
-from sky.skylet.providers.oci import utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
     pd = adaptors_common.LazyImport('pandas')
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
-class oci_query_helper:
+def debug_enabled(log: Logger):
 
+    def decorate(f):
+
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            dt_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            log.debug(f'{dt_str} Enter {f}, {args}, {kwargs}')
+            try:
+                return f(*args, **kwargs)
+            finally:
+                log.debug(f'{dt_str} Exit {f}')
+
+        return wrapper
+
+    return decorate
+
+
+class QueryHelper:
+    """Helper class for some OCI operations
+    """
     # Call Cloud API to try getting the satisfied nodes.
     @classmethod
-    @utils.debug_enabled(logger=logger)
+    @debug_enabled(logger)
     def query_instances_by_tags(cls, tag_filters, region):
 
-        where_clause_tags = ""
+        where_clause_tags = ''
         for tag_key in tag_filters:
-            if where_clause_tags != "":
-                where_clause_tags += " && "
+            if where_clause_tags != '':
+                where_clause_tags += ' && '
 
             tag_value = tag_filters[tag_key]
-            where_clause_tags += (f"(freeformTags.key = '{tag_key}'"
-                                  f" && freeformTags.value = '{tag_value}')")
+            where_clause_tags += (f'(freeformTags.key = \'{tag_key}\''
+                                  f' && freeformTags.value = \'{tag_value}\')')
 
-        qv_str = (f"query instance resources where {where_clause_tags}"
-                  f" && (lifecycleState != 'TERMINATED'"
-                  f" && lifecycleState != 'TERMINATING')")
+        qv_str = (f'query instance resources where {where_clause_tags}'
+                  f' && (lifecycleState != \'TERMINATED\''
+                  f' && lifecycleState != \'TERMINATING\')')
 
         qv = oci_adaptor.oci.resource_search.models.StructuredSearchDetails(
             query=qv_str,
-            type="Structured",
+            type='Structured',
             matching_context_type=oci_adaptor.oci.resource_search.models.
             SearchDetails.MATCHING_CONTEXT_TYPE_NONE,
         )
@@ -63,44 +82,98 @@ class oci_query_helper:
 
     @classmethod
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
-        logger.debug(f"Terminate instance by tags: {tag_filters}")
+        logger.debug(f'Terminate instance by tags: {tag_filters}')
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
             inst_id = inst.identifier
-            logger.debug(f"Got instance(to be terminated): {inst_id}")
+            logger.debug(f'Got instance(to be terminated): {inst_id}')
 
             try:
                 oci_adaptor.get_core_client(
                     region,
                     oci_utils.oci_config.get_profile()).terminate_instance(
                         inst_id)
-            except Exception as e:
+            except oci_adaptor.oci.exceptions.ServiceError as e:
                 fail_count += 1
-                logger.error(f"Terminate instance failed: {str(e)}\n: {inst}")
+                logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
                 traceback.print_exc()
 
         if fail_count == 0:
-            logger.debug(f"Instance teardown result: OK")
+            logger.debug('Instance teardown result: OK')
         else:
-            logger.warn(f"Instance teardown result: {fail_count} failed!")
+            logger.warning(f'Instance teardown result: {fail_count} failed!')
 
         return fail_count
 
     @classmethod
-    @utils.debug_enabled(logger=logger)
+    @debug_enabled(logger)
+    def launch_instance(cls, region, launch_config):
+        """ To create a new instance """
+        return oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).launch_instance(
+                launch_instance_details=launch_config)
+
+    @classmethod
+    @debug_enabled(logger)
+    def start_instance(cls, region, instance_id):
+        """ To start an existing instance """
+        return oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).instance_action(
+                instance_id=instance_id, action='START')
+
+    @classmethod
+    @debug_enabled(logger)
+    def stop_instance(cls, region, instance_id):
+        """ To stop an instance """
+        return oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).instance_action(
+                instance_id=instance_id, action='STOP')
+
+    @classmethod
+    @debug_enabled(logger)
+    def wait_instance_until_status(cls, region, node_id, status):
+        """ To wait a instance becoming the specified state """
+        compute_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile())
+
+        resp = compute_client.get_instance(instance_id=node_id)
+
+        oci_adaptor.oci.wait_until(
+            compute_client,
+            resp,
+            'lifecycle_state',
+            status,
+        )
+
+    @classmethod
+    def get_instance_primary_vnic(cls, region, inst_info):
+        """ Get the primary vnic infomation of the instance """
+        list_vnic_attachments_response = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile()).list_vnic_attachments(
+                availability_domain=inst_info['ad'],
+                compartment_id=inst_info['compartment'],
+                instance_id=inst_info['inst_id'],
+            )
+        vnic = list_vnic_attachments_response.data[0]
+        return oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile()).get_vnic(
+                vnic_id=vnic.vnic_id).data
+
+    @classmethod
+    @debug_enabled(logger)
     def subscribe_image(cls, compartment_id, listing_id, resource_version,
                         region):
-        if (pd.isna(listing_id) or listing_id.strip() == "None" or
-                listing_id.strip() == "nan"):
+        if (pd.isna(listing_id) or listing_id.strip() == 'None' or
+                listing_id.strip() == 'nan'):
             return
 
         core_client = oci_adaptor.get_core_client(
             region, oci_utils.oci_config.get_profile())
         try:
-            agreements_response = core_client.get_app_catalog_listing_agreements(
+            agreements_resp = core_client.get_app_catalog_listing_agreements(
                 listing_id=listing_id, resource_version=resource_version)
-            agreements = agreements_response.data
+            agreements = agreements_resp.data
 
             core_client.create_app_catalog_subscription(
                 create_app_catalog_subscription_details=oci_adaptor.oci.core.
@@ -113,24 +186,24 @@ class oci_query_helper:
                     oracle_terms_of_use_link,
                     time_retrieved=datetime.strptime(
                         re.sub(
-                            "\d{3}\+\d{2}\:\d{2}",
-                            "Z",
+                            r'\d{3}\+\d{2}\:\d{2}',
+                            'Z',
                             str(agreements.time_retrieved),
                             0,
                         ),
-                        "%Y-%m-%d %H:%M:%S.%fZ",
+                        '%Y-%m-%d %H:%M:%S.%fZ',
                     ),
                     signature=agreements.signature,
                     eula_link=agreements.eula_link,
                 ))
-        except Exception as e:
+        except oci_adaptor.oci.exceptions.ServiceError as e:
             logger.critical(
-                f"subscribe_image: {listing_id} - {resource_version} ... [Failed]"
-                f"Error message: {str(e)}")
-            raise RuntimeError("ERR: Image subscription error!")
+                f'[Failed] subscribe_image: {listing_id} - {resource_version}'
+                f'Error message: {str(e)}')
+            raise RuntimeError('ERR: Image subscription error!') from e
 
     @classmethod
-    @utils.debug_enabled(logger=logger)
+    @debug_enabled(logger)
     def find_compartment(cls, region) -> str:
         """ If compartment is not configured, we use root compartment """
         # Try to use the configured one first
@@ -143,12 +216,18 @@ class oci_query_helper:
         # config file is supported (2023/06/09).
         root = oci_adaptor.get_oci_config(
             region, oci_utils.oci_config.get_profile())['tenancy']
+
         list_compartments_response = oci_adaptor.get_identity_client(
             region, oci_utils.oci_config.get_profile()).list_compartments(
                 compartment_id=root,
                 name=oci_utils.oci_config.COMPARTMENT,
+                compartment_id_in_subtree=True,
+                access_level='ACCESSIBLE',
                 lifecycle_state='ACTIVE',
+                sort_by='TIMECREATED',
+                sort_order='DESC',
                 limit=1)
+
         compartments = list_compartments_response.data
         if len(compartments) > 0:
             skypilot_compartment = compartments[0].id
@@ -159,7 +238,7 @@ class oci_query_helper:
         return skypilot_compartment
 
     @classmethod
-    @utils.debug_enabled(logger=logger)
+    @debug_enabled(logger)
     def find_create_vcn_subnet(cls, region) -> Optional[str]:
         """ If sub is not configured, we find/create VCN skypilot_vcn """
         subnet = oci_utils.oci_config.get_vcn_subnet(region)
@@ -174,7 +253,7 @@ class oci_query_helper:
         list_vcns_response = net_client.list_vcns(
             compartment_id=skypilot_compartment,
             display_name=oci_utils.oci_config.VCN_NAME,
-            lifecycle_state="AVAILABLE")
+            lifecycle_state='AVAILABLE')
         vcns = list_vcns_response.data
         if len(vcns) > 0:
             # Found the VCN.
@@ -184,7 +263,7 @@ class oci_query_helper:
                 limit=1,
                 vcn_id=skypilot_vcn,
                 display_name=oci_utils.oci_config.VCN_SUBNET_NAME,
-                lifecycle_state="AVAILABLE")
+                lifecycle_state='AVAILABLE')
             logger.debug(f'Got VCN subnet \n{list_subnets_response.data}')
             if len(list_subnets_response.data) < 1:
                 logger.error(
@@ -201,10 +280,17 @@ class oci_query_helper:
             return cls.create_vcn_subnet(net_client, skypilot_compartment)
 
     @classmethod
-    @utils.debug_enabled(logger=logger)
+    @debug_enabled(logger)
     def create_vcn_subnet(cls, net_client,
                           skypilot_compartment) -> Optional[str]:
+
+        skypilot_vcn = None  # VCN for the resources
+        subnet = None  # Subnet for the VMs
+        ig = None  # Internet gateway
+        sg = None  # Service gateway
+
         try:
+            # pylint: disable=line-too-long
             create_vcn_response = net_client.create_vcn(
                 create_vcn_details=oci_adaptor.oci.core.models.CreateVcnDetails(
                     compartment_id=skypilot_compartment,
@@ -274,38 +360,38 @@ class oci_query_helper:
                 update_security_list_details=oci_adaptor.oci.core.models.
                 UpdateSecurityListDetails(ingress_security_rules=[
                     oci_adaptor.oci.core.models.IngressSecurityRule(
-                        protocol="6",
+                        protocol='6',
                         source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                         is_stateless=False,
-                        source_type="CIDR_BLOCK",
+                        source_type='CIDR_BLOCK',
                         tcp_options=oci_adaptor.oci.core.models.TcpOptions(
                             destination_port_range=oci_adaptor.oci.core.models.
                             PortRange(max=22, min=22),
                             source_port_range=oci_adaptor.oci.core.models.
                             PortRange(max=65535, min=1)),
-                        description="Allow SSH port."),
+                        description='Allow SSH port.'),
                     oci_adaptor.oci.core.models.IngressSecurityRule(
-                        protocol="all",
+                        protocol='all',
                         source=oci_utils.oci_config.VCN_SUBNET_CIDR,
                         is_stateless=False,
-                        source_type="CIDR_BLOCK",
-                        description="Allow all traffic from/to same subnet."),
+                        source_type='CIDR_BLOCK',
+                        description='Allow all traffic from/to same subnet.'),
                     oci_adaptor.oci.core.models.IngressSecurityRule(
-                        protocol="1",
+                        protocol='1',
                         source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                         is_stateless=False,
-                        source_type="CIDR_BLOCK",
+                        source_type='CIDR_BLOCK',
                         icmp_options=oci_adaptor.oci.core.models.IcmpOptions(
                             type=3, code=4),
-                        description="ICMP traffic."),
+                        description='ICMP traffic.'),
                     oci_adaptor.oci.core.models.IngressSecurityRule(
-                        protocol="1",
+                        protocol='1',
                         source=oci_utils.oci_config.VCN_CIDR,
                         is_stateless=False,
-                        source_type="CIDR_BLOCK",
+                        source_type='CIDR_BLOCK',
                         icmp_options=oci_adaptor.oci.core.models.IcmpOptions(
                             type=3),
-                        description="ICMP traffic (VCN)."),
+                        description='ICMP traffic (VCN).'),
                 ]))
             logger.debug(
                 f'Updated security_list: \n{update_security_list_response.data}'
@@ -325,7 +411,7 @@ class oci_query_helper:
                 ]))
             logger.debug(f'Route table: \n{update_route_table_response.data}')
 
-        except oci_adaptor.service_exception() as e:
+        except oci_adaptor.oci.exceptions.ServiceError as e:
             logger.error(f'Create VCN Error: Create new VCN '
                          f'{oci_utils.oci_config.VCN_NAME} failed: {str(e)}')
             # In case of partial success while creating vcn
@@ -335,7 +421,7 @@ class oci_query_helper:
         return subnet
 
     @classmethod
-    @utils.debug_enabled(logger=logger)
+    @debug_enabled(logger)
     def delete_vcn(cls, net_client, skypilot_vcn, skypilot_subnet,
                    internet_gateway, service_gateway):
         if skypilot_vcn is None:
@@ -369,7 +455,7 @@ class oci_query_helper:
                         f'Deleted vcn {skypilot_vcn}-{delete_vcn_response.data}'
                     )
                     break
-                except oci_adaptor.service_exception() as e:
+                except oci_adaptor.oci.exceptions.ServiceError as e:
                     logger.info(f'Waiting del SG/IG/Subnet finish: {str(e)}')
                     retry_count = retry_count + 1
                     if retry_count == oci_utils.oci_config.MAX_RETRY_COUNT:
@@ -378,6 +464,9 @@ class oci_query_helper:
                         time.sleep(
                             oci_utils.oci_config.RETRY_INTERVAL_BASE_SECONDS)
 
-        except oci_adaptor.service_exception() as e:
+        except oci_adaptor.oci.exceptions.ServiceError as e:
             logger.error(
                 f'Delete VCN {oci_utils.oci_config.VCN_NAME} Error: {str(e)}')
+
+
+query_helper = QueryHelper()
