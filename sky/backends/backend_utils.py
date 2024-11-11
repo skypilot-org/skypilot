@@ -100,6 +100,10 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
+# Time that must elapse since the last status check before we should re-check if
+# the cluster has been terminated or autostopped.
+_CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
+
 # Filelocks for updating cluster's file_mounts.
 CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
     '~/.sky/.{}_file_mounts.lock')
@@ -1990,9 +1994,13 @@ def refresh_cluster_record(
         use_spot = handle.launched_resources.use_spot
         has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
                         record['autostop'] >= 0)
+        recently_refreshed = (record['status_updated_at'] is not None and
+                              time.time() - record['status_updated_at'] <
+                              _CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+        should_refresh = (has_autostop or use_spot) and not recently_refreshed
         force_refresh_for_cluster = (force_refresh_statuses is not None and
                                      record['status'] in force_refresh_statuses)
-        if force_refresh_for_cluster or has_autostop or use_spot:
+        if force_refresh_for_cluster or should_refresh:
             record = _update_cluster_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
