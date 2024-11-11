@@ -2834,7 +2834,7 @@ def test_managed_jobs(generic_cloud: str):
                 timeout=60),
             f'sky jobs cancel -y -n {name}-1',
             _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
-                job_name=f'{name}-2',
+                job_name=f'{name}-1',
                 job_status=f'{JobStatus.CANCELLED.value}',
                 timeout=230),
             # Test the functionality for logging.
