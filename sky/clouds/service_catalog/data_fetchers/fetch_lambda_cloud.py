@@ -20,7 +20,6 @@ DEFAULT_LAMBDA_KEYS_PATH = os.path.expanduser('~/.lambda_cloud/lambda_keys')
 
 # List of all possible regions.
 REGIONS = [
-    'australia-southeast-1',
     'europe-central-1',
     'asia-south-1',
     'me-west-1',
@@ -28,9 +27,12 @@ REGIONS = [
     'asia-northeast-1',
     'asia-northeast-2',
     'us-east-1',
+    'us-east-2',
     'us-west-2',
     'us-west-1',
     'us-south-1',
+    'us-south-2',
+    'us-south-3',
     'us-west-3',
     'us-midwest-1',
 ]

@@ -113,6 +113,9 @@ The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
     :pyobject: RequestOptions
     :caption: `RequestOptions Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
+.. note::
+
+    The ``sky.AdminPolicy`` should be idempotent. In other words, it should be safe to apply the policy multiple times to the same user request.
 
 Example Policies    
 ----------------
