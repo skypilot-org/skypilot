@@ -108,11 +108,11 @@ _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     'fi; '
     'current_status=$(sky status {cluster_name} --refresh | '
     'awk "/^{cluster_name}/ '
-    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(INIT|UP|STOPPED)$/) print \$i}}"); '
-    'if [ "$current_status" == "{cluster_status}" ]; '
+    '{{for (i=1; i<=NF; i++) if (\$i ~ /^{cluster_status}$/) print \$i}}"); '
+    'if [[ "$current_status" =~ {cluster_status} ]]; '
     'then echo "Target cluster status \'{cluster_status}\' reached."; break; fi; '
     'echo "Waiting for cluster status to become \'{cluster_status}\', current status: $current_status"; '
-    'sleep 30; '
+    'sleep 15; '
     'done')
 
 _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
@@ -129,7 +129,7 @@ _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     'sleep 15; '
     'done')
 
-_WAIT_UNTIL_JOB_STATUS_CONTAINS = (
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.
     'start_time=$SECONDS; '
@@ -138,7 +138,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS = (
     '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
     'fi; '
     'current_status=$(sky queue {cluster_name} | '
-    'awk "/{job_name}/ '
+    'awk "\\$1 == \\"{job_id}\\" '
     '{{for (i=1; i<=NF; i++) if (\$i ~ /^(INIT|PENDING|SETTING_UP|RUNNING|SUCCEEDED|FAILED|FAILED_SETUP|CANCELLED)$/) print \$i}}"); '
     'found=0; '  # Initialize found variable outside the loop
     'while read -r line; do '  # Read line by line
@@ -153,8 +153,11 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS = (
     'sleep 15; '
     'done')
 
-_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS.replace(
-    'awk "/{job_name}/', 'awk "')
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+    'awk "\\$1 == \\"{job_name}\\"', 'awk "')
+
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+    'awk "\\$1 == \\"{job_name}\\"', 'awk "\\$2 == \\"{job_name}\\"')
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -1083,8 +1086,10 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB_NAME.format(
+                cluster_name=name,
+                job_status=JobStatus.FAILED.value,
+                timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
         f'sky down -y {name}',
     )
@@ -1888,10 +1893,15 @@ def test_multi_echo(generic_cloud: str):
         'multi_echo',
         [
             f'python examples/multi_echo.py {name} {generic_cloud}',
-            'sleep 120',
         ] +
         # Ensure jobs succeeded.
-        [f'sky logs {name} {i + 1} --status' for i in range(32)] +
+        [
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+                cluster_name=name,
+                job_id=i + 1,
+                job_status=JobStatus.SUCCEEDED.value,
+                timeout=120) for i in range(32)
+        ] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
@@ -1984,7 +1994,8 @@ def test_tpu():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} examples/tpu/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
-        f'sky down -y {name}',
+        'echo "hello"',
+        #f'sky down -y {name}',
         timeout=30 * 60,  # can take >20 mins
     )
     run_one_test(test)
@@ -2444,12 +2455,18 @@ def test_gcp_start_stop():
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sleep 20',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=40),
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
-            'sleep 180',
-            f'sky status -r {name} | grep "INIT\|STOPPED"',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=
+                f'({ClusterStatus.STOPPED.value}|{ClusterStatus.INIT.value})',
+                timeout=200),
         ],
         f'sky down -y {name}',
     )
