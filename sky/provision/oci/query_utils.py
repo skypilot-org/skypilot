@@ -524,7 +524,8 @@ class QueryHelper:
             net_client.update_security_list(
                 security_list_id=first_sg_id,
                 update_security_list_details=oci_adaptor.oci.core.models.
-                UpdateSecurityListDetails(ingress_security_rules=new_rules),
+                UpdateSecurityListDetails(
+                    ingress_security_rules=(first_sg_rules + new_rules)),
             )
 
     @classmethod
