@@ -287,13 +287,18 @@ class AbstractStore:
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
 
-        if bucket_sub_path is not None:
-            self._bucket_sub_path: Optional[str] = bucket_sub_path.strip('/')
-        else:
-            self._bucket_sub_path = None
+        # To avoid mypy error
+        self._bucket_sub_path: Optional[str] = None
+        self.set_bucket_sub_path(bucket_sub_path)
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
+
+    def set_bucket_sub_path(self, bucket_sub_path: Optional[str]) -> None:
+        if bucket_sub_path is not None:
+            self._bucket_sub_path = bucket_sub_path.strip('/')
+        else:
+            self._bucket_sub_path = None
 
     @classmethod
     def from_metadata(cls, metadata: StoreMetadata, **override_args):
@@ -601,6 +606,12 @@ class Storage(object):
                     elif self.source.startswith('cos://'):
                         self.add_store(StoreType.IBM)
 
+    def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
+        """Adds the bucket sub path prefix to the blob path."""
+        if self._bucket_sub_path is not None:
+            return f'{blob_path}/{self._bucket_sub_path}'
+        return blob_path
+
     @staticmethod
     def _validate_source(
             source: SourceType, mode: StorageMode,
@@ -855,10 +866,7 @@ class Storage(object):
                 continue
             # This one can't be retrieved from metadata since its set every time
             # we create a new storage object.
-            # This private member setting against coding style guide, but
-            # we want to keep it private member for internal usage only.
-            # pylint: disable=protected-access
-            store._bucket_sub_path = self._bucket_sub_path
+            store.set_bucket_sub_path(self._bucket_sub_path)
             self._add_store(store, is_reconstructed=True)
 
     @classmethod
@@ -1121,6 +1129,8 @@ class Storage(object):
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
             config['_force_delete'] = True
+        if self._bucket_sub_path is not None:
+            config['_bucket_sub_path'] = self._bucket_sub_path
         return config
 
 
