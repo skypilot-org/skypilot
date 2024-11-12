@@ -1,6 +1,11 @@
 """SkyServe core APIs."""
+from dataclasses import dataclass
+import os
 import re
+import signal
+import subprocess
 import tempfile
+import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
@@ -15,9 +20,10 @@ from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.skylet import constants
+from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import resources_utils
@@ -91,6 +97,9 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     'Please specify the same port instead.')
 
 
+logger = sky_logging.init_logger(__name__)
+
+
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -116,12 +125,13 @@ def up(
     # 1. controller cluster name: 'sky-serve-controller-<service_name>'
     # 2. replica cluster name: '<service_name>-<replica_id>'
     # In both cases, service name shares the same regex with cluster name.
-    if re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, service_name) is None:
+    if re.fullmatch(skylet_constants.CLUSTER_NAME_VALID_REGEX,
+                    service_name) is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service name {service_name!r} is invalid: '
                              f'ensure it is fully matched by regex (e.g., '
                              'only contains lower letters, numbers and dash): '
-                             f'{constants.CLUSTER_NAME_VALID_REGEX}')
+                             f'{skylet_constants.CLUSTER_NAME_VALID_REGEX}')
 
     _validate_service_task(task)
     # Always apply the policy again here, even though it might have been applied
@@ -201,7 +211,8 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        idle_minutes_to_autostop = (
+            skylet_constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
         controller_job_id, controller_handle = sky.launch(
             task=controller_task,
             stream_logs=False,
@@ -654,6 +665,216 @@ def status(
     return serve_utils.load_service_status(serve_status_payload)
 
 
+@dataclass
+class SyncLogFileArgs:
+    """DataClass for syncing a log file.
+    Attributes:
+        - source: remote file path of logs.
+        - target: local machine file path of logs.
+        - message: template message to print to user.
+        - message_args: arguments to fill in template.
+    """
+    source: str
+    target: str
+    message: str
+    message_args: List[str]
+
+
+@usage_lib.entrypoint
+def sync_down_logs(service_name: str,
+                   service_component: Optional[serve_utils.ServiceComponent],
+                   replica_id: Optional[int]) -> None:
+    """Sync down logs for a given service.
+
+    - This function synchronizes logs from remote service to local machine.
+    - It supports downloading logs for different components of the service.
+
+    Args:
+        service_name: name of service.
+        service_component: component to sync down the logs of.
+            - Could be controller, load balancer, replica, or None.
+            - None means to sync down logs for everything.
+        replica_id: The replica ID to tail the logs of.
+            - Only used when target is replica.
+
+    Raises:
+        ValueError: If the service_component is not a valid string or
+                    serve_utils.ServiceComponent, or if replica_id is not
+                    specified when service_component is REPLICA.
+        RuntimeError: If there is an error during log sync process.
+    """
+
+    if service_component is not None:
+        if isinstance(service_component, str):
+            service_component = serve_utils.ServiceComponent(service_component)
+        if not isinstance(service_component, serve_utils.ServiceComponent):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('`service_component` must be a string or '
+                                 'sky.serve.ServiceComponent, '
+                                 f'got {type(service_component)}.')
+        if service_component == serve_utils.ServiceComponent.REPLICA:
+            if replica_id is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('`replica_id` must be specified when '
+                                     'using service_component=REPLICA.')
+        else:
+            if replica_id is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        '`replica_id` must be None when using '
+                        'service_component=CONTROLLER/LOAD_BALANCER.')
+
+    logger.info(f'Syncing down logs for {service_name}...')
+    controller_handle = backend_utils.is_controller_accessible(
+        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message='No service is found.')
+
+    # Define local directory for logs and get the current timestamp.
+    sky_logs_directory = os.path.expanduser(skylet_constants.SKY_LOGS_DIRECTORY)
+    run_timestamp = backend_utils.get_run_timestamp()
+
+    # Define the service components to be run:
+    # Either sync down all components or one specified component.
+    # The service_component_to_be_run_list can be:
+    # - [replica] if service_component is replica.
+    # - [lb/controller] if service_component is lb or controller.
+    # - [replica, lb, controller] if service_component is None.
+    service_component_to_be_run_list = ([
+        serve_utils.ServiceComponent.REPLICA,
+        serve_utils.ServiceComponent.CONTROLLER,
+        serve_utils.ServiceComponent.LOAD_BALANCER
+    ] if service_component is None else [service_component])
+
+    # Define all log files to be synced, later processed in loop.
+    log_files_to_be_synced: List[SyncLogFileArgs] = []
+    runner = controller_handle.get_command_runners()
+
+    # Prepare and download replica logs (single/all components).
+    if (serve_utils.ServiceComponent.REPLICA
+            in service_component_to_be_run_list):
+        # The remove logic here is that:
+        # - If user specifies replica, we need to remove it from list.
+        #   The list becomes [] after process, which means we do not
+        #   need to handle controller and lb logs then.
+        # - If sync all components, remove replica from the list,
+        #   then the list is [lb, controller], which will be handled below.
+        service_component_to_be_run_list.remove(
+            serve_utils.ServiceComponent.REPLICA)
+
+        logger.info(
+            'Starting the process to prepare and download replica logs...')
+        prepare_code = (
+            serve_utils.ServeCodeGen.prepare_replica_logs_for_download(
+                service_name, run_timestamp, replica_id))
+
+        backend = backend_utils.get_backend_from_handle(controller_handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        assert isinstance(controller_handle, backends.CloudVmRayResourceHandle)
+
+        logger.info('Preparing replica logs for download on controller...')
+        prepare_returncode = backend.run_on_head(controller_handle,
+                                                 prepare_code,
+                                                 require_outputs=False,
+                                                 stream_logs=False)
+        try:
+            subprocess_utils.handle_returncode(
+                prepare_returncode, prepare_code,
+                'Failed to prepare replica logs to sync down. '
+                'Sky serve controller may be older and not support sync '
+                'down for replica logs.')
+            logger.info('Replica logs prepared successfully.')
+        except exceptions.CommandError as e:
+            logger.error('Error occurred while preparing replica logs: %s',
+                         e.error_msg)
+            raise RuntimeError(e.error_msg) from e
+
+        # Define remote directory for logs and download them.
+        remote_service_dir_name = (
+            serve_utils.generate_remote_service_dir_name(service_name))
+        dir_for_download = os.path.join(remote_service_dir_name, run_timestamp)
+        log_files_to_be_synced.append(
+            SyncLogFileArgs(dir_for_download, sky_logs_directory,
+                            'Downloading the replica logs from %s to %s...',
+                            [remote_service_dir_name, sky_logs_directory]))
+
+        # Remove the logs from the remote server after downloading.
+        logger.info('Preparing to remove replica logs from remote server...')
+        remove_code = (
+            serve_utils.ServeCodeGen.remove_replica_logs_for_download(
+                service_name, run_timestamp))
+        logger.debug('Generated remove code: %s', remove_code)
+        remove_returncode = backend.run_on_head(controller_handle,
+                                                remove_code,
+                                                require_outputs=False,
+                                                stream_logs=False)
+        logger.debug('Remove command return code: %s', remove_returncode)
+
+        try:
+            subprocess_utils.handle_returncode(
+                remove_returncode, remove_code,
+                'Failed to remove the replica logs for '
+                'download on the controller.')
+            logger.info('Replica logs removed successfully'
+                        ' from remote server.')
+        except exceptions.CommandError as e:
+            logger.error('Error occurred while '
+                         'removing replica logs: %s', e.error_msg)
+            raise RuntimeError(e.error_msg) from e
+
+    # We download the replica logs first because that download creates
+    # the timestamp directory, and we can just put the controller and
+    # load balancer logs in there. Otherwise, we would create the
+    # timestamp directory with controller and load balancer logs first,
+    # and then the replica logs download would overwrite it.
+    target_directory = os.path.join(sky_logs_directory, run_timestamp)
+    os.makedirs(target_directory, exist_ok=True)
+
+    # Prepare and download controller and load balancer logs.
+    # After the remove logic in replica, the list is either
+    # [] or [lb, controller] or [lb] or [controller].
+    # - If it is [], we do not need to handle controller and lb logs.
+    # - If it is [lb, controller], we need to handle both.
+    # - If it is [lb] or [controller], we need to handle the one in list.
+    for running_component in service_component_to_be_run_list:
+        logger.info('Starting the process to prepare '
+                    f'and download {running_component.name} logs...')
+
+        if running_component == serve_utils.ServiceComponent.CONTROLLER:
+            log_file_name = \
+                serve_utils.generate_remote_controller_log_file_name(
+                    service_name)
+            log_file_constant = serve_constants.CONTROLLER_LOG_FILE_NAME
+        elif running_component == serve_utils.ServiceComponent.LOAD_BALANCER:
+            log_file_name = \
+                serve_utils.generate_remote_load_balancer_log_file_name(
+                    service_name)
+            log_file_constant = serve_constants.LOAD_BALANCER_LOG_FILE_NAME
+        else:
+            # Actually, this should never happen. So I believe we can
+            # remove this block of code. PTAL :)
+            # TODO(bxhu): remove this code block after check.
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Unsupported service component: {running_component}')
+
+        log_files_to_be_synced.append(
+            SyncLogFileArgs(log_file_name,
+                            os.path.join(target_directory, log_file_constant),
+                            'Downloading the log file from %s to %s...',
+                            [log_file_name, log_file_constant]))
+
+    for arg in log_files_to_be_synced:
+        logger.info(arg.message, *arg.message_args)
+        runner.rsync(source=arg.source,
+                     target=arg.target,
+                     up=False,
+                     stream_logs=False)
+
+    # Final message indicating where the logs can be found.
+    logger.info('Synced down logs '
+                f'can be found at: {target_directory}')
+
+
 @usage_lib.entrypoint
 def tail_logs(
     service_name: str,
@@ -718,8 +939,27 @@ def tail_logs(
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    backend.tail_serve_logs(handle,
-                            service_name,
-                            target,
-                            replica_id,
-                            follow=follow)
+
+    if target != serve_utils.ServiceComponent.REPLICA:
+        code = serve_utils.ServeCodeGen.stream_serve_process_logs(
+            service_name,
+            stream_controller=(
+                target == serve_utils.ServiceComponent.CONTROLLER),
+            follow=follow)
+    else:
+        assert replica_id is not None, service_name
+        code = serve_utils.ServeCodeGen.stream_replica_logs(
+            service_name, replica_id, follow)
+
+    # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+    # kill the process, so we need to handle it manually here.
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+    backend.run_on_head(handle,
+                        code,
+                        stream_logs=True,
+                        process_stream=False,
+                        ssh_mode=command_runner.SshMode.INTERACTIVE,
+                        stdin=subprocess.DEVNULL)

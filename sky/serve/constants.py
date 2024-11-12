@@ -3,6 +3,8 @@
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
+CONTROLLER_LOG_FILE_NAME = 'controller.log'
+LOAD_BALANCER_LOG_FILE_NAME = 'load_balancer.log'
 
 # The filelock for selecting service ports on controller VM when starting a
 # service. We need to have a filelock to avoid port collision when starting
@@ -100,3 +102,6 @@ SERVE_VERSION = 2
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# Pattern used for extracting replica ID from replica launch or log files.
+REPLICA_ID_PATTERN = r'.*replica_(\d+)(_launch)?\.log'

@@ -23,9 +23,10 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
-from sky.serve import constants
+from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
@@ -39,11 +40,13 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
 
+logger = sky_logging.init_logger(__name__)
+
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
-                         constants.CONTROLLER_MEMORY_USAGE_GB)
+                         serve_constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
@@ -86,7 +89,7 @@ class UpdateMode(enum.Enum):
     BLUE_GREEN = 'blue_green'
 
 
-DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
+DEFAULT_UPDATE_MODE: UpdateMode = UpdateMode.ROLLING
 
 _SIGNAL_TO_ERROR = {
     UserSignal.TERMINATE: exceptions.ServeUserTerminatedError,
@@ -188,7 +191,7 @@ def generate_service_name():
 
 def generate_remote_service_dir_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
-    return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
+    return os.path.join(serve_constants.SKYSERVE_METADATA_DIR, service_name)
 
 
 def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
@@ -215,13 +218,13 @@ def generate_remote_config_yaml_file_name(service_name: str) -> str:
 def generate_remote_controller_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'controller.log')
+    return os.path.join(dir_name, serve_constants.CONTROLLER_LOG_FILE_NAME)
 
 
 def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'load_balancer.log')
+    return os.path.join(dir_name, serve_constants.LOAD_BALANCER_LOG_FILE_NAME)
 
 
 def generate_replica_launch_log_file_name(service_name: str,
@@ -492,7 +495,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
         else:
             # Send the terminate signal to controller.
             signal_file = pathlib.Path(
-                constants.SIGNAL_FILE_PATH.format(service_name))
+                serve_constants.SIGNAL_FILE_PATH.format(service_name))
             # Filelock is needed to prevent race condition between signal
             # check/removal and signal writing.
             with filelock.FileLock(str(signal_file) + '.lock'):
@@ -544,7 +547,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                                    'To spin up more services, please '
                                    'tear down some existing services.')
         elapsed = time.time() - start_time
-        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+        if elapsed > serve_constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.
             controller_log_path = (
                 generate_remote_controller_log_file_name(service_name))
@@ -717,6 +720,170 @@ def stream_replica_logs(service_name: str, replica_id: int,
         return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                 f'{replica_id}.{colorama.Style.RESET_ALL}')
     return ''
+
+
+def append_job_logs_to_replica_log(new_replica_log_file: str,
+                                   job_log_file_name: Optional[str],
+                                   replica_id: int) -> None:
+
+    if job_log_file_name is not None:
+        logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
+        with open(new_replica_log_file, 'a',
+                  encoding='utf-8') as replica_log_file, open(
+                      job_log_file_name, 'r', encoding='utf-8') as job_file:
+            replica_log_file.write(job_file.read())
+        os.remove(job_log_file_name)
+    else:
+        with open(new_replica_log_file, 'a',
+                  encoding='utf-8') as replica_log_file:
+            replica_log_file.write('Failed to sync down job logs from replica '
+                                   f'{replica_id}.\n')
+
+
+def validate_log_file(remote_log_file: str,
+                      target_replica_id: Optional[int]) -> bool:
+    """Validate if log file exists and replica ID matches.
+    Args:
+        - remote_log_file: log path on remote server.
+        - target_replica_id: target replica id, can be None.
+    Returns:
+        - True only if log file exists and replica ID matches.
+        - False otherwise.
+    """
+    if not os.path.exists(remote_log_file):
+        logger.error(
+            f'{colorama.Fore.RED}Path {remote_log_file} does not exist.'
+            '{colorama.Style.RESET_ALL}')
+        return False
+
+    if target_replica_id is None:
+        return True
+
+    # File exists and target replica ID is provided.
+    try:
+        match = re.search(serve_constants.REPLICA_ID_PATTERN, remote_log_file)
+        if match is None:
+            raise ValueError(
+                f'Failed to get replica id from file name: {remote_log_file}')
+        file_replica_id = int(match.group(1))
+    except (ValueError, TypeError) as e:
+        logger.error(f'{colorama.Fore.RED}Invalid replica ID format '
+                     f'in {remote_log_file}: {str(e)}'
+                     '{colorama.Style.RESET_ALL}')
+        return False
+
+    # Comparison between replica ID we got and target replica ID.
+    if file_replica_id != target_replica_id:
+        logger.error(f'{colorama.Fore.RED}Replica ID mismatch: '
+                     'expected {target_replica_id}, got {file_replica_id}'
+                     '{colorama.Style.RESET_ALL}')
+        return False
+
+    return True
+
+
+def prepare_replica_logs_for_download(service_name: str, timestamp: str,
+                                      target_replica_id: Optional[int]) -> None:
+    """Prepare replica logs for download.
+    - This function is a command towards remote server.
+    - It tells remote machine how to prepare the logs for download.
+    """
+
+    logger.info('Preparing replica logs for download...')
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
+    # Local download directory for replica.
+    dir_for_download = os.path.join(dir_name, timestamp)
+    os.makedirs(dir_for_download, exist_ok=True)
+
+    service_record = serve_state.get_service_from_name(service_name)
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
+
+    for replica in service_record['replica_info']:
+        replica_id = replica['replica_id']
+
+        # Directly copy over log files of already-terminated
+        # replicas in this service.
+        if replica['status'] in serve_state.ReplicaStatus.terminal_statuses():
+            target_log_file = generate_replica_log_file_name(
+                service_name, replica_id)
+            if validate_log_file(target_log_file, target_replica_id):
+                # Copy log file into download directory.
+                # Path = dir_for_download
+                shutil.copy(target_log_file, dir_for_download)
+            continue
+
+        # Current possible states, follow time order:
+        # PROVISIONING -> PENDING |-> STARTING -> READY
+        #                         |-> STARTING -> NOT_READY
+        # These logs may still be continuously updating and need to be
+        # synchronize the latest log data from remote server.
+
+        # 1) Directly copy existing launch logs.
+        launch_log_file = generate_replica_launch_log_file_name(
+            service_name, replica_id)  # remote log files (launched)
+        new_replica_log_file = os.path.join(dir_for_download,
+                                            f'replica_{replica_id}.log')
+        if not validate_log_file(launch_log_file, target_replica_id):
+            continue
+        # Copy log file into download directory.
+        # Path = dir_for_download/replica_id.log
+        shutil.copy(launch_log_file, new_replica_log_file)
+
+        if replica['status'] == serve_state.ReplicaStatus.PROVISIONING:
+            logger.info(f'Replica {replica_id} is still in PROVISIONING state.')
+            continue
+
+        # 2) Sync down the running job dataflow.
+        logger.info(f'Syncing down logs for replica {replica_id}...')
+        backend = backends.CloudVmRayBackend()
+        handle = global_user_state.get_handle_from_cluster_name(
+            replica['cluster_name'])
+        if handle is None:
+            logger.error(f'Cannot find cluster {replica["cluster_name"]} for '
+                         f'replica {replica_id} in the cluster table. '
+                         'Skipping syncing down job logs.')
+            continue
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+
+        # Set up local directory for replica job logs.
+        replica_job_logs_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                            'replica_jobs')
+        os.makedirs(replica_job_logs_dir, exist_ok=True)
+        job_log_file_name = None
+        try:
+            log_dirs = backend.sync_down_logs(handle,
+                                              job_ids=None,
+                                              local_dir=replica_job_logs_dir)
+            # Now, log_dirs = {job_id: log_path} or {}.
+        except exceptions.CommandError as e:
+            # Shut down at once when error occurs in downloading.
+            raise RuntimeError('Failed to download the logs: '
+                               f'{common_utils.format_exception(e)}') from e
+        else:
+            if not log_dirs:
+                logger.error(
+                    f'Failed to find the logs for replica {replica_id}.')
+            else:
+                log_dir = list(log_dirs.values())[0]
+                candidate_log_file_name = os.path.join(log_dir, 'run.log')
+                if not os.path.exists(candidate_log_file_name):
+                    logger.error('Failed to find the replica logs '
+                                 f'at {candidate_log_file_name}')
+                job_log_file_name = candidate_log_file_name
+
+        append_job_logs_to_replica_log(new_replica_log_file, job_log_file_name,
+                                       replica_id)
+
+
+def remove_replica_logs_for_download(service_name: str, timestamp: str) -> None:
+    logger.info('Removing replica logs...')
+    remote_service_dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(remote_service_dir_name)
+    dir_to_remove = os.path.join(dir_name, timestamp)
+    shutil.rmtree(dir_to_remove)
 
 
 def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
@@ -958,7 +1125,8 @@ class ServeCodeGen:
             f'{replica_id}, {purge}), end="", flush=True) '
             'if getattr(constants, "SERVE_VERSION", 0) >= 2 else '
             f'exec("raise RuntimeError('
-            f'{constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})"))()'
+            f'{serve_constants.TERMINATE_REPLICA_VERSION_MISMATCH_ERROR!r})\
+            ")()'
         ]
         return cls._build(code)
 
@@ -977,6 +1145,36 @@ class ServeCodeGen:
             'msg = serve_utils.stream_replica_logs('
             f'{service_name!r}, {replica_id!r}, follow={follow})',
             'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def prepare_replica_logs_for_download(cls, service_name: str,
+                                          timestamp: str,
+                                          replica_id: Optional[int]) -> str:
+
+        # Backward compatibility is not a concern for this function:
+        # 1. The parameters `service_name`, `timestamp`, and `replica_id`
+        # were defined at the inception of the system and are not newly
+        # introduced in later version like `mode` in `update_service()`,
+        # meaning there are no expected differences between versions.
+        # 2. During system upgrades, all relevant systems have already
+        # synchronized updates for these parameters, so no parameter
+        # inconsistency will occur across versions.
+        code = [
+            'msg = serve_utils.prepare_replica_logs_for_download('
+            f'{service_name!r}, {timestamp!r}, {replica_id})',
+            'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def remove_replica_logs_for_download(cls, service_name: str,
+                                         timestamp: str) -> str:
+        code = [
+            'msg = serve_utils.remove_replica_logs_for_download('
+            f'{service_name!r}, {timestamp!r})',
+            'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

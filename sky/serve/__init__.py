@@ -7,6 +7,7 @@ from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
 from sky.serve.constants import SKYSERVE_METADATA_DIR
 from sky.serve.core import down
 from sky.serve.core import status
+from sky.serve.core import sync_down_logs
 from sky.serve.core import tail_logs
 from sky.serve.core import terminate_replica
 from sky.serve.core import up
@@ -39,12 +40,13 @@ __all__ = [
     'LB_POLICIES',
     'ReplicaStatus',
     'ServiceComponent',
+    'SKY_SERVE_CONTROLLER_NAME',
     'ServiceStatus',
     'ServeCodeGen',
     'SkyServiceSpec',
-    'SKY_SERVE_CONTROLLER_NAME',
     'SKYSERVE_METADATA_DIR',
     'status',
+    'sync_down_logs',
     'terminate_replica',
     'tail_logs',
     'up',

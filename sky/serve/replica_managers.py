@@ -707,7 +707,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                            'already exists. Skipping.')
             return
 
-        log_file_name = serve_utils.generate_replica_log_file_name(
+        new_replica_log_file = serve_utils.generate_replica_log_file_name(
             self._service_name, replica_id)
 
         def _download_and_stream_logs(info: ReplicaInfo):
@@ -715,7 +715,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_utils.generate_replica_launch_log_file_name(
                     self._service_name, replica_id))
             # Write launch log to replica log file
-            with open(log_file_name, 'w',
+            with open(new_replica_log_file, 'w',
                       encoding='utf-8') as replica_log_file, open(
                           launch_log_file_name, 'r',
                           encoding='utf-8') as launch_file:
@@ -737,19 +737,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             job_log_file_name = (
                 controller_utils.download_and_stream_latest_job_log(
                     backend, handle, replica_job_logs_dir))
-            if job_log_file_name is not None:
-                logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
-                with open(log_file_name, 'a',
-                          encoding='utf-8') as replica_log_file, open(
-                              job_log_file_name, 'r',
-                              encoding='utf-8') as job_file:
-                    replica_log_file.write(job_file.read())
-            else:
-                with open(log_file_name, 'a',
-                          encoding='utf-8') as replica_log_file:
-                    replica_log_file.write(
-                        f'Failed to sync down job logs from replica'
-                        f' {replica_id}.\n')
+
+            serve_utils.append_job_logs_to_replica_log(new_replica_log_file,
+                                                       job_log_file_name,
+                                                       replica_id)
 
         logger.info(f'Terminating replica {replica_id}...')
         info = serve_state.get_replica_info_from_id(self._service_name,
@@ -763,7 +754,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     f'replica_id: {replica_id}')
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(terminate_cluster,
-                                                     log_file_name, 'a').run,
+                                                     new_replica_log_file,
+                                                     'a').run,
             args=(info.cluster_name, replica_drain_delay_seconds),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
