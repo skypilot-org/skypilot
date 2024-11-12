@@ -700,7 +700,7 @@ def write_cluster_config(
                 break
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
         if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
-            # If NO_UPLOAD is specified, fall back to default remote identity 
+            # If NO_UPLOAD is specified, fall back to default remote identity
             # for downstream logic but add it to excluded_clouds to skip
             # credential file uploads.
             remote_identity = schemas.get_default_remote_identity(
@@ -713,7 +713,6 @@ def write_cluster_config(
                     'is not supported by this cloud. Remove the config or set: '
                     '`remote_identity: LOCAL_CREDENTIALS`.')
         excluded_clouds.add(cloud)
-
 
     for cloud_str, cloud_obj in cloud_registry.CLOUD_REGISTRY.items():
         remote_identity_config = skypilot_config.get_nested(
