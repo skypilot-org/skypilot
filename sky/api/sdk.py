@@ -296,9 +296,9 @@ def download_logs(cluster_name: str,
                              json=json.loads(body.model_dump_json()))
     remote_path_dict = stream_and_get(api_common.get_request_id(response))
     remote2local_path_dict = {
-        remote_path: remote_path.replace(
-            str(api_common.api_server_logs_dir_prefix()),
-            constants.SKY_LOGS_DIRECTORY)
+        remote_path:
+        remote_path.replace(str(api_common.api_server_logs_dir_prefix()),
+                            constants.SKY_LOGS_DIRECTORY)
         for remote_path in remote_path_dict.values()
     }
     body = payloads.DownloadBody(folder_paths=list(remote_path_dict.values()),)

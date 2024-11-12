@@ -123,9 +123,19 @@ def _get_cluster_records_and_set_ssh_config(
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
     all_users: bool = False,
 ) -> List[dict]:
-    """Returns a list of clusters that match the glob pattern."""
+    """Returns a list of clusters that match the glob pattern.
+
+    Args:
+        clusters: A list of cluster names to query. If None, query all clusters.
+        refresh: The refresh mode for the status command.
+        all_users: Whether to query clusters from all users.
+            If clusters is not None, this field is ignored because cluster list
+            can include other users' clusters.
+    """
     # TODO(zhwu): we should move this function into SDK.
     # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
+    if clusters is not None:
+        all_users = True
     request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
     cluster_records = sdk.stream_and_get(request_id)
     # Update the SSH config for all clusters
@@ -1966,11 +1976,6 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     query_clusters = None if not clusters else clusters
-    if query_clusters is not None:
-        # We have to set all_users to True if we are querying specific clusters.
-        # Otherwise, user will not be able to see the clusters launched by other
-        # users, although they explicitly specify the clusters.
-        all_users = True
     cluster_records = _get_cluster_records_and_set_ssh_config(
         query_clusters, all_users=all_users)
     clusters = [cluster['name'] for cluster in cluster_records]
@@ -2925,7 +2930,7 @@ def _down_or_stop_clusters(
                     raise click.Abort()
                 no_confirm = True
         names += controllers
-    
+
     if apply_to_all or all_users:
         all_clusters = _get_cluster_records_and_set_ssh_config(
             clusters=None, all_users=all_users)
@@ -3541,7 +3546,8 @@ def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
     request_id = sdk.storage_ls()
     storages = sdk.stream_and_get(request_id)
-    storage_table = storage_utils.format_storage_table(storages, show_all=verbose)
+    storage_table = storage_utils.format_storage_table(storages,
+                                                       show_all=verbose)
     click.echo(storage_table)
 
 
@@ -5156,9 +5162,7 @@ def benchmark_down(
             continue
         to_stop.append(cluster)
 
-    _down_or_stop_clusters(to_stop,
-                           down=True,
-                           no_confirm=yes)
+    _down_or_stop_clusters(to_stop, down=True, no_confirm=yes)
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
