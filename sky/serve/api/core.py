@@ -127,7 +127,9 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     _validate_service_task(task)
-
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
@@ -322,6 +324,14 @@ def update(
     """
     task.validate()
     _validate_service_task(task)
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
+    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
+    # will not apply the config.
+    dag, _ = admin_policy_utils.apply(
+        task, use_mutated_config_in_current_request=False)
+    task = dag.tasks[0]
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -575,8 +585,6 @@ def status(
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
             'policy': (Optional[str]) load balancer policy description,
-            'requested_resources': (sky.Resources) requested resources
-              for replica (deprecated),
             'requested_resources_str': (str) str representation of
               requested resources,
             'replica_info': (List[Dict[str, Any]]) replica information,

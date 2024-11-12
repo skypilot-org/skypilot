@@ -112,6 +112,9 @@ rules:
   - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
     resources: ["ingressclasses"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]                 # Required for sky show-gpus command
+    resources: ["pods"]
+    verbs: ["get", "list"]
 ---
 # ClusterRoleBinding for the service account
 apiVersion: rbac.authorization.k8s.io/v1

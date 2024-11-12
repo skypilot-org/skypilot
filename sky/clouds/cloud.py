@@ -18,6 +18,7 @@ from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -366,6 +367,7 @@ class Cloud:
         del label_key, label_value
         return True, None
 
+    @timeline.event
     def get_feasible_launchable_resources(
             self,
             resources: 'resources_lib.Resources',

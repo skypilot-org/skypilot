@@ -324,37 +324,17 @@ class SSHConfigHelper(object):
                 break
 
     @classmethod
-    # TODO: We can remove this after 0.6.0 and have a lock only per cluster.
-    @timeline.FileLockEvent(ssh_conf_lock_path)
-    def remove_cluster(
-        cls,
-        cluster_name: str,
-        ip: str,
-        auth_config: Dict[str, str],
-        docker_user: Optional[str] = None,
-    ):
-        """Remove auth info for cluster from ~/.sky/generated/ssh/<cluster_name>
-
-        For backward compatibility also remove the config from ~/.ssh/config if
-        it exists.
+    def remove_cluster(cls, cluster_name: str):
+        """Remove authentication information for cluster from ~/.sky/ssh/<cluster_name>.
 
         If no existing host matching the provided specification is found, then
         nothing is removed.
 
         Args:
-            ip: Head node's IP address.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
-            docker_user: If not None, use this user to ssh into the docker
+            cluster_name: Cluster name.
         """
-        cluster_config_path = os.path.expanduser(
-            cls.ssh_cluster_path.format(cluster_name))
-        common_utils.remove_file_if_exists(cluster_config_path)
-        cluster_private_key_path = cls.ssh_cluster_key_path.format(cluster_name)
-        common_utils.remove_file_if_exists(cluster_private_key_path)
-
-        # Ensures backward compatibility: before #2706, we wrote the config of
-        # SkyPilot clusters directly in ~/.ssh/config. For these clusters, we
-        # should clean up the config.
-        # TODO: Remove this after 0.6.0
-        cls._remove_stale_cluster_config_for_backward_compatibility(
-            cluster_name, ip, auth_config, docker_user)
+        with timeline.FileLockEvent(
+                cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
+            cluster_config_path = os.path.expanduser(
+                cls.ssh_cluster_path.format(cluster_name))
+            common_utils.remove_file_if_exists(cluster_config_path)

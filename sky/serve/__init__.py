@@ -11,6 +11,7 @@ from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import INITIAL_VERSION
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
 from sky.serve.constants import SKYSERVE_METADATA_DIR
+from sky.serve.load_balancing_policies import LB_POLICIES
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import DEFAULT_UPDATE_MODE
@@ -34,6 +35,7 @@ __all__ = [
     'get_endpoint',
     'INITIAL_VERSION',
     'LB_CONTROLLER_SYNC_INTERVAL_SECONDS',
+    'LB_POLICIES',
     'ReplicaStatus',
     'ServiceComponent',
     'ServiceStatus',

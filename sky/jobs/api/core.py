@@ -28,6 +28,7 @@ from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -36,6 +37,7 @@ if typing.TYPE_CHECKING:
 # TODO(zhwu): Fix jobs API to work with API server
 
 
+@timeline.event
 @usage_lib.entrypoint
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
@@ -52,6 +54,10 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
+        detach_run: Whether to detach the run.
+        fast: Whether to use sky.launch(fast=True) for the jobs controller. If
+          True, the SkyPilot wheel and the cloud credentials may not be updated
+          on the jobs controller.
 
     Returns:
         - Job ID for the managed job
@@ -65,8 +71,10 @@ def launch(
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
-
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
     if not dag.is_chain():
@@ -148,6 +156,7 @@ def launch(
                                 idle_minutes_to_autostop=skylet_constants.
                                 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                                 retry_until_up=True,
+                                fast=fast,
                                 _disable_controller_check=True)
 
 

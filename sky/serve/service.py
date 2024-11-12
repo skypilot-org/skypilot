@@ -219,6 +219,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             load_balancer_port = common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
 
+            # Extract the load balancing policy from the service spec
+            policy_name = service_spec.load_balancing_policy
+
             # Start the load balancer.
             # TODO(tian): Probably we could enable multiple ports specified in
             # service spec and we could start multiple load balancers.
@@ -227,7 +230,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port))
+                args=(controller_addr, load_balancer_port, policy_name))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)

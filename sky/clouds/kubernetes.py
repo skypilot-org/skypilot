@@ -69,8 +69,8 @@ class Kubernetes(clouds.Cloud):
                                                              'Kubernetes.',
     }
 
-    IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
-    IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT

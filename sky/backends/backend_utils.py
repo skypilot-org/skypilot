@@ -569,7 +569,7 @@ def write_cluster_config(
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
     # Deprecated: instance_tags have been replaced by labels. For backward
     # compatibility, we support them and the schema allows them only if
-    # `labels` are not specified. This should be removed after 0.7.0.
+    # `labels` are not specified. This should be removed after 0.8.0.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'instance_tags'),
                                         labels)
     # labels is a dict, which is guaranteed by the type check in
@@ -1243,6 +1243,7 @@ def check_network_connection():
                                               'Network seems down.') from e
 
 
+@timeline.event
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
 
@@ -2402,10 +2403,12 @@ def get_task_resources_str(task: 'task_lib.Task',
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
     spot_str = ''
+    is_controller_task = task.is_controller_task()
     task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
-                       if task.is_controller_task() else
-                       str(DEFAULT_TASK_CPU_DEMAND))
-    if task.best_resources is not None:
+                       if is_controller_task else str(DEFAULT_TASK_CPU_DEMAND))
+    if is_controller_task:
+        resources_str = f'CPU:{task_cpu_demand}'
+    elif task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:
             if task.best_resources.use_spot:

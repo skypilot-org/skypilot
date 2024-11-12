@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import control_master_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
@@ -104,13 +105,22 @@ def ssh_options_list(
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
+    #
+    # We disable ControlMaster when ssh_proxy_command is used, because the
+    # master connection will be idle although the connection might be shared
+    # by other ssh commands that is not idle. In that case, user's custom proxy
+    # command may drop the connection due to idle timeout, since it will only
+    # see the idle master connection. It is an issue even with the
+    # ServerAliveInterval set, since the keepalive message may not be recognized
+    # by the custom proxy command, such as AWS SSM Session Manager.
+    #
     # We also do not use ControlMaster when we use `kubectl port-forward`
     # to access Kubernetes pods over SSH+Proxycommand. This is because the
     # process running ProxyCommand is kept running as long as the ssh session
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            not disable_control_master):
+            ssh_proxy_command is None and not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -237,6 +247,23 @@ class CommandRunner:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
 
+        def _get_remote_home_dir_with_retry():
+            backoff = common_utils.Backoff(initial_backoff=1,
+                                           max_backoff_factor=5)
+            retries_left = max_retry
+            assert retries_left > 0, f'max_retry {max_retry} must be positive.'
+            while retries_left >= 0:
+                try:
+                    return get_remote_home_dir()
+                except Exception:  # pylint: disable=broad-except
+                    if retries_left == 0:
+                        raise
+                    sleep_time = backoff.current_backoff()
+                    logger.warning(f'Failed to get remote home dir '
+                                   f'- retrying in {sleep_time} seconds.')
+                    retries_left -= 1
+                    time.sleep(sleep_time)
+
         # --filter
         # The source is a local path, so we need to resolve it.
         resolved_source = pathlib.Path(source).expanduser().resolve()
@@ -261,7 +288,7 @@ class CommandRunner:
         if up:
             resolved_target = target
             if target.startswith('~'):
-                remote_home_dir = get_remote_home_dir()
+                remote_home_dir = _get_remote_home_dir_with_retry()
                 resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -273,7 +300,7 @@ class CommandRunner:
         else:
             resolved_source = source
             if source.startswith('~'):
-                remote_home_dir = get_remote_home_dir()
+                remote_home_dir = _get_remote_home_dir_with_retry()
                 resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{node_destination}:{resolved_source!r}',
@@ -442,7 +469,9 @@ class SSHCommandRunner(CommandRunner):
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
-        self.disable_control_master = disable_control_master
+        self.disable_control_master = (
+            disable_control_master or
+            control_master_utils.should_disable_control_master())
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -656,6 +685,8 @@ class SSHCommandRunner(CommandRunner):
 class KubernetesCommandRunner(CommandRunner):
     """Runner for Kubernetes commands."""
 
+    _MAX_RETRIES_FOR_RSYNC = 3
+
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
@@ -798,7 +829,7 @@ class KubernetesCommandRunner(CommandRunner):
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
-        max_retry: int = 1,
+        max_retry: int = _MAX_RETRIES_FOR_RSYNC,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 

@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
+import collections
 import copy
 import io
 import multiprocessing.pool
@@ -12,7 +13,8 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
+                    Tuple, Union)
 
 import colorama
 
@@ -26,6 +28,9 @@ from sky.utils import ux_utils
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
 _SKY_LOG_TAILING_GAP_SECONDS = 0.2
+# Peek the head of the lines to check if we need to start
+# streaming when tail > 0.
+PEEK_HEAD_LINES_FOR_START_STREAM = 20
 
 logger = sky_logging.init_logger(__name__)
 
@@ -186,20 +191,11 @@ def run_with_log(
             daemon_script = os.path.join(
                 os.path.dirname(os.path.abspath(job_lib.__file__)),
                 'subprocess_daemon.py')
-            if not hasattr(constants, 'SKY_GET_PYTHON_PATH_CMD'):
-                # Backward compatibility: for cluster started before #3326, this
-                # constant does not exist. Since we generate the job script
-                # in backends.cloud_vm_ray_backend with inspect, so the
-                # the lates `run_with_log` will be used, but the `constants` is
-                # not updated. We fallback to `python3` in this case.
-                # TODO(zhwu): remove this after 0.7.0.
-                python_path = 'python3'
-            else:
-                python_path = subprocess.check_output(
-                    constants.SKY_GET_PYTHON_PATH_CMD,
-                    shell=True,
-                    stderr=subprocess.DEVNULL,
-                    encoding='utf-8').strip()
+            python_path = subprocess.check_output(
+                constants.SKY_GET_PYTHON_PATH_CMD,
+                shell=True,
+                stderr=subprocess.DEVNULL,
+                encoding='utf-8').strip()
             daemon_cmd = [
                 python_path,
                 daemon_script,
@@ -339,6 +335,7 @@ def run_bash_command_with_log(bash_command: str,
 
 def _follow_job_logs(file,
                      job_id: int,
+                     start_streaming: bool,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -347,7 +344,6 @@ def _follow_job_logs(file,
     # No need to lock the status here, as the while loop can handle
     # the older status.
     status = job_lib.get_status_no_lock(job_id)
-    start_streaming = False
     wait_last_logs = True
     while True:
         tmp = file.readline()
@@ -387,10 +383,45 @@ def _follow_job_logs(file,
             status = job_lib.get_status_no_lock(job_id)
 
 
+def _peek_head_lines(log_file: TextIO) -> List[str]:
+    """Peek the head of the file."""
+    lines = [
+        log_file.readline() for _ in range(PEEK_HEAD_LINES_FOR_START_STREAM)
+    ]
+    # Reset the file pointer to the beginning
+    log_file.seek(0, os.SEEK_SET)
+    return [line for line in lines if line]
+
+
+def _should_stream_the_whole_tail_lines(head_lines_of_log_file: List[str],
+                                        tail_lines: Deque[str],
+                                        start_stream_at: str) -> bool:
+    """Check if the entire tail lines should be streamed."""
+    # See comment:
+    # https://github.com/skypilot-org/skypilot/pull/4241#discussion_r1833611567
+    # for more details.
+    # Case 1: If start_stream_at is found at the head of the tail lines,
+    # we should not stream the whole tail lines.
+    for index, line in enumerate(tail_lines):
+        if index >= PEEK_HEAD_LINES_FOR_START_STREAM:
+            break
+        if start_stream_at in line:
+            return False
+    # Case 2: If start_stream_at is found at the head of log file, but not at
+    # the tail lines, we need to stream the whole tail lines.
+    for line in head_lines_of_log_file:
+        if start_stream_at in line:
+            return True
+    # Case 3: If start_stream_at is not at the head, and not found at the tail
+    # lines, we should not stream the whole tail lines.
+    return False
+
+
 def tail_logs(job_id: Optional[int],
               log_dir: Optional[str],
               managed_job_id: Optional[int] = None,
-              follow: bool = True) -> None:
+              follow: bool = True,
+              tail: int = 0) -> None:
     """Tail the logs of a job.
 
     Args:
@@ -399,6 +430,8 @@ def tail_logs(job_id: Optional[int],
         managed_job_id: The managed job id (for logging info only to avoid
             confusion).
         follow: Whether to follow the logs or print the logs so far and exit.
+        tail: The number of lines to display from the end of the log file,
+            if 0, print all lines.
     """
     if job_id is None:
         # This only happens when job_lib.get_latest_job_id() returns None,
@@ -439,6 +472,8 @@ def tail_logs(job_id: Optional[int],
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = 'Waiting for task resources on '
+    # Explicitly declare the type to avoid mypy warning.
+    lines: Iterable[str] = []
     if follow and status in [
             job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,
@@ -449,18 +484,43 @@ def tail_logs(job_id: Optional[int],
         with open(log_path, 'r', newline='', encoding='utf-8') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
+            start_streaming = False
+            if tail > 0:
+                head_lines_of_log_file = _peek_head_lines(log_file)
+                lines = collections.deque(log_file, maxlen=tail)
+                start_streaming = _should_stream_the_whole_tail_lines(
+                    head_lines_of_log_file, lines, start_stream_at)
+                for line in lines:
+                    if start_stream_at in line:
+                        start_streaming = True
+                    if start_streaming:
+                        print(line, end='')
+                # Flush the last n lines
+                print(end='', flush=True)
+            # Now, the cursor is at the end of the last lines
+            # if tail > 0
             for line in _follow_job_logs(log_file,
                                          job_id=job_id,
+                                         start_streaming=start_streaming,
                                          start_streaming_at=start_stream_at):
                 print(line, end='', flush=True)
     else:
         try:
-            start_stream = False
-            with open(log_path, 'r', encoding='utf-8') as f:
-                for line in f.readlines():
+            start_streaming = False
+            with open(log_path, 'r', encoding='utf-8') as log_file:
+                if tail > 0:
+                    # If tail > 0, we need to read the last n lines.
+                    # We use double ended queue to rotate the last n lines.
+                    head_lines_of_log_file = _peek_head_lines(log_file)
+                    lines = collections.deque(log_file, maxlen=tail)
+                    start_streaming = _should_stream_the_whole_tail_lines(
+                        head_lines_of_log_file, lines, start_stream_at)
+                else:
+                    lines = log_file
+                for line in lines:
                     if start_stream_at in line:
-                        start_stream = True
-                    if start_stream:
+                        start_streaming = True
+                    if start_streaming:
                         print(line, end='', flush=True)
                 status_str = status.value if status is not None else 'None'
                 print(ux_utils.finishing_message(

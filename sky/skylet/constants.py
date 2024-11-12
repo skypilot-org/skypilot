@@ -44,9 +44,6 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # We need to add SKY_PYTHON_CMD before ray executable because:
 # The ray executable is a python script with a header like:
 #   #!/opt/conda/bin/python3
-# When we create the skypilot-runtime venv, the previously installed ray
-# executable will be reused (due to --system-site-packages), and that will cause
-# running ray CLI commands to use the wrong python executable.
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
@@ -82,7 +79,7 @@ SKYLET_VERSION = '8'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 1
+SKYLET_LIB_VERSION = 2
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related
@@ -152,10 +149,11 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
-    # We use --system-site-packages to reuse the system site packages to avoid
-    # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages;'
+    # Do NOT use --system-site-packages here, because if users upgrade any
+    # packages in the base env, they interfere with skypilot dependencies.
+    # Reference: https://github.com/skypilot-org/skypilot/issues/4097
+    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV};'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 

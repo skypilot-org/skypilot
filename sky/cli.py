@@ -48,6 +48,7 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import exceptions
@@ -70,6 +71,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import common
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -1043,6 +1045,13 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--fast',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('[Experimental] If the cluster is already up and available, skip '
+          'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
         entrypoint: Tuple[str, ...],
@@ -1074,6 +1083,7 @@ def launch(
         yes: bool,
         no_setup: bool,
         clone_disk_from: Optional[str],
+        fast: bool,
         async_call: bool):
     """Launch a cluster or task.
 
@@ -2031,6 +2041,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2044,6 +2060,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -3114,9 +3131,9 @@ def show_gpus(
     and spot instances. There may be multiple regions with the same lowest
     price.
 
-    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
-    of the GPU available on a single node and the real-time availability of
-    the GPU across all nodes in the Kubernetes cluster.
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
 
     Definitions of certain fields:
 
@@ -3200,15 +3217,16 @@ def show_gpus(
             full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
-
+        no_permissions_str = '<no permissions>'
         for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
+            available_qty = realtime_gpu_availability.available if realtime_gpu_availability.available != -1 else no_permissions_str
             gpu_availability = common.RealtimeGpuAvailability(
                 *realtime_gpu_availability)
             realtime_gpu_table.add_row([
                 gpu_availability.gpu,
                 _list_to_str(gpu_availability.counts),
                 gpu_availability.capacity,
-                gpu_availability.available,
+                available_qty,
             ])
         return realtime_gpu_table
 
@@ -3218,10 +3236,11 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
+            available = node_info.free['nvidia.com/gpu'] if node_info.free[
+                'nvidia.com/gpu'] != -1 else no_permissions_str
             node_table.add_row([
                 node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                node_info.total['nvidia.com/gpu'], available
             ])
         return node_table
 
@@ -3646,6 +3665,15 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(cooperc): remove this flag once --fast can robustly detect cluster
+# yaml config changes
+@click.option('--fast',
+              default=False,
+              is_flag=True,
+              help='[Experimental] Launch the job faster by skipping '
+              'controller initialization steps. If you update SkyPilot or '
+              'your local cloud credentials, they will not be reflected until '
+              'you run `sky jobs launch` at least once without this flag.')
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3672,6 +3700,7 @@ def jobs_launch(
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
+    fast: bool,
     async_call: bool,
 ):
     """Launch a managed job from a YAML or a command.

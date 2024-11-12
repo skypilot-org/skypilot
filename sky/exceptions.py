@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from sky.utils import env_options
 
+from sky.utils import env_options
+
 if typing.TYPE_CHECKING:
     from sky.backends import backend
     from sky.utils import status_lib

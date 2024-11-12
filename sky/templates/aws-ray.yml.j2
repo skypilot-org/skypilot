@@ -122,6 +122,15 @@ available_node_types:
           - path: /etc/apt/apt.conf.d/10cloudinit-disable
             content: |
               APT::Periodic::Enable "0";
+          - path: /etc/apt/apt.conf.d/52unattended-upgrades-local
+            content: |
+              Unattended-Upgrade::DevRelease "false";
+              Unattended-Upgrade::Allowed-Origins {};
+        bootcmd:
+          - systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+          - systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+          - systemctl mask apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
+          - systemctl daemon-reload
       TagSpecifications:
         - ResourceType: instance
           Tags:
