@@ -36,6 +36,7 @@ from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.api.requests import requests as requests_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import service_catalog
@@ -66,7 +67,6 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.api.requests import requests as requests_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1491,8 +1491,8 @@ class RetryingVmProvisioner(object):
                 # as it will only apply to newly-created instances.
                 ports_to_open_on_launch = (
                     list(resources_utils.port_ranges_to_set(to_provision.ports))
-                    if to_provision.cloud.OPEN_PORTS_VERSION
-                    <= clouds.OpenPortsVersion.LAUNCH_ONLY else None)
+                    if to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
@@ -2177,8 +2177,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _update_cluster_info(self):
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
-        if (self.launched_resources.cloud.PROVISIONER_VERSION
-                >= clouds.ProvisionerVersion.SKYPILOT):
+        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
+                clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
             if os.path.exists(self.cluster_yaml):
@@ -2338,8 +2338,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
         updated_to_skypilot_provisioner_after_provisioned = (
-            self.launched_resources.cloud.PROVISIONER_VERSION
-            >= clouds.ProvisionerVersion.SKYPILOT and
+            self.launched_resources.cloud.PROVISIONER_VERSION >=
+            clouds.ProvisionerVersion.SKYPILOT and
             self.cached_external_ips is not None and
             self.cached_cluster_info is None)
         if updated_to_skypilot_provisioner_after_provisioned:
@@ -2348,8 +2348,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'provisioner after cluster {self.cluster_name} was '
                 f'provisioned. Cached IPs are used for connecting to the '
                 'cluster.')
-        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR
-                >= self.launched_resources.cloud.PROVISIONER_VERSION or
+        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
+                self.launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
@@ -3008,8 +3008,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
             cloud = handle.launched_resources.cloud
-            if not (cloud.OPEN_PORTS_VERSION
-                    <= clouds.OpenPortsVersion.LAUNCH_ONLY):
+            if not (cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
                             'Launching - Opening new ports')):
@@ -3503,7 +3503,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         n_attempts = 2
         while True:
             n_attempts -= 1
-            # In case other running cluster operations are still holding the lock.
+            # In case other running cluster operations are still holding the
+            # lock.
             common_utils.remove_file_if_exists(lock_path)
             requests_lib.kill_requests_for_clusters(handle.cluster_name)
 
@@ -4035,8 +4036,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except exceptions.PortDoesNotExistError:
                 logger.debug('Ports do not exist. Skipping cleanup.')
             except FileNotFoundError:
-                # The cluster yaml may not exist, when the cluster is just set to
-                # INIT state and the cluster yaml file has not been written.
+                # The cluster yaml may not exist, when the cluster is just set
+                # to INIT state and the cluster yaml file has not been written.
                 # In that case, we should be safe to assume the cluster does not
                 # exist, i.e. do not need to clean up for the ports.
                 pass
@@ -4049,7 +4050,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     raise
 
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
+            handle.cluster_name)
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
@@ -4288,8 +4290,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
                                                            requested_ports_set)
             to_provision = handle.launched_resources
-            if (to_provision.cloud.OPEN_PORTS_VERSION
-                    <= clouds.OpenPortsVersion.LAUNCH_ONLY):
+            if (to_provision.cloud.OPEN_PORTS_VERSION <=
+                    clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
                     current_cloud = to_provision.cloud
                     with ux_utils.print_exception_no_traceback():

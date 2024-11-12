@@ -38,6 +38,8 @@ class SSHConfigHelper(object):
 
     ssh_conf_path = '~/.ssh/config'
     ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
+    ssh_conf_per_cluster_lock_path = os.path.expanduser(
+        '~/.sky/ssh_config_{}.lock')
     ssh_cluster_path = constants.SKY_USER_FILE_PATH + '/ssh/{}'
     ssh_cluster_key_path = constants.SKY_USER_FILE_PATH + '/ssh-keys/{}.key'
 
@@ -148,13 +150,6 @@ class SSHConfigHelper(object):
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
 
-        # For backward compatibility: before #2706, we wrote the config of
-        # SkyPilot clusters directly in ~/.ssh/config. For these clusters, we
-        # remove the config in ~/.ssh/config and write/overwrite the config in
-        # ~/.sky/ssh/<cluster_name> instead.
-        cls._remove_stale_cluster_config_for_backward_compatibility(
-            cluster_name, ip, auth_config, docker_user)
-
         if not os.path.exists(config_path):
             config = ['\n']
             with open(config_path,
@@ -189,6 +184,7 @@ class SSHConfigHelper(object):
                 f.write('\n' * 2)
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
+
         docker_proxy_command_generator = None
         if docker_user is not None:
             docker_proxy_command_generator = lambda ip, port: ' '.join(

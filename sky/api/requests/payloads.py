@@ -221,6 +221,7 @@ class JobsLaunchBody(RequestBody):
     task: str
     name: Optional[str]
     retry_until_up: bool
+    fast: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

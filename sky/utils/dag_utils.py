@@ -143,7 +143,7 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
-        default_strategy = jobs.DEFAULT_RECOVERY_STRATEGY
+        default_strategy = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
         assert default_strategy is not None
         for resources in list(task_.resources):
             original_job_recovery = resources.job_recovery

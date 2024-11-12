@@ -422,14 +422,6 @@ def launch(
             (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
             OptimizeTarget.TIME.
-        detach_setup: If True, run setup in non-interactive mode as part of the
-            job itself. You can safely ctrl-c to detach from logging, and it
-            will not interrupt the setup process. To see the logs again after
-            detaching, use `sky logs`. To cancel setup, cancel the job via
-            `sky cancel`. Useful for long-running setup
-            commands.
-        detach_run: If True, as soon as a job is submitted, return from this
-            function and do not stream execution logs.
         no_setup: if True, do not re-run setup commands.
         clone_disk_from: [Experimental] if set, clone the disk from the
             specified cluster. This is useful to migrate the cluster to a

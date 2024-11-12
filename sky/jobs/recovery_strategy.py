@@ -110,16 +110,15 @@ class StrategyExecutor:
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
         if isinstance(job_recovery, dict):
-            job_recovery_name = job_recovery.pop('strategy',
-                                                 DEFAULT_RECOVERY_STRATEGY)
+            job_recovery_name = job_recovery.pop(
+                'strategy', registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
             max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
                                                       0)
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
-        return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
-                                                      task, retry_until_up,
-                                                      max_restarts_on_errors)
+        return registry.JOBS_RECOVERY_STRATEGY_REGISTRY[job_recovery_name](
+            cluster_name, backend, task, retry_until_up, max_restarts_on_errors)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -309,8 +308,6 @@ class StrategyExecutor:
                     # autodown to try and avoid a resource leak.
                     idle_minutes_to_autostop=_AUTODOWN_MINUTES,
                     down=True,
-                    detach_setup=True,
-                    detach_run=True,
                     _is_launched_by_jobs_controller=True)
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,

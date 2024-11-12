@@ -557,7 +557,7 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
         await asyncio.sleep(1)
 
 
-async def log_streamer(request_id: str,
+async def log_streamer(request_id: Optional[str],
                        log_path: pathlib.Path,
                        plain_logs: bool = False):
     if request_id is not None:
@@ -617,18 +617,19 @@ async def stream(
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
-        log_path = request_task.log_path
+        log_path_to_stream = request_task.log_path
     else:
         # Make sure the log path is under ~/sky_logs.
+        assert log_path is not None, (request_id, log_path)
         resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
         if not str(resolved_log_path).startswith(
                 os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Unauthorized log path: {log_path}')
-        log_path = resolved_log_path
+        log_path_to_stream = resolved_log_path
 
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, log_path, plain_logs),
+        log_streamer(request_id, log_path_to_stream, plain_logs),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache',

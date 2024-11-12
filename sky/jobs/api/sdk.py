@@ -23,6 +23,7 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     retry_until_up: bool = False,
+    fast: bool = False,
     need_confirmation: bool = False,
 ) -> str:
     """Launch a managed job."""
@@ -44,6 +45,7 @@ def launch(
         task=dag_str,
         name=name,
         retry_until_up=retry_until_up,
+        fast=fast,
     )
     response = requests.post(
         f'{api_common.get_server_url()}/jobs/launch',

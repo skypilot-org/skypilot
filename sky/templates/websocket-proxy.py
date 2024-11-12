@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""Starting a websocket with SkyPilot Server to proxy SSH to a Kubernetes pod.
+
+This script is useful for users who do not have local Kubernetes credentials.
+"""
 import asyncio
 import os
 import sys
@@ -6,9 +10,8 @@ import sys
 import websockets
 
 
-async def main(websocket_url):
-    async with websockets.connect(websocket_url,
-                                  ping_interval=None) as websocket:
+async def main(url: str) -> None:
+    async with websockets.connect(url, ping_interval=None) as websocket:
         if os.isatty(sys.stdin.fileno()):
             import termios
             import tty
@@ -34,8 +37,8 @@ async def stdin_to_websocket(websocket):
             if not data:
                 break
             await websocket.send(data)
-    except Exception as e:
-        print(f"Error in stdin_to_websocket: {e}", file=sys.stderr)
+    except Exception as e:  # pylint: disable=broad-except
+        print(f'Error in stdin_to_websocket: {e}', file=sys.stderr)
     finally:
         await websocket.close()
 
@@ -48,11 +51,12 @@ async def websocket_to_stdout(websocket):
             await asyncio.get_event_loop().run_in_executor(
                 None, sys.stdout.buffer.flush)
     except websockets.exceptions.ConnectionClosed:
-        print("WebSocket connection closed", file=sys.stderr)
+        print('WebSocket connection closed', file=sys.stderr)
     except Exception as e:
-        print(f"Error in websocket_to_stdout: {e}", file=sys.stderr)
+        print(f'Error in websocket_to_stdout: {e}', file=sys.stderr)
 
 
 if __name__ == '__main__':
-    websocket_url = f'ws://{sys.argv[1]}/kubernetes-pod-ssh-proxy?cluster_name={sys.argv[2]}'
+    websocket_url = (f'ws://{sys.argv[1]}/kubernetes-pod-ssh-proxy'
+                     f'?cluster_name={sys.argv[2]}')
     asyncio.run(main(websocket_url))

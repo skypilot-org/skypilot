@@ -44,6 +44,7 @@ def launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     retry_until_up: bool = False,
+    fast: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.

@@ -16,8 +16,9 @@ from sky.api import common
 from sky.api.requests import payloads
 from sky.api.requests.serializers import decoders
 from sky.api.requests.serializers import encoders
-from sky.utils import common_utils, subprocess_utils
+from sky.utils import common_utils
 from sky.utils import db_utils
+from sky.utils import subprocess_utils
 
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
@@ -40,8 +41,8 @@ class RequestStatus(enum.Enum):
     ABORTED = 'ABORTED'
 
     def __gt__(self, other):
-        return (list(RequestStatus).index(self)
-                > list(RequestStatus).index(other))
+        return (list(RequestStatus).index(self) >
+                list(RequestStatus).index(other))
 
 
 REQUEST_COLUMNS = [
@@ -317,9 +318,8 @@ def get_latest_request_id() -> Optional[str]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(
-            f'SELECT request_id FROM {REQUEST_TABLE} ORDER BY created_at DESC LIMIT 1'
-        )
+        cursor.execute(f'SELECT request_id FROM {REQUEST_TABLE} '
+                       'ORDER BY created_at DESC LIMIT 1')
         row = cursor.fetchone()
         return row[0] if row else None
 
@@ -350,8 +350,8 @@ def get_request_tasks(
 
     Args:
         status: a list of statuses of the requests to filter on.
-        cluster_names: a list of cluster names to filter the requests on.
-        exclude_request_names: a list of request names to exclude from the results.
+        cluster_names: a list of cluster names to filter requests on.
+        exclude_request_names: a list of request names to exclude from results.
     """
     filters = []
     if status is not None:

@@ -48,7 +48,6 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
-from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import exceptions
@@ -71,7 +70,6 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
 from sky.utils import common
-from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -1156,6 +1154,7 @@ def launch(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        fast=fast,
         need_confirmation=not yes,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Launch')
@@ -2142,7 +2141,7 @@ def logs(
     logger.info(f'{colorama.Fore.YELLOW}'
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
-    request = sdk.tail_logs(cluster, job_id, follow)
+    request = sdk.tail_logs(cluster, job_id, follow, tail=tail)
     sdk.stream_and_get(request)
 
 
@@ -3219,7 +3218,9 @@ def show_gpus(
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
         for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
-            available_qty = realtime_gpu_availability.available if realtime_gpu_availability.available != -1 else no_permissions_str
+            available_qty = (realtime_gpu_availability.available
+                             if realtime_gpu_availability.available != -1 else
+                             no_permissions_str)
             gpu_availability = common.RealtimeGpuAvailability(
                 *realtime_gpu_availability)
             realtime_gpu_table.add_row([
@@ -3234,6 +3235,7 @@ def show_gpus(
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
+        no_permissions_str = '<no permissions>'
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
             available = node_info.free['nvidia.com/gpu'] if node_info.free[
@@ -3779,6 +3781,7 @@ def jobs_launch(
     request_id = managed_jobs.launch(dag,
                                      name,
                                      retry_until_up=retry_until_up,
+                                     fast=fast,
                                      need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
     if not async_call and not detach_run:

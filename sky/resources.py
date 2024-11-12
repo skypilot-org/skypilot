@@ -839,7 +839,8 @@ class Resources:
         if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
         # Validate the job recovery strategy
-        registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(self._job_recovery['strategy'])
+        registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
+            self._job_recovery['strategy'])
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:

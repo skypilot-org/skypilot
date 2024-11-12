@@ -158,6 +158,7 @@ def launch(
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    fast: bool = False,
     need_confirmation: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
@@ -226,6 +227,7 @@ def launch(
         optimize_target=optimize_target,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        fast=fast,
         # For internal use
         quiet_optimizer=need_confirmation,
         is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
@@ -273,11 +275,15 @@ def exec(  # pylint: disable=redefined-builtin
 
 @usage_lib.entrypoint
 @api_common.check_health
-def tail_logs(cluster_name: str, job_id: Optional[int], follow: bool) -> str:
+def tail_logs(cluster_name: str,
+              job_id: Optional[int],
+              follow: bool,
+              tail: int = 0) -> str:
     body = payloads.ClusterJobBody(
         cluster_name=cluster_name,
         job_id=job_id,
         follow=follow,
+        tail=tail,
     )
     response = requests.post(f'{api_common.get_server_url()}/logs',
                              json=json.loads(body.model_dump_json()))
@@ -296,9 +302,9 @@ def download_logs(cluster_name: str,
                              json=json.loads(body.model_dump_json()))
     remote_path_dict = stream_and_get(api_common.get_request_id(response))
     remote2local_path_dict = {
-        remote_path: remote_path.replace(
-            str(api_common.api_server_logs_dir_prefix()),
-            constants.SKY_LOGS_DIRECTORY)
+        remote_path:
+        remote_path.replace(str(api_common.api_server_logs_dir_prefix()),
+                            constants.SKY_LOGS_DIRECTORY)
         for remote_path in remote_path_dict.values()
     }
     body = payloads.DownloadBody(folder_paths=list(remote_path_dict.values()),)

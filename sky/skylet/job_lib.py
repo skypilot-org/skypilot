@@ -11,9 +11,7 @@ import shlex
 import sqlite3
 import subprocess
 import time
-import traceback
-import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import colorama
 import filelock
