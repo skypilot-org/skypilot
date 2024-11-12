@@ -3687,11 +3687,17 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='cyan')
     dag, _ = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
-    dag = sky.optimize(dag)
+
+    if not yes:
+        # Skip resource preview if -y is set, since we are probably running in
+        # a script and the user won't have a chance to review it anyway.
+        # This can save a couple of seconds.
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='cyan')
+        dag = sky.optimize(dag)
 
     if not yes:
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
