@@ -633,6 +633,10 @@ def update_job_status(job_ids: List[int],
 
             assert original_status is not None, (job_id, status)
             if status is None:
+                # The job is submitted but the job driver process pid is not
+                # set in the database. This is guarding against the case where
+                # the schedule_step() function is interrupted (e.g., VM stop)
+                # at the middle of starting a new process and setting the pid.
                 status = original_status
                 if (original_status is not None and
                         not original_status.is_terminal()):
