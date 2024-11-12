@@ -669,7 +669,7 @@ def fail_all_jobs_in_progress() -> None:
         f"""\
         UPDATE jobs SET status=(?)
         WHERE status IN ({','.join(['?'] * len(in_progress_status))})
-        """, (JobStatus.FAILED.value, *in_progress_status))
+        """, (JobStatus.FAILED_DRIVER.value, *in_progress_status))
     _CONN.commit()
 
 
