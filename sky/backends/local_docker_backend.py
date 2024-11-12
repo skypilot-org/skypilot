@@ -138,7 +138,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         stream_logs: bool,
         cluster_name: str,
         retry_until_up: bool = False,
-        skip_if_config_hash_matches: Optional[str] = None
+        skip_if_no_updates: bool = False,
     ) -> Optional[LocalDockerResourceHandle]:
         """Builds docker image for the task and returns cluster name as handle.
 
@@ -154,9 +154,9 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
                 'Ignored the flag.')
-        if skip_if_config_hash_matches is not None:
-            logger.warning(f'Config hashing is not supported in backend: '
-                           f'{self.NAME}. Ignored skip_if_config_hash_matches.')
+        if skip_if_no_updates:
+            logger.warning(f'skip_if_no_updates is not supported in backend: '
+                           f'{self.NAME}. Ignored skip_if_no_updates.')
         if stream_logs:
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '

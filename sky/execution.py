@@ -108,7 +108,7 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
-    skip_unecessary_provisioning: bool = False,
+    skip_unnecessary_provisioning: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
@@ -188,13 +188,9 @@ def _execute(
             f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
-    existing_config_hash = None
     if cluster_name is not None:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-        if cluster_record is not None:
-            cluster_exists = True
-            if skip_unecessary_provisioning:
-                existing_config_hash = cluster_record['config_hash']
+        cluster_exists = cluster_record is not None
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -292,7 +288,7 @@ def _execute(
 
     try:
         if Stage.PROVISION in stages:
-            assert handle is None or skip_unecessary_provisioning, (
+            assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
@@ -303,7 +299,7 @@ def _execute(
                 stream_logs=stream_logs,
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
-                skip_if_config_hash_matches=existing_config_hash)
+                skip_if_no_updates=skip_unnecessary_provisioning)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -477,7 +473,7 @@ def launch(
 
     handle = None
     stages = None
-    skip_unecessary_provisioning = False
+    skip_unnecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
         maybe_handle = global_user_state.get_handle_from_cluster_name(
@@ -502,7 +498,7 @@ def launch(
                     Stage.EXEC,
                     Stage.DOWN,
                 ]
-                skip_unecessary_provisioning = True
+                skip_unnecessary_provisioning = True
             except exceptions.ClusterNotUpError:
                 # Proceed with normal provisioning
                 pass
@@ -523,7 +519,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
-        skip_unecessary_provisioning=skip_unecessary_provisioning,
+        skip_unnecessary_provisioning=skip_unnecessary_provisioning,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
