@@ -351,7 +351,6 @@ def get_request_tasks(
     Args:
         status: a list of statuses of the requests to filter on.
         cluster_names: a list of cluster names to filter the requests on.
-        all_clusters: if True, get all requests that have a valid cluster name.
         exclude_request_names: a list of request names to exclude from the results.
     """
     filters = []

@@ -3533,30 +3533,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         # In case other cluster operations are still holding the lock.
         common_utils.remove_file_if_exists(lock_path)
-
-        try:
-            # TODO(mraheja): remove pylint disabling when filelock
-            # version updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(
-                    lock_path,
-                    backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                self.teardown_no_lock(
-                    handle,
-                    terminate,
-                    purge,
-                    # When --purge is set and we already see an ID mismatch
-                    # error, we skip the refresh codepath. This is because
-                    # refresh checks current user identity can throw
-                    # ClusterOwnerIdentityMismatchError. The argument/flag
-                    # `purge` should bypass such ID mismatch errors.
-                    refresh_cluster_status=not is_identity_mismatch_and_purge)
-            if terminate:
+        # Retry in case other cluster operation holds the lock right after
+        # the lock is removed.
+        n_retries = 2
+        while n_retries > 0:
+            n_retries -= 1
+            try:
+                with filelock.FileLock(
+                        lock_path,
+                        backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
+                    self.teardown_no_lock(
+                        handle,
+                        terminate,
+                        purge,
+                        # When --purge is set and we already see an ID mismatch
+                        # error, we skip the refresh codepath. This is because
+                        # refresh checks current user identity can throw
+                        # ClusterOwnerIdentityMismatchError. The argument/flag
+                        # `purge` should bypass such ID mismatch errors.
+                        refresh_cluster_status=not is_identity_mismatch_and_purge)
+                if terminate:
+                    common_utils.remove_file_if_exists(lock_path)
+                break
+            except filelock.Timeout:
                 common_utils.remove_file_if_exists(lock_path)
-        except filelock.Timeout as e:
-            raise RuntimeError(
-                f'Cluster {cluster_name!r} is locked by {lock_path}. '
-                'Check to see if it is still being launched') from e
 
     # --- CloudVMRayBackend Specific APIs ---
 
@@ -4124,8 +4124,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except exceptions.PortDoesNotExistError:
                 logger.debug('Ports do not exist. Skipping cleanup.')
             except FileNotFoundError:
-                # When switching to different region to provision,
-                # we delete the cluster yaml file of the previous region attempt.
+                # The cluster yaml may not exist, when the cluster is just set to
+                # INIT state and the cluster yaml file has not been written.
+                # In that case, we should be safe to assume the cluster does not
+                # exist, i.e. do not need to clean up for the ports.
                 pass
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
@@ -4143,6 +4145,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.cluster_name, handle.head_ip, auth_config,
                 handle.docker_user)
         except FileNotFoundError:
+            # The cluster yaml may not exists, when the cluster is just set to
+            # INIT state and the cluster yaml file has not been written.
+            # In that case, we should be safe to assume the cluster does not
+            # exist, i.e. do not need to clean up the cluster ssh config.
             pass
 
         global_user_state.remove_cluster(handle.cluster_name,
