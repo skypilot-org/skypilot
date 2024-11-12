@@ -4580,7 +4580,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         def _decompress_workdir_zips(
                 runner: command_runner.CommandRunner) -> None:
             zip_filename = (f'{constants.SKY_REMOTE_WORKDIR}'
-                            '/skypilot-filemounts*.tar.gz')
+                            '/skypilot-filemounts*.zip')
             decompress_command = (
                 f'[ -f {zip_filename} ] && '
                 f'(tar -xzf {zip_filename} -C {constants.SKY_REMOTE_WORKDIR} '
