@@ -687,7 +687,7 @@ def write_cluster_config(
             (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
 
     assert cluster_name is not None
-    excluded_clouds = []
+    excluded_clouds = set()
     remote_identity_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
@@ -699,13 +699,21 @@ def write_cluster_config(
                 remote_identity = list(profile.values())[0]
                 break
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
-        if not cloud.supports_service_account_on_remote():
-            raise exceptions.InvalidCloudConfigs(
-                'remote_identity: SERVICE_ACCOUNT is specified in '
-                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
-                'is not supported by this cloud. Remove the config or set: '
-                '`remote_identity: LOCAL_CREDENTIALS`.')
-        excluded_clouds = [cloud]
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            # If NO_UPLOAD is specified, fall back to default remote identity 
+            # for downstream logic but add it to excluded_clouds to skip
+            # credential file uploads.
+            remote_identity = schemas.get_default_remote_identity(
+                str(cloud).lower())
+        else:
+            if not cloud.supports_service_account_on_remote():
+                raise exceptions.InvalidCloudConfigs(
+                    'remote_identity: SERVICE_ACCOUNT is specified in '
+                    f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
+                    'is not supported by this cloud. Remove the config or set: '
+                    '`remote_identity: LOCAL_CREDENTIALS`.')
+        excluded_clouds.add(cloud)
+
 
     for cloud_str, cloud_obj in cloud_registry.CLOUD_REGISTRY.items():
         remote_identity_config = skypilot_config.get_nested(
@@ -713,7 +721,7 @@ def write_cluster_config(
         if remote_identity_config:
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
-                excluded_clouds.append(cloud_obj)
+                excluded_clouds.add(cloud_obj)
 
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
