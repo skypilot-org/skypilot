@@ -147,7 +147,8 @@ def kill_children_processes(
             if not force:
                 print(f'Force killing process {proc.pid}', flush=True)
                 proc.kill()
-                proc.wait(timeout=5)  # Shorter timeout after force kill
+                # Do not wait after sending SIGKILL.
+
 
     parent_processes = []
     if parent_pids is None:

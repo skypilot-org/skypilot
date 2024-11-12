@@ -526,7 +526,7 @@ def _is_job_driver_process_running(job_pid: int, job_id: int) -> bool:
     """
     if job_pid <= 0:
         return False
-    return psutil.pid_exists(job_pid) and any(
+    return psutil.Process(job_pid).is_running() and any(
         JOB_CMD_IDENTIFIER.format(job_id) in line
         for line in psutil.Process(job_pid).cmdline())
 
