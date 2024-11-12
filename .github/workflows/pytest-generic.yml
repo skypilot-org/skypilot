@@ -8,10 +8,12 @@ on:
     branches:
       - master
       - 'releases/**'
+      - advanced-dag
   pull_request:
     branches:
       - master
       - 'releases/**'
+      - advanced-dag
   merge_group:
 
 jobs:

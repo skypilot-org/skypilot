@@ -67,10 +67,13 @@ def launch(
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
-    if not dag.is_chain():
+
+    if not dag.is_connected_dag():
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Only single-task or chain DAG is '
-                             f'allowed for job_launch. Dag: {dag}')
+            raise ValueError(
+                f'Only connected DAG is allowed for job_launch. If your dag '
+                f'contains multiple subgraph that is a connected dag, please '
+                f'separate them into multiple dag. Get: {dag}')
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
@@ -95,7 +98,7 @@ def launch(
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
-        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_utils.dump_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
@@ -257,6 +260,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     stopped_message = ''
     if not refresh:
         stopped_message = 'No in-progress managed jobs.'
+    controller_status: Optional[status_lib.ClusterStatus] = None
     try:
         handle = backend_utils.is_controller_accessible(
             controller=jobs_controller_type, stopped_message=stopped_message)
@@ -371,8 +375,8 @@ def cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool) -> None:
+def tail_logs(name: Optional[str], job_id: Optional[int],
+              task_id: Optional[int], follow: bool, controller: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -398,6 +402,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     backend.tail_managed_job_logs(handle,
                                   job_id=job_id,
                                   job_name=name,
+                                  task_id=task_id,
                                   follow=follow,
                                   controller=controller)
 

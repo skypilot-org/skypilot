@@ -598,9 +598,6 @@ def _follow_replica_logs(
         finish_stream: Callable[[], bool],
         exit_if_stream_end: bool = False,
         no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
-    line = ''
-    log_file = None
-    no_new_content_cnt = 0
 
     def cluster_is_up() -> bool:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
@@ -608,51 +605,41 @@ def _follow_replica_logs(
             return False
         return cluster_record['status'] == status_lib.ClusterStatus.UP
 
-    while True:
-        tmp = file.readline()
-        if tmp is not None and tmp != '':
-            no_new_content_cnt = 0
-            line += tmp
-            if '\n' in line or '\r' in line:
-                # Tailing detailed progress for user. All logs in skypilot is
-                # of format `To view detailed progress: tail -n100 -f *.log`.
-                x = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-                if x is not None:
-                    log_file = os.path.expanduser(x.group(1))
-                elif re.match(_SKYPILOT_LOG_PATTERN, line) is None:
-                    # Not print other logs (file sync logs) since we lack
-                    # utility to determine when these log files are finished
-                    # writing.
-                    # TODO(tian): Not skip these logs since there are small
-                    # chance that error will happen in file sync. Need to find
-                    # a better way to do this.
-                    yield line
-                    # Output next line first since it indicates the process is
-                    # starting. For our launching logs, it's always:
-                    # Launching on <cloud> <region> (<zone>)
-                    if log_file is not None:
-                        with open(log_file, 'r', newline='',
-                                  encoding='utf-8') as f:
-                            # We still exit if more than 10 seconds without new
-                            # content to avoid any internal bug that causes
-                            # the launch failed and cluster status remains INIT.
-                            for l in _follow_replica_logs(
-                                    f,
-                                    cluster_name,
-                                    finish_stream=cluster_is_up,
-                                    exit_if_stream_end=exit_if_stream_end,
-                                    no_new_content_timeout=10):
-                                yield l
-                        log_file = None
-                line = ''
-        else:
-            if exit_if_stream_end or finish_stream():
-                break
-            if no_new_content_timeout is not None:
-                if no_new_content_cnt >= no_new_content_timeout:
-                    break
-                no_new_content_cnt += 1
-            time.sleep(1)
+    def handle_line(line: str) -> Iterator[str]:
+        # Tailing detailed progress for user. All logs in skypilot is
+        # of format `To view detailed progress: tail -n100 -f *.log`.
+        match_provision = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
+        if match_provision:
+            log_file = os.path.expanduser(match_provision.group(1))
+            yield line
+            with open(log_file, 'r', newline='', encoding='utf-8') as f:
+                # We still exit if more than 10 seconds without new
+                # content to avoid any internal bug that causes
+                # the launch failed and cluster status remains INIT.
+                yield from _follow_replica_logs(
+                    f,
+                    cluster_name,
+                    finish_stream=cluster_is_up,
+                    exit_if_stream_end=exit_if_stream_end,
+                    no_new_content_timeout=10)
+        elif not re.match(_SKYPILOT_LOG_PATTERN, line):
+            # Not print other logs (file sync logs) since we lack
+            # utility to determine when these log files are finished
+            # writing.
+            # TODO(tian): Not skip these logs since there are small
+            # chance that error will happen in file sync. Need to find
+            # a better way to do this.
+
+            # Output next line first since it indicates the process is
+            # starting. For our launching logs, it's always:
+            # Launching on <cloud> <region> (<zone>)
+            yield line
+
+    return log_utils.follow_logs(file,
+                                 finish_stream=finish_stream,
+                                 exit_if_stream_end=exit_if_stream_end,
+                                 line_handler=handle_line,
+                                 no_new_content_timeout=no_new_content_timeout)
 
 
 def stream_replica_logs(service_name: str, replica_id: int,
@@ -719,22 +706,6 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
-def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
-                 exit_if_stream_end: bool) -> Iterator[str]:
-    line = ''
-    while True:
-        tmp = file.readline()
-        if tmp is not None and tmp != '':
-            line += tmp
-            if '\n' in line or '\r' in line:
-                yield line
-                line = ''
-        else:
-            if exit_if_stream_end or finish_stream():
-                break
-            time.sleep(1)
-
-
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
                               follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
@@ -753,9 +724,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 
     with open(os.path.expanduser(log_file), 'r', newline='',
               encoding='utf-8') as f:
-        for line in _follow_logs(f,
-                                 finish_stream=_service_is_terminal,
-                                 exit_if_stream_end=not follow):
+        for line in log_utils.follow_logs(f,
+                                          finish_stream=_service_is_terminal,
+                                          exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     return ''
 

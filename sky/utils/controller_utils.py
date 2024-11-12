@@ -166,10 +166,8 @@ class Controllers(enum.Enum):
             The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
-        for controller in cls:
-            if name in controller.value.candidate_cluster_names:
-                return controller
-        return None
+        return next((controller for controller in cls
+                     if name in controller.value.candidate_cluster_names), None)
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:

@@ -1,10 +1,12 @@
 """Utility functions for UX."""
 import contextlib
+import functools
 import os
 import sys
+import threading
 import traceback
 import typing
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Literal, Optional, TextIO, Union
 
 import colorama
 import rich.console as rich_console
@@ -15,7 +17,15 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import logging
     import pathlib
+
+T = typing.TypeVar('T')
+
+# `TextOpenMode` emulates `_typeshed.OpenTextMode` to ensure `open()` returns
+# `TextIO` in text modes (e.g., "r", "w") without relying on private module
+# `_typeshed`.
+TextOpenMode = Literal['r', 'r+', 'w', 'w+', 'a', 'a+']
 
 console = rich_console.Console()
 
@@ -119,6 +129,91 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+# TODO(andy): We use this class to redirect at the thread level, and it
+# should replace the process-level redirector `RedirectOutputForProcess`
+# in the future.
+class RedirectOutputForThread:
+    """Redirects stdout and stderr to thread-specific files.
+
+    This class enables output redirection for threading.Thread.
+    Example usage:
+    with RedirectOutputForThread() as redirector:
+        with ThreadPoolExecutor() as executor:
+            executor.submit(redirector.wrap(task_func, 'task1.log'), *args)
+    """
+
+    def __init__(self) -> None:
+        self._original_stdout: TextIO = sys.stdout
+        self._original_stderr: TextIO = sys.stderr
+        self._thread_aware_stdout = self._ThreadAwareOutput(
+            self._original_stdout)
+        self._thread_aware_stderr = self._ThreadAwareOutput(
+            self._original_stderr)
+
+    class _ThreadAwareOutput:
+        """A thread-aware output class that replaces sys.stdout/stderr."""
+
+        def __init__(self, original_output: TextIO) -> None:
+            self._original_output: TextIO = original_output
+            self._thread_local: threading.local = threading.local()
+
+        def resolve_output(self) -> TextIO:
+            return getattr(self._thread_local, 'output', self._original_output)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.resolve_output(), name)
+
+        # These methods must be explicitly defined because logging module calls
+        # them directly without triggering __getattr__. If not defined here,
+        # logging will fallback to original stdout/stderr, which breaks the
+        # redirection. This is likely due to logging's internal implementation
+        # that verifies stream capabilities before using them.
+        def flush(self) -> None:
+            return self.resolve_output().flush()
+
+        def write(self, s: str) -> int:
+            return self.resolve_output().write(s)
+
+        def set_from(self, output: TextIO) -> None:
+            self._thread_local.output = output
+
+    def __enter__(self):  # -> Self:
+        """Replaces global stdout/stderr with our thread-aware versions."""
+        sys.stdout = self._thread_aware_stdout
+        sys.stderr = self._thread_aware_stderr
+        return self
+
+    def __exit__(self, *_) -> None:
+        """Restores original stdout/stderr."""
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
+
+    def run(self,
+            func: Callable[..., T],
+            filepath: Union[str, 'pathlib.Path'],
+            mode: TextOpenMode = 'w') -> Callable[..., T]:
+        """Wraps a function to redirect its output to a specific file."""
+
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs) -> T:
+            with open(filepath, mode, encoding='utf-8') as f:
+                self._thread_aware_stdout.set_from(f)
+                self._thread_aware_stderr.set_from(f)
+
+                sky_logging.reload_logger()
+                logger: 'logging.Logger' = sky_logging.init_logger(__name__)
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    logger.error(f'Failed to run {func.__name__}. '
+                                 f'Details: {common_utils.format_exception(e)}')
+                    with ux_utils.enable_traceback():
+                        logger.error(f'  Traceback:\n{traceback.format_exc()}')
+                    raise
+
+        return wrapped
 
 
 def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:

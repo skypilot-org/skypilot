@@ -780,7 +780,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
+        dag = dag_utils.load_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
@@ -797,7 +797,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
-        # env update has been done for DAG in load_chain_dag_from_yaml for YAML.
+        # env update has been done for DAG in load_dag_from_yaml for YAML.
         task.update_envs(env)
 
     # Override.
@@ -3884,14 +3884,32 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option('--task-id',
+              required=False,
+              type=int,
+              help='Tail the logs of a specific task.')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+def jobs_logs(name: Optional[str], job_id: Optional[int],
+              task_id: Optional[int], follow: bool, controller: bool) -> None:
     """Tail the log of a managed job."""
+    if name is not None and job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
+
+    if task_id is not None:
+        if job_id is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Must specify job_id when specifying task_id.')
+        if controller:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both task_id and controller.')
+    # TODO(andy): Add validation to ensure either `--task-id` or `--controller`
+    # is specified when dealing with non-linear job DAGs.
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
+                               task_id=task_id,
                                follow=follow,
                                controller=controller)
     except exceptions.ClusterNotUpError:
