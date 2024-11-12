@@ -979,7 +979,7 @@ def test_stale_job(generic_cloud: str):
             'sleep 100',  # Ensure this is large enough, else GCP leaks.
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -1010,7 +1010,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -1041,7 +1041,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
