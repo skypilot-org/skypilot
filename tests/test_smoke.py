@@ -465,6 +465,8 @@ def test_aws_with_ssh_proxy_command():
                 f'sky logs {name} 1 --status',
                 f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
                 f'sky logs {name} 2 --status',
+                # Start a small job to make sure the controller is created.
+                f'sky jobs launch -n {name}-0 --cpus 2 --use-spot echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
                 'timeout 300s bash -c "until sky status sky-jobs-controller* | grep UP; do sleep 1; done"',
