@@ -294,6 +294,9 @@ class AbstractStore:
         self._validate()
         self.initialize()
 
+    def get_bucket_sub_path(self) -> Optional[str]:
+        return self._bucket_sub_path
+
     def set_bucket_sub_path(self, bucket_sub_path: Optional[str]) -> None:
         if bucket_sub_path is not None:
             self._bucket_sub_path = bucket_sub_path.strip('/')
@@ -347,7 +350,10 @@ class AbstractStore:
         raise NotImplementedError
 
     def delete(self) -> None:
-        """Removes the Storage object from the cloud."""
+        """Removes the Storage from the cloud."""
+        raise NotImplementedError
+
+    def remove_objects_from_sub_path(self) -> None:
         raise NotImplementedError
 
     def get_handle(self) -> StorageHandle:
@@ -990,7 +996,9 @@ class Storage(object):
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
 
-    def delete(self, store_type: Optional[StoreType] = None) -> None:
+    def delete(self,
+               store_type: Optional[StoreType] = None,
+               only_delete_sub_path_if_exists: bool = False) -> None:
         """Deletes data for all sky-managed storage objects.
 
         If a storage is not managed by sky, it is not deleted from the cloud.
@@ -999,12 +1007,22 @@ class Storage(object):
         Args:
             store_type: StoreType; Specific cloud store to remove from the list
               of backing stores.
+            only_delete_sub_path_if_exists: bool; Whether to delete only the
+              bucket sub path instead of the whole bucket if bucket sub path
+              is set.
         """
-        if not self.stores:
+        if not self.stores and not only_delete_sub_path_if_exists:
             logger.info('No backing stores found. Deleting storage.')
             global_user_state.remove_storage(self.name)
         if store_type:
             store = self.stores[store_type]
+            # We delete the bucket sub path if it exists, and then return.
+            # Without interfering with the global state.
+            # User should still call storage.delete() to remove the bucket.
+            if only_delete_sub_path_if_exists and store.get_bucket_sub_path():
+                store.remove_objects_from_sub_path()
+                return
+
             is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
@@ -1024,15 +1042,24 @@ class Storage(object):
             # Remove store from bookkeeping
             del self.stores[store_type]
         else:
-            for _, store in self.stores.items():
+            keys_to_delete = []
+            for key, store in self.stores.items():
+                if only_delete_sub_path_if_exists and store.get_bucket_sub_path(
+                ):
+                    store.remove_objects_from_sub_path()
+                    continue
+
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
                     store.delete()
                 elif self.force_delete:
                     store.delete()
-            self.stores = {}
-            # Remove storage from global_user_state if present
-            global_user_state.remove_storage(self.name)
+                keys_to_delete.append(key)
+            for key in keys_to_delete:
+                del self.stores[key]
+            if len(self.stores) == 0:
+                # Remove storage from global_user_state if present
+                global_user_state.remove_storage(self.name)
 
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""
@@ -1319,6 +1346,19 @@ class S3Store(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
+    def remove_objects_from_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_s3_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Removed objects from S3 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'Failed to remove objects from S3 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
 
@@ -1532,6 +1572,27 @@ class S3Store(AbstractStore):
                 ) from e
         return aws.resource('s3').Bucket(bucket_name)
 
+    def _execute_s3_remove_command(self, command: str, bucket_name: str,
+                                   hint_operating: str,
+                                   hint_failed: str) -> bool:
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
     def _delete_s3_bucket(self, bucket_name: str) -> bool:
         """Deletes S3 bucket, including all objects in bucket
 
@@ -1549,28 +1610,27 @@ class S3Store(AbstractStore):
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
-        try:
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message(
-                        f'Deleting S3 bucket [green]{bucket_name}')):
-                subprocess.check_output(remove_command.split(' '),
-                                        stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(
-                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name=bucket_name))
-                return False
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete S3 bucket {bucket_name}.'
-                        f'Detailed error: {e.output}')
+        success = self._execute_s3_remove_command(
+            remove_command, bucket_name,
+            f'Deleting S3 bucket [green]{bucket_name}',
+            f'Failed to delete S3 bucket {bucket_name}.')
+        if not success:
+            return False
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_s3_bucket(bucket_name):
             time.sleep(0.1)
         return True
+
+    def _delete_s3_bucket_sub_path(self, bucket_name: str,
+                                   sub_path: str) -> bool:
+        """Deletes the sub path from the bucket."""
+        remove_command = f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive'
+        return self._execute_s3_remove_command(
+            remove_command, bucket_name,
+            f'Removing objects from S3 bucket [green]{bucket_name}/{sub_path}',
+            f'Failed to remove objects from S3 bucket {bucket_name}/{sub_path}.'
+        )
 
 
 class GcsStore(AbstractStore):
@@ -1754,6 +1814,19 @@ class GcsStore(AbstractStore):
         else:
             msg_str = f'GCS bucket {self.name} may have been deleted ' \
                       f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def remove_objects_from_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_gcs_bucket(self.name,
+                                                      self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted objects in GCS bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'GCS bucket {self.name} may have ' \
+                      'been deleted externally.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -1983,19 +2056,30 @@ class GcsStore(AbstractStore):
             f'{new_bucket.storage_class}{colorama.Style.RESET_ALL}')
         return new_bucket
 
-    def _delete_gcs_bucket(self, bucket_name: str) -> bool:
-        """Deletes GCS bucket, including all objects in bucket
+    def _delete_gcs_bucket(self,
+                           bucket_name: str,
+                           bucket_sub_path: Optional[str] = None) -> bool:
+        """Deletes objects in GCS bucket
 
         Args:
           bucket_name: str; Name of bucket
+          bucket_sub_path: str; Sub path in the bucket, if provided only objects
+            in the sub path will be deleted, else the whole bucket will be
+            deleted
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
         """
-
+        if bucket_sub_path is not None:
+            command_suffix = f'/{bucket_sub_path}'
+            hint_text = 'objects in '
+        else:
+            command_suffix = ''
+            hint_text = ''
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Deleting GCS bucket [green]{bucket_name}')):
+                    f'Deleting {hint_text}GCS bucket '
+                    f'[green]{bucket_name}{command_suffix}')):
             try:
                 self.client.get_bucket(bucket_name)
             except gcp.forbidden_exception() as e:
@@ -2013,8 +2097,9 @@ class GcsStore(AbstractStore):
                 return False
             try:
                 gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
-                                      f'rm -r gs://{bucket_name}')
+                remove_obj_command = (
+                    f'{alias_gen};{gsutil_alias} '
+                    f'rm -r gs://{bucket_name}{command_suffix}')
                 subprocess.check_output(remove_obj_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True,
@@ -2023,7 +2108,8 @@ class GcsStore(AbstractStore):
             except subprocess.CalledProcessError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete GCS bucket {bucket_name}.'
+                        f'Failed to delete {hint_text}GCS bucket '
+                        f'{bucket_name}{command_suffix}.'
                         f'Detailed error: {e.output}')
 
 
@@ -2530,6 +2616,10 @@ class AzureBlobStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
+    def remove_objects_from_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        raise NotImplementedError('Not implemented')
+
     def get_handle(self) -> StorageHandle:
         """Returns the Storage Handle object."""
         return self.storage_client.blob_containers.get(
@@ -2937,6 +3027,10 @@ class R2Store(AbstractStore):
                       f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
+
+    def remove_objects_from_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        raise NotImplementedError('Not implemented')
 
     def get_handle(self) -> StorageHandle:
         return cloudflare.resource('s3').Bucket(self.name)
@@ -3367,6 +3461,10 @@ class IBMCosStore(AbstractStore):
         self._delete_cos_bucket()
         logger.info(f'{colorama.Fore.GREEN}Deleted COS bucket {self.name}.'
                     f'{colorama.Style.RESET_ALL}')
+
+    def remove_objects_from_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        raise NotImplementedError('Not implemented')
 
     def get_handle(self) -> StorageHandle:
         return self.s3_resource.Bucket(self.name)

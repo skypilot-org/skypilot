@@ -3505,7 +3505,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if storage_mounts is not None:
             for _, storage in storage_mounts.items():
                 if not storage.persistent:
-                    storage.delete()
+                    storage.delete(only_delete_sub_path_if_exists=True)
 
     def _teardown(self,
                   handle: CloudVmRayResourceHandle,
