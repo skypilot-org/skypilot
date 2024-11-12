@@ -66,6 +66,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.api.requests import requests as requests_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1490,8 +1491,8 @@ class RetryingVmProvisioner(object):
                 # as it will only apply to newly-created instances.
                 ports_to_open_on_launch = (
                     list(resources_utils.port_ranges_to_set(to_provision.ports))
-                    if to_provision.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY else None)
+                    if to_provision.cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.LAUNCH_ONLY else None)
                 try:
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
@@ -2216,8 +2217,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def _update_cluster_info(self):
         # When a cluster is on a cloud that does not support the new
         # provisioner, we should skip updating cluster_info.
-        if (self.launched_resources.cloud.PROVISIONER_VERSION >=
-                clouds.ProvisionerVersion.SKYPILOT):
+        if (self.launched_resources.cloud.PROVISIONER_VERSION
+                >= clouds.ProvisionerVersion.SKYPILOT):
             provider_name = str(self.launched_resources.cloud).lower()
             config = {}
             if os.path.exists(self.cluster_yaml):
@@ -2377,8 +2378,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
         updated_to_skypilot_provisioner_after_provisioned = (
-            self.launched_resources.cloud.PROVISIONER_VERSION >=
-            clouds.ProvisionerVersion.SKYPILOT and
+            self.launched_resources.cloud.PROVISIONER_VERSION
+            >= clouds.ProvisionerVersion.SKYPILOT and
             self.cached_external_ips is not None and
             self.cached_cluster_info is None)
         if updated_to_skypilot_provisioner_after_provisioned:
@@ -2387,8 +2388,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'provisioner after cluster {self.cluster_name} was '
                 f'provisioned. Cached IPs are used for connecting to the '
                 'cluster.')
-        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR >=
-                self.launched_resources.cloud.PROVISIONER_VERSION or
+        if (clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR
+                >= self.launched_resources.cloud.PROVISIONER_VERSION or
                 updated_to_skypilot_provisioner_after_provisioned):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
@@ -3051,8 +3052,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
             cloud = handle.launched_resources.cloud
-            if not (cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+            if not (cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.LAUNCH_ONLY):
                 with rich_utils.safe_status(
                         ux_utils.spinner_message(
                             'Launching - Opening new ports')):
@@ -3528,33 +3529,36 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 is_identity_mismatch_and_purge = True
             else:
                 raise
-
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
-
-        try:
-            # TODO(mraheja): remove pylint disabling when filelock
-            # version updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(
-                    lock_path,
-                    backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                self.teardown_no_lock(
-                    handle,
-                    terminate,
-                    purge,
-                    # When --purge is set and we already see an ID mismatch
-                    # error, we skip the refresh codepath. This is because
-                    # refresh checks current user identity can throw
-                    # ClusterOwnerIdentityMismatchError. The argument/flag
-                    # `purge` should bypass such ID mismatch errors.
-                    refresh_cluster_status=not is_identity_mismatch_and_purge)
-            if terminate:
+        # In case other running cluster operations are still holding the lock.
+        common_utils.remove_file_if_exists(lock_path)
+        # Retry in case new cluster operation comes in and holds the lock
+        # right after the lock is removed.
+        n_retries = 1
+        while n_retries > 0:
+            n_retries -= 1
+            try:
+                with filelock.FileLock(
+                        lock_path,
+                        backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
+                    self.teardown_no_lock(
+                        handle,
+                        terminate,
+                        purge,
+                        # When --purge is set and we already see an ID mismatch
+                        # error, we skip the refresh codepath. This is because
+                        # refresh checks current user identity can throw
+                        # ClusterOwnerIdentityMismatchError. The argument/flag
+                        # `purge` should bypass such ID mismatch errors.
+                        refresh_cluster_status=not is_identity_mismatch_and_purge
+                    )
+                if terminate:
+                    common_utils.remove_file_if_exists(lock_path)
+                break
+            except filelock.Timeout:
                 common_utils.remove_file_if_exists(lock_path)
-        except filelock.Timeout as e:
-            raise RuntimeError(
-                f'Cluster {cluster_name!r} is locked by {lock_path}. '
-                'Check to see if it is still being launched') from e
+                requests_lib.kill_requests_for_clusters(handle.cluster_name)
 
     # --- CloudVMRayBackend Specific APIs ---
 
@@ -3807,6 +3811,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
+        requests_lib.kill_requests_for_clusters(handle.cluster_name)
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
@@ -4106,9 +4111,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
         if terminate:
-            cloud = handle.launched_resources.cloud
-            config = common_utils.read_yaml(handle.cluster_yaml)
             try:
+                cloud = handle.launched_resources.cloud
+                config = common_utils.read_yaml(handle.cluster_yaml)
                 cloud.check_features_are_supported(
                     handle.launched_resources,
                     {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -4119,6 +4124,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 pass
             except exceptions.PortDoesNotExistError:
                 logger.debug('Ports do not exist. Skipping cleanup.')
+            except FileNotFoundError:
+                # The cluster yaml may not exist, when the cluster is just set to
+                # INIT state and the cluster yaml file has not been written.
+                # In that case, we should be safe to assume the cluster does not
+                # exist, i.e. do not need to clean up for the ports.
+                pass
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
@@ -4128,13 +4139,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     raise
 
-        # The cluster file must exist because the cluster_yaml will only
-        # be removed after the cluster entry in the database is removed.
-        config = common_utils.read_yaml(handle.cluster_yaml)
-        auth_config = config['auth']
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
-            handle.cluster_name, handle.head_ip, auth_config,
-            handle.docker_user)
+        try:
+            config = common_utils.read_yaml(handle.cluster_yaml)
+            auth_config = config['auth']
+            sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
+                handle.cluster_name, handle.head_ip, auth_config,
+                handle.docker_user)
+        except FileNotFoundError:
+            # The cluster yaml may not exists, when the cluster is just set to
+            # INIT state and the cluster yaml file has not been written.
+            # In that case, we should be safe to assume the cluster does not
+            # exist, i.e. do not need to clean up the cluster ssh config.
+            pass
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
@@ -4380,8 +4396,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             all_ports = resources_utils.port_set_to_ranges(current_ports_set |
                                                            requested_ports_set)
             to_provision = handle.launched_resources
-            if (to_provision.cloud.OPEN_PORTS_VERSION <=
-                    clouds.OpenPortsVersion.LAUNCH_ONLY):
+            if (to_provision.cloud.OPEN_PORTS_VERSION
+                    <= clouds.OpenPortsVersion.LAUNCH_ONLY):
                 if not requested_ports_set <= current_ports_set:
                     current_cloud = to_provision.cloud
                     with ux_utils.print_exception_no_traceback():

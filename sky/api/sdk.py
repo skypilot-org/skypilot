@@ -296,9 +296,9 @@ def download_logs(cluster_name: str,
                              json=json.loads(body.model_dump_json()))
     remote_path_dict = stream_and_get(api_common.get_request_id(response))
     remote2local_path_dict = {
-        remote_path:
-        remote_path.replace(str(api_common.api_server_logs_dir_prefix()),
-                            constants.SKY_LOGS_DIRECTORY)
+        remote_path: remote_path.replace(
+            str(api_common.api_server_logs_dir_prefix()),
+            constants.SKY_LOGS_DIRECTORY)
         for remote_path in remote_path_dict.values()
     }
     body = payloads.DownloadBody(folder_paths=list(remote_path_dict.values()),)
@@ -609,7 +609,8 @@ def get(request_id: str) -> Any:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def stream_and_get(request_id: Optional[str] = None, log_path: Optional[str] = None) -> Any:
+def stream_and_get(request_id: Optional[str] = None,
+                   log_path: Optional[str] = None) -> Any:
     """Stream the logs of a request and get the final result.
 
     This will block until the request is finished. The request id can be a
@@ -715,13 +716,9 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 
 @usage_lib.entrypoint
-def abort(request_id: Optional[str] = None) -> str:
-    """Abort a request or all requests.
-
-    Args:
-        request_id: the ID of the request to abort. If None, abort all requests.
-    """
-    body = payloads.RequestIdBody(request_id=request_id)
+def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint: disable=redefined-builtin
+    """Abort a request or all requests."""
+    body = payloads.RequestIdBody(request_id=request_id, all=all)
     print(f'Sending abort request to API server for {request_id}')
     response = requests.post(f'{api_common.get_server_url()}/abort',
                              json=json.loads(body.model_dump_json()),

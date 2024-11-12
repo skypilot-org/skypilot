@@ -16,9 +16,12 @@ from sky.api import common
 from sky.api.requests import payloads
 from sky.api.requests.serializers import decoders
 from sky.api.requests.serializers import encoders
-from sky.utils import common_utils
+from sky.utils import common_utils, subprocess_utils
 from sky.utils import db_utils
 
+# Tables in task.db.
+REQUEST_TABLE = 'requests'
+COL_CLUSTER_NAME = 'cluster_name'
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 # TODO(zhwu): For scalability, there are several TODOs:
@@ -37,8 +40,8 @@ class RequestStatus(enum.Enum):
     ABORTED = 'ABORTED'
 
     def __gt__(self, other):
-        return (list(RequestStatus).index(self) >
-                list(RequestStatus).index(other))
+        return (list(RequestStatus).index(self)
+                > list(RequestStatus).index(other))
 
 
 REQUEST_COLUMNS = [
@@ -51,6 +54,7 @@ REQUEST_COLUMNS = [
     'error',
     'pid',
     'created_at',
+    COL_CLUSTER_NAME,
 ]
 
 
@@ -122,11 +126,22 @@ class Request:
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
-        return cls.decode(RequestPayload(**dict(zip(REQUEST_COLUMNS, row))))
+        return cls.decode(
+            RequestPayload(**dict(zip(REQUEST_COLUMNS, row[:-1]))))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
-        return tuple(getattr(payload, k) for k in REQUEST_COLUMNS)
+        row = []
+        for k in REQUEST_COLUMNS:
+            if k == COL_CLUSTER_NAME:
+                cluster_name = ''
+                if hasattr(self.request_body, COL_CLUSTER_NAME) and \
+                        self.request_body.cluster_name is not None:
+                    cluster_name = self.request_body.cluster_name
+                row.append(cluster_name)
+            else:
+                row.append(getattr(payload, k))
+        return tuple(row)
 
     def readable_encode(self) -> RequestPayload:
         """Serialize the request task."""
@@ -186,6 +201,33 @@ class Request:
         )
 
 
+def kill_requests_for_clusters(cluster_name: str):
+    request_ids = [
+        request_task.request_id for request_task in get_request_tasks(
+            cluster_names=[cluster_name],
+            status=[RequestStatus.RUNNING],
+            exclude_request_names=['down', 'stop'])
+    ]
+    kill_requests(request_ids)
+
+
+def kill_requests(request_ids: List[str]):
+    for request_id in request_ids:
+        with update_request(request_id) as request_record:
+            if request_record is None:
+                print(f'No request ID {request_id}')
+                continue
+            if request_record.status > RequestStatus.RUNNING:
+                print(f'Request {request_id} already finished')
+                continue
+            if request_record.pid is not None:
+                print(f'Killing request process {request_record.pid}',
+                      flush=True)
+                subprocess_utils.kill_children_processes(
+                    parent_pids=[request_record.pid], force=True)
+            request_record.status = RequestStatus.ABORTED
+
+
 _DB_PATH = os.path.expanduser(common.API_SERVER_REQUEST_DB_PATH)
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
@@ -206,9 +248,9 @@ def create_table(cursor, conn):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
-    # Table for Clusters
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS requests (
+    # Table for Requests
+    cursor.execute(f"""\
+        CREATE TABLE IF NOT EXISTS {REQUEST_TABLE} (
         request_id TEXT PRIMARY KEY,
         name TEXT,
         entrypoint TEXT,
@@ -217,7 +259,8 @@ def create_table(cursor, conn):
         created_at REAL,
         return_value TEXT,
         error BLOB,
-        pid INTEGER)""")
+        pid INTEGER,
+        {COL_CLUSTER_NAME} TEXT)""")
 
 
 _DB = None
@@ -242,9 +285,7 @@ def reset_db():
 
 
 def request_lock_path(request_id: str) -> str:
-    request_lock = os.path.join(os.path.dirname(_DB_PATH),
-                                f'.{request_id}.lock')
-    return request_lock
+    return os.path.join(os.path.dirname(_DB_PATH), f'.{request_id}.lock')
 
 
 @contextlib.contextmanager
@@ -262,7 +303,7 @@ def _get_request_no_lock(request_id: str) -> Optional[Request]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT * FROM requests WHERE request_id LIKE ?',
+        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} WHERE request_id LIKE ?',
                        (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
@@ -276,9 +317,12 @@ def get_latest_request_id() -> Optional[str]:
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute('SELECT request_id FROM requests ORDER BY created_at DESC LIMIT 1')
+        cursor.execute(
+            f'SELECT request_id FROM {REQUEST_TABLE} ORDER BY created_at DESC LIMIT 1'
+        )
         row = cursor.fetchone()
         return row[0] if row else None
+
 
 @init_db
 def get_request(request_id: str) -> Optional[Request]:
@@ -299,16 +343,34 @@ def create_if_not_exists(request: Request) -> bool:
 
 @init_db
 def get_request_tasks(
-        status: Optional[List[RequestStatus]] = None) -> List[Request]:
-    """Get a REST task."""
-    status_filter = ''
+        status: Optional[List[RequestStatus]] = None,
+        cluster_names: Optional[List[str]] = None,
+        exclude_request_names: Optional[List[str]] = None) -> List[Request]:
+    """Get a list of requests that match the given filters.
+
+    Args:
+        status: a list of statuses of the requests to filter on.
+        cluster_names: a list of cluster names to filter the requests on.
+        exclude_request_names: a list of request names to exclude from the results.
+    """
+    filters = []
     if status is not None:
         status_list_str = ','.join(repr(status.value) for status in status)
-        status_filter = f'WHERE status IN ({status_list_str})'
+        filters.append(f'status IN ({status_list_str})')
+    if exclude_request_names is not None:
+        exclude_request_names_str = ','.join(
+            repr(name) for name in exclude_request_names)
+        filters.append(f'name NOT IN ({exclude_request_names_str})')
+    if cluster_names is not None:
+        cluster_names_str = ','.join(repr(name) for name in cluster_names)
+        filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'SELECT * FROM requests {status_filter}'
+        filter_str = ' AND '.join(filters)
+        if filter_str:
+            filter_str = f' WHERE {filter_str}'
+        cursor.execute(f'SELECT * FROM {REQUEST_TABLE}{filter_str} '
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:
@@ -327,19 +389,5 @@ def _dump_request_no_lock(request: Request):
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'INSERT OR REPLACE INTO requests VALUES ({fill_str})',
-                       row)
-
-
-@init_db
-def dump_reqest(request: Request):
-    """Dump a REST task."""
-    with filelock.FileLock(request_lock_path(request.request_id)):
-        _dump_request_no_lock(request)
-
-
-# def _check_process_alive(pid: int) -> bool:
-#     """Check if a process is alive."""
-
-#     psutil_process = psutil.Process(pid)
-#     return psutil_process.is_running()
+        cursor.execute(
+            f'INSERT OR REPLACE INTO {REQUEST_TABLE} VALUES ({fill_str})', row)

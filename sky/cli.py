@@ -5555,7 +5555,8 @@ def api_get(request_id: Optional[str], log_path: Optional[str]):
         # TODO(zhwu): get the latest request ID.
         raise click.BadParameter('Please provide the request ID or log path.')
     if request_id is not None and log_path is not None:
-        raise click.BadParameter('Only one of request ID and log path can be provided.')
+        raise click.BadParameter(
+            'Only one of request ID and log path can be provided.')
     sdk.stream_and_get(request_id, log_path)
 
 
@@ -5574,9 +5575,7 @@ def api_abort(request_id: Optional[str], all: bool):
     if request_id is None and not all:
         raise click.BadParameter('Either specify a request ID or use --all to '
                                  'abort all requests.')
-    if all:
-        request_id = None
-    sdk.abort(request_id)
+    sdk.abort(request_id=request_id, all=all)
 
 
 @api.command('ls', cls=_DocumentedCodeCommand)
@@ -5600,7 +5599,7 @@ def api_ls(request_id: Optional[str], all: bool):
     for request in request_list:
         r_id = request.request_id
         if not all:
-            r_id = common_utils.truncate_long_string(r_id, 8)
+            r_id = common_utils.truncate_long_string(r_id, 36)
         table.add_row([
             r_id, request.name,
             log_utils.readable_time_duration(request.created_at), request.status

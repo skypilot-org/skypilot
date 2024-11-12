@@ -35,7 +35,6 @@ from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
-from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -288,7 +287,6 @@ async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
     Args:
         task: The YAML string of the task to launch.
     """
-
     request_id = request.state.request_id
     executor.schedule_request(
         request_id,
@@ -603,9 +601,10 @@ async def stream(
         plain_logs: bool = True) -> fastapi.responses.StreamingResponse:
 
     if request_id is not None and log_path is not None:
-        raise fastapi.HTTPException(status_code=400,
-                                    detail='Only one of request_id and log_path can be provided')
-    
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='Only one of request_id and log_path can be provided')
+
     if request_id is None and log_path is None:
         request_id = requests_lib.get_latest_request_id()
         if request_id is None:
@@ -616,15 +615,16 @@ async def stream(
         request_task = requests_lib.get_request(request_id)
         if request_task is None:
             print(f'No task with request ID {request_id}')
-            raise fastapi.HTTPException(status_code=404,
-                                        detail=f'Request {request_id} not found')
+            raise fastapi.HTTPException(
+                status_code=404, detail=f'Request {request_id} not found')
         log_path = request_task.log_path
     else:
         # Make sure the log path is under ~/sky_logs.
         resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
-        if not str(resolved_log_path).startswith(os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
-            raise fastapi.HTTPException(status_code=400,
-                                        detail=f'Unauthorized log path: {log_path}')
+        if not str(resolved_log_path).startswith(
+                os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
+            raise fastapi.HTTPException(
+                status_code=400, detail=f'Unauthorized log path: {log_path}')
         log_path = resolved_log_path
 
     return fastapi.responses.StreamingResponse(
@@ -638,9 +638,11 @@ async def stream(
 
 @app.post('/abort')
 async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
+    """Abort requests."""
+    # Create a list of target abort requests.
     request_ids = []
-    if abort_body.request_id is None:
-        print('Aborting all requests')
+    if abort_body.all:
+        print('Aborting all requests...')
         request_ids = [
             request_task.request_id
             for request_task in requests_lib.get_request_tasks(status=[
@@ -648,31 +650,18 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
                 requests_lib.RequestStatus.PENDING
             ])
         ]
-    else:
+    if abort_body.request_id is not None:
         print(f'Aborting request ID: {abort_body.request_id}')
-        request_ids = [abort_body.request_id]
+        request_ids.append(abort_body.request_id)
 
-    for request_id in request_ids:
-        with requests_lib.update_request(request_id) as request_record:
-            if request_record is None:
-                print(f'No task with request ID {request_id}')
-                raise fastapi.HTTPException(
-                    status_code=404, detail=f'Request {request_id} not found')
-            if request_record.status > requests_lib.RequestStatus.RUNNING:
-                print(f'Request {request_id} already finished')
-                return
-            request_record.status = requests_lib.RequestStatus.ABORTED
-            pid = request_record.pid
-        if pid is not None:
-            print(f'Killing request process {pid}', flush=True)
-            executor.schedule_request(
-                request_id=request.state.request_id,
-                request_name='kill_children_processes',
-                request_body=payloads.KillChildrenProcessesBody(
-                    parent_pids=[pid], force=True),
-                func=subprocess_utils.kill_children_processes,
-                schedule_type=executor.ScheduleType.BLOCKING,
-            )
+    # Abort the target requests.
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='kill_request_processes',
+        request_body=payloads.KillRequestProcessesBody(request_ids=request_ids),
+        func=requests_lib.kill_requests,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
+    )
 
 
 @app.get('/requests')
