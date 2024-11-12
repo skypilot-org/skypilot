@@ -3030,7 +3030,16 @@ class R2Store(AbstractStore):
 
     def remove_objects_from_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
-        raise NotImplementedError('Not implemented')
+        deleted_by_skypilot = self._delete_r2_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Removed objects from R2 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'Failed to remove objects from R2 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
         return cloudflare.resource('s3').Bucket(self.name)
@@ -3250,6 +3259,43 @@ class R2Store(AbstractStore):
                     f'{self.name} but failed.') from e
         return cloudflare.resource('s3').Bucket(bucket_name)
 
+    def _execute_r2_remove_command(self, command: str, bucket_name: str,
+                                   hint_operating: str,
+                                   hint_failed: str) -> bool:
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
+    def _delete_r2_bucket_sub_path(self, bucket_name: str,
+                                   sub_path: str) -> bool:
+        """Deletes the sub path from the bucket."""
+        endpoint_url = cloudflare.create_endpoint()
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
+            f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
+        return self._execute_r2_remove_command(
+            remove_command, bucket_name,
+            f'Removing objects from R2 bucket {bucket_name}/{sub_path}',
+            f'Failed to remove objects from R2 bucket {bucket_name}/{sub_path}.'
+        )
+
     def _delete_r2_bucket(self, bucket_name: str) -> bool:
         """Deletes R2 bucket, including all objects in bucket
 
@@ -3272,24 +3318,12 @@ class R2Store(AbstractStore):
             f'aws s3 rb s3://{bucket_name} --force '
             f'--endpoint {endpoint_url} '
             f'--profile={cloudflare.R2_PROFILE_NAME}')
-        try:
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message(
-                        f'Deleting R2 bucket {bucket_name}')):
-                subprocess.check_output(remove_command,
-                                        stderr=subprocess.STDOUT,
-                                        shell=True)
-        except subprocess.CalledProcessError as e:
-            if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(
-                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name=bucket_name))
-                return False
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete R2 bucket {bucket_name}.'
-                        f'Detailed error: {e.output}')
+
+        success = self._execute_r2_remove_command(
+            remove_command, bucket_name, f'Deleting R2 bucket {bucket_name}',
+            f'Failed to delete R2 bucket {bucket_name}.')
+        if not success:
+            return False
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_r2_bucket(bucket_name):
