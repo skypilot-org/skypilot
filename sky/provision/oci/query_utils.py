@@ -520,7 +520,10 @@ class QueryHelper:
             ) for p in new_ports
         ]
 
-        if len(new_rules) > 0:
+        if first_sg_id is not None and len(new_rules) > 0:
+            if first_sg_rules is None:
+                first_sg_rules = []
+
             net_client.update_security_list(
                 security_list_id=first_sg_id,
                 update_security_list_details=oci_adaptor.oci.core.models.
