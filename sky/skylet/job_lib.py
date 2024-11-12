@@ -676,10 +676,6 @@ def fail_all_jobs_in_progress() -> None:
 def update_status() -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
-    # NOTE: there might be a INIT job in the database set to FAILED by this
-    # function, as the ray job status does not exist due to the app
-    # not submitted yet. It will be then reset to PENDING / RUNNING when the
-    # app starts.
     nonterminal_jobs = _get_jobs(username=None,
                                  status_list=JobStatus.nonterminal_statuses())
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
