@@ -69,7 +69,8 @@ def status(
             'autostop': (int) idle time before autostop,
             'to_down': (bool) whether autodown is used instead of autostop,
             'metadata': (dict) metadata of the cluster,
-            'user_hash': (str) user hash of the cluster,
+            'user_hash': (str) user hash of the cluster owner,
+            'user_name': (str) user name of the cluster owner,
         }
 
     Each cluster can have one of the following statuses:

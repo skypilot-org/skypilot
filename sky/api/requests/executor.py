@@ -10,12 +10,16 @@ import traceback
 import typing
 from typing import Any, Callable, List, Optional, Union
 
+from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.api.requests.queues import mp_queue
+from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -175,6 +179,10 @@ def _wrapper(request_id: str, ignore_return_value: bool):
         original_stdout, original_stderr = redirect_output(f)
         try:
             os.environ.update(request_body.env_vars)
+            user = models.User(
+                user_id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                user_name=request_body.env_vars[constants.USER_ENV_VAR])
+            global_user_state.add_user(user)
             # Force color to be enabled.
             os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()

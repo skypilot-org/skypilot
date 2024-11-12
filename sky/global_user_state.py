@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from sky import clouds
+from sky import models
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import db_utils
@@ -103,6 +104,11 @@ def create_table(cursor, conn):
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
+    # Table for User
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -165,6 +171,25 @@ def get_transaction_id(cluster_name: str) -> int:
     if rows is None:
         return -1
     return rows[0]
+
+
+def add_user(user: models.User):
+    # Check if user exists
+    existing = _DB.cursor.execute('SELECT id, name FROM users WHERE id=?',
+                                  (user.id,)).fetchone()
+    if existing is None or existing[1] is None:
+        _DB.cursor.execute(
+            'INSERT OR REPLACE INTO users (id, name) VALUES (?, ?)',
+            (user.id, user.name))
+        _DB.conn.commit()
+
+
+def get_user(user_id: str) -> models.User:
+    row = _DB.cursor.execute('SELECT id, name FROM users WHERE id=?',
+                             (user_id,)).fetchone()
+    if row is None:
+        return models.User(user_id=user_id)
+    return models.User(user_id=row[0], user_name=row[1])
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -272,7 +297,8 @@ def add_or_update_cluster(cluster_name: str,
         # transaction_id
         '?,'
         # user_hash
-        '?'
+        'COALESCE('
+        '(SELECT user_hash FROM clusters WHERE name=?), ?)'
         ')',
         (
             # name
@@ -307,6 +333,7 @@ def add_or_update_cluster(cluster_name: str,
             # transaction_id
             transaction_id + 1,
             # user_hash
+            cluster_name,
             user_hash,
         ))
 
@@ -687,6 +714,7 @@ def get_clusters() -> List[Dict[str, Any]]:
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
             'user_hash': user_hash,
+            'user_name': get_user(user_hash).name,
         }
 
         records.append(record)

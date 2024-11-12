@@ -1,5 +1,6 @@
 """Payloads for the Sky API requests."""
 import functools
+import getpass
 import os
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -21,6 +22,7 @@ def request_body_env_vars() -> dict:
         if env_var.startswith('SKYPILOT_'):
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
+    env_vars[constants.USER_ENV_VAR] = getpass.getuser()
     return env_vars
 
 
