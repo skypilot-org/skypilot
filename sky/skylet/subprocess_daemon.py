@@ -88,6 +88,9 @@ if __name__ == '__main__':
         # the process due to the children being defunct.
         children = [process] + children
 
+    if not children:
+        sys.exit()
+
     for child in children:
         try:
             child.terminate()
