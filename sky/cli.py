@@ -121,7 +121,7 @@ else:
 def _get_cluster_records_and_set_ssh_config(
     clusters: Optional[List[str]],
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
-    all_users: bool = True,
+    all_users: bool = False,
 ) -> List[dict]:
     """Returns a list of clusters that match the glob pattern."""
     # TODO(zhwu): we should move this function into SDK.
@@ -1497,8 +1497,8 @@ def _status_kubernetes(show_all: bool):
 
 
 @cli.command()
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
@@ -1554,7 +1554,8 @@ def _status_kubernetes(show_all: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.option('--all-users/--no-all-users',
+@click.option('--all-users',
+              '-u',
               default=False,
               is_flag=True,
               required=False,
@@ -1562,7 +1563,7 @@ def _status_kubernetes(show_all: bool):
               'current user.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
+def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
            show_services: bool, kubernetes: bool, clusters: List[str],
            all_users: bool):
@@ -1584,7 +1585,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
     since last launch, resources, region, zone, hourly price, status, autostop,
     command.
 
-    Display all fields using ``sky status -a``.
+    Display all fields using ``sky status -v``.
 
     Each cluster can have one of the following statuses:
 
@@ -1625,11 +1626,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       cluster statuses from the cloud providers.
     """
     if kubernetes:
-        _status_kubernetes(all)
+        _status_kubernetes(verbose)
         return
-    if all:
-        # Set all_users to True if user specifies --all.
-        all_users = True
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
@@ -1778,7 +1776,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
-            normal_clusters + controllers, all, all_users)
+            normal_clusters + controllers, verbose, all_users)
 
         def _try_get_future_result(future) -> Tuple[bool, Any]:
             result = None
@@ -1880,7 +1878,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
               default=False,
               is_flag=True,
               required=False,
-              help='Show all information in full.')
+              help='Show all cluster information.')
 @usage_lib.entrypoint
 def cost_report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1946,7 +1944,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 @cli.command()
 @click.option('--all-users',
-              '-a',
+              '-u',
               default=False,
               is_flag=True,
               required=False,
@@ -2222,9 +2220,14 @@ def cancel(
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
               help='Stop all existing clusters.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              help='Stop all existing clusters for all users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2235,7 +2238,8 @@ def cancel(
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
     yes: bool,
     async_call: bool,
 ):
@@ -2270,6 +2274,7 @@ def stop(
     """
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
+                           all_users=all_users,
                            down=False,
                            no_confirm=yes,
                            async_call=async_call)
@@ -2282,9 +2287,14 @@ def stop(
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
-              help='Apply this command to all existing clusters.')
+              help='Autostop all existing clusters.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              help='Autostop all existing clusters for all users.')
 @click.option('--idle-minutes',
               '-i',
               type=int,
@@ -2316,7 +2326,8 @@ def stop(
 @usage_lib.entrypoint
 def autostop(
     clusters: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
     down: bool,  # pylint: disable=redefined-outer-name
@@ -2374,6 +2385,7 @@ def autostop(
         idle_minutes = 5
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
+                           all_users=all_users,
                            down=down,
                            no_confirm=yes,
                            idle_minutes_to_autostop=idle_minutes,
@@ -2632,9 +2644,14 @@ def start(
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
               help='Tear down all existing clusters.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              help='Tear down all existing clusters for all users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2657,7 +2674,8 @@ def start(
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
     async_call: bool,
@@ -2692,6 +2710,7 @@ def down(
     """
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
+                           all_users=all_users,
                            down=True,
                            no_confirm=yes,
                            purge=purge,
@@ -2805,9 +2824,10 @@ _CONTROLLER_TO_HINT_OR_RAISE = {
 
 def _down_or_stop_clusters(
         names: List[str],
-        apply_to_all: Optional[bool],
-        down: bool,  # pylint: disable=redefined-outer-name
-        no_confirm: bool,
+        apply_to_all: bool = False,
+        all_users: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+        no_confirm: bool = True,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None,
         async_call: bool = False) -> None:
@@ -2823,17 +2843,12 @@ def _down_or_stop_clusters(
         command = 'autostop'
     else:
         command = 'stop'
-    if not names and apply_to_all is None:
-        # UX: frequently users may have only 1 cluster. In this case, 'sky
-        # stop/down' without args should be smart and default to that unique
-        # choice.
-        all_clusters = _get_cluster_records_and_set_ssh_config(['*'])
-        if len(all_clusters) <= 1:
-            names = [cluster['name'] for cluster in all_clusters]
-        else:
-            raise click.UsageError(
-                f'`sky {command}` requires either a cluster name or glob '
-                '(see `sky status`), or the -a/--all flag.')
+    if not names and not apply_to_all and not all_users:
+        raise click.UsageError(
+            f'`sky {command}` requires either a cluster name or glob '
+            '(see `sky status`), or the -a/--all flag for all your '
+            'clusters, or the -u/--all-users flag for all clusters in '
+            'your team.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -2844,6 +2859,7 @@ def _down_or_stop_clusters(
             option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
+    names = list(names)
     if len(names) > 0:
         controllers = [
             name for name in names
@@ -2909,9 +2925,10 @@ def _down_or_stop_clusters(
                     raise click.Abort()
                 no_confirm = True
         names += controllers
-
-    if apply_to_all:
-        all_clusters = _get_cluster_records_and_set_ssh_config(clusters=None)
+    
+    if apply_to_all or all_users:
+        all_clusters = _get_cluster_records_and_set_ssh_config(
+            clusters=None, all_users=all_users)
         if len(names) > 0:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
@@ -3512,19 +3529,19 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
               help='Show all information in full.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def storage_ls(all: bool):
+def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
     request_id = sdk.storage_ls()
     storages = sdk.stream_and_get(request_id)
-    storage_table = storage_utils.format_storage_table(storages, show_all=all)
+    storage_table = storage_utils.format_storage_table(storages, show_all=verbose)
     click.echo(storage_table)
 
 
@@ -3534,6 +3551,9 @@ def storage_ls(all: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_storage_name))
+# TODO(yikaluo): currently -a delete storage objects for all users since we don't
+# have user hash in the storage table. Need to change -a to delete single user's
+# storage objects and add -u for all users.
 @click.option('--all',
               '-a',
               default=False,
@@ -3762,8 +3782,8 @@ def jobs_launch(
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
@@ -3784,7 +3804,7 @@ def jobs_launch(
               help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
+def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -3842,7 +3862,7 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         _, msg = _get_managed_jobs(refresh=refresh,
                                    skip_finished=skip_finished,
-                                   show_all=all,
+                                   show_all=verbose,
                                    is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
@@ -4325,8 +4345,8 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
@@ -4339,7 +4359,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, endpoint: bool, service_names: List[str]):
+def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
@@ -4426,7 +4446,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       sky serve status
       \b
       # Show detailed status for all services
-      sky serve status -a
+      sky serve status -v
       \b
       # Only show status of my-service
       sky serve status my-service
@@ -4434,7 +4454,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
         _, msg = _get_services(service_names,
-                               show_all=all,
+                               show_all=verbose,
                                show_endpoint=endpoint,
                                is_called_by_user=True)
 
@@ -5137,7 +5157,6 @@ def benchmark_down(
         to_stop.append(cluster)
 
     _down_or_stop_clusters(to_stop,
-                           apply_to_all=False,
                            down=True,
                            no_confirm=yes)
 
