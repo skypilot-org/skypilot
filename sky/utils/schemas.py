@@ -3,7 +3,6 @@
 Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
-import copy
 import enum
 from typing import Any, Dict, List, Tuple
 
@@ -709,13 +708,12 @@ def get_config_schema():
                     'resources': resources_schema,
                 }
             },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            }
         }
-    }
-    jobs_configs = copy.deepcopy(controller_resources_schema)
-    jobs_configs['properties']['bucket'] = {
-        'type': 'string',
-        'pattern': '^(https|s3|gs|r2|cos)://.+',
-        'required': []
     }
     cloud_configs = {
         'aws': {
@@ -937,7 +935,7 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'jobs': jobs_configs,
+            'jobs': controller_resources_schema,
             'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,

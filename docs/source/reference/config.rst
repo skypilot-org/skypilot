@@ -24,6 +24,10 @@ Available fields and semantics:
   #
   # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
   jobs:
+    # Bucket to store managed jobs mount files and tmp files.
+    # Its optional, if not set, SkyPilot will create a new bucket for each managed jobs .
+    # Support https|s3|gs|r2|cos
+    bucket: s3://sky-bucket-with-permission
     controller:
       resources:  # same spec as 'resources' in a task YAML
         cloud: gcp
