@@ -167,11 +167,6 @@ class JobStatus(enum.Enum):
 # to avoid a delay between getting job id (INIT) and the actual pending job.
 # TODO(zhwu): This number should be tuned based on heuristics.
 _INIT_SUBMIT_GRACE_PERIOD = 60
-# Only update status of the submitted PENDING jobs after this many seconds of
-# job submission, to avoid race condition with `ray job` to make sure it job has
-# been correctly updated.
-# TODO(zhwu): This number should be tuned based on heuristics.
-_PENDING_SUBMIT_GRACE_PERIOD = 10
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
@@ -523,6 +518,17 @@ def _get_pending_job(job_id: int) -> Optional[Dict[str, Any]]:
         }
     return None
 
+def _is_job_driver_process_running(job_pid: int, job_id: int) -> bool:
+    """Check if the job driver process is running.
+
+    We check the cmdline to avoid the case where the same pid is reused by a
+    different process.
+    """
+    if job_pid <= 0:
+        return False
+    return psutil.pid_exists(job_pid) and any(
+        JOB_CMD_IDENTIFIER.format(job_id) in line
+        for line in psutil.Process(job_pid).cmdline())
 
 def update_job_status(job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
@@ -577,12 +583,7 @@ def update_job_status(job_ids: List[int],
                 # #4318, using ray job submit. We skip the checking for those
                 # jobs.
                 if job_pid > 0:
-                    job_driver_process = psutil.Process(job_pid)
-                    # We check the cmdline to avoid the case where the same
-                    # pid is reused by a different process.
-                    if job_driver_process.is_running() and any(
-                            JOB_CMD_IDENTIFIER.format(job_id) in line
-                            for line in job_driver_process.cmdline()):
+                    if _is_job_driver_process_running(job_pid, job_id):
                         status = JobStatus.PENDING
                     else:
                         # By default, if the job driver process does not exist,
@@ -822,12 +823,13 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
         # it is being cancelled
         with filelock.FileLock(_get_lock_path(job_id)):
             job = _get_jobs_by_ids([job_id])[0]
-            if job['pid'] > 0:
+            if _is_job_driver_process_running(job['pid'], job_id):
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
                 # Instead, we need to kill the children processes recursively,
                 # and forcely kill the underlying processes if timeout.
+                logger.info(f'Killing children processes of job {job["job_id"]}')
                 subprocess_utils.kill_children_processes(job['pid'])
             elif job['pid'] < 0:
                 try:
