@@ -294,10 +294,12 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
 
   for config_file in configs/*; do
     job_name=$(basename $config_file)
+    # --fast: allows SkyPilot to skip the pre-checks for controller and
+    #         speed up the submission.
     # -y: yes to all prompts.
     # -d: detach from the job's logging, so the next job can be submitted
     #      without waiting for the previous job to finish.
-    sky jobs launch -n train-$job_name -y -d train-template.yaml \
+    sky jobs launch --fast -n train-$job_name -y -d train-template.yaml \
       --env-file $config_file \
       --env WANDB_API_KEY
   done
@@ -342,5 +344,6 @@ To have more customized control over generation of job variants, you can also us
         name=f'train-job{job_idx}',
         detach_run=True,
         retry_until_up=True,
+        fast=True
       )
       job_idx += 1
