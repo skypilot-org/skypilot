@@ -1,7 +1,7 @@
 name: intermediate-bucket
 
 file_mounts:
-  file_mounts_dir: .
+  /file_mounts_dir: .
 
 workdir: .
 
@@ -10,5 +10,8 @@ setup: |
   echo "running setup"
 
 run: |
-  conda env list
+  echo "listing workdir"
+  ls .
+  echo "listing file_mounts_dir"
+  ls /file_mounts_dir
   echo "task run finish"

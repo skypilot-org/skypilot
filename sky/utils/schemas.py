@@ -300,7 +300,7 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
-            'bucket_sub_path': {
+            '_bucket_sub_path': {
                 'type': 'string',
             },
             '_force_delete': {

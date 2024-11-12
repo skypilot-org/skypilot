@@ -288,9 +288,9 @@ class AbstractStore:
         self.sync_on_reconstruction = sync_on_reconstruction
 
         if bucket_sub_path is not None:
-            self.bucket_sub_path: Optional[str] = bucket_sub_path.strip('/')
+            self._bucket_sub_path: Optional[str] = bucket_sub_path.strip('/')
         else:
-            self.bucket_sub_path = None
+            self._bucket_sub_path = None
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -540,7 +540,7 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
-        self.bucket_sub_path = bucket_sub_path
+        self._bucket_sub_path = bucket_sub_path
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
         # for spot. Once sky storage supports forced management for external
@@ -855,7 +855,10 @@ class Storage(object):
                 continue
             # This one can't be retrieved from metadata since its set every time
             # we create a new storage object.
-            store.bucket_sub_path = self.bucket_sub_path
+            # This private member setting against coding style guide, but
+            # we want to keep it private member for internal usage only.
+            # pylint: disable=protected-access
+            store._bucket_sub_path = self._bucket_sub_path
             self._add_store(store, is_reconstructed=True)
 
     @classmethod
@@ -937,7 +940,7 @@ class Storage(object):
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
-                bucket_sub_path=self.bucket_sub_path)
+                bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -1066,7 +1069,7 @@ class Storage(object):
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
-        bucket_sub_path = config.pop('bucket_sub_path', None)
+        bucket_sub_path = config.pop('_bucket_sub_path', None)
         if force_delete is None:
             force_delete = False
 
@@ -1336,8 +1339,8 @@ class S3Store(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}{bucket_sub_path}')
@@ -1352,8 +1355,8 @@ class S3Store(AbstractStore):
                 for file_name in excluded_list
             ])
             src_dir_path = shlex.quote(src_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = (
                 f'aws s3 sync --no-follow-symlinks {excludes} '
                 f'{src_dir_path} '
@@ -1468,7 +1471,7 @@ class S3Store(AbstractStore):
         """
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
         mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
-                                                    self.bucket_sub_path,
+                                                    self._bucket_sub_path,
                                                     mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
@@ -1811,8 +1814,8 @@ class GcsStore(AbstractStore):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = (
                 f'{alias_gen}; {gsutil_alias} '
                 f'rsync -e -x \'^(?!{sync_format}$).*\' '
@@ -1826,8 +1829,8 @@ class GcsStore(AbstractStore):
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = (
                 f'{alias_gen}; {gsutil_alias} '
                 f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
@@ -1929,7 +1932,7 @@ class GcsStore(AbstractStore):
         """
         install_cmd = mounting_utils.get_gcs_mount_install_cmd()
         mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
-                                                     self.bucket_sub_path,
+                                                     self._bucket_sub_path,
                                                      mount_path)
         version_check_cmd = (
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
@@ -2543,8 +2546,8 @@ class AzureBlobStore(AbstractStore):
             includes_list = ';'.join(file_names)
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
-            container_path = (f'{self.container_name}/{self.bucket_sub_path}'
-                              if self.bucket_sub_path else self.container_name)
+            container_path = (f'{self.container_name}/{self._bucket_sub_path}'
+                              if self._bucket_sub_path else self.container_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
@@ -2562,8 +2565,8 @@ class AzureBlobStore(AbstractStore):
                 [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            container_path = (f'{self.container_name}/{self.bucket_sub_path}'
-                              if self.bucket_sub_path else
+            container_path = (f'{self.container_name}/{self._bucket_sub_path}'
+                              if self._bucket_sub_path else
                               f'{self.container_name}')
             if dest_dir_name:
                 container_path = f'{container_path}/{dest_dir_name}'
@@ -2710,7 +2713,7 @@ class AzureBlobStore(AbstractStore):
         """
         install_cmd = mounting_utils.get_az_mount_install_cmd()
         mount_cmd = mounting_utils.get_az_mount_cmd(self.container_name,
-                                                    self.bucket_sub_path,
+                                                    self._bucket_sub_path,
                                                     self.storage_account_name,
                                                     mount_path,
                                                     self.storage_account_key)
@@ -2956,8 +2959,8 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
@@ -2977,8 +2980,8 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = (
                 'AWS_SHARED_CREDENTIALS_FILE='
                 f'{cloudflare.R2_CREDENTIALS_PATH} '
@@ -3110,7 +3113,7 @@ class R2Store(AbstractStore):
         r2_profile_name = cloudflare.R2_PROFILE_NAME
         mount_cmd = mounting_utils.get_r2_mount_cmd(
             r2_credential_path, r2_profile_name, endpoint_url, self.bucket.name,
-            self.bucket_sub_path, mount_path)
+            self._bucket_sub_path, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -3395,8 +3398,8 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = (
                 'rclone copy --exclude ".git/*" '
                 f'{src_dir_path} '
@@ -3427,8 +3430,8 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            bucket_sub_path = (f'/{self.bucket_sub_path}'
-                               if self.bucket_sub_path else '')
+            bucket_sub_path = (f'/{self._bucket_sub_path}'
+                               if self._bucket_sub_path else '')
             sync_command = (
                 'rclone copy '
                 f'{includes} {base_dir_path} '
@@ -3556,7 +3559,7 @@ class IBMCosStore(AbstractStore):
                                                      Rclone.RCLONE_CONFIG_PATH,
                                                      self.bucket_rclone_profile,
                                                      self.bucket.name,
-                                                     self.bucket_sub_path,
+                                                     self._bucket_sub_path,
                                                      mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
