@@ -381,7 +381,7 @@ def test_aws_region():
             f'sky launch -y -c {name} --region us-east-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
@@ -404,7 +404,7 @@ def test_gcp_region_and_service_account():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-central1',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
@@ -426,7 +426,7 @@ def test_ibm_region():
             f'sky launch -y -c {name} --cloud ibm --region {region} examples/minimal.yaml',
             f'sky exec {name} --cloud ibm examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep {region}',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep {region}',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -442,7 +442,7 @@ def test_azure_region():
             f'sky launch -y -c {name} --region eastus2 --cloud azure tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep eastus2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep eastus2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
@@ -466,7 +466,7 @@ def test_aws_zone():
             f'sky launch -y -c {name} examples/minimal.yaml --zone us-east-2b',
             f'sky exec {name} examples/minimal.yaml --zone us-east-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )
@@ -483,7 +483,7 @@ def test_ibm_zone():
             f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml --zone {zone}',
             f'sky exec {name} --cloud ibm examples/minimal.yaml --zone {zone}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep {zone}',  # Ensure the zone is correct.
         ],
         f'sky down -y {name} {name}-2 {name}-3',
     )
@@ -499,7 +499,7 @@ def test_gcp_zone():
             f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )
@@ -626,7 +626,7 @@ def test_aws_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
             # Ensure exec works.
             f'sky exec {name} --region us-east-2 examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
@@ -659,7 +659,7 @@ def test_gcp_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-west3',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-west3',  # Ensure the region is correct.
             # Ensure exec works.
             f'sky exec {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
@@ -697,7 +697,7 @@ def test_aws_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
             # Ensure exec works.
             f'sky exec {name} --zone us-east-2a examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
@@ -731,7 +731,7 @@ def test_gcp_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-central1',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-central1',  # Ensure the zone is correct.
             # Ensure exec works.
             f'sky exec {name} --cloud gcp --zone us-central1-a tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
@@ -5683,7 +5683,7 @@ def test_kubernetes_context_failover():
                 f'sky launch -y -c {name}-1 --cpus 1 echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
-                f'sky status -a {name}-1 | grep "{context}"',
+                f'sky status -v {name}-1 | grep "{context}"',
                 # Test failure for launching H100 on other cluster
                 f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --cloud kubernetes --region {context} echo hi && exit 1 || true',
                 # Test failover
@@ -5692,7 +5692,7 @@ def test_kubernetes_context_failover():
                 # Test pods
                 f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
                 # It should be launched on kind-skypilot
-                f'sky status -a {name}-3 | grep "kind-skypilot"',
+                f'sky status -v {name}-3 | grep "kind-skypilot"',
                 # Should be 7 free GPUs
                 f'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "  7"',
                 # Remove the line with "kind-skypilot"
