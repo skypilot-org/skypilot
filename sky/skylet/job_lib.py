@@ -812,6 +812,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
+    pids_to_kill = []
     for job_record in job_records:
         job_id = job_record['job_id']
         # Job is locked to ensure that pending queue does not start it while
@@ -832,11 +833,17 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                     # The process may have already finished.
                     pass
             elif job['pid'] < 0:
-                # TODO(zhwu): Backward compatibility, remove after 0.9.0.
-                # The job was submitted with ray job submit before #4318.
-                job_client = _create_ray_job_submission_client()
-                job_client.stop_job(_make_ray_job_id(job['job_id']))
-
+                try:
+                    # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                    # The job was submitted with ray job submit before #4318.
+                    job_client = _create_ray_job_submission_client()
+                    job_client.stop_job(_make_ray_job_id(job['job_id']))
+                except RuntimeError as e:
+                    # If the request to the job server fails, we should not  
+                    # set the job to CANCELLED.  
+                    if 'does not exist' not in str(e):  
+                        logger.warning(str(e))  
+                        continue 
             # Get the job status again to avoid race condition.
             job_status = get_status_no_lock(job['job_id'])
             if job_status in [
