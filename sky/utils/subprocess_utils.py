@@ -11,6 +11,7 @@ import psutil
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -104,9 +105,8 @@ def handle_returncode(returncode: int,
 
 
 def kill_children_processes(
-    parent_pids: Optional[Union[int, List[Optional[int]]]] = None,
-    force: bool = False,
-) -> None:
+        first_pid_to_kill: Optional[Union[int, List[Optional[int]]]] = None,
+        force: bool = False):
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -116,59 +116,41 @@ def kill_children_processes(
        etc. while we are cleaning up the clusters.
 
     Args:
-        parent_pids: Optional PIDs of a series of processes. The processes and
-          their children will be killed.  If a list of PID is specified, it is
-          killed by the order in the list. This is for guaranteeing the order
-          of cleaning up and suppress flaky errors.
-        force: bool, send SIGKILL if force, otherwise, use SIGTERM for
-          gracefully kill the process.
+        first_pid_to_kill: Optional PID of a process, or PIDs of a series of
+         processes to be killed first. If a list of PID is specified, it is
+         killed by the order in the list.
+         This is for guaranteeing the order of cleaning up and suppress
+         flaky errors.
     """
-    if isinstance(parent_pids, int):
-        parent_pids = [parent_pids]
+    pid_to_proc = dict()
+    child_processes = []
+    if isinstance(first_pid_to_kill, int):
+        first_pid_to_kill = [first_pid_to_kill]
+    elif first_pid_to_kill is None:
+        first_pid_to_kill = []
 
-    def kill(proc: psutil.Process):
-        if not proc.is_running():
-            # Skip if the process is not running.
-            return
-        print(f'Killing process {proc.pid}', flush=True)
-        try:
-            if force:
-                proc.kill()
-            else:
-                proc.terminate()
-            proc.wait(timeout=5)
-        except psutil.NoSuchProcess:
-            # The child process may have already been terminated.
-            pass
-        except psutil.TimeoutExpired:
-            print(f'Process {proc.pid} did not terminate after 10 seconds',
-                  flush=True)
-            # Attempt to force kill if the normal termination fails
-            if not force:
-                print(f'Force killing process {proc.pid}', flush=True)
-                proc.kill()
-                # Do not wait after sending SIGKILL.
-
-    parent_processes = []
-    if parent_pids is None:
-        parent_processes = [psutil.Process()]
-    else:
-        for pid in parent_pids:
+    def _kill_processes(processes: List[psutil.Process]) -> None:
+        for process in processes:
             try:
-                process = psutil.Process(pid)
+                if force:
+                    process.kill()
+                else:
+                    process.terminate()
             except psutil.NoSuchProcess:
-                continue
-            parent_processes.append(process)
+                # The process may have already been terminated.
+                pass
 
-    for parent_process in parent_processes:
-        child_processes = parent_process.children(recursive=True)
-        if parent_pids is not None:
-            # Do not kill the parent process, as it is the current process.
-            kill(parent_process)
-        print(f'Killing child processes: {child_processes}', flush=True)
-        for child in child_processes:
-            kill(child)
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        if child.pid in first_pid_to_kill:
+            pid_to_proc[child.pid] = child
+        else:
+            child_processes.append(child)
 
+    _kill_processes([
+        pid_to_proc[proc] for proc in first_pid_to_kill if proc in pid_to_proc
+    ])
+    _kill_processes(child_processes)
 
 def run_with_retries(
         cmd: str,
@@ -216,3 +198,48 @@ def run_with_retries(
                 continue
         break
     return returncode, stdout, stderr
+
+
+def kill_process_daemon(process_pid: int) -> None:
+    """Start a daemon as a safety net to kill the process.
+
+    Args:
+        process_pid: The PID of the process to kill.
+        parent_pid: The PID of the parent process.
+        kill_when_parent_exits: Wait for the parent process to exit before
+            killing the process.
+    """
+    # The proc can be defunct if the python program is killed. Here we
+    # open a new subprocess to gracefully kill the proc, SIGTERM
+    # and then SIGKILL the process group.
+    # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+    parent_pid = os.getpid()
+    daemon_script = os.path.join(
+        os.path.dirname(os.path.abspath(log_lib.__file__)),
+        'subprocess_daemon.py')
+    python_path = subprocess.check_output(
+        constants.SKY_GET_PYTHON_PATH_CMD,
+        shell=True,
+        stderr=subprocess.DEVNULL,
+        encoding='utf-8').strip()
+    daemon_cmd = [
+        python_path,
+        daemon_script,
+        '--parent-pid',
+        str(parent_pid),
+        '--proc-pid',
+        str(process_pid),
+    ]
+
+    # We do not need to set `start_new_session=True` here, as the
+    # daemon script will detach itself from the parent process with
+    # fork to avoid being killed by ray job. See the reason we
+    # daemonize the process in `sky/skylet/subprocess_daemon.py`.
+    subprocess.Popen(
+        daemon_cmd,
+        # Suppress output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        # Disable input
+        stdin=subprocess.DEVNULL,
+    )

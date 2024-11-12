@@ -9,6 +9,7 @@ import os
 import pathlib
 import shlex
 import sqlite3
+import signal
 import subprocess
 import time
 from typing import Any, Dict, List, Optional
@@ -833,11 +834,12 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
-                # Instead, we need to kill the children processes recursively,
-                # and forcely kill the underlying processes if timeout.
-                logger.info(
-                    f'Killing children processes of job {job["job_id"]}')
-                subprocess_utils.kill_children_processes(job['pid'])
+                # We start a daemon to recursively kill the process group, and
+                # trigger the killing immediately by sending SIGTERM to the
+                # process group.
+                # This allows the job to be killed asynchronously.
+                subprocess_utils.kill_process_daemon(job['pid'])
+                os.killpg(job['pid'], signal.SIGTERM)
             elif job['pid'] < 0:
                 try:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
