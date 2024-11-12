@@ -5,6 +5,8 @@ History:
    migrated from the old provisioning API.
  - Hysun He (hysun.he@oracle.com) @ Oct.18, 2024: Enhancement.
    find_compartment: allow search subtree when find a compartment.
+ - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add methods to
+   Add/remove security rules: add_ingress_rules & remove_ingress_rules
 """
 from datetime import datetime
 import functools
@@ -13,7 +15,7 @@ import re
 import time
 import traceback
 import typing
-from typing import Optional
+from typing import List, Optional, Set
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -467,6 +469,95 @@ class QueryHelper:
         except oci_adaptor.oci.exceptions.ServiceError as e:
             logger.error(
                 f'Delete VCN {oci_utils.oci_config.VCN_NAME} Error: {str(e)}')
+
+    @classmethod
+    @debug_enabled(logger)
+    def add_ingress_rules(cls, region: str, ports: Set[int]):
+        if ports is None or len(ports) == 0:
+            return
+
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
+        subnet_id = query_helper.find_create_vcn_subnet(region)
+        get_subnet_resp = net_client.get_subnet(subnet_id=subnet_id)
+
+        existing_ports: Set[int] = set()
+        first_sg_id = None
+        first_sg_rules = None
+        security_list_ids = get_subnet_resp.data.security_list_ids
+
+        for sg_id in security_list_ids:
+            if first_sg_id is None:
+                first_sg_id = sg_id
+
+            get_sg_resp = net_client.get_security_list(security_list_id=sg_id)
+
+            ingress_rules: List = get_sg_resp.data.ingress_security_rules
+            if first_sg_rules is None:
+                first_sg_rules = ingress_rules
+
+            for r in ingress_rules:
+                rule_existing_ports = [
+                    p for p in ports
+                    if r.source == oci_utils.oci_config.VCN_CIDR_INTERNET and
+                    r.tcp_options and
+                    (r.tcp_options.destination_port_range.max >= p and
+                     r.tcp_options.destination_port_range.min <= p)
+                ]
+                existing_ports.update(rule_existing_ports)
+
+        new_ports = ports - existing_ports
+        new_rules = [
+            oci_adaptor.oci.core.models.IngressSecurityRule(
+                protocol='6',
+                source=oci_utils.oci_config.VCN_CIDR_INTERNET,
+                is_stateless=False,
+                source_type='CIDR_BLOCK',
+                tcp_options=oci_adaptor.oci.core.models.TcpOptions(
+                    destination_port_range=oci_adaptor.oci.core.models.
+                    PortRange(max=p, min=p),),
+                description=oci_utils.oci_config.SERVICE_PORT_RULE_TAG,
+            ) for p in new_ports
+        ]
+
+        if len(new_rules) > 0:
+            net_client.update_security_list(
+                security_list_id=first_sg_id,
+                update_security_list_details=oci_adaptor.oci.core.models.
+                UpdateSecurityListDetails(ingress_security_rules=new_rules),
+            )
+
+    @classmethod
+    @debug_enabled(logger)
+    def remove_ingress_rules(cls, region: str, ports: Set[int]):
+        if ports is None or len(ports) == 0:
+            return
+
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
+        subnet_id = query_helper.find_create_vcn_subnet(region)
+        get_subnet_resp = net_client.get_subnet(subnet_id=subnet_id)
+
+        security_list_ids = get_subnet_resp.data.security_list_ids
+        for sg_id in security_list_ids:
+            get_sg_resp = net_client.get_security_list(security_list_id=sg_id)
+            ingress_rules: list = get_sg_resp.data.ingress_security_rules
+
+            new_rules = [r for r in ingress_rules]
+            for r in ingress_rules:
+                for p in ports:
+                    if r.description == oci_utils.oci_config.SERVICE_PORT_RULE_TAG and (
+                            r.tcp_options.destination_port_range.max == p and
+                            r.tcp_options.destination_port_range.min == p):
+                        new_rules.remove(r)
+                        break
+
+            if len(new_rules) < len(ingress_rules):
+                net_client.update_security_list(
+                    security_list_id=sg_id,
+                    update_security_list_details=oci_adaptor.oci.core.models.
+                    UpdateSecurityListDetails(ingress_security_rules=new_rules),
+                )
 
 
 query_helper = QueryHelper()

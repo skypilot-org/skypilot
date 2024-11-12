@@ -19,6 +19,7 @@ from sky.provision import constants
 from sky.provision.oci import query_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -292,11 +293,11 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Open ports for inbound traffic."""
-    # OCI ports in security groups are opened while creating the new
-    # VCN (skypilot_vcn). If user configure to use existing VCN, it is
-    # intended to let user to manage the ports instead of automatically
-    # opening ports here.
-    del cluster_name_on_cloud, ports, provider_config
+    del cluster_name_on_cloud
+    assert provider_config is not None
+    region = provider_config['region']
+    query_helper.add_ingress_rules(region,
+                                   resources_utils.port_ranges_to_set(ports))
 
 
 @query_utils.debug_enabled(logger)
@@ -306,12 +307,11 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
-    del cluster_name_on_cloud, ports, provider_config
-    # OCI ports in security groups are opened while creating the new
-    # VCN (skypilot_vcn). The VCN will only be created at the first
-    # time when it is not existed. We'll not automatically delete the
-    # VCN while teardown clusters. it is intended to let user to decide
-    # to delete the VCN or not from OCI console, for example.
+    del cluster_name_on_cloud
+    assert provider_config is not None
+    region = provider_config['region']
+    query_helper.remove_ingress_rules(region,
+                                      resources_utils.port_ranges_to_set(ports))
 
 
 @query_utils.debug_enabled(logger)
