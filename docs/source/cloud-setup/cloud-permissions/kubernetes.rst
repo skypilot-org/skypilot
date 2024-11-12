@@ -96,7 +96,29 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
 
 These roles must apply to both the user account configured in the kubeconfig file and the service account used by SkyPilot (if configured).
 
-If your tasks use object store mounting or require access to ingress resources, you will need to grant additional permissions as described below.
+If you need to view real-time GPU availability with ``sky show-gpus``, your tasks use object store mounting or your tasks require access to ingress resources, you will need to grant additional permissions as described below.
+
+Permissions for ``sky show-gpus``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``sky show-gpus`` needs to list all pods across all namespaces to calculate GPU availability. To do this, SkyPilot needs the ``get`` and ``list`` permissions for pods in a ``ClusterRole``:
+
+.. code-block:: yaml
+
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+        name: sky-sa-cluster-role-pod-reader
+    rules:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["get", "list"]
+
+
+.. tip::
+
+    If this role is not granted to the service account, ``sky show-gpus`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
+
 
 Permissions for Object Store Mounting
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -225,6 +247,9 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
         resources: ["ingressclasses"]
         verbs: ["get", "list", "watch"]
+      - apiGroups: [""]                 # Required for `sky show-gpus` command
+        resources: ["pods"]
+        verbs: ["get", "list"]
     ---
     # ClusterRoleBinding for the service account
     apiVersion: rbac.authorization.k8s.io/v1

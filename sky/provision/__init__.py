@@ -24,6 +24,7 @@ from sky.provision import oci
 from sky.provision import runpod
 from sky.provision import vsphere
 from sky.utils import command_runner
+from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
@@ -59,6 +60,7 @@ def _route_to_cloud_impl(func):
 # pylint: disable=unused-argument
 
 
+@timeline.event
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,

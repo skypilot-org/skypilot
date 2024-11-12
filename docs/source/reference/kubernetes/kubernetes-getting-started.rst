@@ -296,6 +296,11 @@ FAQs
                 volumeMounts:       # Custom volume mounts for the pod
                   - mountPath: /foo
                     name: example-volume
+                resources:          # Custom resource requests and limits
+                  requests:
+                    rdma/rdma_shared_device_a: 1
+                  limits:
+                    rdma/rdma_shared_device_a: 1
             volumes:
               - name: example-volume
                 hostPath:
