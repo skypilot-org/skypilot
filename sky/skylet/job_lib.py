@@ -828,7 +828,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # under the shell.
                 # Instead, we need to kill the children processes recursively,
                 # and forcely kill the underlying processes if timeout.
-                subprocess_utils.kill_children_processes([job['pid']])
+                subprocess_utils.kill_children_processes(job['pid'])
             elif job['pid'] < 0:
                 try:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
