@@ -321,7 +321,7 @@ class SSHConfigHelper(object):
 
     @classmethod
     def remove_cluster(cls, cluster_name: str):
-        """Remove authentication information for cluster from ~/.sky/ssh/<cluster_name>.
+        """Remove auth information for cluster from ~/.sky/ssh/<cluster_name>.
 
         If no existing host matching the provided specification is found, then
         nothing is removed.

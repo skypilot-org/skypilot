@@ -13,6 +13,7 @@ import websockets
 async def main(url: str) -> None:
     async with websockets.connect(url, ping_interval=None) as websocket:
         if os.isatty(sys.stdin.fileno()):
+            # pylint: disable=import-outside-toplevel
             import termios
             import tty
             old_settings = termios.tcgetattr(sys.stdin.fileno())
@@ -52,7 +53,7 @@ async def websocket_to_stdout(websocket):
                 None, sys.stdout.buffer.flush)
     except websockets.exceptions.ConnectionClosed:
         print('WebSocket connection closed', file=sys.stderr)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         print(f'Error in websocket_to_stdout: {e}', file=sys.stderr)
 
 

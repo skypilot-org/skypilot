@@ -139,7 +139,7 @@ def _get_cluster_records_and_set_ssh_config(
                 key_path = (
                     cluster_utils.SSHConfigHelper.generate_local_key_file(
                         handle.cluster_name, credentials))
-                # Instead of directly use websocket-proxy.py, we add an
+                # Instead of directly use websocket_proxy.py, we add an
                 # additional proxy, so that ssh can use the head pod in the
                 # cluster to jump to worker pods.
                 proxy_command = (
@@ -154,7 +154,7 @@ def _get_cluster_records_and_set_ssh_config(
                     # the one in skypilot repo, to avoid changing the file when
                     # updating skypilot.
                     f'\'python {os.path.dirname(__file__)}/templates/'
-                    f'websocket-proxy.py '
+                    f'websocket_proxy.py '
                     f'{api_common.get_server_url().split("://")[1]} '
                     f'{handle.cluster_name}\'')
                 credentials['ssh_proxy_command'] = proxy_command
