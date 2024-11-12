@@ -1002,14 +1002,17 @@ def _count_healthy_nodes_from_ray(output: str,
 
 @timeline.event
 def _deterministic_yaml_hash(yaml_path: str) -> str:
-    """Hashes the cluster yaml and contents of file mounts. Two invocations of
-    this function should return the same string if and only if the contents of
-    the yaml are the same and the file contents of all the file_mounts specified
-    in the yaml are the same.
+    """Hash the cluster yaml and contents of file mounts to a unique string.
+
+    Two invocations of this function should return the same string if and only
+    if the contents of the yaml are the same and the file contents of all the
+    file_mounts specified in the yaml are the same.
 
     Limitations:
     - This function can be expensive if the file mounts are large. (E.g. a few
-      seconds for ~1GB.)
+      seconds for ~1GB.) This should be okay since we expect that the
+      file_mounts in the cluster yaml (the wheel and cloud credentials) will be
+      small.
     - Symbolic links are not explicitly handled. Some symbolic link changes may
       not be detected.
 
@@ -1041,22 +1044,8 @@ def _deterministic_yaml_hash(yaml_path: str) -> str:
     we construct it incrementally by using hash.update() to add new bytes.
     """
 
-    # In python 3.11, hashlib.file_digest is available, but for <3.11 we have to
-    # do it manually.
-    # This implementation is simplified from the implementation in CPython.
-    # Beware of f.read() as some files may be larger than memory.
     def _hash_file(path: str) -> bytes:
-        with open(path, 'rb') as f:
-            file_hash = hashlib.sha256()
-            buf = bytearray(2**18)
-            view = memoryview(buf)
-            while True:
-                size = f.readinto(buf)
-                if size == 0:
-                    # EOF
-                    break
-                file_hash.update(view[:size])
-            return file_hash.digest()
+        return common_utils.hash_file(path, 'sha256').digest()
 
     config_hash = hashlib.sha256()
 
@@ -1073,13 +1062,19 @@ def _deterministic_yaml_hash(yaml_path: str) -> str:
         expanded_src = os.path.expanduser(src)
         config_hash.update(dst.encode('utf-8') + b'\0')
 
+        # If the file mount source is a symlink, this should be true. In that
+        # case we hash the contents of the symlink destination.
         if os.path.isfile(expanded_src):
             config_hash.update('file'.encode('utf-8'))
             config_hash.update(_hash_file(expanded_src))
 
+        # This can also be a symlink to a directory. os.walk will treat it as a
+        # normal directory and list the contents of the symlink destination.
         elif os.path.isdir(expanded_src):
             config_hash.update('dir'.encode('utf-8'))
 
+            # Aside from expanded_src, os.walk will list symlinks to directories
+            # but will not recurse into them.
             for (dirpath, dirnames, filenames) in os.walk(expanded_src):
                 config_hash.update(dirpath.encode('utf-8') + b'\0')
 
@@ -1087,9 +1082,10 @@ def _deterministic_yaml_hash(yaml_path: str) -> str:
                 # os.walk. We need it so that the os.walk order is
                 # deterministic.
                 dirnames.sort()
-                # This includes symlinks to directories. We will recurse into
-                # all the directories here but not the symlinks. We don't hash
-                # the link destination.
+                # This includes symlinks to directories. os.walk will recurse
+                # into all the directories but not the symlinks. We don't hash
+                # the link destination, so if a symlink to a directory changes,
+                # we won't notice.
                 for dirname in dirnames:
                     config_hash.update(dirname.encode('utf-8') + b'\0')
                 config_hash.update(b'\0')

@@ -487,7 +487,6 @@ def launch(
                     check_cloud_vm_ray_backend=False,
                     dryrun=dryrun)
                 handle = maybe_handle
-                logger.info('provision')
                 stages = [
                     # Provisioning will be short-circuited if the existing
                     # cluster config hash matches the calculated one.
