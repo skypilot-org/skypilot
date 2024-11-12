@@ -8,7 +8,6 @@ import json
 import os
 import pathlib
 import shlex
-import signal
 import sqlite3
 import subprocess
 import time
@@ -23,6 +22,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -812,7 +812,6 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
-    pids_to_kill = []
     for job_record in job_records:
         job_id = job_record['job_id']
         # Job is locked to ensure that pending queue does not start it while
@@ -823,15 +822,9 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
-                # No need to use `subprocess_utils.kill_children_processes`,
-                # as the underlying ray driver process will handle the
-                # termination of user programs (we use SIGTERM to allow ray
-                # driver to gracefully exit).
-                try:
-                    os.killpg(job['pid'], signal.SIGTERM)
-                except ProcessLookupError:
-                    # The process may have already finished.
-                    pass
+                # Instead, we need to kill the children processes recursively,
+                # and forcely kill the underlying processes if timeout.
+                subprocess_utils.kill_children_processes([job['pid']])
             elif job['pid'] < 0:
                 try:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
@@ -839,11 +832,11 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                     job_client = _create_ray_job_submission_client()
                     job_client.stop_job(_make_ray_job_id(job['job_id']))
                 except RuntimeError as e:
-                    # If the request to the job server fails, we should not  
-                    # set the job to CANCELLED.  
-                    if 'does not exist' not in str(e):  
-                        logger.warning(str(e))  
-                        continue 
+                    # If the request to the job server fails, we should not
+                    # set the job to CANCELLED.
+                    if 'does not exist' not in str(e):
+                        logger.warning(str(e))
+                        continue
             # Get the job status again to avoid race condition.
             job_status = get_status_no_lock(job['job_id'])
             if job_status in [
