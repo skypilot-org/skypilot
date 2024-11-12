@@ -518,6 +518,7 @@ def _get_pending_job(job_id: int) -> Optional[Dict[str, Any]]:
         }
     return None
 
+
 def _is_job_driver_process_running(job_pid: int, job_id: int) -> bool:
     """Check if the job driver process is running.
 
@@ -529,6 +530,7 @@ def _is_job_driver_process_running(job_pid: int, job_id: int) -> bool:
     return psutil.Process(job_pid).is_running() and any(
         JOB_CMD_IDENTIFIER.format(job_id) in line
         for line in psutil.Process(job_pid).cmdline())
+
 
 def update_job_status(job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
@@ -829,7 +831,8 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # under the shell.
                 # Instead, we need to kill the children processes recursively,
                 # and forcely kill the underlying processes if timeout.
-                logger.info(f'Killing children processes of job {job["job_id"]}')
+                logger.info(
+                    f'Killing children processes of job {job["job_id"]}')
                 subprocess_utils.kill_children_processes(job['pid'])
             elif job['pid'] < 0:
                 try:

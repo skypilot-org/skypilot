@@ -149,7 +149,6 @@ def kill_children_processes(
                 proc.kill()
                 # Do not wait after sending SIGKILL.
 
-
     parent_processes = []
     if parent_pids is None:
         parent_processes = [psutil.Process()]
