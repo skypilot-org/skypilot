@@ -288,13 +288,13 @@ _VALIDATE_LAUNCH_OUTPUT = (
     # (min, pid=1277)
     # (min, pid=1277) task run finish
     # ✓ Job finished (status: SUCCEEDED).
-
-    # 📋 Useful Commands
+    #
     # Job ID: 1
+    # 📋 Useful Commands
     # ├── To cancel the job:          sky cancel test 1
     # ├── To stream job logs:         sky logs test 1
     # └── To view job queue:          sky queue test
-
+    #
     # Cluster name: test
     # ├── To log into the head VM:    ssh test
     # ├── To submit a job:            sky exec test yaml_file
@@ -314,8 +314,8 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
-    'grep "Useful Commands" && '
-    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+    'grep "Job ID:" && '
+    'echo "$s" | grep -A 1 "Job ID:" | grep "Useful Commands"')
 
 
 # ---------- A minimal task ----------
