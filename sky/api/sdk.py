@@ -716,9 +716,9 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 
 @usage_lib.entrypoint
-def abort(request_id: Optional[str] = None, all_requests: bool = False) -> str:
+def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint: disable=redefined-builtin
     """Abort a request or all requests."""
-    body = payloads.RequestIdBody(request_id=request_id, all=all_requests)
+    body = payloads.RequestIdBody(request_id=request_id, all=all)
     print(f'Sending abort request to API server for {request_id}')
     response = requests.post(f'{api_common.get_server_url()}/abort',
                              json=json.loads(body.model_dump_json()),

@@ -5575,7 +5575,7 @@ def api_abort(request_id: Optional[str], all: bool):
     if request_id is None and not all:
         raise click.BadParameter('Either specify a request ID or use --all to '
                                  'abort all requests.')
-    sdk.abort(request_id=request_id, all_requests=all)
+    sdk.abort(request_id=request_id, all=all)
 
 
 @api.command('ls', cls=_DocumentedCodeCommand)
