@@ -8,8 +8,8 @@ import json
 import os
 import pathlib
 import shlex
-import sqlite3
 import signal
+import sqlite3
 import subprocess
 import time
 from typing import Any, Dict, List, Optional
@@ -532,7 +532,7 @@ def _is_job_driver_process_running(job_pid: int, job_id: int) -> bool:
         job_process = psutil.Process(job_pid)
         return job_process.is_running() and any(
             JOB_CMD_IDENTIFIER.format(job_id) in line
-        for line in job_process.cmdline())
+            for line in job_process.cmdline())
     except psutil.NoSuchProcess:
         return False
 
