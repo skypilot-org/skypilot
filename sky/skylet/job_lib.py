@@ -836,8 +836,8 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # under the shell.
                 # We start a daemon to recursively kill the process group, and
                 # trigger the killing immediately by sending SIGTERM to the
-                # process group.
-                # This allows the job to be killed asynchronously.
+                # process group. The daemon ensures the job to be killed
+                # asynchronously, without blocking the cancellation request.
                 subprocess_utils.kill_process_daemon(job['pid'])
                 os.killpg(job['pid'], signal.SIGTERM)
             elif job['pid'] < 0:
