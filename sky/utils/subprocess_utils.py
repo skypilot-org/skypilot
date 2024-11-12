@@ -103,9 +103,11 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
+
 def kill_children_processes(
-        first_pid_to_kill: Optional[Union[int, List[Optional[int]]]] = None,
-        force: bool = False):
+    parent_pids: Optional[Union[int, List[Optional[int]]]] = None,
+    force: bool = False,
+) -> None:
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -115,41 +117,62 @@ def kill_children_processes(
        etc. while we are cleaning up the clusters.
 
     Args:
-        first_pid_to_kill: Optional PID of a process, or PIDs of a series of
-         processes to be killed first. If a list of PID is specified, it is
-         killed by the order in the list.
-         This is for guaranteeing the order of cleaning up and suppress
-         flaky errors.
+        parent_pids: Optional PIDs of a series of processes. The processes and
+          their children will be killed.  If a list of PID is specified, it is
+          killed by the order in the list. This is for guaranteeing the order
+          of cleaning up and suppress flaky errors.
+        force: bool, send SIGKILL if force, otherwise, use SIGTERM for
+          gracefully kill the process.
     """
-    pid_to_proc = dict()
-    child_processes = []
-    if isinstance(first_pid_to_kill, int):
-        first_pid_to_kill = [first_pid_to_kill]
-    elif first_pid_to_kill is None:
-        first_pid_to_kill = []
+    if isinstance(parent_pids, int):
+        parent_pids = [parent_pids]
 
-    def _kill_processes(processes: List[psutil.Process]) -> None:
-        for process in processes:
+    def kill(proc: psutil.Process):
+        if not proc.is_running():
+            # Skip if the process is not running.
+            return
+        try:
+            if force:
+                proc.kill()
+                print(f'Force killed process {proc.pid}', flush=True)
+            else:
+                proc.terminate()
+                print(f'Terminate process {proc.pid}', flush=True)
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass
+
+    parent_processes = []
+    if parent_pids is None:
+        parent_processes = [psutil.Process()]
+    else:
+        for pid in parent_pids:
             try:
-                if force:
-                    process.kill()
-                else:
-                    process.terminate()
+                process = psutil.Process(pid)
             except psutil.NoSuchProcess:
-                # The process may have already been terminated.
-                pass
+                continue
+            parent_processes.append(process)
 
-    parent_process = psutil.Process()
-    for child in parent_process.children(recursive=True):
-        if child.pid in first_pid_to_kill:
-            pid_to_proc[child.pid] = child
-        else:
-            child_processes.append(child)
+    all_processes = []
+    for parent_process in parent_processes:
+        child_processes = parent_process.children(recursive=True)
+        if parent_pids is not None:
+            # Do not kill the parent process, as it is the current process.
+            kill(parent_process)
+            all_processes.append(parent_process)
+        print(f'Killing child processes: {child_processes}', flush=True)
+        for child in child_processes:
+            kill(child)
+            all_processes.append(child)
 
-    _kill_processes([
-        pid_to_proc[proc] for proc in first_pid_to_kill if proc in pid_to_proc
-    ])
-    _kill_processes(child_processes)
+    KILL_TIMEOUT = 10
+    # Poll process, and force kill if any process is still running after
+    # timeout.
+    try:
+        psutil.wait_procs(all_processes, timeout=KILL_TIMEOUT)
+    except psutil.TimeoutExpired:
+        for process in all_processes:
+            kill(process, force=True)
 
 
 def run_with_retries(
