@@ -1,7 +1,7 @@
 # service.yaml
 service:
   readiness_probe: /v1/models
-  replicas: 1
+  replicas: 2
 
 # Fields below describe each replica.
 resources:
