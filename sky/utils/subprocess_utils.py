@@ -207,10 +207,13 @@ def kill_process_daemon(process_pid: int) -> None:
     Args:
         process_pid: The PID of the process to kill.
     """
-    # The proc can be defunct if the python program is killed. Here we
-    # open a new subprocess to gracefully kill the proc, SIGTERM
-    # and then SIGKILL the process group.
-    # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+    # Get initial children list
+    try:
+        process = psutil.Process(process_pid)
+        initial_children = [p.pid for p in process.children(recursive=True)]
+    except psutil.NoSuchProcess:
+        initial_children = []
+
     parent_pid = os.getpid()
     daemon_script = os.path.join(
         os.path.dirname(os.path.abspath(log_lib.__file__)),
@@ -226,11 +229,16 @@ def kill_process_daemon(process_pid: int) -> None:
         str(parent_pid),
         '--proc-pid',
         str(process_pid),
+        # We pass the initial children list to avoid the race condition where
+        # the process_pid is terminated before the daemon starts and gets the
+        # children list.
+        '--initial-children',
+        ','.join(map(str, initial_children)),
     ]
 
     # We do not need to set `start_new_session=True` here, as the
     # daemon script will detach itself from the parent process with
-    # fork to avoid being killed by ray job. See the reason we
+    # fork to avoid being killed by parent process. See the reason we
     # daemonize the process in `sky/skylet/subprocess_daemon.py`.
     subprocess.Popen(
         daemon_cmd,

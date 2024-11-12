@@ -43,6 +43,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--parent-pid', type=int, required=True)
     parser.add_argument('--proc-pid', type=int, required=True)
+    parser.add_argument(
+        '--initial-children',
+        type=str,
+        default='',
+        help=(
+            'Comma-separated list of initial children PIDs. This is to guard '
+            'against the case where the target process has already terminated, '
+            'while the children are still running.'),
+    )
     args = parser.parse_args()
 
     process = None
@@ -53,24 +62,31 @@ if __name__ == '__main__':
     except psutil.NoSuchProcess:
         pass
 
-    if process is None:
-        sys.exit()
-
+    # Initialize children list from arguments
     children = []
-    if parent_process is not None:
-        # Wait for either parent or target process to exit.
+    if args.initial_children:
+        for pid in args.initial_children.split(','):
+            try:
+                child = psutil.Process(int(pid))
+                children.append(child)
+            except (psutil.NoSuchProcess, ValueError):
+                pass
+
+    if process is not None and parent_process is not None:
+        # Wait for either parent or target process to exit
         while process.is_running() and parent_process.is_running():
             try:
-                # process.children() must be called while the target process
-                # is alive, as it will return an empty list if the target
-                # process has already terminated.
                 tmp_children = process.children(recursive=True)
                 if tmp_children:
                     children = tmp_children
             except psutil.NoSuchProcess:
                 pass
             time.sleep(1)
-    children.append(process)
+
+    if process is not None:
+        # Kill the target process first to avoid having more children, or fail
+        # the process due to the children being defunct.
+        children = [process] + children
 
     for child in children:
         try:

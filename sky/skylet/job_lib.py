@@ -839,7 +839,10 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # process group. The daemon ensures the job to be killed
                 # asynchronously, without blocking the cancellation request.
                 subprocess_utils.kill_process_daemon(job['pid'])
-                os.killpg(job['pid'], signal.SIGTERM)
+                # The process group pid should be the same as the job pid as we
+                # use start_new_session=True, but we use os.getpgid() to be
+                # extra cautious.
+                os.killpg(os.getpgid(job['pid']), signal.SIGTERM)
             elif job['pid'] < 0:
                 try:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
