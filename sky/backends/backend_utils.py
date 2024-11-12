@@ -1418,6 +1418,7 @@ def check_network_connection():
                                               'Network seems down.') from e
 
 
+@timeline.event
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
 
