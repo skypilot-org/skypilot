@@ -3329,6 +3329,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # running a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         if returncode == 255 and 'too long' in stdout + stderr:
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
@@ -3412,8 +3416,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True,
                                                           separate_stderr=True)
-        # Happens when someone calls `sky exec` but remote is outdated
-        # necessitating calling `sky launch`.
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # adding a job. Necessitating calling `sky launch`.
         backend_utils.check_stale_runtime_on_remote(returncode, stderr,
                                                     handle.cluster_name)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add

@@ -2603,6 +2603,8 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
     pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
                          r'attribute \'(.*)\'')
     if returncode != 0:
+        # TODO(zhwu): Backward compatibility for old SkyPilot runtime version on
+        # the remote cluster. Remove this after 0.10.0 is released.
         attribute_error = re.findall(pattern, stderr)
         if attribute_error:
             with ux_utils.print_exception_no_traceback():
@@ -2619,7 +2621,8 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
                     f'remote cluster: {cluster_name}. To update, run '
                     f'(existing jobs are not interrupted): '
                     f'{colorama.Style.BRIGHT}sky start -f -y {cluster_name}'
-                    f'{colorama.Style.RESET_ALL}') from None
+                    f'{colorama.Style.RESET_ALL}'
+                    f'\n--- Details ---\n{stderr.strip()}\n') from None
 
 
 def get_endpoints(cluster: str,

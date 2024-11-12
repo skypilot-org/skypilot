@@ -163,11 +163,15 @@ class JobStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
-# Only update status of the jobs after this many seconds of job submission,
-# to avoid race condition with `ray job` to make sure it job has been
-# correctly updated.
+# Only update status of the INIT jobs after this many seconds of job submission,
+# to avoid a delay between getting job id (INIT) and the actual pending job.
 # TODO(zhwu): This number should be tuned based on heuristics.
-_PENDING_SUBMIT_GRACE_PERIOD = 60
+_INIT_SUBMIT_GRACE_PERIOD = 60
+# Only update status of the submitted PENDING jobs after this many seconds of
+# job submission, to avoid race condition with `ray job` to make sure it job has
+# been correctly updated.
+# TODO(zhwu): This number should be tuned based on heuristics.
+_PENDING_SUBMIT_GRACE_PERIOD = 10
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
 
@@ -552,7 +556,7 @@ def update_job_status(job_ids: List[int],
             pid_query_time = time.time()
             if original_status == JobStatus.INIT:
                 if (job_submitted_at >= psutil.boot_time() and job_submitted_at
-                        >= pid_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                        >= pid_query_time - _INIT_SUBMIT_GRACE_PERIOD):
                     # The job id is reserved, but the job is not submitted yet.
                     # We should keep it in INIT.
                     status = JobStatus.INIT
@@ -581,9 +585,16 @@ def update_job_status(job_ids: List[int],
                             for line in job_driver_process.cmdline()):
                         status = JobStatus.PENDING
                     else:
-                        # By default, we set the job status to FAILED_DRIVER,
-                        # unless the job driver process set the actual status,
-                        # or a user can cancel the job.
+                        # By default, if the job driver process does not exist,
+                        # the actual SkyPilot job is one of the following:
+                        # 1. Still pending to be submitted.
+                        # 2. Submitted and finished.
+                        # 3. Driver failed without correctly setting the job
+                        #    status in the job table.
+                        # Although we set the status to FAILED_DRIVER, it can be
+                        # overridden to PENDING if the job is not submitted, or
+                        # any other terminal status if the job driver process
+                        # finished correctly.
                         status = JobStatus.FAILED_DRIVER
                 elif job_pid < 0:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
@@ -592,12 +603,10 @@ def update_job_status(job_ids: List[int],
                     # take effect in the later max.
                     status = JobStatus.PENDING
             except psutil.NoSuchProcess:
-                # The job driver process is not found, which means the job has
-                # finished.
+                # The job driver process is not found, it can be in several
+                # cases as mentioned above where we set the job status to
+                # FAILED_DRIVER.
                 status = JobStatus.FAILED_DRIVER
-            # Although we set the status to FAILED_DRIVER, we can still revert
-            # it to PENDING in the following code, if the job is in PENDING
-            # state.
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
@@ -608,16 +617,18 @@ def update_job_status(job_ids: List[int],
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
                     status = JobStatus.FAILED_DRIVER
-                # Gives a 60 second grace period between job being submit from
-                # the pending table until appearing in ray jobs. For jobs
-                # submitted outside of the grace period, we will consider the
-                # ray job status.
-
-                if not (pending_job['submit'] > 0 and pending_job['submit'] <
-                        pid_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
-                    # Reset the job status to PENDING even though it may not
-                    # appear in the ray jobs, so that it will not be considered
-                    # as stale.
+                elif pending_job['submit'] <= 0:
+                    # The job is not submitted (submit <= 0), we set it to
+                    # PENDING.
+                    # For submitted jobs, the driver should have been started,
+                    # because the job_lib.JobScheduler.schedule_step() have
+                    # the submit field and driver process pid set in the same
+                    # job lock.
+                    # The job process check in the above section should
+                    # correctly figured out the status and we don't overwrite
+                    # it here. (Note: the FAILED_DRIVER status will be
+                    # overridden by the actual job terminal status in the table
+                    # if the job driver process finished correctly.)
                     status = JobStatus.PENDING
 
             assert original_status is not None, (job_id, status)
@@ -625,26 +636,22 @@ def update_job_status(job_ids: List[int],
                 status = original_status
                 if (original_status is not None and
                         not original_status.is_terminal()):
-                    echo(f'Ray job status for job {job_id} is None, '
-                         'setting it to FAILED.')
-                    # The job may be stale, when the instance is restarted
-                    # (the process pid is volatile). We need to reset the
-                    # status of the task to FAILED_DRIVER if its original
-                    # status is RUNNING or PENDING.
+                    echo(f'Job {job_id} status is None, setting it to '
+                         'FAILED_DRIVER.')
+                    # The job may be stale, when the instance is restarted. We
+                    # need to reset the job status to FAILED_DRIVER if its
+                    # original status is in nonterminal_statuses.
                     status = JobStatus.FAILED_DRIVER
                     _set_status_no_lock(job_id, status)
                     echo(f'Updated job {job_id} status to {status}')
             else:
                 # Taking max of the status is necessary because:
-                # 1. It avoids race condition, where the original status has
-                # already been set to later state by the job. We skip the
-                # update.
-                # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
-                # `RUNNING` to our JobStatus.SETTING_UP; if a job has already
-                # been set to JobStatus.PENDING or JobStatus.RUNNING by the
-                # generated ray program, `original_status` (job status from our
-                # DB) would already have that value. So we take the max here to
-                # keep it at later status.
+                # 1. The original status has already been set to later
+                #    terminal state by a finished job driver.
+                # 2. Job driver process check would map any running job process
+                #    to `PENDING`, so we need to take the max to keep it at
+                #    later status for jobs actually started in SETTING_UP or
+                #    RUNNING.
                 status = max(status, original_status)
                 assert status is not None, (job_id, status, original_status)
                 if status != original_status:  # Prevents redundant update.
