@@ -196,7 +196,7 @@ def _generic_cloud(config) -> str:
     generic_cloud_option = config.getoption('--generic-cloud')
     if generic_cloud_option is not None:
         return generic_cloud_option
-    return default_clouds_to_run[0]
+    return _get_cloud_to_run(config)[0]
 
 
 @pytest.fixture
