@@ -324,6 +324,17 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args: 
             - |
+              # Helper function to conditionally use sudo
+              prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
+
+              # Run apt update in background and log to a file
+              (
+                DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
+                echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
+              ) &
+
+              function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+
               # Tails file and checks every 5 sec for
               # open file handlers with write access
               # closes if none exist
@@ -333,7 +344,7 @@ available_node_types:
                 while kill -0 $TAIL_PID 2> /dev/null; do
                   # only two PIDs should be accessing the file
                   # the log appender and log tailer
-                  if [ $(lsof -w $file | wc -l) -lt 3 ]; then
+                  if [ $(mylsof $file | wc -l) -lt 2 ]; then
                     kill $TAIL_PID
                     break
                   fi
@@ -417,7 +428,18 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo DEBIAN_FRONTEND=noninteractive apt install lsof gcc patch pciutils rsync fuse curl -y;
+  - |
+    PACKAGES="gcc patch pciutils rsync fuse curl";
+    MISSING_PACKAGES="";
+    for pkg in $PACKAGES; do
+      if ! dpkg -l | grep -q "^ii  $pkg "; then
+        MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+      fi
+    done;
+    if [ ! -z "$MISSING_PACKAGES" ]; then
+      echo "Installing missing packages: $MISSING_PACKAGES";
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING_PACKAGES;
+    fi;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
