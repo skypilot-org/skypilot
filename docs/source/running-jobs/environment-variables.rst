@@ -31,8 +31,8 @@ You can specify environment variables to be made available to a task in two ways
 
   .. code-block:: text
 
+    # sky launch example.yaml --env-file my_app.env
     # cat my_app.env
-    # --env-file my_app.env
     MYVAR=val
     WANDB_API_KEY=MY_WANDB_API_KEY
     HF_TOKEN=MY_HF_TOKEN
