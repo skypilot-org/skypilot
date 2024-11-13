@@ -531,8 +531,8 @@ class QueryHelper:
 
     @classmethod
     @debug_enabled(logger)
-    def remove_ingress_rules(cls, region: str, ports: Set[int]):
-        if ports is None or len(ports) == 0:
+    def remove_ingress_rules(cls, region: str, ports: Set[int]) -> None:
+        if not ports:
             return
 
         net_client = oci_adaptor.get_net_client(
