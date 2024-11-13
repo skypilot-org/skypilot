@@ -114,7 +114,7 @@ _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     'if [[ "$current_status" =~ {cluster_status} ]]; '
     'then echo "Target cluster status {cluster_status} reached."; break; fi; '
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
-    'sleep 15; '
+    'sleep 10; '
     'done')
 
 _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
@@ -128,7 +128,7 @@ _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     '  echo "Cluster {cluster_name} successfully removed."; break; '
     'fi; '
     'echo "Waiting for cluster {name} to be removed..."; '
-    'sleep 15; '
+    'sleep 10; '
     'done')
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
@@ -152,7 +152,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
     'echo "Waiting for job status to contains {job_status}, current status: $current_status"; '
-    'sleep 15; '
+    'sleep 10; '
     'done')
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
@@ -166,6 +166,11 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTA
 _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
     'sky queue {cluster_name}',
     'sky jobs queue').replace('awk "\\$2 == ', 'awk "\\$3 == ')
+
+# After the timeout, the cluster will stop if autostop is set, and our check
+# should be more than the timeout. To address this, we extend the timeout by
+# _BUMP_UP_SECONDS before exiting.
+_BUMP_UP_SECONDS = 35
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -2043,8 +2048,7 @@ def test_tpu():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} examples/tpu/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
-        'echo "hello"',
-        #f'sky down -y {name}',
+        f'sky down -y {name}',
         timeout=30 * 60,  # can take >20 mins
     )
     run_one_test(test)
@@ -2614,7 +2618,7 @@ def test_autostop(generic_cloud: str):
             _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
                 cluster_name=name,
                 cluster_status=ClusterStatus.STOPPED.value,
-                timeout=autostop_timeout),
+                timeout=autostop_timeout + _BUMP_UP_SECONDS),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -2951,7 +2955,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
             _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
                 job_name=name,
                 job_status=f'{JobStatus.FAILED_SETUP.value}',
-                timeout=330),
+                timeout=330 + _BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
