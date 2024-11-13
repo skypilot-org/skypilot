@@ -158,7 +158,8 @@ class Optimizer:
         for src, dst, edge_data in graph.edges(data=True):
             if isinstance(src, task_lib.Task) and isinstance(
                     dst, task_lib.Task) and edge_data['edge'].data:
-                storage_node = task_lib.Task(f'{src.name}_to_{dst.name}_storage')
+                storage_node = task_lib.Task(
+                    f'{src.name}_to_{dst.name}_storage')
                 data = edge_data['edge'].data
                 storage_node.set_resources({resources_lib.Resources()})
                 storage_node.set_time_estimator(lambda _: 0)
@@ -166,12 +167,14 @@ class Optimizer:
         with dag:
             for src, storage_node, dst, data in edges_to_add:
                 dag.remove_edge(src, dst)
-                dag.add_edge(src, storage_node).with_data(source_path=data.source_path,
-                                                   target_path='',
-                                                   size_gb=data.size_gb)
-                dag.add_edge(storage_node, dst).with_data(source_path='',
-                                                   target_path=data.target_path,
-                                                   size_gb=data.size_gb)
+                dag.add_edge(src, storage_node).with_data(
+                    source_path=data.source_path,
+                    target_path='',
+                    size_gb=data.size_gb)
+                dag.add_edge(storage_node,
+                             dst).with_data(source_path='',
+                                            target_path=data.target_path,
+                                            size_gb=data.size_gb)
                 logger.info(
                     f'Adding storage node between {src.name} and {dst.name}')
 
@@ -250,7 +253,7 @@ class Optimizer:
         return src_cloud, dst_cloud, nbytes
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: task_lib.Task,
+    def _egress_cost_or_time(minimize_cost: bool,
                              parent_resources: resources_lib.Resources,
                              node: task_lib.Task,
                              resources: resources_lib.Resources,
@@ -475,10 +478,8 @@ class Optimizer:
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
-                        minimize_cost, parent, parent_resources, node,
-                        resources, graph.get_edge_data(parent,
-                                                       node,
-                                                       key='first'))
+                        minimize_cost, parent_resources, node, resources,
+                        graph.get_edge_data(parent, node, key='first'))
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
@@ -579,7 +580,7 @@ class Optimizer:
             for r_u in node_to_cost_map[u].keys():
                 for r_v in node_to_cost_map[v].keys():
                     F[u][v].append(
-                        Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v,
+                        Optimizer._egress_cost_or_time(minimize_cost, r_u, v,
                                                        r_v, data))
 
         # Define the decision variables.
@@ -680,7 +681,7 @@ class Optimizer:
             for pred, _, edge_data in graph.in_edges(node, data=True):
                 # FIXME: Account for egress time for multi-node clusters
                 egress_time = Optimizer._egress_cost_or_time(
-                    False, pred, plan[pred], node, resources, edge_data)
+                    False, plan[pred], node, resources, edge_data)
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
             cache_finish_time[node] = execution_time + max(pred_finish_times)
@@ -712,7 +713,7 @@ class Optimizer:
             for pred, _, edge_data in graph.in_edges(node):
                 # FIXME: Account for egress costs for multi-node clusters
                 egress_cost = Optimizer._egress_cost_or_time(
-                    True, pred, plan[pred], node, resources, edge_data)
+                    True, plan[pred], node, resources, edge_data)
                 total_cost += egress_cost
         return total_cost
 
