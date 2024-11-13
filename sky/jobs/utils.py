@@ -174,7 +174,7 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
-def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
+def event_callback_func(job_id: int, task_id: int, task: Optional['sky.Task']):
     """Run event callback for the task."""
 
     def callback_func(status: str):
@@ -239,6 +239,30 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     logger.info(f'Cancelling jobs {job_id_str}.')
     cancelled_job_ids = []
     for job_id in job_ids:
+        # Check the status of the controller process. If it is not running,
+        # we can cancel the controller process directly.
+        with filelock.FileLock(job_lib.get_lock_path(job_id)):
+            controller_process_status = job_lib.get_status_no_lock(job_id)
+            if controller_process_status in [
+                    job_lib.JobStatus.PENDING, job_lib.JobStatus.CANCELLED
+            ]:
+                job_lib.cancel_job_no_lock(job_id)
+                controller_process_status = job_lib.get_status_no_lock(job_id)
+                if controller_process_status == job_lib.JobStatus.CANCELLED:
+                    with sky_logging.silent():
+                        managed_job_state.set_cancelling(
+                            job_id,
+                            callback_func=event_callback_func(job_id,
+                                                            task_id=0,
+                                                            task=None))
+                        managed_job_state.set_cancelled(
+                            job_id,
+                            callback_func=event_callback_func(job_id,
+                                                            task_id=0,
+                                                            task=None))
+                    cancelled_job_ids.append(job_id)
+                    continue
+
         # Check the status of the managed job status. If it is in
         # terminal state, we can safely skip it.
         job_status = managed_job_state.get_status(job_id)

@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shlex
+import signal
 import sqlite3
 import subprocess
 import time
@@ -27,9 +28,13 @@ logger = sky_logging.init_logger(__name__)
 
 _LINUX_NEW_LINE = '\n'
 _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
+# JOB_CMD_IDENTIFIER is used for identifying the process retrieved
+# with pid is the same driver process to guard against the case where
+# the same pid is reused by a different process.
+JOB_CMD_IDENTIFIER = 'echo "SKYPILOT_JOB_ID <{}>"'
 
 
-def _get_lock_path(job_id: int) -> str:
+def get_lock_path(job_id: int) -> str:
     lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     return lock_path
@@ -46,6 +51,7 @@ class JobInfoLoc(enum.IntEnum):
     START_AT = 6
     END_AT = 7
     RESOURCES = 8
+    PID = 9
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -75,7 +81,10 @@ def create_table(cursor, conn):
         submitted_at FLOAT,
         status TEXT,
         run_timestamp TEXT CANDIDATE KEY,
-        start_at FLOAT DEFAULT -1)""")
+        start_at FLOAT DEFAULT -1,
+        end_at FLOAT DEFAULT NULL,
+        resources TEXT DEFAULT NULL,
+        pid INTEGER DEFAULT 0)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -86,7 +95,8 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
-
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'pid',
+                                 'INTEGER DEFAULT -1')
     conn.commit()
 
 
@@ -118,6 +128,11 @@ class JobStatus(enum.Enum):
     # In the 'jobs' table, the `start_at` column will be set to the current
     # time, when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    # The job driver process failed. This happens when the job driver process
+    # finishes when the status in job table is still not set to terminal state.
+    # We should keep this state before the SUCCEEDED, as our job status update
+    # relies on the order of the statuses to keep the latest status.
+    FAILED_DRIVER = 'FAILED_DRIVER'
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
     SUCCEEDED = 'SUCCEEDED'
@@ -175,7 +190,19 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
+        proc = subprocess.Popen(['/bin/bash', '-c', run_cmd],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        # TODO(zhwu): Backward compatibility, remove this check after 0.9.0.
+        # This is for the case where the job is submitted with SkyPilot older
+        # than #4318, using ray job submit.
+        pid = proc.pid
+        if 'job submit' in run_cmd:
+            pid = -1
+        _CURSOR.execute((f'UPDATE jobs SET pid={pid} '
+                         f'WHERE job_id={job_id!r}'))
+        _CONN.commit()
 
     def schedule_step(self, force_update_jobs: bool = False) -> None:
         if force_update_jobs:
@@ -185,7 +212,7 @@ class JobScheduler:
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
         for job_id in pending_job_ids:
-            with filelock.FileLock(_get_lock_path(job_id)):
+            with filelock.FileLock(get_lock_path(job_id)):
                 pending_job = _get_pending_job(job_id)
                 if pending_job is None:
                     # Pending job can be removed by another thread, due to the
@@ -237,58 +264,12 @@ _JOB_STATUS_TO_COLOR = {
     JobStatus.SETTING_UP: colorama.Fore.BLUE,
     JobStatus.PENDING: colorama.Fore.BLUE,
     JobStatus.RUNNING: colorama.Fore.GREEN,
+    JobStatus.FAILED_DRIVER: colorama.Fore.RED,
     JobStatus.SUCCEEDED: colorama.Fore.GREEN,
     JobStatus.FAILED: colorama.Fore.RED,
     JobStatus.FAILED_SETUP: colorama.Fore.RED,
     JobStatus.CANCELLED: colorama.Fore.YELLOW,
 }
-
-_RAY_TO_JOB_STATUS_MAP = {
-    # These are intentionally set this way, because:
-    # 1. when the ray status indicates the job is PENDING the generated
-    # python program has been `ray job submit` from the job queue
-    # and is now PENDING
-    # 2. when the ray status indicates the job is RUNNING the job can be in
-    # setup or resources may not be allocated yet, i.e. the job should be
-    # PENDING.
-    # For case 2, update_job_status() would compare this mapped PENDING to
-    # the status in our jobs DB and take the max. This is because the job's
-    # generated ray program is the only place that can determine a job has
-    # reserved resources and actually started running: it will set the
-    # status in the DB to SETTING_UP or RUNNING.
-    # If there is no setup specified in the task, as soon as it is started
-    # (ray's status becomes RUNNING), i.e. it will be very rare that the job
-    # will be set to SETTING_UP by the update_job_status, as our generated
-    # ray program will set the status to PENDING immediately.
-    'PENDING': JobStatus.PENDING,
-    'RUNNING': JobStatus.PENDING,
-    'SUCCEEDED': JobStatus.SUCCEEDED,
-    'FAILED': JobStatus.FAILED,
-    'STOPPED': JobStatus.CANCELLED,
-}
-
-
-def _create_ray_job_submission_client():
-    """Import the ray job submission client."""
-    try:
-        import ray  # pylint: disable=import-outside-toplevel
-    except ImportError:
-        logger.error('Failed to import ray')
-        raise
-    try:
-        # pylint: disable=import-outside-toplevel
-        from ray import job_submission
-    except ImportError:
-        logger.error(
-            f'Failed to import job_submission with ray=={ray.__version__}')
-        raise
-    port = get_job_submission_port()
-    return job_submission.JobSubmissionClient(
-        address=f'http://127.0.0.1:{port}')
-
-
-def make_ray_job_id(sky_job_id: int) -> str:
-    return f'{sky_job_id}-{getpass.getuser()}'
 
 
 def make_job_command_with_user_switching(username: str,
@@ -301,9 +282,10 @@ def add_job(job_name: str, username: str, run_timestamp: str,
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
-                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
-                     run_timestamp, None, resources_str))
+    _CURSOR.execute(
+        'INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?, 0)',
+        (job_name, username, job_submitted_at, JobStatus.INIT.value,
+         run_timestamp, None, resources_str))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -340,14 +322,14 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
 def set_status(job_id: int, status: JobStatus) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_get_lock_path(job_id)):
+    with filelock.FileLock(get_lock_path(job_id)):
         _set_status_no_lock(job_id, status)
 
 
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_get_lock_path(job_id)):
+    with filelock.FileLock(get_lock_path(job_id)):
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
             'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
@@ -374,7 +356,7 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
 def get_status(job_id: int) -> Optional[JobStatus]:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_get_lock_path(job_id)):
+    with filelock.FileLock(get_lock_path(job_id)):
         return get_status_no_lock(job_id)
 
 
@@ -478,6 +460,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'start_at': row[JobInfoLoc.START_AT.value],
             'end_at': row[JobInfoLoc.END_AT.value],
             'resources': row[JobInfoLoc.RESOURCES.value],
+            'pid': row[JobInfoLoc.PID.value],
         })
     return records
 
@@ -554,24 +537,22 @@ def update_job_status(job_ids: List[int],
     if len(job_ids) == 0:
         return []
 
-    ray_job_ids = [make_ray_job_id(job_id) for job_id in job_ids]
-    job_client = _create_ray_job_submission_client()
-
     statuses = []
-    for job_id, ray_job_id in zip(job_ids, ray_job_ids):
+    for job_id in job_ids:
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
-        with filelock.FileLock(_get_lock_path(job_id)):
+        with filelock.FileLock(get_lock_path(job_id)):
             status = None
             job_record = _get_jobs_by_ids([job_id])[0]
             original_status = job_record['status']
             job_submitted_at = job_record['submitted_at']
+            job_pid = job_record['pid']
 
-            ray_job_query_time = time.time()
+            pid_query_time = time.time()
             if original_status == JobStatus.INIT:
                 if (job_submitted_at >= psutil.boot_time() and job_submitted_at
-                        >= ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                        >= pid_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
                     # The job id is reserved, but the job is not submitted yet.
                     # We should keep it in INIT.
                     status = JobStatus.INIT
@@ -582,23 +563,41 @@ def update_job_status(job_ids: List[int],
                     # was killed before the job is submitted. We should set it
                     # to FAILED then. Note, if ray job indicates the job is
                     # running, we will change status to PENDING below.
-                    echo(f'INIT job {job_id} is stale, setting to FAILED')
-                    status = JobStatus.FAILED
+                    echo(
+                        f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
+                    status = JobStatus.FAILED_DRIVER
 
             try:
-                # Querying status within the lock is safer than querying
-                # outside, as it avoids the race condition when job table is
-                # updated after the ray job status query.
-                # Also, getting per-job status is faster than querying all jobs,
-                # when there are significant number of finished jobs.
-                # Reference: getting 124 finished jobs takes 0.038s, while
-                # querying a single job takes 0.006s, 10 jobs takes 0.066s.
-                # TODO: if too slow, directly query against redis.
-                ray_job_status = job_client.get_job_status(ray_job_id)
-                status = _RAY_TO_JOB_STATUS_MAP[ray_job_status.value]
-            except RuntimeError:
-                # Job not found.
-                pass
+                # job_pid is 0 if the job is not submitted yet.
+                # job_pid is -1 if the job is submitted with SkyPilot older than
+                # #4318, using ray job submit. We skip the checking for those
+                # jobs.
+                if job_pid > 0:
+                    job_driver_process = psutil.Process(job_pid)
+                    # We check the cmdline to avoid the case where the same
+                    # pid is reused by a different process.
+                    if job_driver_process.is_running() and any(
+                            JOB_CMD_IDENTIFIER.format(job_id) in line
+                            for line in job_driver_process.cmdline()):
+                        status = JobStatus.PENDING
+                    else:
+                        # By default, we set the job status to FAILED_DRIVER,
+                        # unless the job driver process set the actual status,
+                        # or a user can cancel the job.
+                        status = JobStatus.FAILED_DRIVER
+                elif job_pid < 0:
+                    # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                    # We set the job status to PENDING instead of actually
+                    # checking ray job status and let the status in job table
+                    # take effect in the later max.
+                    status = JobStatus.PENDING
+            except psutil.NoSuchProcess:
+                # The job driver process is not found, which means the job has
+                # finished.
+                status = JobStatus.FAILED_DRIVER
+            # Although we set the status to FAILED_DRIVER, we can still revert
+            # it to PENDING in the following code, if the job is in PENDING
+            # state.
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
@@ -608,14 +607,14 @@ def update_job_status(job_ids: List[int],
                          f'boot_time={psutil.boot_time()}')
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
-                    status = JobStatus.FAILED
+                    status = JobStatus.FAILED_DRIVER
                 # Gives a 60 second grace period between job being submit from
                 # the pending table until appearing in ray jobs. For jobs
                 # submitted outside of the grace period, we will consider the
                 # ray job status.
 
                 if not (pending_job['submit'] > 0 and pending_job['submit'] <
-                        ray_job_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
+                        pid_query_time - _PENDING_SUBMIT_GRACE_PERIOD):
                     # Reset the job status to PENDING even though it may not
                     # appear in the ray jobs, so that it will not be considered
                     # as stale.
@@ -629,10 +628,10 @@ def update_job_status(job_ids: List[int],
                     echo(f'Ray job status for job {job_id} is None, '
                          'setting it to FAILED.')
                     # The job may be stale, when the instance is restarted
-                    # (the ray redis is volatile). We need to reset the
-                    # status of the task to FAILED if its original status
-                    # is RUNNING or PENDING.
-                    status = JobStatus.FAILED
+                    # (the process pid is volatile). We need to reset the
+                    # status of the task to FAILED_DRIVER if its original
+                    # status is RUNNING or PENDING.
+                    status = JobStatus.FAILED_DRIVER
                     _set_status_no_lock(job_id, status)
                     echo(f'Updated job {job_id} status to {status}')
             else:
@@ -756,6 +755,61 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+def _create_ray_job_submission_client():
+    """Import the ray job submission client."""
+    try:
+        import ray  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        logger.error('Failed to import ray')
+        raise
+    try:
+        # pylint: disable=import-outside-toplevel
+        from ray import job_submission
+    except ImportError:
+        logger.error(
+            f'Failed to import job_submission with ray=={ray.__version__}')
+        raise
+    port = get_job_submission_port()
+    return job_submission.JobSubmissionClient(
+        address=f'http://127.0.0.1:{port}')
+
+
+def _make_ray_job_id(sky_job_id: int) -> str:
+    return f'{sky_job_id}-{getpass.getuser()}'
+
+
+def cancel_job_no_lock(job_id: int) -> bool:
+    """Cancel a single job without lock.
+
+    Returns:
+        True if the job is cancelled, False otherwise.
+    """
+    job = _get_jobs_by_ids([job_id])[0]
+    if job['pid'] > 0:
+        # Not use process.terminate() as that will only terminate the
+        # process shell process, not the ray driver process
+        # under the shell.
+        try:
+            os.killpg(job['pid'], signal.SIGTERM)
+        except ProcessLookupError:
+            # The process may have already finished.
+            pass
+    elif job['pid'] < 0:
+        # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+        # The job was submitted with ray job submit before #4318.
+        job_client = _create_ray_job_submission_client()
+        job_client.stop_job(_make_ray_job_id(job['job_id']))
+
+    # Get the job status again to avoid race condition.
+    job_status = get_status_no_lock(job['job_id'])
+    if job_status in [
+            JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
+    ]:
+        _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
+        return True
+    return False
+
+
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                                 cancel_all: bool = False) -> str:
     """Cancel jobs.
@@ -783,34 +837,17 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
             # Cancel jobs with specified IDs.
             job_records = _get_jobs_by_ids(jobs)
 
-    # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
-    # when the memory is not enough, this will keep waiting.
-    job_client = _create_ray_job_submission_client()
     cancelled_ids = []
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
-    for job in job_records:
-        job_id = make_ray_job_id(job['job_id'])
+    for job_record in job_records:
+        job_id = job_record['job_id']
         # Job is locked to ensure that pending queue does not start it while
         # it is being cancelled
-        with filelock.FileLock(_get_lock_path(job['job_id'])):
-            try:
-                job_client.stop_job(job_id)
-            except RuntimeError as e:
-                # If the request to the job server fails, we should not
-                # set the job to CANCELLED.
-                if 'does not exist' not in str(e):
-                    logger.warning(str(e))
-                    continue
-
-            # Get the job status again to avoid race condition.
-            job_status = get_status_no_lock(job['job_id'])
-            if job_status in [
-                    JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
-            ]:
-                _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
-                cancelled_ids.append(job['job_id'])
+        with filelock.FileLock(get_lock_path(job_id)):
+            if cancel_job_no_lock(job_id):
+                cancelled_ids.append(job_id)
 
         scheduler.schedule_step()
     return common_utils.encode_payload(cancelled_ids)
@@ -865,10 +902,17 @@ class JobLibCodeGen:
         if job_name is None:
             job_name = '-'
         code = [
-            'job_id = job_lib.add_job('
-            f'{job_name!r}, '
-            f'{username!r}, '
-            f'{run_timestamp!r}, '
+            # We disallow job submission when SKYLET_VERSION is older than 9, as
+            # it was using ray job submit before #4318, and switched to raw
+            # process. Using the old skylet version will cause the job status
+            # to be stuck in PENDING state or transition to FAILED_DRIVER state.
+            '\nif int(constants.SKYLET_VERSION) < 9: '
+            'raise RuntimeError("SkyPilot runtime is too old, which does not'
+            'support submitting jobs.")',
+            '\njob_id = job_lib.add_job('
+            f'{job_name!r},'
+            f'{username!r},'
+            f'{run_timestamp!r},'
             f'{resources_str!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
@@ -876,9 +920,11 @@ class JobLibCodeGen:
 
     @classmethod
     def queue_job(cls, job_id: int, cmd: str) -> str:
-        code = ['job_lib.scheduler.queue('
-                f'{job_id!r},'
-                f'{cmd!r})']
+        code = [
+            'job_lib.scheduler.queue('
+            f'{job_id!r},'
+            f'{cmd!r})',
+        ]
         return cls._build(code)
 
     @classmethod
