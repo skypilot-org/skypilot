@@ -52,7 +52,7 @@ class Backend(Generic[_ResourceHandleType]):
         stream_logs: bool,
         cluster_name: Optional[str] = None,
         retry_until_up: bool = False,
-        skip_if_no_updates: bool = False,
+        skip_if_no_cluster_updates: bool = False,
     ) -> Optional[_ResourceHandleType]:
         if cluster_name is None:
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
@@ -61,7 +61,7 @@ class Backend(Generic[_ResourceHandleType]):
         with rich_utils.safe_status(ux_utils.spinner_message('Launching')):
             return self._provision(task, to_provision, dryrun, stream_logs,
                                    cluster_name, retry_until_up,
-                                   skip_if_no_updates)
+                                   skip_if_no_cluster_updates)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
@@ -136,7 +136,7 @@ class Backend(Generic[_ResourceHandleType]):
         stream_logs: bool,
         cluster_name: str,
         retry_until_up: bool = False,
-        skip_if_no_updates: bool = False,
+        skip_if_no_cluster_updates: bool = False,
     ) -> Optional[_ResourceHandleType]:
         raise NotImplementedError
 

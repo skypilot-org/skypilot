@@ -2708,7 +2708,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stream_logs: bool,
         cluster_name: str,
         retry_until_up: bool = False,
-        skip_if_no_updates: bool = False,
+        skip_if_no_cluster_updates: bool = False,
     ) -> Optional[CloudVmRayResourceHandle]:
         """Provisions using 'ray up'.
 
@@ -2753,7 +2753,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
 
             skip_if_config_hash_matches = None
-            if skip_if_no_updates:
+            if skip_if_no_cluster_updates:
                 skip_if_config_hash_matches = (
                     to_provision_config.prev_config_hash)
 

@@ -138,7 +138,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         stream_logs: bool,
         cluster_name: str,
         retry_until_up: bool = False,
-        skip_if_no_updates: bool = False,
+        skip_if_no_cluster_updates: bool = False,
     ) -> Optional[LocalDockerResourceHandle]:
         """Builds docker image for the task and returns cluster name as handle.
 
@@ -154,9 +154,9 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
                 'Ignored the flag.')
-        if skip_if_no_updates:
-            logger.warning(f'skip_if_no_updates is not supported in backend: '
-                           f'{self.NAME}. Ignored skip_if_no_updates.')
+        if skip_if_no_cluster_updates:
+            logger.warning(f'skip_if_no_cluster_updates is not supported in '
+                           f'backend: {self.NAME}. Ignored the flag.')
         if stream_logs:
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '
