@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from sky import check as sky_check
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.adaptors import kubernetes
 from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
@@ -21,6 +22,8 @@ if typing.TYPE_CHECKING:
     import pandas as pd
 else:
     pd = adaptors_common.LazyImport('pandas')
+
+logger = sky_logging.init_logger(__name__)
 
 _PULL_FREQUENCY_HOURS = 7
 
@@ -77,6 +80,11 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
+    """List accelerators in the Kubernetes cluster.
+
+    If the user does not have sufficient permissions to list pods in all
+    namespaces, the function will return free GPUs as -1.
+    """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
@@ -108,7 +116,17 @@ def list_accelerators_realtime(
     keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes(context)
     # Get the pods to get the real-time GPU usage
-    pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+    try:
+        pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+    except kubernetes.api_exception() as e:
+        if e.status == 403:
+            logger.warning('Failed to get pods in the Kubernetes cluster '
+                           '(forbidden). Please check if your account has '
+                           'necessary permissions to list pods. Realtime GPU '
+                           'availability information may be incorrect.')
+            pods = None
+        else:
+            raise
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
@@ -158,6 +176,22 @@ def list_accelerators_realtime(
                             accelerators_qtys.add(
                                 (accelerator_name, accelerator_count))
 
+                if accelerator_count >= min_quantity_filter:
+                    quantized_count = (
+                        min_quantity_filter *
+                        (accelerator_count // min_quantity_filter))
+                    if accelerator_name not in total_accelerators_capacity:
+                        total_accelerators_capacity[
+                            accelerator_name] = quantized_count
+                    else:
+                        total_accelerators_capacity[
+                            accelerator_name] += quantized_count
+                        
+                if pods is None:
+                    # If we can't get the pods, we can't get the GPU usage
+                    total_accelerators_available[accelerator_name] = -1
+                    continue
+
                 for pod in pods:
                     # Get all the pods running on the node
                     if (pod.spec.node_name == node.metadata.name and
@@ -171,17 +205,6 @@ def list_accelerators_realtime(
                                         container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
-
-                if accelerator_count >= min_quantity_filter:
-                    quantized_count = (
-                        min_quantity_filter *
-                        (accelerator_count // min_quantity_filter))
-                    if accelerator_name not in total_accelerators_capacity:
-                        total_accelerators_capacity[
-                            accelerator_name] = quantized_count
-                    else:
-                        total_accelerators_capacity[
-                            accelerator_name] += quantized_count
 
                 if accelerator_name not in total_accelerators_available:
                     total_accelerators_available[accelerator_name] = 0
