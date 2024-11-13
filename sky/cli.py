@@ -3095,7 +3095,8 @@ def check(clouds: Tuple[str], verbose: bool):
     request_id = sdk.check(clouds=clouds_arg, verbose=verbose)
     sdk.stream_and_get(request_id)
     api_server_url = api_common.get_server_url()
-    click.echo(click.style(f'Using API server: {api_server_url}', fg='blue'))
+    click.echo()
+    click.echo(click.style(f'Using API server: {api_server_url}', fg='green'))
 
 
 @cli.command()
