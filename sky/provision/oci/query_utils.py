@@ -548,8 +548,7 @@ class QueryHelper:
             new_rules = [r for r in ingress_rules]
             for r in ingress_rules:
                 for p in ports:
-                    # pylint: disable=line-too-long
-                    if r.description == oci_utils.oci_config.SERVICE_PORT_RULE_TAG and (
+                    if (r.description == oci_utils.oci_config.SERVICE_PORT_RULE_TAG and 
                             r.tcp_options.destination_port_range.max == p and
                             r.tcp_options.destination_port_range.min == p):
                         new_rules.remove(r)
