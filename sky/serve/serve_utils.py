@@ -12,7 +12,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, Set, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar)
 import uuid
 
 import colorama
@@ -46,9 +46,14 @@ NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
-# Log paths should always appear after a space and start with ~
-_SKYPILOT_PROVISION_LOG_PATTERN = r'.* (~/.*provision\.log)'
-_SKYPILOT_LOG_PATTERN = r'.* (~/.*\.log)'
+# NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
+# and always appear after a space. Be careful when changing UX as this
+# assumption is used to expand some log files while ignoring others.
+_SKYPILOT_LOG_DIRS = r'~/(sky_logs|\.sky)'
+_SKYPILOT_PROVISION_LOG_PATTERN = (
+    fr'.* ({_SKYPILOT_LOG_DIRS}/.*provision\.log)')
+_SKYPILOT_LOG_PATTERN = fr'.* ({_SKYPILOT_LOG_DIRS}/.*\.log)'
+
 # TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
@@ -592,16 +597,15 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _follow_replica_logs(
+def _expand_provision_logs(
     file: TextIO,
     cluster_name: str,
     *,
     should_stop: Callable[[], bool],
     stop_on_eof: bool = False,
     idle_timeout_seconds: Optional[int] = None,
-    _visited_logs: Optional[Set[str]] = None,
 ) -> Iterator[str]:
-    """Follows logs for a replica, handling nested log files.
+    """Follows logs and expands any provision.log references found.
 
     Args:
         file: Log file to read from.
@@ -610,13 +614,10 @@ def _follow_replica_logs(
         stop_on_eof: If True, stop when reaching end of file.
         idle_timeout_seconds: If set, stop after these many seconds without
             new content.
-        _visited_logs: Internal parameter to prevent infinite recursion.
 
     Yields:
-        Log lines from the main file and any nested log files.
+        Log lines, including expanded content from referenced provision logs.
     """
-    visited_logs: Set[
-        str] = _visited_logs if _visited_logs is not None else set()
 
     def cluster_is_up() -> bool:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
@@ -634,24 +635,22 @@ def _follow_replica_logs(
         if provision_log_prompt is not None:
             nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
 
-            if nested_log_path in visited_logs:
-                return
-            visited_logs.add(nested_log_path)
-
             try:
                 with open(nested_log_path, 'r', newline='',
                           encoding='utf-8') as f:
                     # We still exit if more than 10 seconds without new content
                     # to avoid any internal bug that causes the launch to fail
                     # while cluster status remains INIT.
-                    yield from _follow_replica_logs(f,
-                                                    cluster_name,
-                                                    should_stop=cluster_is_up,
-                                                    stop_on_eof=stop_on_eof,
-                                                    idle_timeout_seconds=10,
-                                                    _visited_logs=visited_logs)
+                    yield from log_utils.follow_logs(f,
+                                                     should_stop=cluster_is_up,
+                                                     stop_on_eof=stop_on_eof,
+                                                     idle_timeout_seconds=10)
             except FileNotFoundError:
-                # Ignore missing log files
+                yield line
+
+                yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
+                       f'Try to expand log file {nested_log_path} but not '
+                       f'found. Skipping...{colorama.Style.RESET_ALL}')
                 pass
             return
 
@@ -708,7 +707,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_replica_logs(
+        for line in _expand_provision_logs(
                 f,
                 replica_cluster_name,
                 should_stop=replica_provisioned,
