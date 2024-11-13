@@ -164,13 +164,23 @@ class Optimizer:
                 task_edge.with_data(source_path=data.source_path,
                                     target_path=data.target_path,
                                     size_gb=data.size_gb)
-                best_storage = Storage()
+                instance_to_storage = {
+                    'AWS': 'S3',
+                    'GCP': 'GCS',
+                    'Azure': 'Azure',
+                    'IBM': 'IBM'
+                }
+                best_storage = Storage(name='ghost_name')
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
-                    best_storage.add_store(
-                        str(storage_node.best_resources.cloud),
-                        storage_node.best_resources.region)
-                    task_edge.best_storage = best_storage
+                    cloud_name = str(storage_node.best_resources.cloud)
+                    if cloud_name in instance_to_storage.keys():
+                        best_storage.add_store(
+                            instance_to_storage[cloud_name],
+                            storage_node.best_resources.region)
+                        task_edge.best_storage = best_storage
+                    else:
+                        task_edge.best_storage = None
                 else:
                     task_edge.best_storage = None
 
