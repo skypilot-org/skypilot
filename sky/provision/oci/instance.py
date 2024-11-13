@@ -2,6 +2,8 @@
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Oct.16, 2024: Initial implementation
+ - Hysun He (hysun.he@oracle.com) @ Nov.13, 2024: Implement open_ports
+   and cleanup_ports for supporting SkyServe.
 """
 
 import copy
@@ -293,11 +295,12 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Open ports for inbound traffic."""
-    del cluster_name_on_cloud
-    assert provider_config is not None
+    assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    query_helper.add_ingress_rules(region,
-                                   resources_utils.port_ranges_to_set(ports))
+    query_helper.add_ingress_rules(
+        region=region,
+        cluster_name=cluster_name_on_cloud,
+        ports=resources_utils.port_ranges_to_set(ports))
 
 
 @query_utils.debug_enabled(logger)
@@ -307,11 +310,12 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
-    del cluster_name_on_cloud
-    assert provider_config is not None
+    assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    query_helper.remove_ingress_rules(region,
-                                      resources_utils.port_ranges_to_set(ports))
+    query_helper.remove_ingress_rules(
+        region=region,
+        cluster_name=cluster_name_on_cloud,
+        ports=resources_utils.port_ranges_to_set(ports))
 
 
 @query_utils.debug_enabled(logger)

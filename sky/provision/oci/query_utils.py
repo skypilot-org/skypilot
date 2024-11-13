@@ -21,6 +21,8 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
+from sky.exceptions import ResourcesUnavailableError
+from sky.provision import constants
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -472,44 +474,113 @@ class QueryHelper:
 
     @classmethod
     @debug_enabled(logger)
-    def add_ingress_rules(cls, region: str, ports: Set[int]) -> None:
+    def find_or_create_nsg(cls, region: str, cluster_name: str) -> str:
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
+
+        compartment = cls.find_compartment(region)
+
+        list_vcns_resp = net_client.list_vcns(
+            compartment_id=compartment,
+            display_name=oci_utils.oci_config.VCN_NAME,
+            lifecycle_state='AVAILABLE',
+        )
+
+        if not list_vcns_resp:
+            raise ResourcesUnavailableError('The VCN is not available')
+
+        vcn = list_vcns_resp.data[0]
+
+        list_nsg_resp = net_client.list_network_security_groups(
+            compartment_id=compartment,
+            vcn_id=vcn.id,
+            limit=1,
+            display_name=f'nsg_{cluster_name}',
+        )
+
+        nsgs = list_nsg_resp.data
+        if nsgs:
+            return nsgs[0].id
+
+        # Continue to create new NSG if not exists
+        create_nsg_resp = net_client.create_network_security_group(
+            create_network_security_group_details=oci_adaptor.oci.core.models.
+            CreateNetworkSecurityGroupDetails(
+                compartment_id=compartment,
+                vcn_id=vcn.id,
+                display_name=f'nsg_{cluster_name}',
+            ))
+        get_nsg_resp = net_client.get_network_security_group(
+            network_security_group_id=create_nsg_resp.data.id)
+        oci_adaptor.oci.wait_until(
+            net_client,
+            get_nsg_resp,
+            'lifecycle_state',
+            'AVAILABLE',
+        )
+
+        return get_nsg_resp.data.id
+
+    @classmethod
+    @debug_enabled(logger)
+    def add_ingress_rules(cls, region: str, cluster_name: str,
+                          ports: Set[int]) -> None:
         if not ports:
             return
 
         net_client = oci_adaptor.get_net_client(
             region, oci_utils.oci_config.get_profile())
-        subnet_id = query_helper.find_create_vcn_subnet(region)
-        get_subnet_resp = net_client.get_subnet(subnet_id=subnet_id)
+
+        nsg_id = cls.find_or_create_nsg(region, cluster_name)
+
+        filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name}
+        insts = query_helper.query_instances_by_tags(filters, region)
+        for inst in insts:
+            vnic = cls.get_instance_primary_vnic(
+                region=region,
+                inst_info={
+                    'inst_id': inst.identifier,
+                    'ad': inst.availability_domain,
+                    'compartment': inst.compartment_id,
+                })
+            nsg_ids = vnic.nsg_ids
+            if not nsg_ids:
+                net_client.update_vnic(
+                    vnic_id=vnic.id,
+                    update_vnic_details=oci_adaptor.oci.core.models.
+                    UpdateVnicDetails(nsg_ids=[nsg_id],
+                                      skip_source_dest_check=False),
+                )
+
+        # pylint: disable=line-too-long
+        list_nsg_rules_resp = net_client.list_network_security_group_security_rules(
+            network_security_group_id=nsg_id,
+            direction='INGRESS',
+            sort_by='TIMECREATED',
+            sort_order='DESC',
+        )
+
+        ingress_rules: List = [
+            r for r in list_nsg_rules_resp.data if r.direction == 'INGRESS'
+        ]
 
         existing_ports: Set[int] = set()
-        first_sg_id = None
-        first_sg_rules = None
-        security_list_ids = get_subnet_resp.data.security_list_ids
 
-        for sg_id in security_list_ids:
-            if first_sg_id is None:
-                first_sg_id = sg_id
-
-            get_sg_resp = net_client.get_security_list(security_list_id=sg_id)
-
-            ingress_rules: List = get_sg_resp.data.ingress_security_rules
-            if first_sg_rules is None:
-                first_sg_rules = ingress_rules
-
-            for r in ingress_rules:
-                rule_existing_ports = [
-                    p for p in ports if r.tcp_options and
-                    (r.tcp_options.destination_port_range.max >= p and
-                     r.tcp_options.destination_port_range.min <= p)
-                ]
-                existing_ports.update(rule_existing_ports)
+        for r in ingress_rules:
+            rule_existing_ports = [
+                p for p in ports if r.tcp_options and
+                (r.tcp_options.destination_port_range.max >= p and
+                 r.tcp_options.destination_port_range.min <= p)
+            ]
+            existing_ports.update(rule_existing_ports)
 
         new_ports = ports - existing_ports
         new_rules = [
-            oci_adaptor.oci.core.models.IngressSecurityRule(
+            oci_adaptor.oci.core.models.AddSecurityRuleDetails(
+                direction='INGRESS',
                 protocol='6',
-                source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                 is_stateless=False,
+                source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                 source_type='CIDR_BLOCK',
                 tcp_options=oci_adaptor.oci.core.models.TcpOptions(
                     destination_port_range=oci_adaptor.oci.core.models.
@@ -518,49 +589,77 @@ class QueryHelper:
             ) for p in new_ports
         ]
 
-        if first_sg_id is not None and len(new_rules) > 0:
-            if first_sg_rules is None:
-                first_sg_rules = []
-
-            net_client.update_security_list(
-                security_list_id=first_sg_id,
-                update_security_list_details=oci_adaptor.oci.core.models.
-                UpdateSecurityListDetails(
-                    ingress_security_rules=(first_sg_rules + new_rules)),
+        if new_rules:
+            net_client.add_network_security_group_security_rules(
+                network_security_group_id=nsg_id,
+                add_network_security_group_security_rules_details=oci_adaptor.
+                oci.core.models.AddNetworkSecurityGroupSecurityRulesDetails(
+                    security_rules=new_rules),
             )
 
     @classmethod
     @debug_enabled(logger)
-    def remove_ingress_rules(cls, region: str, ports: Set[int]) -> None:
+    def remove_ingress_rules(cls, region: str, cluster_name: str,
+                             ports: Set[int]) -> None:
         if not ports:
             return
 
         net_client = oci_adaptor.get_net_client(
             region, oci_utils.oci_config.get_profile())
-        subnet_id = query_helper.find_create_vcn_subnet(region)
-        get_subnet_resp = net_client.get_subnet(subnet_id=subnet_id)
 
-        security_list_ids = get_subnet_resp.data.security_list_ids
-        for sg_id in security_list_ids:
-            get_sg_resp = net_client.get_security_list(security_list_id=sg_id)
-            ingress_rules: list = get_sg_resp.data.ingress_security_rules
+        nsg_id = cls.find_or_create_nsg(region, cluster_name)
 
-            new_rules = [r for r in ingress_rules]
-            for r in ingress_rules:
-                for p in ports:
-                    if (r.description
-                            == oci_utils.oci_config.SERVICE_PORT_RULE_TAG and
-                            r.tcp_options.destination_port_range.max == p and
-                            r.tcp_options.destination_port_range.min == p):
-                        new_rules.remove(r)
-                        break
+        # pylint: disable=line-too-long
+        list_nsg_rules_resp = net_client.list_network_security_group_security_rules(
+            network_security_group_id=nsg_id,
+            direction='INGRESS',
+            sort_by='TIMECREATED',
+            sort_order='DESC',
+        )
 
-            if len(new_rules) < len(ingress_rules):
-                net_client.update_security_list(
-                    security_list_id=sg_id,
-                    update_security_list_details=oci_adaptor.oci.core.models.
-                    UpdateSecurityListDetails(ingress_security_rules=new_rules),
+        ingress_rules: List = [
+            r for r in list_nsg_rules_resp.data if r.direction == 'INGRESS'
+        ]
+
+        rules_removed = []
+        for r in ingress_rules:
+            for p in ports:
+                if (r.description == oci_utils.oci_config.SERVICE_PORT_RULE_TAG
+                        and r.tcp_options.destination_port_range.max == p and
+                        r.tcp_options.destination_port_range.min == p):
+                    rules_removed.append(r)
+                    break
+
+        if len(ingress_rules) == len(rules_removed):
+            # All rules are removed, so delete the NSG directly.
+            filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name}
+            insts = query_helper.query_instances_by_tags(filters, region)
+
+            for inst in insts:
+                vnic = cls.get_instance_primary_vnic(
+                    region=region,
+                    inst_info={
+                        'inst_id': inst.identifier,
+                        'ad': inst.availability_domain,
+                        'compartment': inst.compartment_id,
+                    })
+                # Detatch the NSG before removing it.
+                net_client.update_vnic(
+                    vnic_id=vnic.id,
+                    update_vnic_details=oci_adaptor.oci.core.models.
+                    UpdateVnicDetails(nsg_ids=[], skip_source_dest_check=False),
                 )
+
+            net_client.delete_network_security_group(
+                network_security_group_id=nsg_id)
+
+        elif rules_removed:
+            net_client.remove_network_security_group_security_rules(
+                network_security_group_id=nsg_id,
+                remove_network_security_group_security_rules_details=oci_adaptor
+                .oci.core.models.RemoveNetworkSecurityGroupSecurityRulesDetails(
+                    security_rule_ids=[r.id for r in rules_removed]),
+            )
 
 
 query_helper = QueryHelper()
