@@ -130,8 +130,7 @@ class Optimizer:
             # This function is effectful: mutates every node in 'dag' by setting
             # node.best_resources if it is None.
             Optimizer._add_dummy_source_sink_nodes(dag)
-            Optimizer._add_dummy_storage_nodes(dag)
-            logger.info('Add dummy nodes for storage')
+            Optimizer._add_storage_nodes_for_data_transfer(dag)
 
             try:
                 unused_best_plan = Optimizer._optimize_dag(
@@ -146,7 +145,7 @@ class Optimizer:
             return dag
 
     @staticmethod
-    def _add_dummy_storage_nodes(dag: 'dag_lib.Dag'):
+    def _add_storage_nodes_for_data_transfer(dag: 'dag_lib.Dag'):
         """Adds special nodes for storage buckets. Specifically, it adds dummy
         nodes between nodes that are connected by with_data edges."""
         graph = dag.get_graph()
@@ -159,22 +158,22 @@ class Optimizer:
         for src, dst, edge_data in graph.edges(data=True):
             if isinstance(src, task_lib.Task) and isinstance(
                     dst, task_lib.Task) and edge_data['edge'].data:
-                dummy = task_lib.Task(f'{src.name}_to_{dst.name}_storage')
+                storage_node = task_lib.Task(f'{src.name}_to_{dst.name}_storage')
                 data = edge_data['edge'].data
-                dummy.set_resources({resources_lib.Resources()})
-                dummy.set_time_estimator(lambda _: 0)
-                edges_to_add.append((src, dummy, dst, data))
+                storage_node.set_resources({resources_lib.Resources()})
+                storage_node.set_time_estimator(lambda _: 0)
+                edges_to_add.append((src, storage_node, dst, data))
         with dag:
-            for src, dummy, dst, data in edges_to_add:
+            for src, storage_node, dst, data in edges_to_add:
                 dag.remove_edge(src, dst)
-                dag.add_edge(src, dummy).with_data(source_path=data.source_path,
+                dag.add_edge(src, storage_node).with_data(source_path=data.source_path,
                                                    target_path='',
                                                    size_gb=data.size_gb)
-                dag.add_edge(dummy, dst).with_data(source_path='',
+                dag.add_edge(storage_node, dst).with_data(source_path='',
                                                    target_path=data.target_path,
                                                    size_gb=data.size_gb)
                 logger.info(
-                    f'Adding dummy node between {src.name} and {dst.name}')
+                    f'Adding storage node between {src.name} and {dst.name}')
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
