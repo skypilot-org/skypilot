@@ -17,6 +17,7 @@ import colorama
 import filelock
 import psutil
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -763,6 +764,8 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
+        job['user_hash'] = job['username']
+        job['username'] = global_user_state.get_user(job['user_hash']).name
     return jobs
 
 
