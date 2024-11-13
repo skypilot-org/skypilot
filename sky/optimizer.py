@@ -710,7 +710,7 @@ class Optimizer:
             cost_per_node = resources.get_cost(execution_time)
             total_cost += cost_per_node * node.num_nodes
 
-            for pred, _, edge_data in graph.in_edges(node):
+            for pred, _, edge_data in graph.in_edges(node, data=True):
                 # FIXME: Account for egress costs for multi-node clusters
                 egress_cost = Optimizer._egress_cost_or_time(
                     True, plan[pred], node, resources, edge_data)
