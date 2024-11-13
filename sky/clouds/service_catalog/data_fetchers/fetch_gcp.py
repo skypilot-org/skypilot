@@ -441,8 +441,15 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
     df['Price'] = df.apply(lambda row: get_vm_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_vm_price(row, spot=True), axis=1)
     dropped_rows = df[df['Price'].isna() & df['SpotPrice'].isna()]
-    dropped_instance_types = ', '.join(dropped_rows['InstanceType'].unique())
-    print(f'Price not found for {dropped_instance_types}. Dropping them.')
+    dropped_info = (dropped_rows[['InstanceType',
+                                  'AvailabilityZone']].drop_duplicates())
+    az2missing = dropped_info.groupby('AvailabilityZone').apply(
+        lambda x: x['InstanceType'].tolist())
+    print('Price not found for the following zones and instance types. '
+          'Dropping them.')
+    for az, instances in az2missing.items():
+        print('-' * 30, az, '-' * 30)
+        print(', '.join(instances))
     df = df.dropna(subset=['Price', 'SpotPrice'], how='all')
     df = df.reset_index(drop=True)
     df = df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'])
