@@ -2606,22 +2606,14 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
         # TODO(zhwu): Backward compatibility for old SkyPilot runtime version on
         # the remote cluster. Remove this after 0.10.0 is released.
         attribute_error = re.findall(pattern, stderr)
-        if attribute_error:
+        if attribute_error or 'SkyPilot runtime is too old' in stderr:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
-                    'on the remote cluster. To update, run (existing jobs are '
-                    f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
+                    f'on the remote cluster: {cluster_name}. To update, run '
+                    '(existing jobs will not be interrupted): '
+                    f'{colorama.Style.BRIGHT}sky start -f -y '
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
-                    f'\n--- Details ---\n{stderr.strip()}\n')
-        if 'SkyPilot runtime is too old' in stderr:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'{colorama.Fore.RED}SkyPilot runtime is too old on '
-                    f'remote cluster: {cluster_name}. To update, run '
-                    f'(existing jobs are not interrupted): '
-                    f'{colorama.Style.BRIGHT}sky start -f -y {cluster_name}'
-                    f'{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n') from None
 
 

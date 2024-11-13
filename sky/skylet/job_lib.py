@@ -921,7 +921,7 @@ class JobLibCodeGen:
             # process. Using the old skylet version will cause the job status
             # to be stuck in PENDING state or transition to FAILED_DRIVER state.
             '\nif int(constants.SKYLET_VERSION) < 9: '
-            'raise RuntimeError("SkyPilot runtime is too old, which does not'
+            'raise RuntimeError("SkyPilot runtime is too old, which does not '
             'support submitting jobs.")',
             '\njob_id = job_lib.add_job('
             f'{job_name!r},'
