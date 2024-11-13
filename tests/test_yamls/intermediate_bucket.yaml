@@ -1,7 +1,9 @@
 name: intermediate-bucket
 
 file_mounts:
-  /file_mounts_dir: .
+  /setup.py: ./setup.py
+  /sky: .
+  /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
 workdir: .
 
@@ -12,6 +14,8 @@ setup: |
 run: |
   echo "listing workdir"
   ls .
-  echo "listing file_mounts_dir"
-  ls /file_mounts_dir
+  echo "listing file_mounts"
+  ls /setup.py
+  ls /sky
+  ls /train-00001-of-01024
   echo "task run finish"
