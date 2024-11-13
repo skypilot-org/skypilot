@@ -174,7 +174,7 @@ class Optimizer:
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
                     cloud_name = str(storage_node.best_resources.cloud)
-                    if cloud_name in instance_to_storage.keys():
+                    if cloud_name in instance_to_storage:
                         best_storage.add_store(
                             instance_to_storage[cloud_name],
                             storage_node.best_resources.region)
@@ -770,9 +770,8 @@ class Optimizer:
             if not n_gigabytes:
                 # n_gigabytes can be None, if the task has no inputs/outputs.
                 continue
-            assert src_cloud is not None and dst_cloud is not None, (src_cloud,
-                                                                     dst_cloud,
-                                                                     n_gigabytes)
+            assert src_cloud is not None and dst_cloud is not None, (
+                src_cloud, dst_cloud, n_gigabytes)
 
             if minimize_cost:
                 fn = Optimizer._egress_cost
