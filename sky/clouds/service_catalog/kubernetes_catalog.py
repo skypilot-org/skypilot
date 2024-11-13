@@ -186,7 +186,7 @@ def list_accelerators_realtime(
                     else:
                         total_accelerators_capacity[
                             accelerator_name] += quantized_count
-                        
+
                 if pods is None:
                     # If we can't get the pods, we can't get the GPU usage
                     total_accelerators_available[accelerator_name] = -1

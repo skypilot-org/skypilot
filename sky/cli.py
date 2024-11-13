@@ -3162,8 +3162,9 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
-            available = node_info.free['accelerators_available'] if node_info.free[
-                'accelerators_available'] != -1 else no_permissions_str
+            available = node_info.free[
+                'accelerators_available'] if node_info.free[
+                    'accelerators_available'] != -1 else no_permissions_str
             node_table.add_row([
                 node_name, node_info.accelerator_type,
                 node_info.total['accelerator_count'], available
