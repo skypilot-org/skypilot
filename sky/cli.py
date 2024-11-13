@@ -46,6 +46,7 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds as sky_clouds
@@ -67,6 +68,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -582,6 +584,15 @@ def _launch_with_confirm(
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
                                    f'{colorama.Style.RESET_ALL}') from e
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            ),
+        )
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -2011,6 +2022,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2024,6 +2041,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -2090,7 +2108,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    core.tail_logs(cluster, job_id, follow, tail)
 
 
 @cli.command()
@@ -3036,9 +3054,9 @@ def show_gpus(
     and spot instances. There may be multiple regions with the same lowest
     price.
 
-    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
-    of the GPU available on a single node and the real-time availability of
-    the GPU across all nodes in the Kubernetes cluster.
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
 
     Definitions of certain fields:
 
@@ -3084,6 +3102,7 @@ def show_gpus(
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+    no_permissions_str = '<no permissions>'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3124,13 +3143,16 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg +
+                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
+            available_qty = available[gpu] if available[gpu] != -1 else (
+                no_permissions_str)
             realtime_gpu_table.add_row([
                 gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available_qty
             ])
         return realtime_gpu_table
 
@@ -3140,10 +3162,12 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
+            available = node_info.free[
+                'accelerators_available'] if node_info.free[
+                    'accelerators_available'] != -1 else no_permissions_str
             node_table.add_row([
-                node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                node_name, node_info.accelerator_type,
+                node_info.total['accelerator_count'], available
             ])
         return node_table
 
@@ -3198,8 +3222,18 @@ def show_gpus(
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
+                    # TODO(Doyoung): Update the message with the multi-host TPU
+                    # support.
+                    k8s_per_node_acc_message = (
+                        'Kubernetes per node accelerator availability ')
+                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
+                            context):
+                        k8s_per_node_acc_message += (
+                            '(Note: Multi-host TPUs are detected and excluded '
+                            'from the display as multi-host TPUs are not '
+                            'supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node GPU availability'
+                           f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
@@ -3667,6 +3701,8 @@ def jobs_launch(
 
     click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
                 fg='cyan')
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     dag = sky.optimize(dag)
 
     if not yes:
@@ -4145,6 +4181,8 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4261,6 +4299,8 @@ def serve_update(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
