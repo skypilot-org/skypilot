@@ -498,9 +498,7 @@ class QueryHelper:
 
             for r in ingress_rules:
                 rule_existing_ports = [
-                    p for p in ports
-                    if r.source == oci_utils.oci_config.VCN_CIDR_INTERNET and
-                    r.tcp_options and
+                    p for p in ports if r.tcp_options and
                     (r.tcp_options.destination_port_range.max >= p and
                      r.tcp_options.destination_port_range.min <= p)
                 ]
