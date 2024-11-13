@@ -953,6 +953,8 @@ def ssh_credential_from_yaml(
             the docker container.
         ssh_user: override the ssh_user in the cluster yaml.
     """
+    if not os.path.exists(cluster_yaml):
+        return dict()
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     if ssh_user is None:
@@ -2218,6 +2220,8 @@ def get_clusters(
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
+        if not credentials:
+            return
         ssh_private_key_path = credentials.get('ssh_private_key', None)
         if ssh_private_key_path is not None:
             with open(os.path.expanduser(ssh_private_key_path),

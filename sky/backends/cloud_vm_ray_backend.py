@@ -1543,7 +1543,9 @@ class RetryingVmProvisioner(object):
                     # cluster does not exist. Also we are fast at
                     # cleaning up clusters now if there is no existing node..
                     CloudVmRayBackend().post_teardown_cleanup(
-                        handle, terminate=not prev_cluster_ever_up)
+                        handle,
+                        terminate=not prev_cluster_ever_up,
+                        remove_from_db=False)
                     # TODO(suquark): other clouds may have different zone
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
@@ -1660,7 +1662,8 @@ class RetryingVmProvisioner(object):
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
             CloudVmRayBackend().teardown_no_lock(handle,
-                                                 terminate=terminate_or_stop)
+                                                 terminate=terminate_or_stop,
+                                                 remove_from_db=False)
 
         if to_provision.zone is not None:
             message = (
@@ -2786,24 +2789,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
-                    # Do not remove the stopped cluster from the global state
-                    # if failed to start.
+                    log_path = retry_provisioner.log_dir + '/provision.log'
+                    error_message = (
+                        f'{colorama.Fore.RED}Failed to provision all '
+                        f'possible launchable resources.'
+                        f'{colorama.Style.RESET_ALL}'
+                        ' Relax the task\'s resource requirements: '
+                        f'{task.num_nodes}x {list(task.resources)[0]}')
                     if e.no_failover:
                         error_message = str(e)
-                    else:
-                        # Clean up the cluster's entry in `sky status`.
-                        global_user_state.remove_cluster(cluster_name,
-                                                         terminate=True)
-                        usage_lib.messages.usage.update_final_cluster_status(
-                            None)
-                        error_message = (
-                            f'{colorama.Fore.RED}Failed to provision all '
-                            f'possible launchable resources.'
-                            f'{colorama.Style.RESET_ALL}'
-                            ' Relax the task\'s resource requirements: '
-                            f'{task.num_nodes}x {list(task.resources)[0]}')
 
-                    log_path = retry_provisioner.log_dir + '/provision.log'
                     if retry_until_up:
                         logger.error(error_message)
                         # Sleep and retry.
@@ -2818,6 +2813,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
+                    # Clean up the cluster's entry in `sky status`.
+                    # Do not remove the stopped cluster from the global state
+                    # if failed to start.
+                    if not e.no_failover:
+                        global_user_state.remove_cluster(cluster_name,
+                                                         terminate=True)
+                        usage_lib.messages.usage.update_final_cluster_status(
+                            None)
                     logger.error(
                         ux_utils.error_message(
                             'Failed to provision resources. '
@@ -3776,7 +3779,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          terminate: bool,
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
-                         refresh_cluster_status: bool = True) -> None:
+                         refresh_cluster_status: bool = True,
+                         remove_from_db: bool = True) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -3817,6 +3821,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.warning(
                 f'Cluster {handle.cluster_name!r} is already terminated. '
                 'Skipped.')
+            return
+
+        if not os.path.exists(handle.cluster_yaml):
+            logger.warning(f'Cluster {handle.cluster_name!r} has no '
+                           f'provision yaml {handle.cluster_yaml} so it '
+                           'has not been provisioned. Skipped.')
+            global_user_state.remove_cluster(handle.cluster_name,
+                                             terminate=terminate)
             return
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -3872,7 +3884,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
             if post_teardown_cleanup:
-                self.post_teardown_cleanup(handle, terminate, purge)
+                self.post_teardown_cleanup(handle, terminate, purge,
+                                           remove_from_db)
             return
 
         if (isinstance(cloud, clouds.IBM) and terminate and
@@ -3995,7 +4008,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def post_teardown_cleanup(self,
                               handle: CloudVmRayResourceHandle,
                               terminate: bool,
-                              purge: bool = False) -> None:
+                              purge: bool = False,
+                              remove_from_db: bool = True) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
@@ -4056,8 +4070,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
             handle.cluster_name)
 
-        global_user_state.remove_cluster(handle.cluster_name,
-                                         terminate=terminate)
+        if not terminate or remove_from_db:
+            global_user_state.remove_cluster(handle.cluster_name,
+                                             terminate=terminate)
 
         if terminate:
             # This function could be directly called from status refresh,
