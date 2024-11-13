@@ -17,7 +17,9 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.dag import TaskData
 from sky.dag import TaskEdge
+from sky.data import Storage
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -130,7 +132,8 @@ class Optimizer:
             # This function is effectful: mutates every node in 'dag' by setting
             # node.best_resources if it is None.
             Optimizer._add_dummy_source_sink_nodes(dag)
-            Optimizer._add_storage_nodes_for_data_transfer(dag)
+            storage_nodes_info = Optimizer._add_storage_nodes_for_data_transfer(
+                dag)
 
             try:
                 unused_best_plan = Optimizer._optimize_dag(
@@ -142,10 +145,39 @@ class Optimizer:
                 # Make sure to remove the dummy source/sink nodes, even if the
                 # optimization fails.
                 Optimizer._remove_dummy_source_sink_nodes(dag)
+                Optimizer._convert_storage_nodes_to_edge_attributes(
+                    dag, storage_nodes_info)
             return dag
 
     @staticmethod
-    def _add_storage_nodes_for_data_transfer(dag: 'dag_lib.Dag'):
+    def _convert_storage_nodes_to_edge_attributes(
+        dag: 'dag_lib.Dag',
+        edges_to_add: List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
+                                 TaskData]]):
+        """Removes the storage nodes and adds the storage information to the
+        edges."""
+        with dag:
+            for src, storage_node, dst, data in edges_to_add:
+                dag.remove_edge(src, storage_node)
+                dag.remove_edge(storage_node, dst)
+                task_edge = dag.add_edge(src, dst)
+                task_edge.with_data(source_path=data.source_path,
+                                    target_path=data.target_path,
+                                    size_gb=data.size_gb)
+                best_storage = Storage()
+                if storage_node.best_resources is not None:
+                    assert storage_node.best_resources.cloud is not None
+                    best_storage.add_store(
+                        str(storage_node.best_resources.cloud),
+                        storage_node.best_resources.region)
+                    task_edge.best_storage = best_storage
+                else:
+                    task_edge.best_storage = None
+
+    @staticmethod
+    def _add_storage_nodes_for_data_transfer(
+        dag: 'dag_lib.Dag'
+    ) -> List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, TaskData]]:
         """Adds special nodes for storage buckets. Specifically, it adds dummy
         nodes between nodes that are connected by with_data edges."""
         graph = dag.get_graph()
@@ -177,6 +209,7 @@ class Optimizer:
                                             size_gb=data.size_gb)
                 logger.info(
                     f'Adding storage node between {src.name} and {dst.name}')
+        return edges_to_add
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
