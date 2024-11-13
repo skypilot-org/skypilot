@@ -735,7 +735,6 @@ class Optimizer:
             else:
                 fn = Optimizer._egress_time
             cost_or_time = fn(src_cloud, dst_cloud, nbytes)
-            logger.info(f'cost_or_time: {cost_or_time}')
             if cost_or_time > 0:
                 if parent.name == _DUMMY_SOURCE_NAME:
                     egress = [
