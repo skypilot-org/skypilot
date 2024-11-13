@@ -3506,8 +3506,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # In case other running cluster operations are still holding the
             # lock.
             common_utils.remove_file_if_exists(lock_path)
-            requests_lib.kill_requests_for_clusters(handle.cluster_name)
-
+            exclude_request_to_kill = 'down' if terminate else 'stop'
+            requests_lib.kill_cluster_requests(handle.cluster_name,
+                                               exclude_request_to_kill)
             try:
                 with filelock.FileLock(
                         lock_path,
@@ -3787,7 +3788,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
-        requests_lib.kill_requests_for_clusters(handle.cluster_name)
+        exclude_request_to_kill = 'down' if terminate else 'stop'
+        requests_lib.kill_cluster_requests(handle.cluster_name,
+                                           exclude_request_to_kill)
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
