@@ -164,8 +164,14 @@ class JobStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
-# Only update status of the INIT jobs after this many seconds of job submission,
-# to avoid a delay between getting job id (INIT) and the actual pending job.
+# We have two steps for job submissions:
+# 1. Client reserve a job id from the job table by adding a INIT state job.
+# 2. Client updates the job status to PENDING by actually submitting the job's
+#    command to the scheduler.
+# In normal cases, the two steps happens very close to each other through two
+# consecutive SSH connections.
+# We should update status for INIT job that has been staying in INIT state for
+# a while (60 seconds), which likely fails to reach step 2.
 # TODO(zhwu): This number should be tuned based on heuristics.
 _INIT_SUBMIT_GRACE_PERIOD = 60
 
