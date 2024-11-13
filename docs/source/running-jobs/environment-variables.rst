@@ -16,18 +16,9 @@ User-specified environment variables
 
 User-specified environment variables are useful for passing secrets and any arguments or configurations needed for your tasks. They are made available in ``file_mounts``, ``setup``, and ``run``.
 
-You can specify environment variables to be made available to a task in two ways:
+You can specify environment variables to be made available to a task in several ways:
 
-- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`:
-
-  .. code-block:: yaml
-
-    envs:
-      MYVAR: val
-
-- ``--env`` flag in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
-
-- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>`, path to a dotenv file (lowest precedence over the above)
+- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>`, path to a dotenv file:
 
   .. code-block:: text
 
@@ -36,6 +27,15 @@ You can specify environment variables to be made available to a task in two ways
     MYVAR=val
     WANDB_API_KEY=MY_WANDB_API_KEY
     HF_TOKEN=MY_HF_TOKEN
+
+- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`: (takes precedence over the above)
+
+  .. code-block:: yaml
+
+    envs:
+      MYVAR: val
+
+- ``--env`` flag in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
 .. tip::
 
