@@ -2858,7 +2858,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We need to return the handle - but it should be the existing
                 # handle for the cluster.
                 record = global_user_state.get_cluster_from_name(cluster_name)
-                assert record is not None and record['handle'] is not None
+                assert record is not None and record['handle'] is not None, (
+                    cluster_name, record)
                 return record['handle']
 
             if 'provision_record' in config_dict:
