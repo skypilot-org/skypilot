@@ -161,7 +161,6 @@ class Optimizer:
                     dst, task_lib.Task) and edge_data['edge'].data:
                 dummy = task_lib.Task(f'{src.name}_to_{dst.name}_storage')
                 data = edge_data['edge'].data
-                dummy.set_outputs(data.source_path, data.size_gb)
                 dummy.set_resources({resources_lib.Resources()})
                 dummy.set_time_estimator(lambda _: 0)
                 edges_to_add.append((src, dummy, dst, data))
