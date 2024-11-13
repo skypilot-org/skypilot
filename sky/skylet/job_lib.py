@@ -583,6 +583,7 @@ def update_job_status(job_ids: List[int],
             job_pid = job_record['pid']
 
             pid_query_time = time.time()
+            failed_driver_transition_message = None
             if original_status == JobStatus.INIT:
                 if (job_submitted_at >= psutil.boot_time() and job_submitted_at
                         >= pid_query_time - _INIT_SUBMIT_GRACE_PERIOD):
@@ -596,48 +597,47 @@ def update_job_status(job_ids: List[int],
                     # was killed before the job is submitted. We should set it
                     # to FAILED then. Note, if ray job indicates the job is
                     # running, we will change status to PENDING below.
-                    echo(
+                    failed_driver_transition_message = (
                         f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
 
-            try:
-                # job_pid is 0 if the job is not submitted yet.
-                # job_pid is -1 if the job is submitted with SkyPilot older than
-                # #4318, using ray job submit. We skip the checking for those
-                # jobs.
-                if job_pid > 0:
-                    if _is_job_driver_process_running(job_pid, job_id):
-                        status = JobStatus.PENDING
-                    else:
-                        # By default, if the job driver process does not exist,
-                        # the actual SkyPilot job is one of the following:
-                        # 1. Still pending to be submitted.
-                        # 2. Submitted and finished.
-                        # 3. Driver failed without correctly setting the job
-                        #    status in the job table.
-                        # Although we set the status to FAILED_DRIVER, it can be
-                        # overridden to PENDING if the job is not submitted, or
-                        # any other terminal status if the job driver process
-                        # finished correctly.
-                        status = JobStatus.FAILED_DRIVER
-                elif job_pid < 0:
-                    # TODO(zhwu): Backward compatibility, remove after 0.9.0.
-                    # We set the job status to PENDING instead of actually
-                    # checking ray job status and let the status in job table
-                    # take effect in the later max.
+            # job_pid is 0 if the job is not submitted yet.
+            # job_pid is -1 if the job is submitted with SkyPilot older than
+            # #4318, using ray job submit. We skip the checking for those
+            # jobs.
+            if job_pid > 0:
+                if _is_job_driver_process_running(job_pid, job_id):
                     status = JobStatus.PENDING
-            except psutil.NoSuchProcess:
-                # The job driver process is not found, it can be in several
-                # cases as mentioned above where we set the job status to
-                # FAILED_DRIVER.
-                status = JobStatus.FAILED_DRIVER
+                else:
+                    # By default, if the job driver process does not exist,
+                    # the actual SkyPilot job is one of the following:
+                    # 1. Still pending to be submitted.
+                    # 2. Submitted and finished.
+                    # 3. Driver failed without correctly setting the job
+                    #    status in the job table.
+                    # Although we set the status to FAILED_DRIVER, it can be
+                    # overridden to PENDING if the job is not submitted, or
+                    # any other terminal status if the job driver process
+                    # finished correctly.
+                    failed_driver_transition_message = (
+                        f'Job {job_id} driver process is not running, but '
+                        'the job state is not in terminal states, setting '
+                        'it to FAILED_DRIVER')
+                    status = JobStatus.FAILED_DRIVER
+            elif job_pid < 0:
+                # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+                # We set the job status to PENDING instead of actually
+                # checking ray job status and let the status in job table
+                # take effect in the later max.
+                status = JobStatus.PENDING
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
                 if pending_job['created_time'] < psutil.boot_time():
-                    echo(f'Job {job_id} is stale, setting to FAILED: '
-                         f'created_time={pending_job["created_time"]}, '
-                         f'boot_time={psutil.boot_time()}')
+                    failed_driver_transition_message = (
+                        f'Job {job_id} is stale, setting to FAILED_DRIVER: '
+                        f'created_time={pending_job["created_time"]}, '
+                        f'boot_time={psutil.boot_time()}')
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
                     status = JobStatus.FAILED_DRIVER
@@ -669,9 +669,11 @@ def update_job_status(job_ids: List[int],
                     # The job may be stale, when the instance is restarted. We
                     # need to reset the job status to FAILED_DRIVER if its
                     # original status is in nonterminal_statuses.
+                    failed_driver_transition_message = (
+                        f'Job {job_id} is in a unknown state, setting it to '
+                        'FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
                     _set_status_no_lock(job_id, status)
-                    echo(f'Updated job {job_id} status to {status}')
             else:
                 # Taking max of the status is necessary because:
                 # 1. The original status has already been set to later
@@ -685,6 +687,9 @@ def update_job_status(job_ids: List[int],
                 if status != original_status:  # Prevents redundant update.
                     _set_status_no_lock(job_id, status)
                     echo(f'Updated job {job_id} status to {status}')
+            if (original_status != status and
+                    failed_driver_transition_message is not None):
+                echo(failed_driver_transition_message)
         statuses.append(status)
     return statuses
 
