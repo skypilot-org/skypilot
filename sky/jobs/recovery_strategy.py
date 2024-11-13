@@ -117,8 +117,9 @@ class StrategyExecutor:
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
-        return registry.JOBS_RECOVERY_STRATEGY_REGISTRY[job_recovery_name](
-            cluster_name, backend, task, retry_until_up, max_restarts_on_errors)
+        return registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_name(
+            job_recovery_name)(cluster_name, backend, task, retry_until_up,
+                               max_restarts_on_errors)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
