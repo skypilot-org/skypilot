@@ -354,6 +354,7 @@ class AbstractStore:
         raise NotImplementedError
 
     def remove_objects_from_sub_path(self) -> None:
+        """Removes objects from the sub path in the bucket."""
         raise NotImplementedError
 
     def get_handle(self) -> StorageHandle:
