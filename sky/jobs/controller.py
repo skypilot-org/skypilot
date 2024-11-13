@@ -487,11 +487,6 @@ def start(job_id, dag_yaml, retry_until_up):
     controller_process = None
     cancelling = False
     try:
-        if (len(managed_job_state.get_nonterminal_job_ids_by_name(None)) >
-                managed_job_utils.NUM_JOBS_THRESHOLD):
-            raise exceptions.ManagedJobUserCancelledError(
-                'Too many concurrent managed jobs are running. '
-                'Please try again later or cancel some jobs.')
         _handle_signal(job_id)
         # TODO(suquark): In theory, we should make controller process a
         #  daemon process so it will be killed after this process exits,
