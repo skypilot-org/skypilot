@@ -286,14 +286,14 @@ class Optimizer:
                 # A task_lib.Task may have no inputs specified.
                 return None, None, 0
             src_cloud = node.get_inputs_cloud()
-            nbytes = node.get_estimated_inputs_size_gigabytes()
+            n_gigabytes = node.get_estimated_inputs_size_gigabytes()
         else:
             src_cloud = parent_resources.cloud
             assert isinstance(edge_data['edge'], TaskEdge)
             task_edge = edge_data['edge']
-            nbytes = task_edge.data.size_gb if task_edge.data else 0
+            n_gigabytes = task_edge.data.size_gb if task_edge.data else 0
         dst_cloud = resources.cloud
-        return src_cloud, dst_cloud, nbytes
+        return src_cloud, dst_cloud, n_gigabytes
 
     @staticmethod
     def _egress_cost_or_time(minimize_cost: bool,
@@ -302,20 +302,20 @@ class Optimizer:
                              resources: resources_lib.Resources,
                              edge_data: Dict[str, Any]):
         """Computes the egress cost or time depending on 'minimize_cost'."""
-        src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
+        src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(
             parent_resources, node, resources, edge_data)
-        if not nbytes:
-            # nbytes can be None, if the task has no inputs/outputs.
+        if not n_gigabytes:
+            # n_gigabytes can be None, if the task has no inputs/outputs.
             return 0
         assert src_cloud is not None and dst_cloud is not None, (src_cloud,
                                                                  dst_cloud,
-                                                                 nbytes)
+                                                                 n_gigabytes)
 
         if minimize_cost:
             fn = Optimizer._egress_cost
         else:
             fn = Optimizer._egress_time
-        return fn(src_cloud, dst_cloud, nbytes)
+        return fn(src_cloud, dst_cloud, n_gigabytes)
 
     @staticmethod
     def _estimate_nodes_cost_or_time(
@@ -765,20 +765,20 @@ class Optimizer:
         logger.info('Print egress plan')
         message_data = []
         for parent, child, edge_data in graph.edges(data=True):
-            src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
+            src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(
                 plan[parent], child, plan[child], edge_data)
-            if not nbytes:
-                # nbytes can be None, if the task has no inputs/outputs.
+            if not n_gigabytes:
+                # n_gigabytes can be None, if the task has no inputs/outputs.
                 continue
             assert src_cloud is not None and dst_cloud is not None, (src_cloud,
                                                                      dst_cloud,
-                                                                     nbytes)
+                                                                     n_gigabytes)
 
             if minimize_cost:
                 fn = Optimizer._egress_cost
             else:
                 fn = Optimizer._egress_time
-            cost_or_time = fn(src_cloud, dst_cloud, nbytes)
+            cost_or_time = fn(src_cloud, dst_cloud, n_gigabytes)
             if cost_or_time > 0:
                 if parent.name == _DUMMY_SOURCE_NAME:
                     egress = [
@@ -789,7 +789,7 @@ class Optimizer:
                     egress = [
                         f'{parent} ({src_cloud})', f'{child} ({dst_cloud})'
                     ]
-                message_data.append((*egress, nbytes, cost_or_time))
+                message_data.append((*egress, n_gigabytes, cost_or_time))
 
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
