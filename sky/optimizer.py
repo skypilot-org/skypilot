@@ -479,7 +479,7 @@ class Optimizer:
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
                         minimize_cost, parent_resources, node, resources,
-                        graph.get_edge_data(parent, node, key='first'))
+                        graph.get_edge_data(parent, node))
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
