@@ -27,7 +27,7 @@ You can specify environment variables to be made available to a task in two ways
 
 - ``--env`` flag in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
-- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>` (lowest precedence over the above)
+- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>`, path to a dotenv file (lowest precedence over the above)
 
   .. code-block:: text
 
