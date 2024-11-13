@@ -74,6 +74,16 @@ def create_table(cursor, conn):
             # If the database is locked, it is OK to continue, as the WAL mode
             # is not critical and is likely to be enabled by other processes.
 
+    # Pid column is used for keeping track of the driver process of a job. It
+    # can be in three states:
+    # -1: The job was submitted with SkyPilot older than #4318, where we use
+    #     ray job submit to submit the job, i.e. no pid is recorded. This is for
+    #     backward compatibility and should be removed after 0.10.0.
+    # 0: The job driver process has never been started. When adding a job with
+    #    INIT state, the pid will be set to 0 (the default -1 value is just for
+    #    backward compatibility).
+    # >=0: The job has been started. The pid is the driver process's pid.
+    #      The driver can be actually running or finished.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +95,7 @@ def create_table(cursor, conn):
         start_at FLOAT DEFAULT -1,
         end_at FLOAT DEFAULT NULL,
         resources TEXT DEFAULT NULL,
-        pid INTEGER DEFAULT 0)""")
+        pid INTEGER DEFAULT -1)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
