@@ -62,9 +62,9 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 Ready to get started?
 ----------------------
 
-:ref:`Install SkyPilot <installation>` in ~1 minute. Then, launch your first dev cluster in ~5 minutes in :ref:`Quickstart <quickstart>`.
+:ref:`Install SkyPilot <installation>` in 1 minute. Then, launch your first dev cluster in 2 minutes in :ref:`Quickstart <quickstart>`.
 
-Everything is launched within your cloud accounts, VPCs, and cluster(s).
+SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and clusters.
 
 Contact the SkyPilot team
 ---------------------------------
@@ -130,6 +130,7 @@ Read the research:
    ../getting-started/quickstart
    ../examples/interactive-development
    ../getting-started/tutorial
+   ../getting-started/sky-computing
 
 
 .. toctree::
