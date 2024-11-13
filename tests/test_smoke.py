@@ -288,13 +288,13 @@ _VALIDATE_LAUNCH_OUTPUT = (
     # (min, pid=1277)
     # (min, pid=1277) task run finish
     # ✓ Job finished (status: SUCCEEDED).
-
-    # 📋 Useful Commands
+    #
     # Job ID: 1
+    # 📋 Useful Commands
     # ├── To cancel the job:          sky cancel test 1
     # ├── To stream job logs:         sky logs test 1
     # └── To view job queue:          sky queue test
-
+    #
     # Cluster name: test
     # ├── To log into the head VM:    ssh test
     # ├── To submit a job:            sky exec test yaml_file
@@ -314,8 +314,8 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
-    'grep "Useful Commands" && '
-    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+    'grep "Job ID:" && '
+    'echo "$s" | grep -A 1 "Job ID:" | grep "Useful Commands"')
 
 
 # ---------- A minimal task ----------
@@ -443,6 +443,35 @@ def test_aws_region():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_with_ssh_proxy_command():
+    name = _get_cluster_name()
+    with tempfile.NamedTemporaryFile(mode='w') as f:
+        f.write(
+            textwrap.dedent(f"""\
+        aws:
+            ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
+        """))
+        f.flush()
+        test = Test(
+            'aws_with_ssh_proxy_command',
+            [
+                f'sky launch -y -c jump-{name} --cloud aws --cpus 2 --region us-east-1',
+                # Use jump config
+                f'export SKYPILOT_CONFIG={f.name}; '
+                f'sky launch -y -c {name} --cloud aws --cpus 2 --region us-east-1 echo hi',
+                f'sky logs {name} 1 --status',
+                f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
+                f'sky logs {name} 2 --status',
+                f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
+                'sleep 300',
+                f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
+            ],
+            f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
+        )
+        run_one_test(test)
 
 
 @pytest.mark.gcp
@@ -1963,6 +1992,25 @@ def test_tpu_vm_pod():
             f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32 --use-spot --zone europe-west4-a',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
+# ---------- TPU Pod Slice on GKE. ----------
+@pytest.mark.kubernetes
+def test_tpu_pod_slice_gke():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod_slice_gke',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --cloud kubernetes --gpus tpu-v5-lite-podslice',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "conda activate flax; python -c \'import jax; print(jax.devices()[0].platform);\' | grep tpu || exit 1;"',  # Ensure TPU is reachable.
+            f'sky logs {name} 2 --status'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins

@@ -63,7 +63,7 @@ ENDPOINT=$(sky serve status --endpoint sglang-llava)
 
 4. Once it status is `READY`, you can use the endpoint to talk to the model with both text and image inputs:
 <figure align="center">
-  <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/examples/quick_start/images/cat.jpeg" alt="" width="50%">
+  <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/examples/frontend_language/quick_start/images/cat.jpeg" alt="" width="50%">
   <figcaption>Input image to the LLaVA model.</figcaption>
 </figure>
 
@@ -80,7 +80,7 @@ curl $ENDPOINT/v1/chat/completions \
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": "https://raw.githubusercontent.com/sgl-project/sglang/main/examples/quick_start/images/cat.jpeg"
+                    "url": "https://raw.githubusercontent.com/sgl-project/sglang/main/examples/frontend_language/quick_start/images/cat.jpeg"
                 }
             }
         ]

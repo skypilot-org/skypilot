@@ -26,9 +26,11 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 
+@timeline.event
 @usage_lib.entrypoint
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
@@ -59,8 +61,10 @@ def launch(
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
-
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
     if not dag.is_chain():

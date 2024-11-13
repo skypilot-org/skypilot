@@ -431,6 +431,12 @@ Available fields and semantics:
   # Advanced Azure configurations (optional).
   # Apply to all new instances but not existing ones.
   azure:
+    # By default, SkyPilot creates a unique resource group for each VM when
+    # launched. If specified, all VMs will be launched within the provided
+    # resource group. Additionally, controllers for serve and managed jobs will
+    # be created in this resource group. Note: This setting only applies to VMs
+    # and does not affect storage accounts or containers.
+    resource_group_vm: user-resource-group-name
     # Specify an existing Azure storage account for SkyPilot-managed containers.
     # If not set, SkyPilot will use its default naming convention to create and
     # use the storage account unless container endpoint URI is used as source.

@@ -5,13 +5,14 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct, 2024: Add default image OS
    configuration.
 """
-import logging
 import os
 
+from sky import sky_logging
 from sky import skypilot_config
+from sky import status_lib
 from sky.utils import resources_utils
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 class OCIConfig:
@@ -75,6 +76,19 @@ class OCIConfig:
         resources_utils.DiskTier.LOW: DISK_TIER_LOW,
         resources_utils.DiskTier.MEDIUM: DISK_TIER_MEDIUM,
         resources_utils.DiskTier.HIGH: DISK_TIER_HIGH,
+    }
+
+    # Oracle instance's lifecycle state to sky state mapping.
+    # For Oracle VM instance's lifecyle state, please refer to the link:
+    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+    STATE_MAPPING_OCI_TO_SKY = {
+        'PROVISIONING': status_lib.ClusterStatus.INIT,
+        'STARTING': status_lib.ClusterStatus.INIT,
+        'RUNNING': status_lib.ClusterStatus.UP,
+        'STOPPING': status_lib.ClusterStatus.STOPPED,
+        'STOPPED': status_lib.ClusterStatus.STOPPED,
+        'TERMINATED': None,
+        'TERMINATING': None,
     }
 
     @classmethod

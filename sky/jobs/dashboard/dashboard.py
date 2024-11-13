@@ -26,7 +26,8 @@ def _is_running_on_jobs_controller() -> bool:
     """
     if pathlib.Path('~/.sky/sky_ray.yml').expanduser().exists():
         config = yaml.safe_load(
-            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text())
+            pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text(
+                encoding='utf-8'))
         cluster_name = config.get('cluster_name', '')
         candidate_controller_names = (
             controller_utils.Controllers.JOBS_CONTROLLER.value.
