@@ -2,7 +2,7 @@
 import copy
 import json
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
 from sky import exceptions
@@ -47,6 +47,72 @@ def head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
+def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
+    # Returns a formatted string of resource requirements for a pod.
+    resource_requirements = {}
+
+    if isinstance(pod_or_spec, dict):
+        containers = pod_or_spec.get('spec', {}).get('containers', [])
+    else:
+        containers = pod_or_spec.spec.containers
+
+    for container in containers:
+        if isinstance(container, dict):
+            resources = container.get('resources', {})
+            requests = resources.get('requests', {})
+        else:
+            resources = container.resources
+            requests = resources.requests or {}
+
+        for resource, value in requests.items():
+            if resource not in resource_requirements:
+                resource_requirements[resource] = 0
+            if resource == 'memory':
+                int_value = kubernetes_utils.parse_memory_resource(value)
+            else:
+                int_value = kubernetes_utils.parse_cpu_or_gpu_resource(value)
+            resource_requirements[resource] += int(int_value)
+    return ', '.join(f'{resource}={value}'
+                     for resource, value in resource_requirements.items())
+
+
+def _formatted_node_selector(pod_or_spec: Union[Any, dict]) -> Optional[str]:
+    # Returns a formatted string of node selectors for a pod.
+    node_selectors = []
+
+    if isinstance(pod_or_spec, dict):
+        selectors = pod_or_spec.get('spec', {}).get('nodeSelector', {})
+    else:
+        selectors = pod_or_spec.spec.node_selector
+
+    if not selectors:
+        return None
+
+    for label_key, label_value in selectors.items():
+        node_selectors.append(f'{label_key}={label_value}')
+    return ', '.join(node_selectors)
+
+
+def _lack_resource_msg(resource: str,
+                       pod_or_spec: Union[Any, dict],
+                       extra_msg: Optional[str] = None,
+                       details: Optional[str] = None) -> str:
+    resource_requirements = _formatted_resource_requirements(pod_or_spec)
+    node_selectors = _formatted_node_selector(pod_or_spec)
+    node_selector_str = f' and labels ({node_selectors})' if (
+        node_selectors) else ''
+    msg = (f'Insufficient {resource} capacity on the cluster. '
+           f'Required resources ({resource_requirements}){node_selector_str} '
+           'were not found in a single node. Other SkyPilot tasks or pods may '
+           'be using resources. Check resource usage by running '
+           '`kubectl describe nodes`.')
+    if extra_msg:
+        msg += f' {extra_msg}'
+    if details:
+        msg += f'\nFull error: {details}'
+    return msg
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -54,52 +120,6 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
-
-    def _formatted_resource_requirements(pod):
-        # Returns a formatted string of resource requirements for a pod.
-        resource_requirements = {}
-        for container in pod.spec.containers:
-            for resource, value in container.resources.requests.items():
-                if resource not in resource_requirements:
-                    resource_requirements[resource] = 0
-                if resource == 'memory':
-                    int_value = kubernetes_utils.parse_memory_resource(value)
-                else:
-                    int_value = kubernetes_utils.parse_cpu_or_gpu_resource(
-                        value)
-                resource_requirements[resource] += int_value
-        return ', '.join(f'{resource}={value}'
-                         for resource, value in resource_requirements.items())
-
-    def _formatted_node_selector(pod) -> Optional[str]:
-        # Returns a formatted string of node selectors for a pod.
-        node_selectors = []
-        if pod.spec.node_selector is None:
-            return None
-        for label_key, label_value in pod.spec.node_selector.items():
-            node_selectors.append(f'{label_key}={label_value}')
-        return ', '.join(node_selectors)
-
-    def _lack_resource_msg(resource: str,
-                           pod,
-                           extra_msg: Optional[str] = None,
-                           details: Optional[str] = None) -> str:
-        resource_requirements = _formatted_resource_requirements(pod)
-        node_selectors = _formatted_node_selector(pod)
-        node_selector_str = f' and labels ({node_selectors})' if (
-            node_selectors) else ''
-        msg = (
-            f'Insufficient {resource} capacity on the cluster. '
-            f'Required resources ({resource_requirements}){node_selector_str} '
-            'were not found in a single node. Other SkyPilot tasks or pods may '
-            'be using resources. Check resource usage by running '
-            '`kubectl describe nodes`.')
-        if extra_msg:
-            msg += f' {extra_msg}'
-        if details:
-            msg += f'\nFull error: {details}'
-        return msg
-
     for new_node in new_nodes:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             new_node.metadata.name, namespace)
@@ -148,8 +168,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                         '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
                         f' Full error: {event_message}')
                 gpu_lf_keys = [
-                    lf.get_label_key()
-                    for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    for key in lf.get_label_keys()
                 ]
                 if pod.spec.node_selector:
                     for label_key in pod.spec.node_selector.keys():
@@ -157,10 +177,24 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             # TODO(romilb): We may have additional node
                             #  affinity selectors in the future - in that
                             #  case we will need to update this logic.
-                            if (('Insufficient nvidia.com/gpu'
-                                 in event_message) or
-                                ('didn\'t match Pod\'s node affinity/selector'
-                                 in event_message)):
+                            # TODO(Doyoung): Update the error message raised
+                            # with the multi-host TPU support.
+                            if 'Insufficient google.com/tpu' in event_message:
+                                extra_msg = (
+                                    f'Verify if '
+                                    f'{pod.spec.node_selector[label_key]}'
+                                    ' is available in the cluster. Note '
+                                    'that multi-host TPU podslices are '
+                                    'currently not unsupported.')
+                                raise config_lib.KubernetesError(
+                                    _lack_resource_msg('TPU',
+                                                       pod,
+                                                       extra_msg,
+                                                       details=event_message))
+                            elif (('Insufficient nvidia.com/gpu'
+                                   in event_message) or
+                                  ('didn\'t match Pod\'s node affinity/selector'
+                                   in event_message)):
                                 extra_msg = (
                                     f'Verify if '
                                     f'{pod.spec.node_selector[label_key]}'
@@ -553,6 +587,20 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                 logger.info('Failed to create Pod without AppArmor annotation: '
                             f'{retry_exception}')
                 raise retry_exception
+        # Unlike other error from resource lackage on CPU/GPU/Memory, TPU
+        # lackage error is raised when pod is attemtped to be created.
+        # TODO(Doyoung): Update the error message raised with the multi-host
+        # TPU support.
+        elif 'Invalid resource requests for google.com/tpu.' in error_message:
+            extra_message = ('Verify if the cluster has a TPU slice node with '
+                             'a topology matching the number of TPU(s) '
+                             'requested. Note that multi-host TPU podslices '
+                             'are currently not unsupported.')
+            raise config_lib.KubernetesError(
+                _lack_resource_msg('TPU',
+                                   pod_spec,
+                                   details=error_message,
+                                   extra_msg=extra_message))
         else:
             # Re-raise the exception if it's a different error
             raise e
@@ -633,8 +681,14 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'override runtimeClassName in ~/.sky/config.yaml. '
                        'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
-    needs_gpus = (pod_spec['spec']['containers'][0].get('resources', {}).get(
-        'limits', {}).get('nvidia.com/gpu', 0) > 0)
+    needs_gpus = False
+    limits = pod_spec['spec']['containers'][0].get('resources',
+                                                   {}).get('limits')
+    if limits is not None:
+        needs_gpus = limits.get(kubernetes_utils.GPU_RESOURCE_KEY, 0) > 0
+
+    # TPU pods provisioned on GKE use the default containerd runtime.
+    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
@@ -678,6 +732,22 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                     }]
                 }
             }
+
+        # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
+        # This is to prevent from non-TPU workloads from being scheduled on TPU
+        # slice nodes. We need this toleration to allow the pod to be scheduled
+        # on TPU nodes.
+        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
+        tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+        if tpu_label in config.node_config.get('spec',
+                                               {}).get('nodeSelector', {}):
+            tpu_toleration = {
+                'key': kubernetes_utils.TPU_RESOURCE_KEY,
+                'operator': 'Equal',
+                'value': 'present',
+                'effect': 'NoSchedule'
+            }
+            pod_spec['spec']['tolerations'] = [tpu_toleration]
 
         pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
         created_pods[pod.metadata.name] = pod
