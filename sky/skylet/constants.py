@@ -252,12 +252,14 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each jobs/
-# serve controller process.
+# serve controller process. The memory unit is bytes here (so 1GB = 1024**3).
 # Jobs: A default controller with 8 vCPU and 32 GB memory can manage up to 32
 # managed jobs.
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
-CONTROLLER_PROCESS_CPU_DEMAND = 0.25
+CONTROLLER_PROCESS_TASK_DEMANDS = {'CPU': 0.25, 'memory': 1024**3}
+CONTROLLER_PROCESS_TASK_DEMANDS_STR = ', '.join(
+    f'{k}:{v}' for k, v in CONTROLLER_PROCESS_TASK_DEMANDS.items())
 
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'

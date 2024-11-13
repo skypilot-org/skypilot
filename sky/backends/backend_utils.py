@@ -2475,10 +2475,11 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     # TODO: Custom CPU and other memory resources are not supported yet.
     # For sky jobs/serve controller task, we set the CPU resource to a smaller
     # value to support a larger number of managed jobs and services.
-    resources_dict = {
-        'CPU': (constants.CONTROLLER_PROCESS_CPU_DEMAND
-                if task.is_controller_task() else DEFAULT_TASK_CPU_DEMAND)
-    }
+    if task.is_controller_task():
+        # There is no accelerator demand for the controller task, so we only
+        # return the CPU demand.
+        return constants.CONTROLLER_PROCESS_TASK_DEMANDS.copy()
+    resources_dict = {'CPU': DEFAULT_TASK_CPU_DEMAND}
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2499,11 +2500,11 @@ def get_task_resources_str(task: 'task_lib.Task',
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
     spot_str = ''
-    is_controller_task = task.is_controller_task()
-    task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
-                       if is_controller_task else str(DEFAULT_TASK_CPU_DEMAND))
-    if is_controller_task:
-        resources_str = f'CPU:{task_cpu_demand}'
+    task_cpu_demand = str(DEFAULT_TASK_CPU_DEMAND)
+    if task.is_controller_task():
+        resources_str = ', '.join(
+            f'{k}:{v}'
+            for k, v in constants.CONTROLLER_PROCESS_TASK_DEMANDS.items())
     elif task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:

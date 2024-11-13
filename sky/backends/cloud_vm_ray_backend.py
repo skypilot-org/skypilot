@@ -385,21 +385,30 @@ class RayCodeGen:
 
         if resources_dict:
             assert len(resources_dict) == 1, (
-                'There can only be one type of accelerator per instance. '
-                f'Found: {resources_dict}.')
-            acc_name, acc_count = list(resources_dict.items())[0]
-            gpu_dict = {'GPU': acc_count}
-            # gpu_dict should be empty when the accelerator is not GPU.
-            # TODO(zongheng,zhanghao): an alternative is to start the remote
-            # cluster with custom resource 'GPU': <n> even if the accelerator(s)
-            # are not GPU. We opt for the current solution for now.
-            if accelerator_registry.is_schedulable_non_gpu_accelerator(
-                    acc_name):
-                gpu_dict = {}
+                'There can only be one type of accelerator or memory '
+                f'per instance. Found: {resources_dict}.')
+            res_name, res_count = list(resources_dict.items())[0]
+            if res_name == 'memory':
+                # Memory resources used by the controller task.
+                # We keep its original format here.
+                res_dict = {res_name: res_count}
+            elif accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    res_name):
+                # gpu_dict should be empty when the accelerator is not GPU.
+                # TODO(zongheng,zhanghao): an alternative is to start
+                # the remote cluster with custom resource 'GPU': <n>
+                # even if the accelerator(s) are not GPU. We opt for
+                # the current solution for now.
+                res_dict = {}
+            else:
+                # GPU resources.
+                res_dict = {'GPU': res_count}
             for bundle in bundles:
                 bundle.update({
-                    # Set the GPU to avoid ray hanging the resources allocation
-                    **gpu_dict,
+                    # Set the GPU to avoid ray hanging the resources allocation,
+                    # and memory to avoid too many controller tasks running on
+                    # the same time.
+                    **res_dict,
                 })
 
         streaming_message = (
@@ -556,21 +565,24 @@ class RayCodeGen:
         num_gpus = 0.0
         if ray_resources_dict:
             assert len(ray_resources_dict) == 1, (
-                'There can only be one type of accelerator per instance. '
-                f'Found: {ray_resources_dict}.')
-            num_gpus = list(ray_resources_dict.values())[0]
-            options.append(f'resources={json.dumps(ray_resources_dict)}')
+                'There can only be one type of accelerator or memory '
+                f'per instance. Found: {ray_resources_dict}.')
+            resources_key, num_resources = list(ray_resources_dict.items())[0]
+            if resources_key == 'memory':
+                options.append(f'memory={num_resources}')
+            else:
+                options.append(f'resources={json.dumps(ray_resources_dict)}')
 
-            resources_key = list(ray_resources_dict.keys())[0]
-            if not accelerator_registry.is_schedulable_non_gpu_accelerator(
-                    resources_key):
-                # `num_gpus` should be empty when the accelerator is not GPU.
-                # FIXME: use a set of GPU types, instead of 'tpu' in the key.
+                num_gpus = num_resources
+                if not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                        resources_key):
+                    # `num_gpus` should be empty when the accelerator is not GPU
+                    # FIXME: use a set of GPU types, instead of 'tpu' in the key
 
-                # Passing this ensures that the Ray remote task gets
-                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
-                # would be force-set to empty by Ray.
-                options.append(f'num_gpus={num_gpus}')
+                    # Passing this ensures that the Ray remote task gets
+                    # CUDA_VISIBLE_DEVICES set correctly. If not passed,
+                    # that flag would be force-set to empty by Ray.
+                    options.append(f'num_gpus={num_gpus}')
         options.append(
             'scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy('  # pylint: disable=line-too-long
             'placement_group=pg, '
