@@ -1,3 +1,4 @@
+# pylint: skip-file
 """SkyPilot.
 
 SkyPilot is a framework for easily running machine learning* workloads on any
@@ -12,7 +13,6 @@ and would love to hear more about how we can better support your requirements -
 please join us in [this
 discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
 """
-
 import atexit
 import io
 import os

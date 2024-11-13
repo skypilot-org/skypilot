@@ -764,9 +764,8 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
-        # Jobs table's username is actually user hash, so overwrite it with
-        # the user name for sky queue display.
-        job['username'] = global_user_state.get_user(job['username']).name
+        job['user_hash'] = job['username']
+        job['username'] = global_user_state.get_user(job['user_hash']).name
     return jobs
 
 

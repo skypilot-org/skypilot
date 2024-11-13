@@ -3578,9 +3578,6 @@ def storage_ls(verbose: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_storage_name))
-# TODO(yikaluo): currently -a delete storage objects for all users since we don't
-# have user hash in the storage table. Need to change -a to delete single user's
-# storage objects and add -u for all users.
 @click.option('--all',
               '-a',
               default=False,
