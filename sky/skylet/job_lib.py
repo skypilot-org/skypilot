@@ -669,9 +669,8 @@ def update_job_status(job_ids: List[int],
                     # The job may be stale, when the instance is restarted. We
                     # need to reset the job status to FAILED_DRIVER if its
                     # original status is in nonterminal_statuses.
-                    echo(
-                        f'Job {job_id} is in a unknown state, setting it to '
-                        'FAILED_DRIVER')
+                    echo(f'Job {job_id} is in a unknown state, setting it to '
+                         'FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
                     _set_status_no_lock(job_id, status)
             else:
@@ -688,7 +687,7 @@ def update_job_status(job_ids: List[int],
                     _set_status_no_lock(job_id, status)
                     echo(f'Updated job {job_id} status to {status}')
                     if (status == JobStatus.FAILED_DRIVER and
-                        failed_driver_transition_message is not None):
+                            failed_driver_transition_message is not None):
                         echo(failed_driver_transition_message)
         statuses.append(status)
     return statuses
