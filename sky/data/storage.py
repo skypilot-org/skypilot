@@ -2618,7 +2618,29 @@ class AzureBlobStore(AbstractStore):
 
     def remove_objects_from_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
-        raise NotImplementedError('Not implemented')
+        try:
+            container_url = data_utils.AZURE_CONTAINER_URL.format(
+                storage_account_name=self.storage_account_name,
+                container_name=self.name)
+            container_client = data_utils.create_az_client(
+                client_type='container',
+                container_url=container_url,
+                storage_account_name=self.storage_account_name,
+                resource_group_name=self.resource_group_name)
+            # List and delete blobs in the specified directory
+            blobs = container_client.list_blobs(
+                name_starts_with=self._bucket_sub_path + '/')
+            for blob in blobs:
+                container_client.delete_blob(blob.name)
+            logger.info(
+                f'Deleted objects from sub path {self._bucket_sub_path} '
+                f'in container {self.name}.')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(
+                f'Failed to delete objects from sub path '
+                f'{self._bucket_sub_path} in container {self.name}. '
+                f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+            )
 
     def get_handle(self) -> StorageHandle:
         """Returns the Storage Handle object."""
@@ -3498,7 +3520,12 @@ class IBMCosStore(AbstractStore):
 
     def remove_objects_from_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
-        raise NotImplementedError('Not implemented')
+        bucket = self.s3_resource.Bucket(self.name)
+        try:
+            self._delete_cos_bucket_objects(bucket, self._bucket_sub_path + '/')
+        except ibm.ibm_botocore.exceptions.ClientError as e:
+            if e.__class__.__name__ == 'NoSuchBucket':
+                logger.debug('bucket already removed')
 
     def get_handle(self) -> StorageHandle:
         return self.s3_resource.Bucket(self.name)
@@ -3740,15 +3767,27 @@ class IBMCosStore(AbstractStore):
 
         return self.bucket
 
+    def _delete_cos_bucket_objects(self,
+                                   bucket: Any,
+                                   prefix: Optional[str] = None):
+        bucket_versioning = self.s3_resource.BucketVersioning(bucket.name)
+        if bucket_versioning.status == 'Enabled':
+            if prefix is not None:
+                res = list(
+                    bucket.object_versions.filter(Prefix=prefix).delete())
+            else:
+                res = list(bucket.object_versions.delete())
+        else:
+            if prefix is not None:
+                res = list(bucket.objects.filter(Prefix=prefix).delete())
+            else:
+                res = list(bucket.objects.delete())
+        logger.debug(f'Deleted bucket\'s content:\n{res}, prefix: {prefix}')
+
     def _delete_cos_bucket(self):
         bucket = self.s3_resource.Bucket(self.name)
         try:
-            bucket_versioning = self.s3_resource.BucketVersioning(self.name)
-            if bucket_versioning.status == 'Enabled':
-                res = list(bucket.object_versions.delete())
-            else:
-                res = list(bucket.objects.delete())
-            logger.debug(f'Deleted bucket\'s content:\n{res}')
+            self._delete_cos_bucket_objects(bucket)
             bucket.delete()
             bucket.wait_until_not_exists()
         except ibm.ibm_botocore.exceptions.ClientError as e:
