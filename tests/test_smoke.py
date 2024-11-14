@@ -316,7 +316,7 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
     'grep "Job ID:" && '
-    'echo "$s" | grep -A 1 "Job ID:" | grep "Useful Commands"')
+    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
 
 
 # ---------- A minimal task ----------
@@ -1994,6 +1994,25 @@ def test_tpu_vm_pod():
             f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32 --use-spot --zone europe-west4-a',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
+# ---------- TPU Pod Slice on GKE. ----------
+@pytest.mark.kubernetes
+def test_tpu_pod_slice_gke():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod_slice_gke',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --cloud kubernetes --gpus tpu-v5-lite-podslice',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "conda activate flax; python -c \'import jax; print(jax.devices()[0].platform);\' | grep tpu || exit 1;"',  # Ensure TPU is reachable.
+            f'sky logs {name} 2 --status'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
