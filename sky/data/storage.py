@@ -35,6 +35,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -1020,34 +1021,43 @@ class Storage(object):
             grep_cmd = ['cat']
             if len(excluded_list) > 0:
                 grep_cmd = ['grep', '-vE', f'"({"|".join(excluded_list)})"']
-            all_files = subprocess.Popen(find_cmd, stdout=subprocess.PIPE)
-            relevant_files = subprocess.Popen(grep_cmd,
-                                              stdin=all_files.stdout,
-                                              stdout=subprocess.PIPE)
-            all_files.stdout.close()
-            num_files = subprocess.Popen(['wc', '-l'],
-                                         stdin=relevant_files.stdout,
-                                         stdout=subprocess.PIPE)
-            relevant_files.stdout.close()
-            count += int(num_files.communicate()[0])
-            num_files.stdout.close()
+            all_files = subprocess_utils.run(find_cmd,
+                                             capture_output=True,
+                                             text=True)
+            relevant_files = subprocess_utils.run(grep_cmd,
+                                                  input=all_files.stdout,
+                                                  capture_output=True,
+                                                  text=True,
+                                                  shell=False)
+            num_files = subprocess_utils.run(['wc', '-l'],
+                                             input=relevant_files.stdout,
+                                             capture_output=True,
+                                             text=True,
+                                             shell=False)
+            count += int(num_files.stdout)
             return count
 
         excluded_list = storage_utils.get_excluded_files_from_gitignore(
             self.source)
         excluded_list.append('.git')
 
+        special_chars = r'.[]{}\^$*+?()|'
+        escaped = []
+        for s in excluded_list:
+            escaped_str = ''.join(
+                '\\' + c if c in special_chars else c for c in s)
+            escaped.append(escaped_str)
         # Checks for total number of files before compressing
         # Rsync main latency delay is in compressing a certain number of files.
         # Testing shows that with 10+ files it's worth compressing.
-        if num_files(self.source, excluded_list) <= _MIN_FILES_TO_COMPRESS:
+        if num_files(self.source, escaped) <= _MIN_FILES_TO_COMPRESS:
             self._sync_store(store)
             return
 
         try:
             with tempfile.TemporaryDirectory() as tmp_cmpdir:
                 # uuid used to avoid collisions if compressing multiple sources
-                file_name = f'skypilot-filemounts-{uuid.uuid1()}.zip'
+                file_name = f'skypilot-filemounts-{uuid.uuid1()}.tar.gz'
                 tmp_path = os.path.join(tmp_cmpdir, file_name)
                 command = ['tar', '-czf', tmp_path]
                 for ignored_file in excluded_list:
@@ -1055,7 +1065,7 @@ class Storage(object):
                 # TODO(warrickhe): Possibly extend compression to all filemounts
                 # Currently only supports workdirs
                 command.extend(['-C', self.source, '.'])
-                subprocess.Popen(command)
+                subprocess_utils.run(' '.join(command), check=False)
                 original_source = store.source
                 store.source = tmp_cmpdir
                 self._sync_store(store)
