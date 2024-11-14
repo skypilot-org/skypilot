@@ -206,11 +206,18 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
+        # TODO(zhwu): This will cause the job driver processes to be a chain in
+        # the process tree (start_new_session=True does not create a new root
+        # for the process tree, see: ps faux), since a job driver process will
+        # call the schedule_step() function to schedule new jobs. A more elegant
+        # solution is to use another daemon process to be in charge of starting
+        # these driver processes, instead of starting them in the current
+        # process.
         proc = subprocess.Popen(['/bin/bash', '-c', run_cmd],
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 start_new_session=True)
-        # TODO(zhwu): Backward compatibility, remove this check after 0.9.0.
+        # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
         # This is for the case where the job is submitted with SkyPilot older
         # than #4318, using ray job submit.
         pid = proc.pid
@@ -856,15 +863,28 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # Not use process.terminate() as that will only terminate the
                 # process shell process, not the ray driver process
                 # under the shell.
-                # We start a daemon to recursively kill the process group, and
-                # trigger the killing immediately by sending SIGTERM to the
-                # process group. The daemon ensures the job to be killed
-                # asynchronously, without blocking the cancellation request.
-                subprocess_utils.kill_process_daemon(job['pid'])
+                #
+                # We don't kill all the children of the process, like
+                # subprocess_utils.kill_process_daemon() does, but just the
+                # process group here, because the underlying job driver can
+                # start other jobs with `schedule_step`, causing the other job
+                # driver processes to be children of the current job driver
+                # process.
+                #
+                # Killing the process group is enough as the underlying job
+                # should be able to clean itself up correctly by ray driver.
+                #
                 # The process group pid should be the same as the job pid as we
                 # use start_new_session=True, but we use os.getpgid() to be
                 # extra cautious.
-                os.killpg(os.getpgid(job['pid']), signal.SIGTERM)
+                job_pgid = os.getpgid(job['pid'])
+                os.killpg(job_pgid, signal.SIGTERM)
+                # Start a daemon to forcefully kill the process group after 30
+                # seconds to avoid the case where some processes are not killed
+                # by SIGTERM.
+                subprocess.Popen(f'sleep 30; kill -9 -{job_pgid}',
+                                 shell=True,
+                                 start_new_session=True)
             elif job['pid'] < 0:
                 try:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
