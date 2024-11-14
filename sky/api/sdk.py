@@ -734,11 +734,14 @@ def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint
 
 
 @usage_lib.entrypoint
-def requests_ls(
-        request_id: Optional[str] = None) -> List[requests_lib.RequestPayload]:
-    body = payloads.RequestIdBody(request_id=request_id)
+def requests_ls(request_id: Optional[str] = None, all: bool = False) -> List[requests_lib.RequestPayload]:
+    body = payloads.RequestIdBody(request_id=request_id, all=all)
+    params = {}
+    for k, v in json.loads(body.model_dump_json()).items():
+        if v is not None:
+            params[k] = v
     response = requests.get(f'{api_common.get_server_url()}/requests',
-                            params=json.loads(body.model_dump_json()),
+                            params=params,
                             timeout=5)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()
