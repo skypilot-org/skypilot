@@ -459,6 +459,7 @@ def launch(
     """
 
     entrypoint = task
+    entrypoint.validate()
     if not _disable_controller_check:
         controller_utils.check_cluster_name_not_controller(
             cluster_name, operation_str='sky.launch')
@@ -573,6 +574,7 @@ def exec(  # pylint: disable=redefined-builtin
         if dryrun.
     """
     entrypoint = task
+    entrypoint.validate()
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
 

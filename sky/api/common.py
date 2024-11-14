@@ -147,11 +147,13 @@ def upload_mounts_to_api_server(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+    if is_api_server_local():
+        return dag
+
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))
 
     upload_list = []
-    # if not _is_api_server_local():
     for task_ in dag.tasks:
         file_mounts_mapping = {}
         if task_.workdir:

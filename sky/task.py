@@ -286,14 +286,11 @@ class Task:
         # For internal use only.
         self.file_mounts_mapping = file_mounts_mapping
 
-        # Check if the task is legal.
-        self._validate()
-
         dag = sky.dag.get_current_dag()
         if dag is not None:
             dag.add(self)
 
-    def _validate(self):
+    def validate(self):
         """Checks if the Task fields are valid."""
         if not _is_valid_name(self.name):
             with ux_utils.print_exception_no_traceback():
@@ -341,16 +338,17 @@ class Task:
 
         # Workdir.
         if self.workdir is not None:
-            workdir = self.workdir
-            if self.file_mounts_mapping is not None:
-                workdir = self.file_mounts_mapping.get(workdir, workdir)
-            full_workdir = os.path.expanduser(workdir)
+            full_workdir = os.path.expanduser(self.workdir)
             if not os.path.isdir(full_workdir):
                 # Symlink to a dir is legal (isdir() follows symlinks).
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Workdir must exist and must be a directory (or '
                         f'a symlink to a directory). {self.workdir} not found.')
+
+        # Resources.
+        for r in self.resources:
+            r.validate()
 
     @staticmethod
     def from_yaml_config(
@@ -1214,7 +1212,3 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
-
-    def validate(self):
-        for r in self.resources:
-            r.validate()
