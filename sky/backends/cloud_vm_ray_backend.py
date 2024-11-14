@@ -1318,7 +1318,19 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
     ) -> Dict[str, Any]:
-        """The provision retry loop."""
+        """The provision retry loop.
+
+        Returns a config_dict with the following fields:
+        - All fields from backend_utils.write_cluster_config(). See its
+          docstring.
+        - 'provisioning_skipped': True if provisioning was short-circuited
+          by skip_if_config_hash_matches, False otherwise.
+        - 'handle': The provisioned cluster handle.
+        - 'provision_record': (Only if using the new skypilot provisioner) The
+          record returned by provisioner.bulk_provision().
+        - 'resources_vars': (Only if using the new skypilot provisioner) The
+          resources variables given by make_deploy_resources_variables().
+        """
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1429,8 +1441,8 @@ class RetryingVmProvisioner(object):
                     f'invalid cloud config: {common_utils.format_exception(e)}')
 
             if skip_if_config_hash_matches == config_dict['config_hash']:
-                logger.info('Skipping provisioning of cluster with matching '
-                            'config hash.')
+                logger.debug('Skipping provisioning of cluster with matching '
+                             'config hash.')
                 config_dict['provisioning_skipped'] = True
                 return config_dict
             config_dict['provisioning_skipped'] = False
@@ -1951,7 +1963,11 @@ class RetryingVmProvisioner(object):
         stream_logs: bool,
         skip_if_config_hash_matches: Optional[str],
     ) -> Dict[str, Any]:
-        """Provision with retries for all launchable resources."""
+        """Provision with retries for all launchable resources.
+
+        Returns the config_dict from _retry_zones() - see its docstring for
+        details.
+        """
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
@@ -2710,7 +2726,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         retry_until_up: bool = False,
         skip_if_no_cluster_updates: bool = False,
     ) -> Optional[CloudVmRayResourceHandle]:
-        """Provisions using 'ray up'.
+        """Provisions the cluster, or re-provisions an existing cluster.
+
+        Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
+        use 'ray up'.
+
+        See also docstring for Backend.provision().
 
         Raises:
             exceptions.ClusterOwnerIdentityMismatchError: if the cluster
