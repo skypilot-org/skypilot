@@ -703,23 +703,20 @@ def api_stop():
 @usage_lib.entrypoint
 def api_server_logs(follow: bool = True, tail: str = 'all'):
     """Stream the API server logs."""
-    server_url = api_common.get_server_url()
-    # TODO(zhwu): this needs to work with remote server.
-    if server_url != api_common.DEFAULT_SERVER_URL:
-        raise RuntimeError(
-            f'Cannot query the API server logs at {server_url} because it is '
-            f'not the default SkyPilot API server started locally.')
-
-    tail_args = ['-f'] if follow else []
-    if tail == 'all':
-        tail_args.extend(['-n', '+1'])
+    if api_common.is_api_server_local():
+        tail_args = ['-f'] if follow else []
+        if tail == 'all':
+            tail_args.extend(['-n', '+1'])
+        else:
+            try:
+                tail_args.extend(['-n', f'{int(tail)}'])
+            except ValueError as e:
+                raise ValueError(f'Invalid tail argument: {tail}') from e
+        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
-        try:
-            tail_args.extend(['-n', f'{int(tail)}'])
-        except ValueError as e:
-            raise ValueError(f'Invalid tail argument: {tail}') from e
-    log_path = os.path.expanduser(constants.API_SERVER_LOGS)
-    subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
+        stream_and_get(log_path=constants.API_SERVER_LOGS)
+
 
 
 @usage_lib.entrypoint

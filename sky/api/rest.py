@@ -621,8 +621,9 @@ async def stream(
         # Make sure the log path is under ~/sky_logs.
         assert log_path is not None, (request_id, log_path)
         resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
-        if not str(resolved_log_path).startswith(
-                os.path.expanduser(constants.SKY_LOGS_DIRECTORY)):
+        if (not str(resolved_log_path).startswith(
+                os.path.expanduser(constants.SKY_LOGS_DIRECTORY)) and
+            str(resolved_log_path) != os.path.expanduser(constants.API_SERVER_LOGS)):
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Unauthorized log path: {log_path}')
         log_path_to_stream = resolved_log_path

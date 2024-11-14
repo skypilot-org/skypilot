@@ -90,7 +90,7 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
 def get_request_id(response) -> str:
     if response.status_code != 200:
         raise RuntimeError(
-            f'Failed to connect to SkyPilot server at {get_server_url()}. '
+            f'Failed to get request ID from SkyPilot server at {get_server_url()}. '
             f'Response: {response.content}')
     request_id = response.headers.get('X-Request-ID')
     return request_id
