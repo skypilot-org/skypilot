@@ -8,11 +8,11 @@ import pathlib
 import queue
 import time
 import traceback
-import typing
 from typing import Callable, Dict, List, Tuple
 
 import filelock
 
+import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
@@ -29,9 +29,6 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    import sky
 
 # Use the explicit logger name so that the logger is under the
 # `sky.jobs.controller` namespace when executed directly, so as
@@ -440,6 +437,12 @@ class JobsController:
 
     def run(self) -> None:
         """Run controller logic and handle exceptions."""
+
+        # NOTE: Re-run optimization as user-side optimization is only for
+        # display and its results are not propagated here. Also cluster states
+        # may change.
+        sky.optimize(self._dag)
+
         all_tasks_completed = lambda: self._num_tasks == len(self._task_status)
         # TODO(andy): Serve has a logic to prevent from too many services
         # running at the same time. We should have a similar logic here, but
