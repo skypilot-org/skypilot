@@ -628,24 +628,6 @@ class QueryHelper:
         if nsg_id is None:
             return
 
-        filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name}
-        insts = query_helper.query_instances_by_tags(filters, region)
-        for inst in insts:
-            vnic = cls.get_instance_primary_vnic(
-                region=region,
-                inst_info={
-                    'inst_id': inst.identifier,
-                    'ad': inst.availability_domain,
-                    'compartment': inst.compartment_id,
-                })
-
-            # Detatch the NSG before removing it.
-            net_client.update_vnic(
-                vnic_id=vnic.id,
-                update_vnic_details=oci_adaptor.oci.core.models.
-                UpdateVnicDetails(nsg_ids=[], skip_source_dest_check=False),
-            )
-
         # Delete the NSG
         net_client.delete_network_security_group(
             network_security_group_id=nsg_id)
