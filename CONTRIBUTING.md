@@ -1,7 +1,7 @@
 # Contributing to SkyPilot
 
-Thank you for your interest in contributing to SkyPilot! We welcome and value 
-all contributions to the project, including but not limited to: 
+Thank you for your interest in contributing to SkyPilot! We welcome and value
+all contributions to the project, including but not limited to:
 
 * [Bug reports](https://github.com/skypilot-org/skypilot/issues) and [discussions](https://github.com/skypilot-org/skypilot/discussions)
 * [Pull requests](https://github.com/skypilot-org/skypilot/pulls) for bug fixes and new features
@@ -26,7 +26,7 @@ pip install -r requirements-dev.txt
 ### Testing
 To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 ```
-# Run all tests except for AWS and Lambda Cloud
+# Run all tests on AWS and Azure (default smoke test clouds)
 pytest tests/test_smoke.py
 
 # Terminate a test's cluster even if the test failed (default is to keep it around for debugging)
@@ -41,11 +41,11 @@ pytest tests/test_smoke.py::test_minimal
 # Only run managed spot tests
 pytest tests/test_smoke.py --managed-spot
 
-# Only run test for AWS + generic tests
-pytest tests/test_smoke.py --aws
+# Only run test for GCP + generic tests
+pytest tests/test_smoke.py --gcp
 
-# Change cloud for generic tests to aws
-pytest tests/test_smoke.py --generic-cloud aws
+# Change cloud for generic tests to Azure
+pytest tests/test_smoke.py --generic-cloud azure
 ```
 
 For profiling code, use:
