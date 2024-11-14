@@ -160,6 +160,7 @@ class Optimizer:
             for src, storage_node, dst, data in edges_to_add:
                 dag.remove_edge(src, storage_node)
                 dag.remove_edge(storage_node, dst)
+                dag.remove(storage_node)
                 task_edge = dag.add_edge(src, dst)
                 task_edge.with_data(source_path=data.source_path,
                                     target_path=data.target_path,
@@ -171,7 +172,8 @@ class Optimizer:
                     'IBM': 'IBM'
                 }
                 best_storage = Storage(
-                    name=f'bucket_for_{src.name}_to_{dst.name}')
+                    name=(f'bucket_for_{src.name}_to_{dst.name}_data_transfer'
+                         ).lower())
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
                     cloud_name = str(storage_node.best_resources.cloud)

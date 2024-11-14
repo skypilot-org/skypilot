@@ -3,13 +3,13 @@ edges:
   - source: data-processing
     target: infer_A
     data:
-      source_path: /data/data-processing-output
+      source_path: /data/data-processing-output-A
       target_path: /data/infer-A-input
       size_gb: 10
   - source: data-processing
     target: infer_B
     data:
-      source_path: /data/data-processing-output
+      source_path: /data/data-processing-output-B
       target_path: /data/infer-B-input
       size_gb: 20
   - source: infer_A
@@ -32,7 +32,8 @@ setup: |
 
 run: |
   echo data-processing starts
-  sleep 30
+  mkdir -p /data/data-processing-output-A
+  echo "Hello World!" > /data/data-processing-output-A/world.txt
   echo data-processing ends
 
 ---
@@ -50,7 +51,7 @@ setup: |
 
 run: |
   echo infer_A starts
-  sleep 20
+  cat /data/infer-A-input/world.txt
   echo infer_A ends
 
 ---
