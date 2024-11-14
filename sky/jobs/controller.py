@@ -436,8 +436,11 @@ class JobsController:
         managed_job_state.set_cancelled(self._job_id, callback_func)
 
     def run(self) -> None:
-        # sky.optimize(self._dag)
         """Run controller logic and handle exceptions."""
+
+        # NOTE: Re-run optimization as user-side optimization is only for
+        # display and its results are not propagated here. Also cluster states
+        # may change.
         sky.optimize(self._dag)
 
         all_tasks_completed = lambda: self._num_tasks == len(self._task_status)
