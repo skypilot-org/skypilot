@@ -90,7 +90,7 @@ class QueryHelper:
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
         logger.debug(f'Terminate instance by tags: {tag_filters}')
 
-        cluster_name = tag_filters(constants.TAG_RAY_CLUSTER_NAME)
+        cluster_name = tag_filters[constants.TAG_RAY_CLUSTER_NAME]
         nsg_name = f'{oci_utils.oci_config.NSG_NAME_PREFIX}{cluster_name}'
         nsg_id = cls.find_nsg(region, nsg_name, False)
 
