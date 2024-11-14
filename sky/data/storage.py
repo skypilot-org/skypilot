@@ -266,18 +266,23 @@ class AbstractStore:
 
         # To avoid mypy error
         self._bucket_sub_path: Optional[str] = None
-        self.set_bucket_sub_path(_bucket_sub_path)
+        # Trigger the setter to strip any leading/trailing slashes.
+        self.bucket_sub_path = self._bucket_sub_path
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
 
-    def get_bucket_sub_path(self) -> Optional[str]:
+    @property
+    def bucket_sub_path(self) -> Optional[str]:
+        """Get the bucket_sub_path."""
         return self._bucket_sub_path
 
+    @bucket_sub_path.setter
     # pylint: disable=invalid-name
-    def set_bucket_sub_path(self, _bucket_sub_path: Optional[str]) -> None:
-        if _bucket_sub_path is not None:
-            self._bucket_sub_path = _bucket_sub_path.strip('/')
+    def bucket_sub_path(self, bucket_sub_path: Optional[str]) -> None:
+        """Set the bucket_sub_path, stripping any leading/trailing slashes."""
+        if bucket_sub_path is not None:
+            self._bucket_sub_path = bucket_sub_path.strip('/')
         else:
             self._bucket_sub_path = None
 
@@ -854,7 +859,7 @@ class Storage(object):
                 continue
             # This one can't be retrieved from metadata since its set every time
             # we create a new storage object.
-            store.set_bucket_sub_path(self._bucket_sub_path)
+            store.bucket_sub_path = self._bucket_sub_path
             self._add_store(store, is_reconstructed=True)
 
     @classmethod
@@ -1001,7 +1006,7 @@ class Storage(object):
             # We delete the bucket sub path if it exists, and then return.
             # Without interfering with the global state.
             # User should still call storage.delete() to remove the bucket.
-            if only_delete_sub_path_if_exists and store.get_bucket_sub_path():
+            if only_delete_sub_path_if_exists and store.bucket_sub_path:
                 store.delete_sub_path()
                 return
 
@@ -1026,8 +1031,7 @@ class Storage(object):
         else:
             keys_to_delete = []
             for key, store in self.stores.items():
-                if only_delete_sub_path_if_exists and store.get_bucket_sub_path(
-                ):
+                if only_delete_sub_path_if_exists and store.bucket_sub_path:
                     store.delete_sub_path()
                     continue
 

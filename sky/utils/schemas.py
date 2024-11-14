@@ -713,10 +713,10 @@ def get_config_schema():
                 'required': [],
                 'additionalProperties': False,
                 'properties': {
-                    'aws': {
+                    's3': {
                         'type': 'string',
                     },
-                    'gcp': {
+                    'gcs': {
                         'type': 'string',
                     },
                     'azure': {
