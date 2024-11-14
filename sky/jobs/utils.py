@@ -704,11 +704,9 @@ def sync_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
                                         edge.best_storage)
         if best_storage is not None:
             assert data is not None
-            new_storage_mounts_src = {}
-            new_storage_mounts_src[data.source_path] = best_storage
+            new_storage_mounts_src = {data.source_path: best_storage}
             src.update_storage_mounts(new_storage_mounts_src)
-            new_storage_mounts_tgt = {}
-            new_storage_mounts_tgt[data.target_path] = best_storage
+            new_storage_mounts_tgt = {data.target_path: best_storage}
             tgt.update_storage_mounts(new_storage_mounts_tgt)
     return dag
 

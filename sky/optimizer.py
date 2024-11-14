@@ -172,7 +172,7 @@ class Optimizer:
                     'Azure': 'Azure',
                     'IBM': 'IBM'
                 }
-                bucket_name = (f'bucket-for-{src.name}-to-{dst.name}_'
+                bucket_name = (f'bucket-for-{src.name}-to-{dst.name}-'
                                f'{common_utils.get_user_hash()}').lower()
                 best_storage = Storage(name=bucket_name)
                 if storage_node.best_resources is not None:
