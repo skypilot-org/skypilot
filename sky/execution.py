@@ -466,15 +466,24 @@ def launch(
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
         if cluster_status == status_lib.ClusterStatus.INIT:
-            # If the cluster is provisioning we should actually hard refresh the
-            # state with the appropriate lock.
+            # If the cluster is INIT, it may be provisioning. We want to prevent
+            # concurrent calls from queueing up many sequential reprovision
+            # attempts. Since provisioning will hold the cluster status lock, we
+            # wait to hold that lock by force refreshing the status. This will
+            # block until the cluster finishes provisioning, then correctly see
+            # that it is UP.
+            # TODO(cooperc): If multiple processes launched in parallel see that
+            # the cluster is STOPPED or does not exist, they will still all try
+            # to provision it, since we do not hold the lock continuously from
+            # the status check until the provision call. Fixing this requires a
+            # bigger refactor.
             cluster_status, maybe_handle = (
                 backend_utils.refresh_cluster_status_handle(
                     cluster_name,
                     force_refresh_statuses=[
                         # If the cluster is INIT, we want to try to grab the
-                        # status lock, which should block until initialization
-                        # is finished.
+                        # status lock, which should block until provisioning is
+                        # finished.
                         status_lib.ClusterStatus.INIT,
                     ],
                     # Wait indefinitely to obtain the lock, so that we don't
