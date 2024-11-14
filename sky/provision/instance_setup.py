@@ -266,6 +266,9 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
         f'--min-worker-port 11002 '
         f'--object-manager-port=8076 '
+        # We set the object store memory to minimal (75MB) value
+        # to allow more memory on the resources for the tasks.
+        f'--object-store-memory=78643200 '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
