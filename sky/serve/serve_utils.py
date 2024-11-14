@@ -597,7 +597,7 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _expand_provision_logs(
+def _follow_logs_with_provision_expanding(
     file: TextIO,
     cluster_name: str,
     *,
@@ -707,7 +707,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _expand_provision_logs(
+        for line in _follow_logs_with_provision_expanding(
                 f,
                 replica_cluster_name,
                 should_stop=replica_provisioned,
