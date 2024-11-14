@@ -3254,6 +3254,7 @@ def show_gpus(
             ])
         return realtime_gpu_table
 
+    # TODO(zhwu): this needs to run on remote server.
     def _get_kubernetes_node_info_table(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
