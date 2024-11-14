@@ -3241,11 +3241,11 @@ def show_gpus(
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
         for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
-            available_qty = (realtime_gpu_availability.available
-                             if realtime_gpu_availability.available != -1 else
-                             no_permissions_str)
             gpu_availability = common.RealtimeGpuAvailability(
                 *realtime_gpu_availability)
+            available_qty = (gpu_availability.available
+                             if gpu_availability.available != -1 else
+                             no_permissions_str)
             realtime_gpu_table.add_row([
                 gpu_availability.gpu,
                 _list_to_str(gpu_availability.counts),
