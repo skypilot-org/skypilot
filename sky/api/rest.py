@@ -666,12 +666,12 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
 
 @app.get('/requests')
 async def requests(
-    request: fastapi.Request, request_id: Optional[str] = None,
-    all: bool = False) -> List[requests_lib.RequestPayload]:
+    request: fastapi.Request,
+    request_ls_body: payloads.RequestIdBody = fastapi.Depends()) -> List[requests_lib.RequestPayload]:
     """Get the list of requests."""
     del request  # Unused.
-    if request_id is None:
-        if not all:
+    if request_ls_body.request_id is None:
+        if not request_ls_body.all:
             statuses = [
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
@@ -683,11 +683,11 @@ async def requests(
             for request_task in requests_lib.get_request_tasks(status=statuses)
         ]
     else:
-        request_task = requests_lib.get_request(request_id)
+        request_task = requests_lib.get_request(request_ls_body.request_id)
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404,
-                detail=f'Request {request_id} not found')
+                detail=f'Request {request_ls_body.request_id} not found')
         return [request_task.readable_encode()]
 
 

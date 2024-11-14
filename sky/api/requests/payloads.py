@@ -256,7 +256,7 @@ class JobsLogsBody(RequestBody):
 
 class RequestIdBody(RequestBody):
     """The request body for the API request endpoint."""
-    request_id: Optional[str]
+    request_id: Optional[str] = None
     all: bool = False
 
 
