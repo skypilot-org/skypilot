@@ -6,7 +6,7 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct.18, 2024: Enhancement.
    find_compartment: allow search subtree when find a compartment.
  - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add methods to
-   Add/remove security rules: create_nsg & remove_nsg
+   Add/remove security rules: create_nsg_rules & remove_nsg
 """
 from datetime import datetime
 import functools
@@ -537,8 +537,8 @@ class QueryHelper:
 
     @classmethod
     @debug_enabled(logger)
-    def create_nsg(cls, region: str, cluster_name: str,
-                   ports: List[str]) -> None:
+    def create_nsg_rules(cls, region: str, cluster_name: str,
+                         ports: List[str]) -> None:
         """ Create per-cluster NSG with ingress rules """
         if not ports:
             return

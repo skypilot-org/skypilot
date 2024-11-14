@@ -296,9 +296,9 @@ def open_ports(
     """Open ports for inbound traffic."""
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    query_helper.create_nsg(region=region,
-                            cluster_name=cluster_name_on_cloud,
-                            ports=ports)
+    query_helper.create_nsg_rules(region=region,
+                                  cluster_name=cluster_name_on_cloud,
+                                  ports=ports)
 
 
 @query_utils.debug_enabled(logger)
