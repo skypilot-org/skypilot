@@ -790,6 +790,8 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+# TODO(zhwu): Backward compatibility for jobs submitted before #4318, remove
+# after 0.10.0.
 def _create_ray_job_submission_client():
     """Import the ray job submission client."""
     try:
