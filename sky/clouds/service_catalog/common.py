@@ -212,7 +212,8 @@ def read_catalog(filename: str,
                             f'Updating {cloud} catalog: {filename}') +
                         f'{update_frequency_str}'):
                     try:
-                        r = requests.get(url)
+                        r = requests.get(url=url,
+                                         headers={'User-Agent': 'SkyPilot/0.7'})
                         r.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         error_str = (f'Failed to fetch {cloud} catalog '
