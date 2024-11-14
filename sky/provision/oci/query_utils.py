@@ -89,17 +89,29 @@ class QueryHelper:
     @debug_enabled(logger)
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
         logger.debug(f'Terminate instance by tags: {tag_filters}')
+
+        cluster_name = tag_filters(constants.TAG_RAY_CLUSTER_NAME)
+        nsg_name = f'{oci_utils.oci_config.NSG_NAME_PREFIX}{cluster_name}'
+        nsg_id = cls.find_nsg(region, nsg_name, False)
+
+        core_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile())
+
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
             inst_id = inst.identifier
-            logger.debug(f'Got instance(to be terminated): {inst_id}')
+            logger.debug(f'Terminating instance {inst_id}')
 
             try:
-                oci_adaptor.get_core_client(
-                    region,
-                    oci_utils.oci_config.get_profile()).terminate_instance(
-                        inst_id)
+                # Release the NSG reference so that the NSG can be
+                # deleted without waiting the instance being terminated.
+                if nsg_id is not None:
+                    cls.detach_nsg(region, inst, nsg_id)
+
+                # Terminate the instance
+                core_client.terminate_instance(inst_id)
+
             except oci_adaptor.oci.exceptions.ServiceError as e:
                 fail_count += 1
                 logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
@@ -614,6 +626,28 @@ class QueryHelper:
             add_network_security_group_security_rules_details=oci_adaptor.oci.
             core.models.AddNetworkSecurityGroupSecurityRulesDetails(
                 security_rules=new_rules),
+        )
+
+    @classmethod
+    @debug_enabled(logger)
+    def detach_nsg(cls, region: str, inst, nsg_id: Optional[str]) -> None:
+        if nsg_id is None:
+            return
+
+        vnic = cls.get_instance_primary_vnic(
+            region=region,
+            inst_info={
+                'inst_id': inst.identifier,
+                'ad': inst.availability_domain,
+                'compartment': inst.compartment_id,
+            })
+
+        # Detatch the NSG before removing it.
+        oci_adaptor.get_net_client(region, oci_utils.oci_config.get_profile(
+        )).update_vnic(
+            vnic_id=vnic.id,
+            update_vnic_details=oci_adaptor.oci.core.models.UpdateVnicDetails(
+                nsg_ids=[], skip_source_dest_check=False),
         )
 
     @classmethod
