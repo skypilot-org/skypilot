@@ -3341,7 +3341,6 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
-            print('zhwu DEBUG', clouds_to_list)
             result = sdk.stream_and_get(
                 sdk.list_accelerator_counts(
                     gpus_only=True,
