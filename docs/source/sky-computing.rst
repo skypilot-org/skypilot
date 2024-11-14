@@ -5,7 +5,7 @@ Concept: Sky Computing
 
 SkyPilot is an open-source Sky Computing framework.
 
-.. figure:: ../images/sky-above-clouds-gen.png
+.. figure:: images/sky-above-clouds-gen.jpg
    :width: 60%
    :align: center
 
