@@ -1,0 +1,22 @@
+# service.yaml
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 2
+
+# Fields below describe each replica.
+resources:
+  cloud: oci
+  region: us-sanjose-1
+  ports: 8080
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+setup: |
+  echo "No addtional setup required."
+
+run: |
+  echo "Startup the http server..."
+  python3 server.py
