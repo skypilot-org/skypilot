@@ -28,7 +28,7 @@ You can specify environment variables to be made available to a task in several 
     WANDB_API_KEY=MY_WANDB_API_KEY
     HF_TOKEN=MY_HF_TOKEN
 
-- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>`: (takes precedence over the above)
+- ``envs`` field (dict) in a :ref:`task YAML <yaml-spec>` (takes precedence over the above):
 
   .. code-block:: yaml
 
