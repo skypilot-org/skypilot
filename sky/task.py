@@ -9,13 +9,11 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import yaml
-import traceback
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky.api.common import CLIENT_DIR
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -347,7 +345,7 @@ class Task:
                     raise ValueError(
                         'Workdir must exist and must be a directory (or '
                         f'a symlink to a directory). {self.workdir} not found.')
-        
+
         # Resources.
         for r in self.resources:
             r.validate()
