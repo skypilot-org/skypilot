@@ -1166,6 +1166,7 @@ class S3Store(AbstractStore):
 
         Source for rules: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html # pylint: disable=line-too-long
         """
+        logger.info(f'Validating store name {name}...')
 
         def _raise_no_traceback_name_error(err_str):
             with ux_utils.print_exception_no_traceback():

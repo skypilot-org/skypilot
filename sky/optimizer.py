@@ -20,6 +20,7 @@ from sky.adaptors import common as adaptors_common
 from sky.dag import TaskData
 from sky.dag import TaskEdge
 from sky.data import Storage
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -171,9 +172,9 @@ class Optimizer:
                     'Azure': 'Azure',
                     'IBM': 'IBM'
                 }
-                best_storage = Storage(
-                    name=(f'bucket_for_{src.name}_to_{dst.name}_data_transfer'
-                         ).lower())
+                bucket_name = (f'bucket-for-{src.name}-to-{dst.name}_'
+                               f'{common_utils.get_user_hash()}').lower()
+                best_storage = Storage(name=bucket_name)
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
                     cloud_name = str(storage_node.best_resources.cloud)
@@ -1154,7 +1155,6 @@ class Optimizer:
                 local_graph, local_topo_order, local_node_to_cost_map,
                 minimize_cost)
         else:
-            logger.info('Optimizing the DAG using an ILP solver.')
             local_best_plan, best_total_objective = Optimizer._optimize_by_ilp(
                 local_graph, local_topo_order, local_node_to_cost_map,
                 minimize_cost)

@@ -34,6 +34,7 @@ run: |
   echo data-processing starts
   mkdir -p /data/data-processing-output-A
   echo "Hello World!" > /data/data-processing-output-A/world.txt
+  echo "Hello World!" > /data/data-processing-output-B/world.txt
   echo data-processing ends
 
 ---
@@ -52,6 +53,7 @@ setup: |
 run: |
   echo infer_A starts
   cat /data/infer-A-input/world.txt
+  sleep 20
   echo infer_A ends
 
 ---
@@ -67,6 +69,7 @@ setup: |
 
 run: |
   echo infer_B starts
+  cat /data/infer-B-input/world.txt
   sleep 20
   echo infer_B ends
 
