@@ -4080,7 +4080,7 @@ def _generate_task_with_service(
                              'To fix, add a valid `service` field.')
     service_port: Optional[int] = None
     for requested_resources in list(task.resources):
-        if requested_resources.ports is None :
+        if requested_resources.ports is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Must specify at least one ports in resources. Each '
