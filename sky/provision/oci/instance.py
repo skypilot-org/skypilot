@@ -21,7 +21,6 @@ from sky.provision import constants
 from sky.provision.oci import query_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
-from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -297,10 +296,9 @@ def open_ports(
     """Open ports for inbound traffic."""
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    query_helper.add_ingress_rules(
-        region=region,
-        cluster_name=cluster_name_on_cloud,
-        ports=resources_utils.port_ranges_to_set(ports))
+    query_helper.create_nsg(region=region,
+                            cluster_name=cluster_name_on_cloud,
+                            ports=ports)
 
 
 @query_utils.debug_enabled(logger)
@@ -312,10 +310,9 @@ def cleanup_ports(
     """Delete any opened ports."""
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
-    query_helper.remove_ingress_rules(
-        region=region,
-        cluster_name=cluster_name_on_cloud,
-        ports=resources_utils.port_ranges_to_set(ports))
+    del ports
+    query_helper.remove_cluster_nsg(region=region,
+                                    cluster_name=cluster_name_on_cloud)
 
 
 @query_utils.debug_enabled(logger)
