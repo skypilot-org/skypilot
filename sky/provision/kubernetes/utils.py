@@ -438,7 +438,7 @@ def detect_accelerator_resource(
     nodes = get_kubernetes_nodes(context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_accelerator = (GPU_RESOURCE_KEY in cluster_resources or
+    has_accelerator = (get_gpu_resource_key() in cluster_resources or
                        TPU_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
@@ -2233,10 +2233,11 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    assert not (GPU_RESOURCE_KEY in attribute_dict and
+    gpu_resource_name = get_gpu_resource_key()
+    assert not (gpu_resource_name in attribute_dict and
                 TPU_RESOURCE_KEY in attribute_dict)
-    if GPU_RESOURCE_KEY in attribute_dict:
-        return int(attribute_dict[GPU_RESOURCE_KEY])
+    if gpu_resource_name in attribute_dict:
+        return int(attribute_dict[gpu_resource_name])
     elif TPU_RESOURCE_KEY in attribute_dict:
         return int(attribute_dict[TPU_RESOURCE_KEY])
     return 0
@@ -2395,3 +2396,17 @@ def process_skypilot_pods(
         num_pods = len(cluster.pods)
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
+
+
+def get_gpu_resource_key():
+    """Get the GPU resource name to use in kubernetes.
+    The function first checks for an environment variable.
+    If defined, it uses its value; otherwise, it returns the default value.
+    Args:
+        name (str): Default GPU resource name, default is "nvidia.com/gpu".
+    Returns:
+        str: The selected GPU resource name.
+    """
+    # Retrieve GPU resource name from environment variable, if set. Else use default.
+    # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default = GPU_RESOURCE_KEY)

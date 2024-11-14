@@ -378,7 +378,7 @@ class Kubernetes(clouds.Cloud):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.GPU_RESOURCE_KEY
+                k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
 
         port_mode = network_utils.get_port_mode(None)
 
