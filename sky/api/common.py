@@ -204,7 +204,6 @@ def upload_mounts_to_api_server(
     return dag
 
 
-def get_full_work
 def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                            workdir_only: bool) -> 'dag_lib.Dag':
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
