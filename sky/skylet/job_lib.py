@@ -220,17 +220,16 @@ class JobScheduler:
         wrapped_cmd = (f'nohup bash -c {shlex.quote(run_cmd)} '
                        '</dev/null >/dev/null 2>&1 & echo $!')
         proc = subprocess.run(wrapped_cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            stdin=subprocess.DEVNULL,
-                            start_new_session=True,
-                            shell=True,
-                            text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(f'Failed to start job: {proc.stderr}')
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              stdin=subprocess.DEVNULL,
+                              start_new_session=True,
+                              check=True,
+                              shell=True,
+                              text=True)
         # Get the PID of the detached process
         pid = int(proc.stdout.strip())
-        
+
         # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
         # This is for the case where the job is submitted with SkyPilot older
         # than #4318, using ray job submit.
