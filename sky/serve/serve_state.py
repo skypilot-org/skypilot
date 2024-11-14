@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
+from sky import exceptions
 from sky.serve import constants
 from sky.utils import db_utils
-from sky import exceptions
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers

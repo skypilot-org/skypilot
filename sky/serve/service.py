@@ -23,12 +23,12 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
-from sky.skylet import constants as skylet_constants
 from sky.serve import controller
 from sky.serve import load_balancer
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
@@ -177,7 +177,8 @@ def _start_external_load_balancer(service_name: str, controller_addr: str,
             'load_balancer_port': lb_port,
             'controller_addr': controller_addr,
             'load_balancing_policy': lb_policy,
-            'sky_activate_python_env': skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+            'sky_activate_python_env':
+                skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
             'lb_envs': controller_utils.sky_managed_cluster_envs(),
         }
         common_utils.fill_template(constants.EXTERNAL_LB_TEMPLATE,
