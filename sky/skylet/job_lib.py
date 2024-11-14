@@ -205,21 +205,35 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        # TODO(zhwu): This will cause the job driver processes to be a chain in
-        # the process tree (start_new_session=True does not create a new root
-        # for the process tree, see: ps faux), since a job driver process will
-        # call the schedule_step() function to schedule new jobs. A more elegant
-        # solution is to use another daemon process to be in charge of starting
-        # these driver processes, instead of starting them in the current
-        # process.
-        proc = subprocess.Popen(['/bin/bash', '-c', run_cmd],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                start_new_session=True)
+        # Use nohup to ensure the job driver process is a separate process tree,
+        # instead of being a child of the current process. This is important to
+        # avoid a chain of driver processes (job driver can call schedule_step()
+        # to submit new jobs, and the new job can also call schedule_step()
+        # recursively).
+        #
+        # echo $! will output the PID of the last background process started
+        # in the current shell, so we can retrieve it and record in the DB.
+        #
+        # TODO(zhwu): A more elegant solution is to use another daemon process
+        # to be in charge of starting these driver processes, instead of
+        # starting them in the current process.
+        wrapped_cmd = (f'nohup bash -c {shlex.quote(run_cmd)} '
+                       '</dev/null >/dev/null 2>&1 & echo $!')
+        proc = subprocess.run(wrapped_cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL,
+                            start_new_session=True,
+                            shell=True,
+                            text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f'Failed to start job: {proc.stderr}')
+        # Get the PID of the detached process
+        pid = int(proc.stdout.strip())
+        
         # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
         # This is for the case where the job is submitted with SkyPilot older
         # than #4318, using ray job submit.
-        pid = proc.pid
         if 'job submit' in run_cmd:
             pid = -1
         _CURSOR.execute((f'UPDATE jobs SET pid={pid} '
