@@ -199,7 +199,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # exist in those cases.
 _get_name = (lambda cluster_record: cluster_record['name'])
 _get_user_hash = (lambda cluster_record: cluster_record['user_hash'])
-_get_user_name = (lambda cluster_record: cluster_record['user_name'])
+_get_user_name = (lambda cluster_record: cluster_record.get('user_name', '-'))
 _get_launched = (lambda cluster_record: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_region = (
