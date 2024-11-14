@@ -690,6 +690,29 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
+def sync_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
+    """Syncs up the file mounts for data transfer.
+
+    This function is used to sync up the file mounts with the storage
+    information in the edge for data transfer before launching the task.
+
+    Args:
+        dag: The DAG containing the task to launch.
+    """
+    for edge in dag.get_edges():
+        src, tgt, data, best_storage = (edge.source, edge.target, edge.data,
+                                        edge.best_storage)
+        if best_storage is not None:
+            assert data is not None
+            new_storage_mounts_src = {}
+            new_storage_mounts_src[data.source_path] = best_storage
+            src.update_storage_mounts(new_storage_mounts_src)
+            new_storage_mounts_tgt = {}
+            new_storage_mounts_tgt[data.target_path] = best_storage
+            tgt.update_storage_mounts(new_storage_mounts_tgt)
+    return dag
+
+
 def _get_job_status_from_tasks(
     job_tasks: List[Dict[str, Any]]
 ) -> Tuple[managed_job_state.ManagedJobStatus, int]:

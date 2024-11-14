@@ -170,7 +170,8 @@ class Optimizer:
                     'Azure': 'Azure',
                     'IBM': 'IBM'
                 }
-                best_storage = Storage(name='ghost_name')
+                best_storage = Storage(
+                    name=f'bucket_for_{src.name}_to_{dst.name}')
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
                     cloud_name = str(storage_node.best_resources.cloud)
