@@ -18,7 +18,7 @@ User-specified environment variables are useful for passing secrets and any argu
 
 You can specify environment variables to be made available to a task in several ways:
 
-- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>`, path to a `dotenv` file:
+- ``--env-file`` flag in ``sky launch/exec`` :ref:`CLI <cli>`, which is a path to a `dotenv` file:
 
   .. code-block:: text
 
