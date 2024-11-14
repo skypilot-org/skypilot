@@ -7,25 +7,30 @@ import multiprocessing
 import os
 import pathlib
 import shutil
+import subprocess
+import tempfile
 import time
 import traceback
-from typing import Dict
+from typing import Any, Dict
 
 import filelock
 
 from sky import authentication
 from sky import exceptions
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
+from sky.skylet import constants as skylet_constants
 from sky.serve import controller
 from sky.serve import load_balancer
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -89,6 +94,8 @@ def _cleanup(service_name: str) -> bool:
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
+    external_lbs = serve_state.get_external_load_balancers(service_name)
+    lbid2proc: Dict[int, multiprocessing.Process] = dict()
     for info in replica_infos:
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
@@ -101,6 +108,14 @@ def _cleanup(service_name: str) -> bool:
             replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
+    for external_lb_record in external_lbs:
+        lb_cluster_name = external_lb_record['cluster_name']
+        lb_id = external_lb_record['lb_id']
+        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
+                                    args=(lb_cluster_name,))
+        p.start()
+        lbid2proc[lb_id] = p
+        logger.info(f'Terminating external load balancer {lb_cluster_name} ...')
     for info, p in info2proc.items():
         p.join()
         if p.exitcode == 0:
@@ -114,6 +129,15 @@ def _cleanup(service_name: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
+    for lb_id, p in lbid2proc.items():
+        p.join()
+        if p.exitcode == 0:
+            serve_state.remove_external_load_balancer(service_name, lb_id)
+            logger.info(
+                f'External load balancer {lb_id} terminated successfully.')
+        else:
+            failed = True
+            logger.error(f'External load balancer {lb_id} failed to terminate.')
     versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
 
@@ -128,6 +152,50 @@ def _cleanup(service_name: str) -> bool:
         failed = True
 
     return failed
+
+
+def _get_external_lb_cluster_name(service_name: str, lb_id: int) -> str:
+    return f'sky-{service_name}-lb-{lb_id}'
+
+
+def _start_external_load_balancer(service_name: str, controller_addr: str,
+                                  lb_id: int, lb_port: int, lb_policy: str,
+                                  lb_resources: Dict[str, Any]) -> None:
+    # TODO(tian): Hack. We should figure out the optimal resoruces.
+    if 'cpus' not in lb_resources:
+        lb_resources['cpus'] = '2+'
+    # Already checked in service spec validation.
+    assert 'ports' not in lb_resources
+    lb_resources['ports'] = [lb_port]
+    lbr = resources_lib.Resources.from_yaml_config(lb_resources)
+    lb_cluster_name = _get_external_lb_cluster_name(service_name, lb_id)
+    # TODO(tian): Set delete=False to debug. Remove this on production.
+    with tempfile.NamedTemporaryFile(prefix=lb_cluster_name,
+                                     mode='w',
+                                     delete=False) as f:
+        vars_to_fill = {
+            'load_balancer_port': lb_port,
+            'controller_addr': controller_addr,
+            'load_balancing_policy': lb_policy,
+            'sky_activate_python_env': skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+            'lb_envs': controller_utils.sky_managed_cluster_envs(),
+        }
+        common_utils.fill_template(constants.EXTERNAL_LB_TEMPLATE,
+                                   vars_to_fill,
+                                   output_path=f.name)
+        lb_task = task_lib.Task.from_yaml(f.name)
+        lb_task.set_resources(lbr)
+        serve_state.add_external_load_balancer(service_name, lb_id,
+                                               lb_cluster_name, lb_port)
+        # TODO(tian): Temporary solution for circular import. We should move
+        # the import to the top of the file.
+        import sky  # pylint: disable=import-outside-toplevel
+        sky.launch(
+            task=lb_task,
+            stream_logs=True,
+            cluster_name=lb_cluster_name,
+            retry_until_up=True,
+        )
 
 
 def _start(service_name: str, tmp_task_yaml: str, job_id: int):
@@ -177,12 +245,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name, constants.INITIAL_VERSION)
     shutil.copy(tmp_task_yaml, task_yaml)
 
-    # Generate load balancer log file name.
-    load_balancer_log_file = os.path.expanduser(
-        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
-
     controller_process = None
-    load_balancer_process = None
     try:
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
@@ -202,6 +265,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 # ('::1', 20001, 0, 0): cannot assign requested address
                 return '127.0.0.1'
 
+            def _get_external_host():
+                assert service_spec.external_load_balancers is not None
+                # TODO(tian): Use a more robust way to get the host.
+                return subprocess.check_output(
+                    'curl ifconfig.me', shell=True).decode('utf-8').strip()
+
             controller_host = _get_host()
 
             # Start the controller.
@@ -215,25 +284,55 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
+            load_balancer_processes = []
 
-            load_balancer_port = common_utils.find_free_port(
-                constants.LOAD_BALANCER_PORT_START)
+            if service_spec.external_load_balancers is None:
+                # Generate load balancer log file name.
+                load_balancer_log_file = os.path.expanduser(
+                    serve_utils.generate_remote_load_balancer_log_file_name(
+                        service_name))
 
-            # Extract the load balancing policy from the service spec
-            policy_name = service_spec.load_balancing_policy
+                load_balancer_port = common_utils.find_free_port(
+                    constants.LOAD_BALANCER_PORT_START)
 
-            # Start the load balancer.
-            # TODO(tian): Probably we could enable multiple ports specified in
-            # service spec and we could start multiple load balancers.
-            # After that, we will have a mapping from replica port to endpoint.
-            load_balancer_process = multiprocessing.Process(
-                target=ux_utils.RedirectOutputForProcess(
-                    load_balancer.run_load_balancer,
-                    load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port, policy_name))
-            load_balancer_process.start()
-            serve_state.set_service_load_balancer_port(service_name,
-                                                       load_balancer_port)
+                # Extract the load balancing policy from the service spec
+                policy_name = service_spec.load_balancing_policy
+
+                # Start the load balancer.
+                # TODO(tian): Probably we could enable multiple ports specified
+                # in service spec and we could start multiple load balancers.
+                # After that, we need a mapping from replica port to endpoint.
+                load_balancer_process = multiprocessing.Process(
+                    target=ux_utils.RedirectOutputForProcess(
+                        load_balancer.run_load_balancer,
+                        load_balancer_log_file).run,
+                    args=(controller_addr, load_balancer_port, policy_name))
+                load_balancer_process.start()
+                load_balancer_processes.append(load_balancer_process)
+                serve_state.set_service_load_balancer_port(
+                    service_name, load_balancer_port)
+            else:
+                lb_port = 8000
+                for lb_id, lb_config in enumerate(
+                        service_spec.external_load_balancers):
+                    # Generate load balancer log file name.
+                    load_balancer_log_file = os.path.expanduser(
+                        serve_utils.
+                        generate_remote_external_load_balancer_log_file_name(
+                            service_name, lb_id))
+                    lb_policy = lb_config['load_balancing_policy']
+                    lb_resources = lb_config['resources']
+                    controller_external_addr = (
+                        f'http://{_get_external_host()}:{controller_port}')
+                    lb_process = multiprocessing.Process(
+                        target=ux_utils.RedirectOutputForProcess(
+                            _start_external_load_balancer,
+                            load_balancer_log_file).run,
+                        args=(service_name, controller_external_addr, lb_id,
+                              lb_port, lb_policy, lb_resources))
+                    lb_process.start()
+                    load_balancer_processes.append(lb_process)
+                    serve_state.set_service_load_balancer_port(service_name, -1)
 
         while True:
             _handle_signal(service_name)
@@ -245,7 +344,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
         process_to_kill = [
-            proc for proc in [load_balancer_process, controller_process]
+            proc for proc in [*load_balancer_processes, controller_process]
             if proc is not None
         ]
         subprocess_utils.kill_children_processes(

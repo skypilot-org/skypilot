@@ -311,6 +311,7 @@ def get_service_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.serve import load_balancing_policies
+    lb_policy_choices = list(load_balancing_policies.LB_POLICIES.keys())
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -385,10 +386,26 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'external_load_balancers': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'required': ['resources', 'load_balancing_policy'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'resources': {
+                            'type': 'object',
+                        },
+                        'load_balancing_policy': {
+                            'type': 'string',
+                            'case_insensitive_enum': lb_policy_choices,
+                        },
+                    }
+                }
+            },
             'load_balancing_policy': {
                 'type': 'string',
-                'case_insensitive_enum': list(
-                    load_balancing_policies.LB_POLICIES.keys())
+                'case_insensitive_enum': lb_policy_choices,
             },
         }
     }

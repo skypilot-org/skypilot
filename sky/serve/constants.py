@@ -1,6 +1,7 @@
 """Constants used for SkyServe."""
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
+EXTERNAL_LB_TEMPLATE = 'sky-serve-external-load-balancer.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
@@ -79,6 +80,7 @@ DEFAULT_MIN_REPLICAS = 1
 # Default port range start for controller and load balancer. Ports will be
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
+CONTROLLER_PORT_RANGE = '20001-20020'
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30020'
 

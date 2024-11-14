@@ -1,0 +1,23 @@
+# The template for the sky serve load balancers
+
+name: load-balancer
+
+setup: |
+  {{ sky_activate_python_env }}
+  # Install serve dependencies.
+  # TODO(tian): Gather those into serve constants.
+  pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+  pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
+  pip list | grep httpx > /dev/null 2>&1 || pip install httpx > /dev/null 2>&1
+
+run: |
+  {{ sky_activate_python_env }}
+  python -u -m sky.serve.load_balancer \
+    --controller-addr {{controller_addr}} \
+    --load-balancer-port {{load_balancer_port}} \
+    --load-balancing-policy {{load_balancing_policy}}
+
+envs:
+{%- for env_name, env_value in lb_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

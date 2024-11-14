@@ -12,6 +12,7 @@ import colorama
 
 from sky.serve import constants
 from sky.utils import db_utils
+from sky import exceptions
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -58,6 +59,13 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS external_load_balancers (
+        lb_id INTEGER, 
+        service_name TEXT,
+        cluster_name TEXT,
+        port INTEGER,
+        PRIMARY KEY (service_name, lb_id))""")
     conn.commit()
 
 
@@ -538,3 +546,62 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+
+# === External Load Balancer functions ===
+# TODO(tian): Add a status column.
+def add_external_load_balancer(service_name: str, lb_id: int, cluster_name: str,
+                               port: int) -> None:
+    """Adds an external load balancer to the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT INTO external_load_balancers
+            (service_name, lb_id, cluster_name, port)
+            VALUES (?, ?, ?, ?)""", (service_name, lb_id, cluster_name, port))
+
+
+def _get_external_load_balancer_from_row(row) -> Dict[str, Any]:
+    from sky import core  # pylint: disable=import-outside-toplevel
+
+    # TODO(tian): Temporary workaround to avoid circular import.
+    # This should be fixed.
+    lb_id, cluster_name, port = row[:3]
+    try:
+        endpoint = core.endpoints(cluster_name, port)[port]
+    except exceptions.ClusterNotUpError:
+        # TODO(tian): Currently, when this cluster is not in the UP status,
+        # the endpoint query will raise an cluster is not up error. We should
+        # implement a status for external lbs as well and returns a '-' when
+        # it is still provisioning.
+        endpoint = '-'
+    return {
+        'lb_id': lb_id,
+        'cluster_name': cluster_name,
+        'port': port,
+        'endpoint': endpoint,
+    }
+
+
+def get_external_load_balancers(service_name: str) -> List[Dict[str, Any]]:
+    """Gets all external load balancers of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT lb_id, cluster_name, port FROM external_load_balancers
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+    external_load_balancers = []
+    for row in rows:
+        external_load_balancers.append(
+            _get_external_load_balancer_from_row(row))
+    return external_load_balancers
+
+
+def remove_external_load_balancer(service_name: str, lb_id: int) -> None:
+    """Removes an external load balancer from the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM external_load_balancers
+            WHERE service_name=(?)
+            AND lb_id=(?)""", (service_name, lb_id))

@@ -1,0 +1,31 @@
+# SkyServe YAML to run multiple Load Balancers in different region.
+
+name: multi-lb
+
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 2
+  external_load_balancers:
+    - resources:
+        # cloud: aws
+        # region: us-east-2
+        cloud: gcp
+        region: us-east1
+      load_balancing_policy: round_robin
+    - resources:
+        # cloud: aws
+        # region: ap-northeast-1
+        cloud: gcp
+        region: asia-northeast1
+      load_balancing_policy: round_robin
+
+resources:
+  cloud: aws
+  ports: 8080
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

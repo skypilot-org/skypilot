@@ -2,11 +2,11 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from sky import serve
+from sky import resources as resources_lib
 from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -31,6 +31,7 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        external_load_balancers: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -57,13 +58,27 @@ class SkyServiceSpec:
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
-        # Add the check for unknown load balancing policies
+        # Use load_balancing_policy as fallback for external_load_balancers
         if (load_balancing_policy is not None and
-                load_balancing_policy not in serve.LB_POLICIES):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Unknown load balancing policy: {load_balancing_policy}. '
-                    f'Available policies: {list(serve.LB_POLICIES.keys())}')
+                external_load_balancers is not None):
+            for lb_config in external_load_balancers:
+                if lb_config.get('load_balancing_policy') is None:
+                    lb_config['load_balancing_policy'] = load_balancing_policy
+
+        if external_load_balancers is not None:
+            for lb_config in external_load_balancers:
+                r = lb_config.get('resources')
+                if r is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('`resources` must be set for '
+                                         'external_load_balancers.')
+                if 'ports' in r:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('`ports` must not be set for '
+                                         'external_load_balancers.')
+                # Validate resources
+                resources_lib.Resources.from_yaml_config(r)
+
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
@@ -79,6 +94,8 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._external_load_balancers: Optional[List[Dict[str, Any]]] = (
+            external_load_balancers)
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -162,6 +179,8 @@ class SkyServiceSpec:
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
+        service_config['external_load_balancers'] = config.get(
+            'external_load_balancers', None)
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -219,6 +238,8 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('external_load_balancers', None,
+                        self._external_load_balancers)
         return config
 
     def probe_str(self):
@@ -329,3 +350,7 @@ class SkyServiceSpec:
     @property
     def load_balancing_policy(self) -> Optional[str]:
         return self._load_balancing_policy
+
+    @property
+    def external_load_balancers(self) -> Optional[List[Dict[str, Any]]]:
+        return self._external_load_balancers
