@@ -66,8 +66,6 @@ def launch(
     dag, mutated_user_config = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
 
-    dag.plot('diamond.png')
-
     if not dag.is_connected_dag():
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
