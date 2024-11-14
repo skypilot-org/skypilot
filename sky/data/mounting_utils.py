@@ -30,17 +30,19 @@ def get_s3_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_s3_mount_cmd(bucket_name: str, bucket_sub_path: Optional[str],
-                     mount_path: str) -> str:
+# pylint: disable=invalid-name
+def get_s3_mount_cmd(bucket_name: str,
+                     mount_path: str,
+                     _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an S3 bucket using goofys."""
-    if bucket_sub_path is None:
-        bucket_sub_path = ''
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
     else:
-        bucket_sub_path = f':{bucket_sub_path}'
+        _bucket_sub_path = f':{_bucket_sub_path}'
     mount_cmd = ('goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'{bucket_name}{bucket_sub_path} {mount_path}')
+                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 
 
@@ -54,11 +56,13 @@ def get_gcs_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_gcs_mount_cmd(bucket_name: str, bucket_sub_path: Optional[str],
-                      mount_path: str) -> str:
+# pylint: disable=invalid-name
+def get_gcs_mount_cmd(bucket_name: str,
+                      mount_path: str,
+                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
-    bucket_sub_path_arg = f'--only-dir {bucket_sub_path} '\
-        if bucket_sub_path else ''
+    bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
+        if _bucket_sub_path else ''
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
@@ -86,20 +90,21 @@ def get_az_mount_install_cmd() -> str:
     return install_cmd
 
 
+# pylint: disable=invalid-name
 def get_az_mount_cmd(container_name: str,
-                     bucket_sub_path: Optional[str],
                      storage_account_name: str,
                      mount_path: str,
-                     storage_account_key: Optional[str] = None) -> str:
+                     storage_account_key: Optional[str] = None,
+                     _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an AZ Container using blobfuse2.
 
     Args:
         container_name: Name of the mounting container.
-        bucket_sub_path: Sub path of the mounting container.
         storage_account_name: Name of the storage account the given container
             belongs to.
         mount_path: Path where the container will be mounting.
         storage_account_key: Access key for the given storage account.
+        _bucket_sub_path: Sub path of the mounting container.
 
     Returns:
         str: Command used to mount AZ container with blobfuse2.
@@ -116,10 +121,10 @@ def get_az_mount_cmd(container_name: str,
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
-    if bucket_sub_path is None:
+    if _bucket_sub_path is None:
         bucket_sub_path_arg = ''
     else:
-        bucket_sub_path_arg = f'--subdirectory={bucket_sub_path}/ '
+        bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
@@ -130,20 +135,24 @@ def get_az_mount_cmd(container_name: str,
     return mount_cmd
 
 
-def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
-                     endpoint_url: str, bucket_name: str,
-                     bucket_sub_path: Optional[str], mount_path: str) -> str:
+# pylint: disable=invalid-name
+def get_r2_mount_cmd(r2_credentials_path: str,
+                     r2_profile_name: str,
+                     endpoint_url: str,
+                     bucket_name: str,
+                     mount_path: str,
+                     _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to install R2 mount utility goofys."""
-    if bucket_sub_path is None:
-        bucket_sub_path = ''
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
     else:
-        bucket_sub_path = f':{bucket_sub_path}'
+        _bucket_sub_path = f':{_bucket_sub_path}'
     mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                  f'AWS_PROFILE={r2_profile_name} goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--endpoint {endpoint_url} '
-                 f'{bucket_name}{bucket_sub_path} {mount_path}')
+                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 
 
@@ -155,9 +164,12 @@ def get_cos_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
-                      bucket_rclone_profile: str, bucket_name: str,
-                      bucket_sub_path: Optional[str], mount_path: str) -> str:
+def get_cos_mount_cmd(rclone_config_data: str,
+                      rclone_config_path: str,
+                      bucket_rclone_profile: str,
+                      bucket_name: str,
+                      mount_path: str,
+                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # creates a fusermount soft link on older (<22) Ubuntu systems for
     # rclone's mount utility.
@@ -169,8 +181,8 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                                 'mkdir -p ~/.config/rclone/ && '
                                 f'echo "{rclone_config_data}" >> '
                                 f'{rclone_config_path}')
-    if bucket_sub_path is None:
-        sub_path_arg = f'{bucket_name}/{bucket_name}'
+    if _bucket_sub_path is None:
+        sub_path_arg = f'{bucket_name}/{_bucket_sub_path}'
     else:
         sub_path_arg = f'/{bucket_name}'
     # --daemon will keep the mounting process running in the background.
