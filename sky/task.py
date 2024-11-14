@@ -14,6 +14,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky.api.common import CLIENT_DIR
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -286,14 +287,11 @@ class Task:
         # For internal use only.
         self.file_mounts_mapping = file_mounts_mapping
 
-        # Check if the task is legal.
-        self._validate()
-
         dag = sky.dag.get_current_dag()
         if dag is not None:
             dag.add(self)
 
-    def _validate(self):
+    def validate(self):
         """Checks if the Task fields are valid."""
         if not _is_valid_name(self.name):
             with ux_utils.print_exception_no_traceback():
@@ -340,17 +338,29 @@ class Task:
                                  f'Got {type(self.run)}')
 
         # Workdir.
+        logger.info(f'YIKADEBUG workdir is: {self.workdir}')
         if self.workdir is not None:
             workdir = self.workdir
-            if self.file_mounts_mapping is not None:
+            if self.file_mounts_mapping is None:
+                # Local API server.
+                full_workdir = os.path.expanduser(workdir)
+                logger.info(f'YIKADEBUG local full_workdir: {full_workdir}')
+            else:
+                # Remote API server.
                 workdir = self.file_mounts_mapping.get(workdir, workdir)
-            full_workdir = os.path.expanduser(workdir)
+                client_dir = (CLIENT_DIR.expanduser().resolve() / common_utils.get_user_hash())
+                full_workdir = client_dir / workdir
+                logger.info(f'YIKADEBUG remote full_workdir: {full_workdir}')
             if not os.path.isdir(full_workdir):
                 # Symlink to a dir is legal (isdir() follows symlinks).
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Workdir must exist and must be a directory (or '
                         f'a symlink to a directory). {self.workdir} not found.')
+        
+        # Resources.
+        for r in self.resources:
+            r.validate()
 
     @staticmethod
     def from_yaml_config(
@@ -1214,7 +1224,3 @@ class Task:
         else:
             s += '\n  resources: default instances'
         return s
-
-    def validate(self):
-        for r in self.resources:
-            r.validate()

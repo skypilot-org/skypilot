@@ -147,11 +147,15 @@ def upload_mounts_to_api_server(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+    if is_api_server_local():
+        # Task file_mounts_mapping is None.
+        logger.info(f'YIKADEBUG local, file mount is None: {task.file_mounts_mapping is None}')
+        return dag
+
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))
 
     upload_list = []
-    # if not _is_api_server_local():
     for task_ in dag.tasks:
         file_mounts_mapping = {}
         if task_.workdir:
@@ -181,6 +185,7 @@ def upload_mounts_to_api_server(
                         upload_list.append(_full_path(src))
                         file_mounts_mapping[src] = _full_path(src)
         task_.file_mounts_mapping = file_mounts_mapping
+        logger.info(f'YIKADEBUG remote, file mount: {task_.file_mounts_mapping}')
 
     server_url = get_server_url()
     if upload_list:

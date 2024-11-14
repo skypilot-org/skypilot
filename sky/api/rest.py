@@ -225,7 +225,6 @@ async def upload_zip_file(user_hash: str,
 
         # Cleanup the temporary file
         zip_file_path.unlink()
-
         return {'status': 'files uploaded and extracted'}
     except Exception as e:  # pylint: disable=broad-except
         return {'detail': str(e)}
