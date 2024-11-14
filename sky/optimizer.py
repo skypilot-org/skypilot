@@ -120,6 +120,8 @@ class Optimizer:
             exceptions.NoCloudAccessError: if no public clouds are enabled.
         """
         with rich_utils.safe_status(ux_utils.spinner_message('Optimizing')):
+            # TODO: should validate the dag here for faster failure
+            # of invalid task configs.
             _check_specified_clouds(dag)
 
             # This function is effectful: mutates every node in 'dag' by setting
