@@ -704,10 +704,11 @@ def api_stop():
 def api_server_logs(follow: bool = True, tail: str = 'all'):
     """Stream the API server logs."""
     server_url = api_common.get_server_url()
+    # TODO(zhwu): this needs to work with remote server.
     if server_url != api_common.DEFAULT_SERVER_URL:
         raise RuntimeError(
-            f'Cannot kill the API server at {server_url} because it is not '
-            f'the default SkyPilot API server started locally.')
+            f'Cannot query the API server logs at {server_url} because it is '
+            f'not the default SkyPilot API server started locally.')
 
     tail_args = ['-f'] if follow else []
     if tail == 'all':
@@ -737,7 +738,7 @@ def requests_ls(
         request_id: Optional[str] = None) -> List[requests_lib.RequestPayload]:
     body = payloads.RequestIdBody(request_id=request_id)
     response = requests.get(f'{api_common.get_server_url()}/requests',
-                            json=json.loads(body.model_dump_json()),
+                            params=json.loads(body.model_dump_json()),
                             timeout=5)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()

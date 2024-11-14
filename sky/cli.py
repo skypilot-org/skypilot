@@ -5676,7 +5676,7 @@ def api_ls(request_id: Optional[str], all: bool):
 @usage_lib.entrypoint
 def api_server_logs(follow: bool, tail: str):
     """Shows the API server logs."""
-    sdk.api_logs(follow, tail)
+    sdk.api_server_logs(follow, tail)
 
 
 @api.command('login', cls=_DocumentedCodeCommand)
