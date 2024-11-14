@@ -130,7 +130,7 @@ Read the research:
    ../getting-started/quickstart
    ../examples/interactive-development
    ../getting-started/tutorial
-   ../getting-started/sky-computing
+   ../sky-computing
 
 
 .. toctree::
