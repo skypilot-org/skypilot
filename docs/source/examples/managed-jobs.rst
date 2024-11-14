@@ -190,7 +190,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     pip install wandb
 
   run: |
-    cd transformers/examples/pytorch/question-answering/
+    cd examples/pytorch/question-answering/
     python run_qa.py \
       --model_name_or_path bert-base-uncased \
       --dataset_name squad \
