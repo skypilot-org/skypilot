@@ -3,8 +3,10 @@ import collections
 import copy
 import enum
 import json
+import re
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+import uuid
 
 import colorama
 import numpy as np
@@ -172,8 +174,11 @@ class Optimizer:
                     'Azure': 'Azure',
                     'IBM': 'IBM'
                 }
-                bucket_name = (f'bucket-for-{src.name}-to-{dst.name}-'
-                               f'{common_utils.get_user_hash()}').lower()
+
+                bucket_name_tmp = (
+                    f'bucket-for-{src.name}-to-{dst.name}-'
+                    f'{common_utils.get_user_hash()}-{uuid.uuid4()}')
+                bucket_name = re.sub(r'[._]', '-', bucket_name_tmp).lower()
                 best_storage = Storage(name=bucket_name)
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
