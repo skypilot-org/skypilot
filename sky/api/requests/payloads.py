@@ -8,12 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import pydantic
 
 from sky import serve
+from sky import sky_logging
 from sky.api import common
 from sky.skylet import constants
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import registry
 
+logger = sky_logging.init_logger(__name__)
 
 @functools.lru_cache()
 def request_body_env_vars() -> dict:

@@ -9,6 +9,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import yaml
+import traceback
 
 import sky
 from sky import clouds
@@ -338,19 +339,8 @@ class Task:
                                  f'Got {type(self.run)}')
 
         # Workdir.
-        logger.info(f'YIKADEBUG workdir is: {self.workdir}')
         if self.workdir is not None:
-            workdir = self.workdir
-            if self.file_mounts_mapping is None:
-                # Local API server.
-                full_workdir = os.path.expanduser(workdir)
-                logger.info(f'YIKADEBUG local full_workdir: {full_workdir}')
-            else:
-                # Remote API server.
-                workdir = self.file_mounts_mapping.get(workdir, workdir)
-                client_dir = (CLIENT_DIR.expanduser().resolve() / common_utils.get_user_hash())
-                full_workdir = client_dir / workdir
-                logger.info(f'YIKADEBUG remote full_workdir: {full_workdir}')
+            full_workdir = os.path.expanduser(self.workdir)
             if not os.path.isdir(full_workdir):
                 # Symlink to a dir is legal (isdir() follows symlinks).
                 with ux_utils.print_exception_no_traceback():

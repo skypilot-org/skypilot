@@ -148,8 +148,6 @@ def upload_mounts_to_api_server(
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
     if is_api_server_local():
-        # Task file_mounts_mapping is None.
-        logger.info(f'YIKADEBUG local, file mount is None: {task.file_mounts_mapping is None}')
         return dag
 
     def _full_path(src: str) -> str:
@@ -185,7 +183,6 @@ def upload_mounts_to_api_server(
                         upload_list.append(_full_path(src))
                         file_mounts_mapping[src] = _full_path(src)
         task_.file_mounts_mapping = file_mounts_mapping
-        logger.info(f'YIKADEBUG remote, file mount: {task_.file_mounts_mapping}')
 
     server_url = get_server_url()
     if upload_list:
@@ -207,6 +204,7 @@ def upload_mounts_to_api_server(
     return dag
 
 
+def get_full_work
 def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                            workdir_only: bool) -> 'dag_lib.Dag':
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
