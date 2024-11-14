@@ -14,6 +14,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -902,6 +903,19 @@ class Task:
         task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
+
+    def get_bucket_name_and_store_type_from_job_config(
+            self) -> Tuple[Optional[str], Optional[str]]:
+        """Returns the bucket name and store type from the job config."""
+        bucket_dict = skypilot_config.get_nested(('jobs', 'bucket'), None)
+        store_type, _ = self._get_preferred_store()
+        if store_type.value.lower() in bucket_dict:
+            bucket_name = bucket_dict[store_type.value.lower()]
+        elif 'default' in bucket_dict:
+            bucket_name = bucket_dict['default']
+        else:
+            return None, None
+        return bucket_name, store_type.value
 
     def _get_preferred_store(
             self) -> Tuple[storage_lib.StoreType, Optional[str]]:

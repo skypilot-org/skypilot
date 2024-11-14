@@ -189,29 +189,6 @@ class StoreType(enum.Enum):
         return bucket_endpoint_url
 
 
-class StorePrefix(enum.Enum):
-    """Enum for the prefix of different stores."""
-    S3 = 's3://'
-    GCS = 'gs://'
-    AZURE = 'https://'
-    R2 = 'r2://'
-    IBM = 'cos://'
-
-    def to_store_type(self) -> StoreType:
-        if self == StorePrefix.S3:
-            return StoreType.S3
-        elif self == StorePrefix.GCS:
-            return StoreType.GCS
-        elif self == StorePrefix.AZURE:
-            return StoreType.AZURE
-        elif self == StorePrefix.R2:
-            return StoreType.R2
-        elif self == StorePrefix.IBM:
-            return StoreType.IBM
-        else:
-            raise ValueError(f'Unknown store prefix: {self}')
-
-
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
@@ -354,7 +331,7 @@ class AbstractStore:
         """Removes the Storage from the cloud."""
         raise NotImplementedError
 
-    def remove_objects_from_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         """Removes objects from the sub path in the bucket."""
         raise NotImplementedError
 
@@ -1025,7 +1002,7 @@ class Storage(object):
             # Without interfering with the global state.
             # User should still call storage.delete() to remove the bucket.
             if only_delete_sub_path_if_exists and store.get_bucket_sub_path():
-                store.remove_objects_from_sub_path()
+                store.delete_sub_path()
                 return
 
             is_sky_managed = store.is_sky_managed
@@ -1051,7 +1028,7 @@ class Storage(object):
             for key, store in self.stores.items():
                 if only_delete_sub_path_if_exists and store.get_bucket_sub_path(
                 ):
-                    store.remove_objects_from_sub_path()
+                    store.delete_sub_path()
                     continue
 
                 if store.is_sky_managed:
@@ -1352,7 +1329,7 @@ class S3Store(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def remove_objects_from_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_s3_bucket_sub_path(
             self.name, self._bucket_sub_path)
@@ -1822,7 +1799,7 @@ class GcsStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def remove_objects_from_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_gcs_bucket(self.name,
                                                       self._bucket_sub_path)
@@ -2622,7 +2599,7 @@ class AzureBlobStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def remove_objects_from_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         try:
             container_url = data_utils.AZURE_CONTAINER_URL.format(
@@ -3056,7 +3033,7 @@ class R2Store(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def remove_objects_from_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_r2_bucket_sub_path(
             self.name, self._bucket_sub_path)
@@ -3523,7 +3500,7 @@ class IBMCosStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}Deleted COS bucket {self.name}.'
                     f'{colorama.Style.RESET_ALL}')
 
-    def remove_objects_from_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         bucket = self.s3_resource.Bucket(self.name)
         try:

@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import colorama
 
@@ -676,21 +676,6 @@ def replace_skypilot_config_path_in_file_mounts(
                      f'with the real path in file mounts: {file_mounts}')
 
 
-def _get_bucket_name_and_store_type_from_job_config(
-) -> Tuple[Optional[str], Optional[str]]:
-    bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
-    if bucket_wth_prefix is None:
-        return None, None
-
-    for prefix in storage_lib.StorePrefix:
-        if bucket_wth_prefix.startswith(prefix.value):
-            bucket_name = bucket_wth_prefix[len(prefix.value):]
-            store = prefix.to_store_type().value
-            return bucket_name, store
-
-    raise ValueError(f'Invalid bucket name with prefix: {bucket_wth_prefix}')
-
-
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   path: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
@@ -734,7 +719,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Get the bucket name for the workdir and file mounts,
     # we stores all these files in same bucket from config.
-    bucket_name, store = _get_bucket_name_and_store_type_from_job_config()
+    bucket_name, store = task.get_bucket_name_and_store_type_from_job_config()
     if bucket_name is None:
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(), id=run_id)
@@ -757,7 +742,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'persistent': False,
                 'mode': 'COPY',
                 'store': store,
-                '_bucket_sub_path': f'job-{run_id}/workdir',
+                '_bucket_sub_path':
+                    constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id),
             })
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -782,7 +768,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             'persistent': False,
             'mode': 'COPY',
             'store': store,
-            '_bucket_sub_path': f'job-{run_id}/local-file-mounts/{i}',
+            '_bucket_sub_path': constants.FILE_MOUNTS_SUBPATH.format(
+                i=i, run_id=run_id),
         })
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
@@ -809,7 +796,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'persistent': False,
                 'mode': 'MOUNT',
                 'store': store,
-                '_bucket_sub_path': f'job-{run_id}/tmp-files',
+                '_bucket_sub_path':
+                    constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id),
             })
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
