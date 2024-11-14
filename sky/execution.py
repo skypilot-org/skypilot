@@ -112,6 +112,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _is_controller: Optional[controller_utils._ControllerSpec] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -267,6 +268,9 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
+                    if _is_controller is not None:
+                        logger.info(
+                            f'Choosing resources for {_is_controller.name}...')
                     dag = sky.optimize(dag, minimize=optimize_target)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
@@ -364,7 +368,7 @@ def launch(
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
-    _disable_controller_check: bool = False,
+    _is_controller: Optional[controller_utils._ControllerSpec] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a cluster or task.
@@ -455,7 +459,7 @@ def launch(
         if dryrun.
     """
     entrypoint = task
-    if not _disable_controller_check:
+    if _is_controller is None:
         controller_utils.check_cluster_name_not_controller(
             cluster_name, operation_str='sky.launch')
 
@@ -505,6 +509,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _is_controller=_is_controller,
     )
 
 

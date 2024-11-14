@@ -137,15 +137,16 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky.launch(task=controller_task,
-                   stream_logs=stream_logs,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   fast=fast,
-                   _disable_controller_check=True)
+        sky.launch(
+            task=controller_task,
+            stream_logs=stream_logs,
+            cluster_name=controller_name,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=skylet_constants.
+            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            retry_until_up=True,
+            fast=fast,
+            _is_controller=controller_utils.Controllers.JOBS_CONTROLLER.value)
 
 
 def queue_from_kubernetes_pod(
