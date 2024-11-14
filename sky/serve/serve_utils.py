@@ -46,8 +46,14 @@ NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
-_SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
-_SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
+# NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
+# and always appear after a space. Be careful when changing UX as this
+# assumption is used to expand some log files while ignoring others.
+_SKYPILOT_LOG_DIRS = r'~/(sky_logs|\.sky)'
+_SKYPILOT_PROVISION_LOG_PATTERN = (
+    fr'.* ({_SKYPILOT_LOG_DIRS}/.*provision\.log)')
+_SKYPILOT_LOG_PATTERN = fr'.* ({_SKYPILOT_LOG_DIRS}/.*\.log)'
+
 # TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
@@ -591,7 +597,7 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _follow_replica_logs(
+def _follow_logs_with_provision_expanding(
     file: TextIO,
     cluster_name: str,
     *,
@@ -599,7 +605,7 @@ def _follow_replica_logs(
     stop_on_eof: bool = False,
     idle_timeout_seconds: Optional[int] = None,
 ) -> Iterator[str]:
-    """Follows logs for a replica, handling nested log files.
+    """Follows logs and expands any provision.log references found.
 
     Args:
         file: Log file to read from.
@@ -610,7 +616,7 @@ def _follow_replica_logs(
             new content.
 
     Yields:
-        Log lines from the main file and any nested log files.
+        Log lines, including expanded content from referenced provision logs.
     """
 
     def cluster_is_up() -> bool:
@@ -620,36 +626,35 @@ def _follow_replica_logs(
         return cluster_record['status'] == status_lib.ClusterStatus.UP
 
     def process_line(line: str) -> Iterator[str]:
-        # Tailing detailed progress for user. All logs in skypilot is
-        # of format `To view detailed progress: tail -n100 -f *.log`.
-        # Check if the line is directing users to view logs
+        # The line might be directing users to view logs, like
+        # `✓ Cluster launched: new-http.  View logs at: *.log`
+        # We should tail the detailed logs for user.
         provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-        other_log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
+        log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
         if provision_log_prompt is not None:
             nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
-            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
-                # We still exit if more than 10 seconds without new content
-                # to avoid any internal bug that causes the launch to fail
-                # while cluster status remains INIT.
-                # Originally, we output the next line first before printing
-                # the launching logs. Since the next line is always
-                # `Launching on <cloud> <region> (<zone>)`, we output it first
-                # to indicate the process is starting.
-                # TODO(andyl): After refactor #4323, the above logic is broken,
-                # but coincidentally with the new UX 3.0, the `Cluster launched`
-                # message is printed first, making the output appear correct.
-                # Explaining this since it's technically a breaking change
-                # for this refactor PR #4323. Will remove soon in a fix PR
-                # for adapting the serve.follow_logs to the new UX.
-                yield from _follow_replica_logs(f,
-                                                cluster_name,
-                                                should_stop=cluster_is_up,
-                                                stop_on_eof=stop_on_eof,
-                                                idle_timeout_seconds=10)
+
+            try:
+                with open(nested_log_path, 'r', newline='',
+                          encoding='utf-8') as f:
+                    # We still exit if more than 10 seconds without new content
+                    # to avoid any internal bug that causes the launch to fail
+                    # while cluster status remains INIT.
+                    yield from log_utils.follow_logs(f,
+                                                     should_stop=cluster_is_up,
+                                                     stop_on_eof=stop_on_eof,
+                                                     idle_timeout_seconds=10)
+            except FileNotFoundError:
+                yield line
+
+                yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
+                       f'Try to expand log file {nested_log_path} but not '
+                       f'found. Skipping...{colorama.Style.RESET_ALL}')
+                pass
             return
 
-        if other_log_prompt is not None:
+        if log_prompt is not None:
             # Now we skip other logs (file sync logs) since we lack
             # utility to determine when these log files are finished
             # writing.
@@ -702,7 +707,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_replica_logs(
+        for line in _follow_logs_with_provision_expanding(
                 f,
                 replica_cluster_name,
                 should_stop=replica_provisioned,
