@@ -879,12 +879,9 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # extra cautious.
                 job_pgid = os.getpgid(job['pid'])
                 os.killpg(job_pgid, signal.SIGTERM)
-                # Start a daemon to forcefully kill the process group after 30
-                # seconds to avoid the case where some processes are not killed
-                # by SIGTERM.
-                subprocess.Popen(f'sleep 30; kill -9 -{job_pgid}',
-                                 shell=True,
-                                 start_new_session=True)
+                # We don't have to start a daemon to forcefully kill the process
+                # as our job driver process will clean up the underlying
+                # child processes.
             elif job['pid'] < 0:
                 try:
                     # TODO(zhwu): Backward compatibility, remove after 0.9.0.
