@@ -682,6 +682,7 @@ def get_cluster_from_name(
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
             'user_hash': user_hash,
+            'user_name': get_user(user_hash).name,
         }
         return record
     return None
