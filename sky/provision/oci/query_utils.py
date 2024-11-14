@@ -86,6 +86,7 @@ class QueryHelper:
         return result_set
 
     @classmethod
+    @debug_enabled(logger)
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
         logger.debug(f'Terminate instance by tags: {tag_filters}')
         insts = cls.query_instances_by_tags(tag_filters, region)
