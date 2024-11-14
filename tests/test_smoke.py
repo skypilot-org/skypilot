@@ -3230,6 +3230,10 @@ def test_managed_jobs_storage(generic_cloud: str):
     storage_name = f'sky-test-{timestamp}'
     output_storage_name = f'sky-test-output-{timestamp}'
 
+    yaml_str_user_config = pathlib.Path(
+        'tests/test_yamls/use_intermediate_bucket.yaml').read_text()
+    intermediate_storage_name = f'bucket-jobs-s3-{timestamp}'
+
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
     # However, we inject this testing only for AWS and GCP since they are the
@@ -3284,28 +3288,38 @@ def test_managed_jobs_storage(generic_cloud: str):
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(yaml_str)
-        f.flush()
-        file_path = f.name
-        test = Test(
-            'managed_jobs_storage',
-            [
-                *STORAGE_SETUP_COMMANDS,
-                f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
-                region_validation_cmd,  # Check if the bucket is created in the correct region
-                'sleep 60',  # Wait the spot queue to be updated
-                f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
-                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
-                # Check if file was written to the mounted output bucket
-                output_check_cmd
-            ],
-            (f'sky jobs cancel -y -n {name}',
-             f'; sky storage delete {output_storage_name} || true'),
-            # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
-            timeout=20 * 60,
-        )
-        run_one_test(test)
+    yaml_str_user_config = yaml_str_user_config.replace(
+        'bucket-jobs-s3', intermediate_storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f_user_config:
+        f_user_config.write(yaml_str_user_config)
+        f_user_config.flush()
+        user_config_path = f_user_config.name
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f_task:
+            f_task.write(yaml_str)
+            f_task.flush()
+            file_path = f_task.name
+            test = Test(
+                'managed_jobs_storage',
+                [
+                    *STORAGE_SETUP_COMMANDS,
+                    f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
+                    region_validation_cmd,  # Check if the bucket is created in the correct region
+                    'sleep 60',  # Wait the spot queue to be updated
+                    f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
+                    f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
+                    # check intermediate bucket exists
+                    f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{intermediate_storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
+                    # Check if file was written to the mounted output bucket
+                    output_check_cmd
+                ],
+                (f'sky jobs cancel -y -n {name}',
+                 f'; sky storage delete {intermediate_storage_name}',
+                 f'; sky storage delete {output_storage_name} || true'),
+                env={'SKYPILOT_CONFIG': user_config_path},
+                # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
+                timeout=20 * 60,
+            )
+            run_one_test(test)
 
 
 # ---------- Testing spot TPU ----------
@@ -5772,23 +5786,3 @@ def test_kubernetes_context_failover():
             env={'SKYPILOT_CONFIG': f.name},
         )
         run_one_test(test)
-
-
-@pytest.mark.aws
-def test_intermediate_bucket():
-    name = _get_cluster_name()
-    bucket_name = f'sky-bucket-{int(time.time())}'
-    test = Test(
-        'interm-resources',
-        [
-            '[ ! -f ~/.sky/config.yaml ] || mv ~/.sky/config.yaml ~/.sky/config.yaml.bak_intermediate_bucket_test',
-            f'echo "jobs:\n  bucket: \"s3://{bucket_name}\"" > ~/.sky/config.yaml',
-            f'sky jobs launch -n {name} tests/test_yamls/intermediate_bucket.yaml -y',
-            f'sky storage ls | grep {bucket_name}'  # the bucket name is created
-            f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
-            '[ ! -f ~/.sky/config.yaml.bak_intermediate_bucket_test ] || mv ~/.sky/config.yaml.bak_intermediate_bucket_test ~/.sky/config.yaml'
-        ],
-        f'sky jobs cancel -y -n {name}',
-        timeout=25 * 60,
-    )
-    run_one_test(test)

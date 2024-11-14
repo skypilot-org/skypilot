@@ -776,6 +776,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
+    file_mounts_tmp_subpath = constants.FILE_MOUNTS_TMP_SUBPATH.format(
+        run_id=run_id)
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
@@ -796,8 +798,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'persistent': False,
                 'mode': 'MOUNT',
                 'store': store,
-                '_bucket_sub_path':
-                    constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id),
+                '_bucket_sub_path': file_mounts_tmp_subpath,
             })
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
@@ -858,6 +859,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         store_object = storage_obj.stores[store_type]
         bucket_url = storage_lib.StoreType.get_endpoint_url(
             store_object, bucket_name)
+        bucket_url += f'/{file_mounts_tmp_subpath}'
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
