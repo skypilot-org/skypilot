@@ -1681,15 +1681,6 @@ def _update_cluster_status_no_lock(
     the design of the cluster status and transition, please refer to the
     sky/design_docs/cluster_status.md
 
-    Args:
-        cluster_name: The name of the cluster.
-        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status.
-        cluster_status_lock_timeout: The timeout to acquire the per-cluster
-          lock.
-        force: Refresh the cluster status from the cloud even if the status is
-          not stale.
-
     Returns:
         If the cluster is terminated or does not exist, return None. Otherwise
         returns the input record with status and handle potentially updated.
@@ -1994,22 +1985,21 @@ def refresh_cluster_record(
     # The loop logic allows us to notice if the status was updated in the
     # global_user_state by another process and stop trying to get the lock.
     # The core loop logic is adapted from FileLock's implementation.
-    start_time = time.perf_counter()
     lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+    start_time = time.perf_counter()
 
-    try:
-        # Loop until we have an up-to-date status or until we acquire the lock.
-        while True:
-            # Check to see if we can return the cached status.
-            if not _must_refresh_cluster_status(record, force_refresh_statuses):
-                return record
+    # Loop until we have an up-to-date status or until we acquire the lock.
+    while True:
+        # Check to see if we can return the cached status.
+        if not _must_refresh_cluster_status(record, force_refresh_statuses):
+            return record
 
-            if not acquire_per_cluster_status_lock:
-                return _update_cluster_status_no_lock(cluster_name)
+        if not acquire_per_cluster_status_lock:
+            return _update_cluster_status_no_lock(cluster_name)
 
-            # Try to acquire the lock so we can fetch the status.
-            try:
-                lock.acquire(blocking=False)
+        # Try to acquire the lock so we can fetch the status.
+        try:
+            with lock.acquire(blocking=False):
                 # Lock acquired.
 
                 # Check the cluster status again, since it could have been
@@ -2021,28 +2011,22 @@ def refresh_cluster_record(
 
                 # Update and return the cluster status.
                 return _update_cluster_status_no_lock(cluster_name)
+        except filelock.Timeout:
+            # lock.acquire() will throw a Timeout exception if the lock is not
+            # available and we have blocking=False.
+            pass
 
-            except filelock.Timeout:
-                # lock.acquire() will throw a Timeout exception if the lock
-                # is not available and we have blocking=False.
-                pass
+        # Logic adapted from FileLock.acquire().
+        if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
+            logger.debug('Refreshing status: Failed get the lock for cluster '
+                         f'{cluster_name!r}. Using the cached status.')
+            return record
+        time.sleep(0.05)
 
-            if 0 <= cluster_status_lock_timeout < time.perf_counter(
-            ) - start_time:
-                logger.debug(
-                    'Refreshing status: Failed get the lock for cluster '
-                    f'{cluster_name!r}. Using the cached status.')
-                return record
-
-            time.sleep(0.05)
-
-            record = global_user_state.get_cluster_from_name(cluster_name)
-            if record is None:
-                return None
-
-    finally:
-        if lock.is_locked:
-            lock.release()
+        # Refresh for next loop iteration.
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is None:
+            return None
 
 
 @timeline.event
