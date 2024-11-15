@@ -209,7 +209,7 @@ def up(
             detach_run=True,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
-            _is_controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+            _disable_controller_check=True,
         )
 
         style = colorama.Style
