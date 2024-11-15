@@ -32,7 +32,6 @@ setup: |
 
 run: |
   echo data-processing starts
-  mkdir -p /data/data-processing-output-A
   echo "Hello World!" > /data/data-processing-output-A/world.txt
   echo "Hello World!" > /data/data-processing-output-B/world.txt
   echo data-processing ends
