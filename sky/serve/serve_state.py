@@ -86,6 +86,8 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'active_versions',
                              f'TEXT DEFAULT {json.dumps([])!r}')
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'dns_endpoint',
+                             'TEXT DEFAULT NULL')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -331,10 +333,19 @@ def set_service_load_balancer_port(service_name: str,
             (load_balancer_port, service_name))
 
 
+def set_service_dns_endpoint(service_name: str, dns_endpoint: str) -> None:
+    """Sets the dns endpoint of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            dns_endpoint=(?) WHERE name=(?)""", (dns_endpoint, service_name))
+
+
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions) = row[:13]
+     _, active_versions, dns_endpoint) = row[:14]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -351,6 +362,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         # integers in json format. This is mainly for display purpose.
         'active_versions': json.loads(active_versions),
         'requested_resources_str': requested_resources_str,
+        'dns_endpoint': dns_endpoint,
     }
 
 

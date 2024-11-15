@@ -12,7 +12,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -555,6 +555,9 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
+                if record['dns_endpoint'] is not None:
+                    endpoint = f'{record["dns_endpoint"]}:{lb_port}'
+                    return common_utils.encode_payload(endpoint)
                 return common_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
@@ -577,7 +580,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         time.sleep(1)
 
 
-def load_service_initialization_result(payload: str) -> int:
+def load_service_initialization_result(payload: str) -> Union[int, str]:
     return common_utils.decode_payload(payload)
 
 
@@ -794,6 +797,10 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
+    if service_record['dns_endpoint'] is not None:
+        dns = service_record['dns_endpoint']
+        lb_port = service_record['load_balancer_port']
+        return f'{dns}:{lb_port}'
     # Don't use backend_utils.is_controller_accessible since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
@@ -846,12 +853,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_status = record['status']
         status_str = service_status.colored_str()
         replicas = _get_replicas(record)
-        if record['external_lb_info']:
-            # Don't show endpoint for services with external load balancers.
-            # TODO(tian): Add automatic DNS record creation and show domain here
-            endpoint = '-'
-        else:
-            endpoint = get_endpoint(record)
+        endpoint = get_endpoint(record)
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
 

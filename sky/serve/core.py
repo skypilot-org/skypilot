@@ -239,7 +239,7 @@ def up(
             assert isinstance(backend, backends.CloudVmRayBackend)
             assert isinstance(controller_handle,
                               backends.CloudVmRayResourceHandle)
-            returncode, lb_port_payload, _ = backend.run_on_head(
+            returncode, service_init_payload, _ = backend.run_on_head(
                 controller_handle,
                 code,
                 require_outputs=True,
@@ -247,7 +247,7 @@ def up(
         try:
             subprocess_utils.handle_returncode(
                 returncode, code, 'Failed to wait for service initialization',
-                lb_port_payload)
+                service_init_payload)
         except exceptions.CommandError:
             statuses = backend.get_job_status(controller_handle,
                                               [controller_job_id],
@@ -276,18 +276,20 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
+            service_init_result = (
+                serve_utils.load_service_initialization_result(
+                    service_init_payload))
             if task.service.external_load_balancers is None:
-                lb_port = serve_utils.load_service_initialization_result(
-                    lb_port_payload)
+                assert isinstance(service_init_result, int)
                 endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
-                    lb_port,
-                    skip_status_check=True).get(lb_port)
+                    service_init_result,
+                    skip_status_check=True).get(service_init_result)
                 assert endpoint is not None, (
                     'Did not get endpoint for controller.')
             else:
-                endpoint = (
-                    'Please query with sky serve status for the endpoint.')
+                assert isinstance(service_init_result, str)
+                endpoint = service_init_result
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '
@@ -600,6 +602,7 @@ def status(
             'policy': (Optional[str]) load balancer policy description,
             'requested_resources_str': (str) str representation of
               requested resources,
+            'dns_endpoint': (Optional[str]) DNS endpoint,
             'replica_info': (List[Dict[str, Any]]) replica information,
             'external_lb_info': (Dict[str, Any]) external load balancer
               information,

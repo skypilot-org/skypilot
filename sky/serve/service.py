@@ -102,13 +102,17 @@ def _get_cluster_ip(cluster_name: str) -> Optional[str]:
     return record['handle'].head_ip
 
 
+def _get_domain_name(subdomain: str, hosted_zone: str) -> str:
+    return f'{subdomain}.{hosted_zone}'
+
+
 def _get_route53_change(action: str, subdomain: str, hosted_zone: str,
                         record_type: str, region: str,
                         value: str) -> Dict[str, Any]:
     return {
         'Action': action,
         'ResourceRecordSet': {
-            'Name': f'{subdomain}.{hosted_zone}',
+            'Name': _get_domain_name(subdomain, hosted_zone),
             'Type': record_type,
             'TTL': 300,
             'Region': region,
@@ -372,7 +376,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 serve_state.set_service_load_balancer_port(
                     service_name, load_balancer_port)
             else:
-                lb_port = 8000
                 for lb_id, lb_config in enumerate(
                         service_spec.external_load_balancers):
                     # Generate load balancer log file name.
@@ -392,8 +395,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                         target=ux_utils.RedirectOutputForProcess(
                             _start_external_load_balancer,
                             load_balancer_log_file).run,
+                        # TODO(tian): Let the user to customize the port.
                         args=(service_name, lb_id, lb_cluster_name,
-                              controller_external_addr, lb_port, lb_policy,
+                              controller_external_addr,
+                              constants.EXTERNAL_LB_PORT, lb_policy,
                               lb_resources))
                     lb_process.start()
                     load_balancer_processes.append(lb_process)
@@ -420,7 +425,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 client.change_resource_record_sets(
                     HostedZoneId=service_spec.target_hosted_zone_id,
                     ChangeBatch={'Changes': change_batch})
-            serve_state.set_service_load_balancer_port(service_name, -1)
+                serve_state.set_service_dns_endpoint(
+                    service_name, _get_domain_name(service_name, hosted_zone))
+            serve_state.set_service_load_balancer_port(
+                service_name, constants.EXTERNAL_LB_PORT)
 
         while True:
             _handle_signal(service_name)
