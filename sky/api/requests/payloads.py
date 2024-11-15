@@ -29,6 +29,7 @@ def request_body_env_vars() -> dict:
 class RequestBody(pydantic.BaseModel):
     """The request body for the SkyPilot API."""
     env_vars: Dict[str, str] = request_body_env_vars()
+    entrypoint_command: str = common_utils.get_pretty_entry_point()
 
     def to_kwargs(self) -> Dict[str, Any]:
         """Convert the request body to a kwargs dictionary on API server.
@@ -38,6 +39,7 @@ class RequestBody(pydantic.BaseModel):
         """
         kwargs = self.model_dump()
         kwargs.pop('env_vars')
+        kwargs.pop('entrypoint_command')
         return kwargs
 
 

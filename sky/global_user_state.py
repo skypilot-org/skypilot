@@ -215,7 +215,7 @@ def add_or_update_cluster(cluster_name: str,
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
-    last_use = common_utils.get_pretty_entry_point() if is_launch else None
+    last_use = common_utils.get_current_command() if is_launch else None
     status = status_lib.ClusterStatus.INIT
     if ready:
         status = status_lib.ClusterStatus.UP
@@ -379,7 +379,7 @@ def add_or_update_cluster(cluster_name: str,
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
-                       (common_utils.get_pretty_entry_point(), cluster_name))
+                       (common_utils.get_current_command(), cluster_name))
     _DB.conn.commit()
 
 
@@ -806,7 +806,7 @@ def add_or_update_storage(storage_name: str,
                           storage_status: status_lib.StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
-    last_use = common_utils.get_pretty_entry_point()
+    last_use = common_utils.get_current_command()
 
     def status_check(status):
         return status in status_lib.StorageStatus

@@ -75,7 +75,7 @@ class UsageMessageToReport(MessageToReport):
         self.sky_commit: str = sky.__commit__
 
         # Entry
-        self.cmd: str = common_utils.get_pretty_entry_point()
+        self.cmd: str = common_utils.get_current_command()
         self.entrypoint: Optional[str] = None  # entrypoint_context
         #: Whether entrypoint is called by sky internal code.
         self.internal: bool = False  # set_internal

@@ -19,6 +19,7 @@ from sky.api.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -182,6 +183,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
                 name=request_body.env_vars[constants.USER_ENV_VAR])
             global_user_state.add_user(user)
+            common_utils.set_current_command(request_body.entrypoint_command)
             # Force color to be enabled.
             os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()

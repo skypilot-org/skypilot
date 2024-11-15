@@ -252,6 +252,34 @@ class Backoff:
         return self._backoff
 
 
+_current_command: Optional[str] = None
+
+
+def set_current_command(command: str):
+    """Override the current command.
+
+    This is useful when we are on the SkyPilot server side and we have a command
+    from the client.
+    """
+    # TODO(cooperc): If we move toward a threading model on the SkyPilot server,
+    # this should be thread-local.
+    global _current_command
+    _current_command = command
+
+
+def get_current_command() -> str:
+    """Returns the command related to this operation.
+
+    Normally uses get_pretty_entry_point(), but will use the client command on
+    the server side.
+    """
+    global _current_command
+    if _current_command is not None:
+        return _current_command
+
+    return get_pretty_entry_point()
+
+
 def get_pretty_entry_point() -> str:
     """Returns the prettified entry point of this process (sys.argv).
 
