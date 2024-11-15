@@ -93,7 +93,7 @@ class QueryHelper:
         cluster_name = tag_filters[constants.TAG_RAY_CLUSTER_NAME]
         nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
             cluster_name=cluster_name)
-        nsg_id = cls.find_nsg(region, nsg_name, False)
+        nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=False)
 
         core_client = oci_adaptor.get_core_client(
             region, oci_utils.oci_config.get_profile())
@@ -564,7 +564,7 @@ class QueryHelper:
 
         nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
             cluster_name=cluster_name)
-        nsg_id = cls.find_nsg(region, nsg_name, True)
+        nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=True)
 
         filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name}
         insts = query_helper.query_instances_by_tags(filters, region)
@@ -666,7 +666,7 @@ class QueryHelper:
 
         nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
             cluster_name=cluster_name)
-        nsg_id = cls.find_nsg(region, nsg_name, False)
+        nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=False)
         if nsg_id is None:
             return
 
