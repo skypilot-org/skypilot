@@ -124,7 +124,8 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
     expanded_home = os.path.expanduser('~')
     if log_path.startswith(expanded_home):
         log_path = '~' + log_path[len(expanded_home):]
-    log_path = log_path.removeprefix(constants.SKY_LOGS_DIRECTORY)
+    if log_path.startswith(constants.SKY_LOGS_DIRECTORY):
+        log_path = log_path[len(constants.SKY_LOGS_DIRECTORY):]
     log_path = log_path.lstrip(os.path.sep)
     return _LOG_PATH_HINT.format(log_path=log_path)
 

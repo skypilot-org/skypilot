@@ -87,7 +87,8 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        # Default cluster name is the current user's controller cluster unless caller initiate with a different controller name.
+        # Default cluster name is the current user's controller cluster unless
+        # caller initiate with a different controller name.
         # TODO(zhwu): by having the controller name loaded in common, it
         # will not respect the latest updated user hash.
         cluster_name=common.JOB_CONTROLLER_NAME,

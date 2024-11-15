@@ -83,12 +83,9 @@ def realtime_kubernetes_gpu_availability(
 @api_common.check_health
 def kubernetes_node_info(context: Optional[str] = None) -> str:
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
-    params = {}
-    for k, v in json.loads(body.model_dump_json()).items():
-        if v is not None:
-            params[k] = v
     response = requests.get(
-        f'{api_common.get_server_url()}/kubernetes_node_info', params=params)
+        f'{api_common.get_server_url()}/kubernetes_node_info',
+        params=api_common.request_body_to_params(body))
     return api_common.get_request_id(response)
 
 
@@ -610,10 +607,7 @@ def get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/get?request_id={request_id}',
         timeout=(5, None))
-    if response.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to get request {request_id}: '
-                               f'{response.status_code} {response.text}')
+    api_common.handle_request_error(response)
     request_task = requests_lib.Request.decode(
         requests_lib.RequestPayload(**response.json()))
     error = request_task.get_error()
@@ -637,13 +631,14 @@ def stream_and_get(request_id: Optional[str] = None,
     This will block until the request is finished. The request id can be a
     prefix of the full request id.
     """
+    body = payloads.StreamBody(
+        request_id=request_id,
+        log_path=log_path,
+        plain_logs=False,
+    )
     response = requests.get(
         f'{api_common.get_server_url()}/stream',
-        params={
-            'request_id': str(request_id) if request_id is not None else None,
-            'log_path': str(log_path) if log_path is not None else None,
-            'plain_logs': str(False),
-        },
+        params=api_common.request_body_to_params(body),
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)
@@ -753,13 +748,10 @@ def requests_ls(
     all: bool = False
 ) -> List[requests_lib.RequestPayload]:
     body = payloads.RequestIdBody(request_id=request_id, all=all)
-    params = {}
-    for k, v in json.loads(body.model_dump_json()).items():
-        if v is not None:
-            params[k] = v
     response = requests.get(f'{api_common.get_server_url()}/requests',
-                            params=params,
+                            params=api_common.request_body_to_params(body),
                             timeout=5)
+    api_common.handle_request_error(response)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()
     ]

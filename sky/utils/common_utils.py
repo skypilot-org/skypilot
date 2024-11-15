@@ -273,7 +273,6 @@ def get_current_command() -> str:
     Normally uses get_pretty_entry_point(), but will use the client command on
     the server side.
     """
-    global _current_command
     if _current_command is not None:
         return _current_command
 

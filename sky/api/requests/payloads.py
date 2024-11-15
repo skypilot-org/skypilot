@@ -366,3 +366,10 @@ class ServeTerminateReplicaBody(RequestBody):
 class KillRequestProcessesBody(RequestBody):
     """The request body for the kill request processes endpoint."""
     request_ids: List[str]
+
+
+class StreamBody(RequestBody):
+    """The request body for the stream endpoint."""
+    request_id: Optional[str] = None
+    log_path: Optional[str] = None
+    plain_logs: bool = True

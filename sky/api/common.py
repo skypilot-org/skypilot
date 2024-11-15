@@ -6,10 +6,11 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import colorama
 import filelock
+import pydantic
 import requests
 
 from sky import sky_logging
@@ -87,13 +88,19 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
             time.sleep(0.5)
 
 
-def get_request_id(response) -> str:
+def handle_request_error(response):
     if response.status_code != 200:
-        raise RuntimeError('Failed to get request ID from SkyPilot server at '
-                           f'{get_server_url()}. '
-                           f'Response: {response.content}')
-    request_id = response.headers.get('X-Request-ID')
-    return request_id
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to process response from SkyPilot server at '
+                f'{get_server_url()}. '
+                f'Response: {response.status_code} '
+                f'{response.text}')
+
+
+def get_request_id(response) -> str:
+    handle_request_error(response)
+    return response.headers.get('X-Request-ID')
 
 
 def check_health(func):
@@ -276,3 +283,9 @@ def api_server_logs_dir_prefix(user_hash: Optional[str] = None) -> pathlib.Path:
     if user_hash is None:
         user_hash = common_utils.get_user_hash()
     return CLIENT_DIR / user_hash / 'sky_logs'
+
+
+def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
+    return {
+        k: v for k, v in body.model_dump(mode='json').items() if v is not None
+    }
