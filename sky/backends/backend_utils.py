@@ -1958,7 +1958,9 @@ def refresh_cluster_record(
           acquired if the status does not need to be refreshed.
         cluster_status_lock_timeout: The timeout to acquire the per-cluster
           lock. If timeout, the function will use the cached status. If the
-          value is <0, do not timeout (wait for the lock indefinitely).
+          value is <0, do not timeout (wait for the lock indefinitely). By
+          default, this is set to CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS. Warning:
+          if correctness is required, you must set this to -1.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -2017,6 +2019,10 @@ def refresh_cluster_record(
             pass
 
         # Logic adapted from FileLock.acquire().
+        # If cluster_status_lock_time is <0, we will never hit this. No timeout.
+        # Otherwise, if we have timed out, return the cached status. This has
+        # the potential to cause correctness issues, but if so it is the
+        # caller's responsibility to set the timeout to -1.
         if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
             logger.debug('Refreshing status: Failed get the lock for cluster '
                          f'{cluster_name!r}. Using the cached status.')
