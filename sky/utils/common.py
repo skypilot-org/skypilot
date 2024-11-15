@@ -1,11 +1,20 @@
 """Common enumerators and classes."""
 
-import collections
 import enum
 import importlib
 
 from sky import sky_logging
 from sky.utils import common_utils
+
+
+SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
+JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
+# Add user hash so that two users don't have the same controller VM on
+# shared-account clouds such as GCP.
+SKY_SERVE_CONTROLLER_NAME: str = (
+    f'{SKY_SERVE_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
+JOB_CONTROLLER_NAME: str = (
+    f'{JOB_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
 
 
 class StatusRefreshMode(enum.Enum):
@@ -22,19 +31,6 @@ class StatusRefreshMode(enum.Enum):
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
-
-
-RealtimeGpuAvailability = collections.namedtuple(
-    'RealtimeGpuAvailability', ['gpu', 'counts', 'capacity', 'available'])
-
-SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
-JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
-# Add user hash so that two users don't have the same controller VM on
-# shared-account clouds such as GCP.
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'{SKY_SERVE_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
-JOB_CONTROLLER_NAME: str = (
-    f'{JOB_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
 
 
 def reload():
