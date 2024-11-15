@@ -91,7 +91,8 @@ class QueryHelper:
         logger.debug(f'Terminate instance by tags: {tag_filters}')
 
         cluster_name = tag_filters[constants.TAG_RAY_CLUSTER_NAME]
-        nsg_name = f'{oci_utils.oci_config.NSG_NAME_PREFIX}{cluster_name}'
+        nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
+            cluster_name=cluster_name)
         nsg_id = cls.find_nsg(region, nsg_name, False)
 
         core_client = oci_adaptor.get_core_client(
@@ -505,6 +506,8 @@ class QueryHelper:
             raise exceptions.ResourcesUnavailableError(
                 'The VCN is not available')
 
+        # Get the primary vnic.
+        assert len(list_vcns_resp.data) > 0
         vcn = list_vcns_resp.data[0]
 
         list_nsg_resp = net_client.list_network_security_groups(
@@ -559,7 +562,8 @@ class QueryHelper:
         net_client = oci_adaptor.get_net_client(
             region, oci_utils.oci_config.get_profile())
 
-        nsg_name = f'{oci_utils.oci_config.NSG_NAME_PREFIX}{cluster_name}'
+        nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
+            cluster_name=cluster_name)
         nsg_id = cls.find_nsg(region, nsg_name, True)
 
         filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name}
@@ -593,7 +597,8 @@ class QueryHelper:
         existing_port_ranges: List[str] = []
         for r in ingress_rules:
             if r.tcp_options:
-                rule_port_range = f'{r.tcp_options.destination_port_range.min}-{r.tcp_options.destination_port_range.max}'
+                options_range = r.tcp_options.destination_port_range
+                rule_port_range = f'{options_range.min}-{options_range.max}'
                 existing_port_ranges.append(rule_port_range)
 
         new_ports = resources_utils.port_ranges_to_set(ports)
@@ -603,23 +608,25 @@ class QueryHelper:
             # ports already contains in the existing rules, nothing to add.
             return
 
-        union_ports = new_ports.union(existing_ports)
-        union_port_ranges = resources_utils.port_set_to_ranges(union_ports)
+        # Determine the ports to be added, without overlapping.
+        ports_to_open = new_ports - existing_ports
+        port_ranges_to_open = resources_utils.port_set_to_ranges(ports_to_open)
 
-        new_rules = [
-            oci_adaptor.oci.core.models.AddSecurityRuleDetails(
-                direction='INGRESS',
-                protocol='6',
-                is_stateless=False,
-                source=oci_utils.oci_config.VCN_CIDR_INTERNET,
-                source_type='CIDR_BLOCK',
-                tcp_options=oci_adaptor.oci.core.models.TcpOptions(
-                    destination_port_range=oci_adaptor.oci.core.models.
-                    PortRange(min=cls.get_range_min_max(range)[0],
-                              max=cls.get_range_min_max(range)[1]),),
-                description=oci_utils.oci_config.SERVICE_PORT_RULE_TAG,
-            ) for range in union_port_ranges
-        ]
+        new_rules = []
+        for port_range in port_ranges_to_open:
+            port_range_min, port_range_max = cls.get_range_min_max(port_range)
+            new_rules.append(
+                oci_adaptor.oci.core.models.AddSecurityRuleDetails(
+                    direction='INGRESS',
+                    protocol='6',
+                    is_stateless=False,
+                    source=oci_utils.oci_config.VCN_CIDR_INTERNET,
+                    source_type='CIDR_BLOCK',
+                    tcp_options=oci_adaptor.oci.core.models.TcpOptions(
+                        destination_port_range=oci_adaptor.oci.core.models.
+                        PortRange(min=port_range_min, max=port_range_max),),
+                    description=oci_utils.oci_config.SERVICE_PORT_RULE_TAG,
+                ))
 
         net_client.add_network_security_group_security_rules(
             network_security_group_id=nsg_id,
@@ -657,7 +664,8 @@ class QueryHelper:
         net_client = oci_adaptor.get_net_client(
             region, oci_utils.oci_config.get_profile())
 
-        nsg_name = f'{oci_utils.oci_config.NSG_NAME_PREFIX}{cluster_name}'
+        nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
+            cluster_name=cluster_name)
         nsg_id = cls.find_nsg(region, nsg_name, False)
         if nsg_id is None:
             return

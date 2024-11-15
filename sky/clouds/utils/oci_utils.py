@@ -45,8 +45,8 @@ class OCIConfig:
     VCN_CIDR = '192.168.0.0/16'
     VCN_SUBNET_CIDR = '192.168.0.0/18'
     SERVICE_PORT_RULE_TAG = 'SkyServe-Service-Port'
-    # NSG name format is prefix + clustername
-    NSG_NAME_PREFIX = 'nsg_'
+    # NSG name template
+    NSG_NAME_TEMPLATE = 'nsg_{cluster_name}'
 
     MAX_RETRY_COUNT = 3
     RETRY_INTERVAL_BASE_SECONDS = 5
