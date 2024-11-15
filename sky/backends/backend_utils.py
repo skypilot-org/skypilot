@@ -100,6 +100,10 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
+# Time that must elapse since the last status check before we should re-check if
+# the cluster has been terminated or autostopped.
+_CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
+
 # Filelocks for updating cluster's file_mounts.
 CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
     '~/.sky/.{}_file_mounts.lock')
@@ -401,6 +405,8 @@ class SSHConfigHelper(object):
 
     ssh_conf_path = '~/.ssh/config'
     ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
+    ssh_conf_per_cluster_lock_path = os.path.expanduser(
+        '~/.sky/ssh_config_{}.lock')
     ssh_cluster_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
@@ -486,12 +492,6 @@ class SSHConfigHelper(object):
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
 
-        # For backward compatibility: before #2706, we wrote the config of SkyPilot clusters
-        # directly in ~/.ssh/config. For these clusters, we remove the config in ~/.ssh/config
-        # and write/overwrite the config in ~/.sky/ssh/<cluster_name> instead.
-        cls._remove_stale_cluster_config_for_backward_compatibility(
-            cluster_name, ip, auth_config, docker_user)
-
         if not os.path.exists(config_path):
             config = ['\n']
             with open(config_path,
@@ -560,139 +560,20 @@ class SSHConfigHelper(object):
             f.write(codegen)
 
     @classmethod
-    def _remove_stale_cluster_config_for_backward_compatibility(
-        cls,
-        cluster_name: str,
-        ip: str,
-        auth_config: Dict[str, str],
-        docker_user: Optional[str] = None,
-    ):
-        """Remove authentication information for cluster from local SSH config.
-
-        If no existing host matching the provided specification is found, then
-        nothing is removed.
-
-        Args:
-            ip: Head node's IP address.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
-            docker_user: If not None, use this user to ssh into the docker
-        """
-        username = auth_config['ssh_user']
-        config_path = os.path.expanduser(cls.ssh_conf_path)
-        cluster_config_path = os.path.expanduser(
-            cls.ssh_cluster_path.format(cluster_name))
-        if not os.path.exists(config_path):
-            return
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = f.readlines()
-
-        start_line_idx = None
-
-        # Scan the config for the cluster name.
-        for i, line in enumerate(config):
-            next_line = config[i + 1] if i + 1 < len(config) else ''
-            if docker_user is None:
-                found = (line.strip() == f'HostName {ip}' and
-                         next_line.strip() == f'User {username}')
-            else:
-                found = (line.strip() == 'HostName localhost' and
-                         next_line.strip() == f'User {docker_user}')
-                if found:
-                    # Find the line starting with ProxyCommand and contains the ip
-                    found = False
-                    for idx in range(i, len(config)):
-                        # Stop if we reach an empty line, which means a new host
-                        if not config[idx].strip():
-                            break
-                        if config[idx].strip().startswith('ProxyCommand'):
-                            proxy_command_line = config[idx].strip()
-                            if proxy_command_line.endswith(f'@{ip}'):
-                                found = True
-                                break
-            if found:
-                start_line_idx = i - 1
-                break
-
-        if start_line_idx is not None:
-            # Scan for end of previous config.
-            cursor = start_line_idx
-            while cursor > 0 and len(config[cursor].strip()) > 0:
-                cursor -= 1
-            prev_end_line_idx = cursor
-
-            # Scan for end of the cluster config.
-            end_line_idx = None
-            cursor = start_line_idx + 1
-            start_line_idx -= 1  # remove auto-generated comment
-            while cursor < len(config):
-                if config[cursor].strip().startswith(
-                        '# ') or config[cursor].strip().startswith('Host '):
-                    end_line_idx = cursor
-                    break
-                cursor += 1
-
-            # Remove sky-generated config and update the file.
-            config[prev_end_line_idx:end_line_idx] = [
-                '\n'
-            ] if end_line_idx is not None else []
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(''.join(config).strip())
-                f.write('\n' * 2)
-
-        # Delete include statement if it exists in the config.
-        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
-                               f'{cluster_name}` to remove)')
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = f.readlines()
-
-        for i, line in enumerate(config):
-            config_str = line.strip()
-            if f'Include {cluster_config_path}' in config_str:
-                with open(config_path, 'w', encoding='utf-8') as f:
-                    if i < len(config) - 1 and config[i + 1] == '\n':
-                        del config[i + 1]
-                    # Delete Include string
-                    del config[i]
-                    # Delete Sky Autogen Comment
-                    if i > 0 and sky_autogen_comment in config[i - 1].strip():
-                        del config[i - 1]
-                    f.write(''.join(config))
-                break
-            if 'Host' in config_str:
-                break
-
-    @classmethod
-    # TODO: We can remove this after 0.6.0 and have a lock only per cluster.
-    @timeline.FileLockEvent(ssh_conf_lock_path)
-    def remove_cluster(
-        cls,
-        cluster_name: str,
-        ip: str,
-        auth_config: Dict[str, str],
-        docker_user: Optional[str] = None,
-    ):
+    def remove_cluster(cls, cluster_name: str):
         """Remove authentication information for cluster from ~/.sky/ssh/<cluster_name>.
 
-        For backward compatibility also remove the config from ~/.ssh/config if it exists.
-
         If no existing host matching the provided specification is found, then
         nothing is removed.
 
         Args:
-            ip: Head node's IP address.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
-            docker_user: If not None, use this user to ssh into the docker
+            cluster_name: Cluster name.
         """
-        cluster_config_path = os.path.expanduser(
-            cls.ssh_cluster_path.format(cluster_name))
-        common_utils.remove_file_if_exists(cluster_config_path)
-
-        # Ensures backward compatibility: before #2706, we wrote the config of SkyPilot clusters
-        # directly in ~/.ssh/config. For these clusters, we should clean up the config.
-        # TODO: Remove this after 0.6.0
-        cls._remove_stale_cluster_config_for_backward_compatibility(
-            cluster_name, ip, auth_config, docker_user)
+        with timeline.FileLockEvent(
+                cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
+            cluster_config_path = os.path.expanduser(
+                cls.ssh_cluster_path.format(cluster_name))
+            common_utils.remove_file_if_exists(cluster_config_path)
 
 
 def _replace_yaml_dicts(
@@ -867,7 +748,7 @@ def write_cluster_config(
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
     # Deprecated: instance_tags have been replaced by labels. For backward
     # compatibility, we support them and the schema allows them only if
-    # `labels` are not specified. This should be removed after 0.7.0.
+    # `labels` are not specified. This should be removed after 0.8.0.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'instance_tags'),
                                         labels)
     # labels is a dict, which is guaranteed by the type check in
@@ -1541,6 +1422,7 @@ def check_network_connection():
                                               'Network seems down.') from e
 
 
+@timeline.event
 def check_owner_identity(cluster_name: str) -> None:
     """Check if current user is the same as the user who created the cluster.
 
@@ -1791,11 +1673,27 @@ def check_can_clone_disk_and_override_task(
 
 def _update_cluster_status_no_lock(
         cluster_name: str) -> Optional[Dict[str, Any]]:
-    """Updates the status of the cluster.
+    """Update the cluster status.
+
+    The cluster status is updated by checking ray cluster and real status from
+    cloud.
+
+    The function will update the cached cluster status in the global state. For
+    the design of the cluster status and transition, please refer to the
+    sky/design_docs/cluster_status.md
+
+    Returns:
+        If the cluster is terminated or does not exist, return None. Otherwise
+        returns the input record with status and handle potentially updated.
 
     Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
+          fetched from the cloud provider or there are leaked nodes causing
+          the node number larger than expected.
     """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
@@ -2015,52 +1913,22 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(
-    cluster_name: str,
-    acquire_per_cluster_status_lock: bool,
-    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
-) -> Optional[Dict[str, Any]]:
-    """Update the cluster status.
+def _must_refresh_cluster_status(
+        record: Dict[str, Any],
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]]
+) -> bool:
+    force_refresh_for_cluster = (force_refresh_statuses is not None and
+                                 record['status'] in force_refresh_statuses)
 
-    The cluster status is updated by checking ray cluster and real status from
-    cloud.
+    use_spot = record['handle'].launched_resources.use_spot
+    has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
+                    record['autostop'] >= 0)
+    recently_refreshed = (record['status_updated_at'] is not None and
+                          time.time() - record['status_updated_at'] <
+                          _CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+    is_stale = (use_spot or has_autostop) and not recently_refreshed
 
-    The function will update the cached cluster status in the global state. For
-    the design of the cluster status and transition, please refer to the
-    sky/design_docs/cluster_status.md
-
-    Args:
-        cluster_name: The name of the cluster.
-        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status.
-        cluster_status_lock_timeout: The timeout to acquire the per-cluster
-          lock.
-
-    Returns:
-        If the cluster is terminated or does not exist, return None. Otherwise
-        returns the input record with status and handle potentially updated.
-
-    Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        exceptions.CloudUserIdentityError: if we fail to get the current user
-          identity.
-        exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider or there are leaked nodes causing
-          the node number larger than expected.
-    """
-    if not acquire_per_cluster_status_lock:
-        return _update_cluster_status_no_lock(cluster_name)
-
-    try:
-        with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
-                               timeout=cluster_status_lock_timeout):
-            return _update_cluster_status_no_lock(cluster_name)
-    except filelock.Timeout:
-        logger.debug('Refreshing status: Failed get the lock for cluster '
-                     f'{cluster_name!r}. Using the cached status.')
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        return record
+    return force_refresh_for_cluster or is_stale
 
 
 def refresh_cluster_record(
@@ -2078,16 +1946,22 @@ def refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh_statuses: if specified, refresh the cluster if it has one of
-          the specified statuses. Additionally, clusters satisfying the
-          following conditions will always be refreshed no matter the
-          argument is specified or not:
-            1. is a spot cluster, or
-            2. is a non-spot cluster, is not STOPPED, and autostop is set.
+        force_refresh_statuses: if specified, refresh the cluster if it has one
+          of the specified statuses. Additionally, clusters satisfying the
+          following conditions will be refreshed no matter the argument is
+          specified or not:
+            - the most latest available status update is more than
+              _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
+                1. the cluster is a spot cluster, or
+                2. cluster autostop is set and the cluster is not STOPPED.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status.
+          before updating the status. Even if this is True, the lock may not be
+          acquired if the status does not need to be refreshed.
         cluster_status_lock_timeout: The timeout to acquire the per-cluster
-          lock. If timeout, the function will use the cached status.
+          lock. If timeout, the function will use the cached status. If the
+          value is <0, do not timeout (wait for the lock indefinitely). By
+          default, this is set to CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS. Warning:
+          if correctness is required, you must set this to -1.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -2108,19 +1982,58 @@ def refresh_cluster_record(
         return None
     check_owner_identity(cluster_name)
 
-    handle = record['handle']
-    if isinstance(handle, backends.CloudVmRayResourceHandle):
-        use_spot = handle.launched_resources.use_spot
-        has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
-                        record['autostop'] >= 0)
-        force_refresh_for_cluster = (force_refresh_statuses is not None and
-                                     record['status'] in force_refresh_statuses)
-        if force_refresh_for_cluster or has_autostop or use_spot:
-            record = _update_cluster_status(
-                cluster_name,
-                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-                cluster_status_lock_timeout=cluster_status_lock_timeout)
-    return record
+    if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
+        return record
+
+    # The loop logic allows us to notice if the status was updated in the
+    # global_user_state by another process and stop trying to get the lock.
+    # The core loop logic is adapted from FileLock's implementation.
+    lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+    start_time = time.perf_counter()
+
+    # Loop until we have an up-to-date status or until we acquire the lock.
+    while True:
+        # Check to see if we can return the cached status.
+        if not _must_refresh_cluster_status(record, force_refresh_statuses):
+            return record
+
+        if not acquire_per_cluster_status_lock:
+            return _update_cluster_status_no_lock(cluster_name)
+
+        # Try to acquire the lock so we can fetch the status.
+        try:
+            with lock.acquire(blocking=False):
+                # Lock acquired.
+
+                # Check the cluster status again, since it could have been
+                # updated between our last check and acquiring the lock.
+                record = global_user_state.get_cluster_from_name(cluster_name)
+                if record is None or not _must_refresh_cluster_status(
+                        record, force_refresh_statuses):
+                    return record
+
+                # Update and return the cluster status.
+                return _update_cluster_status_no_lock(cluster_name)
+        except filelock.Timeout:
+            # lock.acquire() will throw a Timeout exception if the lock is not
+            # available and we have blocking=False.
+            pass
+
+        # Logic adapted from FileLock.acquire().
+        # If cluster_status_lock_time is <0, we will never hit this. No timeout.
+        # Otherwise, if we have timed out, return the cached status. This has
+        # the potential to cause correctness issues, but if so it is the
+        # caller's responsibility to set the timeout to -1.
+        if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
+            logger.debug('Refreshing status: Failed get the lock for cluster '
+                         f'{cluster_name!r}. Using the cached status.')
+            return record
+        time.sleep(0.05)
+
+        # Refresh for next loop iteration.
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is None:
+            return None
 
 
 @timeline.event
@@ -2621,10 +2534,12 @@ def get_task_resources_str(task: 'task_lib.Task',
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
     spot_str = ''
+    is_controller_task = task.is_controller_task()
     task_cpu_demand = (str(constants.CONTROLLER_PROCESS_CPU_DEMAND)
-                       if task.is_controller_task() else
-                       str(DEFAULT_TASK_CPU_DEMAND))
-    if task.best_resources is not None:
+                       if is_controller_task else str(DEFAULT_TASK_CPU_DEMAND))
+    if is_controller_task:
+        resources_str = f'CPU:{task_cpu_demand}'
+    elif task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
         if is_managed_job:
             if task.best_resources.use_spot:
@@ -2724,15 +2639,18 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
     pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
                          r'attribute \'(.*)\'')
     if returncode != 0:
+        # TODO(zhwu): Backward compatibility for old SkyPilot runtime version on
+        # the remote cluster. Remove this after 0.10.0 is released.
         attribute_error = re.findall(pattern, stderr)
-        if attribute_error:
+        if attribute_error or 'SkyPilot runtime is too old' in stderr:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
-                    'on the remote cluster. To update, run (existing jobs are '
-                    f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
+                    f'on the remote cluster: {cluster_name}. To update, run '
+                    '(existing jobs will not be interrupted): '
+                    f'{colorama.Style.BRIGHT}sky start -f -y '
                     f'{cluster_name}{colorama.Style.RESET_ALL}'
-                    f'\n--- Details ---\n{stderr.strip()}\n')
+                    f'\n--- Details ---\n{stderr.strip()}\n') from None
 
 
 def get_endpoints(cluster: str,

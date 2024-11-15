@@ -1,10 +1,9 @@
 """Kubernetes."""
 import functools
-import json
 import os
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import sky_logging
@@ -33,7 +32,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
-@clouds.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
@@ -69,8 +68,8 @@ class Kubernetes(clouds.Cloud):
                                                              'Kubernetes.',
     }
 
-    IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
-    IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
+    IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
+    IMAGE_GPU = 'skypilot:custom-gpu-ubuntu-2004'
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -263,7 +262,7 @@ class Kubernetes(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         inst = kubernetes_utils.KubernetesInstanceType.from_instance_type(
             instance_type)
         return {
@@ -320,10 +319,8 @@ class Kubernetes(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
@@ -357,11 +354,23 @@ class Kubernetes(clouds.Cloud):
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
+        k8s_topology_label_key = None
+        k8s_topology_label_value = None
+        k8s_resource_key = None
+        tpu_requested = False
 
-        # If GPUs are requested, set node label to match the GPU type.
+        # If GPU/TPUs are requested, set node label to match the GPU/TPU type.
         if acc_count > 0 and acc_type is not None:
-            k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(context, acc_type)
+            (k8s_acc_label_key, k8s_acc_label_value, k8s_topology_label_key,
+             k8s_topology_label_value) = (
+                 kubernetes_utils.get_accelerator_label_key_value(
+                     context, acc_type, acc_count))
+            if (k8s_acc_label_key ==
+                    kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY):
+                tpu_requested = True
+                k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
+            else:
+                k8s_resource_key = kubernetes_utils.GPU_RESOURCE_KEY
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -443,6 +452,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
+            'tpu_requested': tpu_requested,
+            'k8s_topology_label_key': k8s_topology_label_key,
+            'k8s_topology_label_value': k8s_topology_label_value,
+            'k8s_resource_key': k8s_resource_key,
             'k8s_env_vars': k8s_env_vars,
             'image_id': image_id,
         }

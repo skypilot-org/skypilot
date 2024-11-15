@@ -1,7 +1,8 @@
 """Kubernetes instance provisioning."""
 import copy
+import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
 from sky import exceptions
@@ -18,10 +19,13 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
+_MAX_RETRIES = 3
+NUM_THREADS = subprocess_utils.get_parallel_threads() * 2
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -43,6 +47,72 @@ def head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
+def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
+    # Returns a formatted string of resource requirements for a pod.
+    resource_requirements = {}
+
+    if isinstance(pod_or_spec, dict):
+        containers = pod_or_spec.get('spec', {}).get('containers', [])
+    else:
+        containers = pod_or_spec.spec.containers
+
+    for container in containers:
+        if isinstance(container, dict):
+            resources = container.get('resources', {})
+            requests = resources.get('requests', {})
+        else:
+            resources = container.resources
+            requests = resources.requests or {}
+
+        for resource, value in requests.items():
+            if resource not in resource_requirements:
+                resource_requirements[resource] = 0
+            if resource == 'memory':
+                int_value = kubernetes_utils.parse_memory_resource(value)
+            else:
+                int_value = kubernetes_utils.parse_cpu_or_gpu_resource(value)
+            resource_requirements[resource] += int(int_value)
+    return ', '.join(f'{resource}={value}'
+                     for resource, value in resource_requirements.items())
+
+
+def _formatted_node_selector(pod_or_spec: Union[Any, dict]) -> Optional[str]:
+    # Returns a formatted string of node selectors for a pod.
+    node_selectors = []
+
+    if isinstance(pod_or_spec, dict):
+        selectors = pod_or_spec.get('spec', {}).get('nodeSelector', {})
+    else:
+        selectors = pod_or_spec.spec.node_selector
+
+    if not selectors:
+        return None
+
+    for label_key, label_value in selectors.items():
+        node_selectors.append(f'{label_key}={label_value}')
+    return ', '.join(node_selectors)
+
+
+def _lack_resource_msg(resource: str,
+                       pod_or_spec: Union[Any, dict],
+                       extra_msg: Optional[str] = None,
+                       details: Optional[str] = None) -> str:
+    resource_requirements = _formatted_resource_requirements(pod_or_spec)
+    node_selectors = _formatted_node_selector(pod_or_spec)
+    node_selector_str = f' and labels ({node_selectors})' if (
+        node_selectors) else ''
+    msg = (f'Insufficient {resource} capacity on the cluster. '
+           f'Required resources ({resource_requirements}){node_selector_str} '
+           'were not found in a single node. Other SkyPilot tasks or pods may '
+           'be using resources. Check resource usage by running '
+           '`kubectl describe nodes`.')
+    if extra_msg:
+        msg += f' {extra_msg}'
+    if details:
+        msg += f'\nFull error: {details}'
+    return msg
+
+
 def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     """Raise pod scheduling failure reason.
 
@@ -50,52 +120,6 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
-
-    def _formatted_resource_requirements(pod):
-        # Returns a formatted string of resource requirements for a pod.
-        resource_requirements = {}
-        for container in pod.spec.containers:
-            for resource, value in container.resources.requests.items():
-                if resource not in resource_requirements:
-                    resource_requirements[resource] = 0
-                if resource == 'memory':
-                    int_value = kubernetes_utils.parse_memory_resource(value)
-                else:
-                    int_value = kubernetes_utils.parse_cpu_or_gpu_resource(
-                        value)
-                resource_requirements[resource] += int_value
-        return ', '.join(f'{resource}={value}'
-                         for resource, value in resource_requirements.items())
-
-    def _formatted_node_selector(pod) -> Optional[str]:
-        # Returns a formatted string of node selectors for a pod.
-        node_selectors = []
-        if pod.spec.node_selector is None:
-            return None
-        for label_key, label_value in pod.spec.node_selector.items():
-            node_selectors.append(f'{label_key}={label_value}')
-        return ', '.join(node_selectors)
-
-    def _lack_resource_msg(resource: str,
-                           pod,
-                           extra_msg: Optional[str] = None,
-                           details: Optional[str] = None) -> str:
-        resource_requirements = _formatted_resource_requirements(pod)
-        node_selectors = _formatted_node_selector(pod)
-        node_selector_str = f' and labels ({node_selectors})' if (
-            node_selectors) else ''
-        msg = (
-            f'Insufficient {resource} capacity on the cluster. '
-            f'Required resources ({resource_requirements}){node_selector_str} '
-            'were not found in a single node. Other SkyPilot tasks or pods may '
-            'be using resources. Check resource usage by running '
-            '`kubectl describe nodes`.')
-        if extra_msg:
-            msg += f' {extra_msg}'
-        if details:
-            msg += f'\nFull error: {details}'
-        return msg
-
     for new_node in new_nodes:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             new_node.metadata.name, namespace)
@@ -144,8 +168,8 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                         '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
                         f' Full error: {event_message}')
                 gpu_lf_keys = [
-                    lf.get_label_key()
-                    for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    for key in lf.get_label_keys()
                 ]
                 if pod.spec.node_selector:
                     for label_key in pod.spec.node_selector.keys():
@@ -153,10 +177,24 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             # TODO(romilb): We may have additional node
                             #  affinity selectors in the future - in that
                             #  case we will need to update this logic.
-                            if (('Insufficient nvidia.com/gpu'
-                                 in event_message) or
-                                ('didn\'t match Pod\'s node affinity/selector'
-                                 in event_message)):
+                            # TODO(Doyoung): Update the error message raised
+                            # with the multi-host TPU support.
+                            if 'Insufficient google.com/tpu' in event_message:
+                                extra_msg = (
+                                    f'Verify if '
+                                    f'{pod.spec.node_selector[label_key]}'
+                                    ' is available in the cluster. Note '
+                                    'that multi-host TPU podslices are '
+                                    'currently not unsupported.')
+                                raise config_lib.KubernetesError(
+                                    _lack_resource_msg('TPU',
+                                                       pod,
+                                                       extra_msg,
+                                                       details=event_message))
+                            elif (('Insufficient nvidia.com/gpu'
+                                   in event_message) or
+                                  ('didn\'t match Pod\'s node affinity/selector'
+                                   in event_message)):
                                 extra_msg = (
                                     f'Verify if '
                                     f'{pod.spec.node_selector[label_key]}'
@@ -302,39 +340,64 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         time.sleep(1)
 
 
-def _set_env_vars_in_pods(namespace: str, context: Optional[str],
-                          new_pods: List):
-    """Setting environment variables in pods.
+def _run_function_with_retries(func: Callable,
+                               operation_name: str,
+                               max_retries: int = _MAX_RETRIES,
+                               retry_delay: int = 5) -> Any:
+    """Runs a function with retries on Kubernetes errors.
 
-    Once all containers are ready, we can exec into them and set env vars.
-    Kubernetes automatically populates containers with critical
-    environment variables, such as those for discovering services running
-    in the cluster and CUDA/nvidia environment variables. We need to
-    make sure these env vars are available in every task and ssh session.
-    This is needed for GPU support and service discovery.
-    See https://github.com/skypilot-org/skypilot/issues/2287 for
-    more details.
+    Args:
+        func: Function to retry
+        operation_name: Name of the operation for logging
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
 
-    To do so, we capture env vars from the pod's runtime and write them to
-    /etc/profile.d/, making them available for all users in future
-    shell sessions.
+    Raises:
+        The last exception encountered if all retries fail.
     """
-    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except config_lib.KubernetesError:
+            if attempt < max_retries:
+                logger.warning(f'Failed to {operation_name} - '
+                               f'retrying in {retry_delay} seconds.')
+                time.sleep(retry_delay)
+            else:
+                raise
 
-    for new_pod in new_pods:
-        runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), new_pod.metadata.name))
-        rc, stdout, _ = runner.run(set_k8s_env_var_cmd,
-                                   require_outputs=True,
-                                   stream_logs=False)
-        _raise_command_running_error('set env vars', set_k8s_env_var_cmd,
-                                     new_pod.metadata.name, rc, stdout)
 
+def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
+    """Pre-initialization step for SkyPilot pods.
 
-def _check_user_privilege(namespace: str, context: Optional[str],
-                          new_nodes: List) -> None:
-    # Checks if the default user has sufficient privilege to set up
-    # the kubernetes instance pod.
+    This step is run in the pod right after it is created and before the
+    SkyPilot runtime is setup.
+
+    This step includes three key steps:
+
+    1. Privilege check: Checks if the default user has sufficient privilege
+    to set up the kubernetes instance pod.
+    2. SSH setup: Sets up SSH for the pod instance.
+    3. Environment variable setup to populate k8s env vars in the pod.
+
+    Make sure commands used in these methods are generic and work
+    on most base images. E.g., do not use Python, since that may not
+    be installed by default.
+
+    If you run any apt commands, be sure to check if the lock is available.
+    It is possible the `apt update` run in the pod container args may still
+    be running.
+
+    Args:
+        namespace (str): Kubernetes namespace.
+        context (Optional[str]): Kubernetes context.
+        new_nodes (List): List of new pod instances.
+
+    Raises:
+        config_lib.KubernetesError: If user privileges are insufficient or
+          setup fails.
+    """
+
     check_k8s_user_sudo_cmd = (
         'if [ $(id -u) -eq 0 ]; then'
         # If user is root, create an alias for sudo used in skypilot setup
@@ -342,42 +405,67 @@ def _check_user_privilege(namespace: str, context: Optional[str],
         'else '
         '  if command -v sudo >/dev/null 2>&1; then '
         '    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  else '
-        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+        f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; '
+        f'      exit {exceptions.INSUFFICIENT_PRIVILEGES_CODE}; ); '
         '  fi; '
-        'fi')
+        'fi;')
 
-    for new_node in new_nodes:
-        runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), new_node.metadata.name))
-        rc, stdout, stderr = runner.run(check_k8s_user_sudo_cmd,
-                                        require_outputs=True,
-                                        separate_stderr=True,
-                                        stream_logs=False)
-        _raise_command_running_error('check user privilege',
-                                     check_k8s_user_sudo_cmd,
-                                     new_node.metadata.name, rc,
-                                     stdout + stderr)
-        if stdout == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
-            raise config_lib.KubernetesError(
-                'Insufficient system privileges detected. '
-                'Ensure the default user has root access or '
-                '"sudo" is installed and the user is added to the sudoers '
-                'from the image.')
+    # Kubernetes automatically populates containers with critical
+    # environment variables, such as those for discovering services running
+    # in the cluster and CUDA/nvidia environment variables. We need to
+    # make sure these env vars are available in every task and ssh session.
+    # This is needed for GPU support and service discovery.
+    # See https://github.com/skypilot-org/skypilot/issues/2287 for more details.
+    # To do so, we capture env vars from the pod's runtime and write them to
+    # /etc/profile.d/, making them available for all users in future
+    # shell sessions.
+    set_k8s_env_var_cmd = docker_utils.SETUP_ENV_VARS_CMD
 
+    check_apt_update_complete_cmd = (
+        'echo "Checking if apt update from container init is complete..."; '
+        'timeout_secs=600; '
+        'start_time=$(date +%s); '
+        'while ! grep -q "Fetched" /tmp/apt-update.log 2>/dev/null; do '
+        '  echo "apt update still running. Logs:"; '
+        '  cat /tmp/apt-update.log; '
+        '  current_time=$(date +%s); '
+        '  elapsed=$((current_time - start_time)); '
+        '  if [ $elapsed -ge $timeout_secs ]; then '
+        '    echo "Timed out waiting for apt update"; '
+        '    exit 1; '
+        '  fi; '
+        '  sleep 5; '
+        'done; '
+        'echo "apt update complete."; ')
 
-def _setup_ssh_in_pods(namespace: str, context: Optional[str],
-                       new_nodes: List) -> None:
-    # Setting up ssh for the pod instance. This is already setup for
-    # the jump pod so it does not need to be run for it.
-    set_k8s_ssh_cmd = (
-        'set -ex; '
+    install_ssh_k8s_cmd = (
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
         'export DEBIAN_FRONTEND=noninteractive;'
-        '$(prefix_cmd) apt-get update;'
-        '$(prefix_cmd) apt install openssh-server rsync -y; '
+        'echo "Installing missing packages..."; '
+        'for i in {1..5}; do '
+        '  output=$($(prefix_cmd) apt install openssh-server rsync -y 2>&1); '
+        '  rc=$?; '
+        '  if [ $rc -eq 0 ]; then '
+        '    break; '
+        '  fi; '
+        '  echo "$output" | grep -qi "could not get lock" || '
+        '  grep -qi "Unable to acquire the dpkg frontend lock"; '
+        '  if [ $? -eq 0 ]; then '
+        '    echo "apt install failed due to lock, retrying. (Attempt $i/5)"; '
+        '    sleep 5; '
+        '  else '
+        '    echo "apt install failed for a non-lock reason: $output"; '
+        '    exit $rc; '
+        '  fi; '
+        'done; '
+        'if [ $rc -ne 0 ]; then '
+        '    echo "apt install failed after 5 attempts due to lock errors."; '
+        '    exit $rc; '
+        'fi; '
         '$(prefix_cmd) mkdir -p /var/run/sshd; '
         '$(prefix_cmd) '
         'sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" '
@@ -398,18 +486,35 @@ def _setup_ssh_in_pods(namespace: str, context: Optional[str],
         # See https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
         '$(prefix_cmd) sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;')
 
-    # TODO(romilb): Parallelize the setup of SSH in pods for multi-node clusters
-    for new_node in new_nodes:
+    pre_init_cmd = ('set -ex; ' + check_k8s_user_sudo_cmd +
+                    set_k8s_env_var_cmd + check_apt_update_complete_cmd +
+                    install_ssh_k8s_cmd)
+
+    def _pre_init_thread(new_node):
         pod_name = new_node.metadata.name
+        logger.info(f'{"-"*20}Start: Pre-init in pod {pod_name!r} {"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name))
-        logger.info(f'{"-"*20}Start: Set up SSH in pod {pod_name!r} {"-"*20}')
-        rc, stdout, _ = runner.run(set_k8s_ssh_cmd,
+
+        # Run the combined pre-init command
+        rc, stdout, _ = runner.run(pre_init_cmd,
                                    require_outputs=True,
                                    stream_logs=False)
-        _raise_command_running_error('setup ssh', set_k8s_ssh_cmd, pod_name, rc,
+        if rc == exceptions.INSUFFICIENT_PRIVILEGES_CODE:
+            raise config_lib.KubernetesError(
+                'Insufficient system privileges detected. '
+                'Ensure the default user has root access or '
+                '"sudo" is installed and the user is added to the sudoers '
+                'from the image.')
+
+        op_name = 'pre-init'
+        _raise_command_running_error(op_name, pre_init_cmd, pod_name, rc,
                                      stdout)
-        logger.info(f'{"-"*20}End: Set up SSH in pod {pod_name!r} {"-"*20}')
+
+        logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
+
+    # Run pre_init in parallel across all new_nodes
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, NUM_THREADS)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -421,6 +526,84 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
             'labels': label
         }},
         _request_timeout=kubernetes.API_TIMEOUT)
+
+
+def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
+                                        context: Optional[str]) -> Any:
+    """Attempts to create a Kubernetes Pod and handle any errors.
+
+    Currently, we handle errors due to the AppArmor annotation and retry if
+    it fails due to the `FieldValueForbidden` error.
+    See https://github.com/skypilot-org/skypilot/issues/4174 for details.
+
+    Returns: The created Pod object.
+    """
+    try:
+        # Attempt to create the Pod with the AppArmor annotation
+        pod = kubernetes.core_api(context).create_namespaced_pod(
+            namespace, pod_spec)
+        return pod
+    except kubernetes.api_exception() as e:
+        try:
+            error_body = json.loads(e.body)
+            error_message = error_body.get('message', '')
+        except json.JSONDecodeError:
+            error_message = str(e.body)
+        # Check if the error is due to the AppArmor annotation and retry.
+        # We add an AppArmor annotation to set it as unconfined in our
+        # base template in kubernetes-ray.yml.j2. This is required for
+        # FUSE to work in the pod on most Kubernetes distributions.
+        # However, some distributions do not support the AppArmor annotation
+        # and will fail to create the pod. In this case, we retry without
+        # the annotation.
+        if (e.status == 422 and 'FieldValueForbidden' in error_message and
+                'AppArmorProfile: nil' in error_message):
+            logger.warning('AppArmor annotation caused pod creation to fail. '
+                           'Retrying without the annotation. '
+                           'Note: this may cause bucket mounting to fail.')
+
+            # Remove the AppArmor annotation
+            annotations = pod_spec.get('metadata', {}).get('annotations', {})
+            if ('container.apparmor.security.beta.kubernetes.io/ray-node'
+                    in annotations):
+                del annotations[
+                    'container.apparmor.security.beta.kubernetes.io/ray-node']
+                pod_spec['metadata']['annotations'] = annotations
+                logger.info('AppArmor annotation removed from Pod spec.')
+            else:
+                logger.warning('AppArmor annotation not found in pod spec, '
+                               'retrying will not help. '
+                               f'Current annotations: {annotations}')
+                raise e
+
+            # Retry Pod creation without the AppArmor annotation
+            try:
+                pod = kubernetes.core_api(context).create_namespaced_pod(
+                    namespace, pod_spec)
+                logger.info(f'Pod {pod.metadata.name} created successfully '
+                            'without AppArmor annotation.')
+                return pod
+            except kubernetes.api_exception() as retry_exception:
+                logger.info('Failed to create Pod without AppArmor annotation: '
+                            f'{retry_exception}')
+                raise retry_exception
+        # Unlike other error from resource lackage on CPU/GPU/Memory, TPU
+        # lackage error is raised when pod is attemtped to be created.
+        # TODO(Doyoung): Update the error message raised with the multi-host
+        # TPU support.
+        elif 'Invalid resource requests for google.com/tpu.' in error_message:
+            extra_message = ('Verify if the cluster has a TPU slice node with '
+                             'a topology matching the number of TPU(s) '
+                             'requested. Note that multi-host TPU podslices '
+                             'are currently not unsupported.')
+            raise config_lib.KubernetesError(
+                _lack_resource_msg('TPU',
+                                   pod_spec,
+                                   details=error_message,
+                                   extra_msg=extra_message))
+        else:
+            # Re-raise the exception if it's a different error
+            raise e
 
 
 def _create_pods(region: str, cluster_name_on_cloud: str,
@@ -498,8 +681,14 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'override runtimeClassName in ~/.sky/config.yaml. '
                        'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
-    needs_gpus = (pod_spec['spec']['containers'][0].get('resources', {}).get(
-        'limits', {}).get('nvidia.com/gpu', 0) > 0)
+    needs_gpus = False
+    limits = pod_spec['spec']['containers'][0].get('resources',
+                                                   {}).get('limits')
+    if limits is not None:
+        needs_gpus = limits.get(kubernetes_utils.GPU_RESOURCE_KEY, 0) > 0
+
+    # TPU pods provisioned on GKE use the default containerd runtime.
+    # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
@@ -544,8 +733,23 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 }
             }
 
-        pod = kubernetes.core_api(context).create_namespaced_pod(
-            namespace, pod_spec)
+        # TPU slice nodes are given a taint, google.com/tpu=present:NoSchedule.
+        # This is to prevent from non-TPU workloads from being scheduled on TPU
+        # slice nodes. We need this toleration to allow the pod to be scheduled
+        # on TPU nodes.
+        # Reference: https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work # pylint: disable=line-too-long
+        tpu_label = kubernetes_utils.GKELabelFormatter.TPU_LABEL_KEY
+        if tpu_label in config.node_config.get('spec',
+                                               {}).get('nodeSelector', {}):
+            tpu_toleration = {
+                'key': kubernetes_utils.TPU_RESOURCE_KEY,
+                'operator': 'Equal',
+                'value': 'present',
+                'effect': 'NoSchedule'
+            }
+            pod_spec['spec']['tolerations'] = [tpu_toleration]
+
+        pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
         created_pods[pod.metadata.name] = pod
         if head_pod_name is None:
             head_pod_name = pod.metadata.name
@@ -597,13 +801,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                      f'pods: {list(uninitialized_pods.keys())}')
         uninitialized_pods_list = list(uninitialized_pods.values())
 
-        # Setup SSH and environment variables in pods.
-        # Make sure commands used in these methods are generic and work
-        # on most base images. E.g., do not use Python, since that may not
-        # be installed by default.
-        _check_user_privilege(namespace, context, uninitialized_pods_list)
-        _setup_ssh_in_pods(namespace, context, uninitialized_pods_list)
-        _set_env_vars_in_pods(namespace, context, uninitialized_pods_list)
+        # Run pre-init steps in the pod.
+        pre_init(namespace, context, uninitialized_pods_list)
 
         for pod in uninitialized_pods.values():
             _label_pod(namespace,
@@ -699,11 +898,16 @@ def terminate_instances(
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
 
-    for pod_name, pod in pods.items():
-        logger.debug(f'Terminating instance {pod_name}: {pod}')
+    def _terminate_pod_thread(pod_info):
+        pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
-            continue
+            return
+        logger.debug(f'Terminating instance {pod_name}: {pod}')
         _terminate_node(namespace, context, pod_name)
+
+    # Run pod termination in parallel
+    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(),
+                                     NUM_THREADS)
 
 
 def get_cluster_info(

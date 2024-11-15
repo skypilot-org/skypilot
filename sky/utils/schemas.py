@@ -92,7 +92,27 @@ def _get_single_resources_schema():
                 'type': 'string',
             },
             'job_recovery': {
-                'type': 'string',
+                # Either a string or a dict.
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'strategy': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'null',
+                            }],
+                        },
+                        'max_restarts_on_errors': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                    }
+                }],
             },
             'disk_size': {
                 'type': 'integer',
@@ -288,6 +308,9 @@ def get_storage_schema():
 
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import load_balancing_policies
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -357,23 +380,15 @@ def get_service_schema():
                     'downscale_delay_seconds': {
                         'type': 'number',
                     },
-                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
-                    # `qps_lower_threshold` and `auto_restart` are deprecated.
-                    # Temporarily keep these fields for backward compatibility.
-                    # Remove after 2 minor release, i.e., 0.6.0.
-                    'auto_restart': {
-                        'type': 'boolean',
-                    },
-                    'qps_upper_threshold': {
-                        'type': 'number',
-                    },
-                    'qps_lower_threshold': {
-                        'type': 'number',
-                    },
                 }
             },
             'replicas': {
                 'type': 'integer',
+            },
+            'load_balancing_policy': {
+                'type': 'string',
+                'case_insensitive_enum': list(
+                    load_balancing_policies.LB_POLICIES.keys())
             },
         }
     }
@@ -595,7 +610,7 @@ _NETWORK_CONFIG_SCHEMA = {
 
 _LABELS_SCHEMA = {
     # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.7.0.
+    # compatibility. Will be removed after 0.8.0.
     'instance_tags': {
         'type': 'object',
         'required': [],
@@ -776,6 +791,9 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'storage_account': {
+                    'type': 'string',
+                },
+                'resource_group_vm': {
                     'type': 'string',
                 },
             }

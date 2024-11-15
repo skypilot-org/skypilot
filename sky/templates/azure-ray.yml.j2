@@ -34,6 +34,7 @@ provider:
   # instead of the cluster_name. This ensures that ray creates new instances
   # for different cluster_name.
   resource_group: {{resource_group}}
+  use_external_resource_group: {{use_external_resource_group}}
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
@@ -67,6 +68,8 @@ available_node_types:
             imageOffer: {{image_offer}}
             imageSku: "{{image_sku}}"
             imageVersion: {{image_version}}
+            # Community Gallery Image ID 
+            communityGalleryImageId: {{community_gallery_image_id}}
             osDiskSizeGB: {{disk_size}}
             osDiskTier: {{disk_tier}}
             {%- if use_spot %}
@@ -80,7 +83,6 @@ available_node_types:
               {%- for cmd in cloud_init_setup_commands %}
               {{ cmd }}
               {%- endfor %}
-        need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
         {%- if disk_performance_tier is not none %}
         disk_performance_tier: {{disk_performance_tier}}
         {%- endif %}

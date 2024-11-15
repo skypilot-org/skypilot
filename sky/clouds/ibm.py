@@ -1,8 +1,7 @@
 """IBM Web Services."""
-import json
 import os
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -206,10 +205,8 @@ class IBM(clouds.Cloud):
             'IBM does not currently support spot instances in this framework'
 
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         instance_resources = _get_profile_resources(r.instance_type)
 
@@ -247,7 +244,7 @@ class IBM(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='ibm')

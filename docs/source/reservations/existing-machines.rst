@@ -106,11 +106,11 @@ Deploying SkyPilot
 
    .. code-block:: console
 
-      $ sky show-gpus --cloud kubernetes
+      $ sky show-gpus --cloud k8s
       Kubernetes GPUs
-      GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-      L4    1, 2, 4       12          12
-      H100  1, 2, 4, 8    16          16
+      GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+      L4    1, 2, 4                   12          12
+      H100  1, 2, 4, 8                16          16
 
       Kubernetes per node GPU availability
       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
@@ -121,7 +121,7 @@ Deploying SkyPilot
       my-cluster-4               H100      8           8
       my-cluster-5               H100      8           8
 
-      $ sky launch --cloud kubernetes --gpus H100:1 -- nvidia-smi
+      $ sky launch --cloud k8s --gpus H100:1 -- nvidia-smi
 
    .. tip::
 

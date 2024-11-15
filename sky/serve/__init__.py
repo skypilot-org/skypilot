@@ -8,8 +8,10 @@ from sky.serve.constants import SKYSERVE_METADATA_DIR
 from sky.serve.core import down
 from sky.serve.core import status
 from sky.serve.core import tail_logs
+from sky.serve.core import terminate_replica
 from sky.serve.core import up
 from sky.serve.core import update
+from sky.serve.load_balancing_policies import LB_POLICIES
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import DEFAULT_UPDATE_MODE
@@ -34,6 +36,7 @@ __all__ = [
     'get_endpoint',
     'INITIAL_VERSION',
     'LB_CONTROLLER_SYNC_INTERVAL_SECONDS',
+    'LB_POLICIES',
     'ReplicaStatus',
     'ServiceComponent',
     'ServiceStatus',
@@ -42,6 +45,7 @@ __all__ = [
     'SKY_SERVE_CONTROLLER_NAME',
     'SKYSERVE_METADATA_DIR',
     'status',
+    'terminate_replica',
     'tail_logs',
     'up',
     'update',

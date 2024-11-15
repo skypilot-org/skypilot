@@ -276,6 +276,7 @@ class RayCodeGen:
             from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
+            from sky.utils import subprocess_utils
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
@@ -1950,17 +1951,8 @@ class RetryingVmProvisioner(object):
 
         failover_history: List[Exception] = list()
 
-        style = colorama.Style
-        fore = colorama.Fore
         # Retrying launchable resources.
         while True:
-            if (isinstance(to_provision.cloud, clouds.Azure) and
-                    to_provision.accelerators is not None and
-                    'A10' in to_provision.accelerators and prev_handle is None):
-                logger.warning(f'{style.BRIGHT}{fore.YELLOW}Trying to launch '
-                               'an A10 cluster on Azure. This may take ~20 '
-                               'minutes due to driver installation.'
-                               f'{style.RESET_ALL}')
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
@@ -2118,18 +2110,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
-            cluster_info: Optional[provision_common.ClusterInfo] = None,
-            # The following 2 fields are deprecated. SkyPilot new provisioner
-            # API handles the TPU node creation/deletion.
-            # Backward compatibility for TPU nodes created before #2943.
-            # TODO (zhwu): Remove this after 0.6.0.
-            tpu_create_script: Optional[str] = None,
-            tpu_delete_script: Optional[str] = None) -> None:
+            cluster_info: Optional[provision_common.ClusterInfo] = None
+    ) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
         self.cluster_name_on_cloud = cluster_name_on_cloud
-        self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
-                                                  1)
+        # Replace the home directory with ~ for better robustness across systems
+        # with different home directories.
+        if cluster_yaml.startswith(os.path.expanduser('~')):
+            cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~', 1)
+        self._cluster_yaml = cluster_yaml
         # List of (internal_ip, feasible_ip) tuples for all the nodes in the
         # cluster, sorted by the feasible ips. The feasible ips can be either
         # internal or external ips, depending on the use_internal_ips flag.
@@ -2139,12 +2129,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
-        # Deprecated. SkyPilot new provisioner API handles the TPU node
-        # creation/deletion.
-        # Backward compatibility for TPU nodes created before #2943.
-        # TODO (zhwu): Remove this after 0.6.0.
-        self.tpu_create_script = tpu_create_script
-        self.tpu_delete_script = tpu_delete_script
 
     def __repr__(self):
         return (f'ResourceHandle('
@@ -2160,10 +2144,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
-                f'\n\tssh_user={self.ssh_user},'
-                # TODO (zhwu): Remove this after 0.6.0.
-                f'\n\ttpu_create_script={self.tpu_create_script}, '
-                f'\n\ttpu_delete_script={self.tpu_delete_script})')
+                f'\n\tssh_user={self.ssh_user}')
 
     def get_cluster_name(self):
         return self.cluster_name
@@ -2175,26 +2156,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # cluster is UP.
         return common_utils.read_yaml(self.cluster_yaml).get(
             'provider', {}).get('use_internal_ips', False)
-
-    def _update_cluster_region(self):
-        """Update the region in handle.launched_resources.
-
-        This is for backward compatibility to handle the clusters launched
-        long before. We should remove this after 0.6.0.
-        """
-        if self.launched_resources.region is not None:
-            return
-
-        config = common_utils.read_yaml(self.cluster_yaml)
-        provider = config['provider']
-        cloud = self.launched_resources.cloud
-        if cloud.is_same_cloud(clouds.Azure()):
-            region = provider['location']
-        elif cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
-                clouds.AWS()):
-            region = provider['region']
-
-        self.launched_resources = self.launched_resources.copy(region=region)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
         """Fetches and sets the SSH ports for the cluster nodes.
@@ -2510,7 +2471,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """Returns number of IPs per node in the cluster, handling TPU Pod."""
         is_tpu_vm_pod = gcp_utils.is_tpu_vm_pod(self.launched_resources)
         if is_tpu_vm_pod:
-            num_ips = gcp_utils.get_num_tpu_devices(self.launched_resources)
+            num_ips = len(self.internal_ips())
         else:
             num_ips = 1
         return num_ips
@@ -2566,8 +2527,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 pass
         if version < 4:
             self.update_ssh_ports()
-
-        self._update_cluster_region()
 
         if version < 8:
             try:
@@ -2649,8 +2608,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if record is not None:
             usage_lib.messages.usage.update_cluster_status(record['status'])
 
-        # Backward compatibility: the old launched_resources without region info
-        # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
@@ -2713,6 +2670,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'  Existing:\t{handle.launched_nodes}x '
                     f'{handle.launched_resources}\n'
                     f'{mismatch_str}')
+        else:
+            # For fractional acc count clusters, we round up the number of accs
+            # to 1 (sky/utils/resources_utils.py::make_ray_custom_resources_str)
+            # Here we scale the required acc count to (required / launched) * 1
+            # so the total number of accs is the same as the requested number.
+            launched_accs = launched_resources.accelerators
+            if (launched_accs is not None and
+                    valid_resource.accelerators is not None):
+                for _, count in launched_accs.items():
+                    if isinstance(count, float) and not count.is_integer():
+                        valid_resource = valid_resource.copy(
+                            accelerators={
+                                k: v / count
+                                for k, v in valid_resource.accelerators.items()
+                            })
         return valid_resource
 
     def _provision(
@@ -2737,7 +2709,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (e.g., cluster name invalid) or a region/zone throwing
                 resource unavailability.
             exceptions.CommandError: any ssh command error.
-            RuntimeErorr: raised when 'rsync' is not installed.
+            RuntimeError: raised when 'rsync' is not installed.
             # TODO(zhwu): complete the list of exceptions.
         """
         # FIXME: ray up for Azure with different cluster_names will overwrite
@@ -3198,9 +3170,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode = _run_setup(f'{create_script_code} && {setup_cmd}',)
             if returncode == 255:
                 is_message_too_long = False
-                with open(setup_log_path, 'r', encoding='utf-8') as f:
-                    if 'too long' in f.read():
-                        is_message_too_long = True
+                try:
+                    with open(os.path.expanduser(setup_log_path),
+                              'r',
+                              encoding='utf-8') as f:
+                        if 'too long' in f.read():
+                            is_message_too_long = True
+                except Exception as e:  # pylint: disable=broad-except
+                    # We don't crash the setup if we cannot read the log file.
+                    # Instead, we should retry the setup with dumping the script
+                    # to a file to be safe.
+                    logger.debug('Failed to read setup log file '
+                                 f'{setup_log_path}: {e}')
+                    is_message_too_long = True
 
                 if is_message_too_long:
                     # If the setup script is too long, we retry it with dumping
@@ -3281,6 +3263,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
+        fore = colorama.Fore
 
         script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
         remote_log_dir = self.log_dir
@@ -3293,13 +3276,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         encoded_script = shlex.quote(codegen)
         create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
-            f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-            f'{cd} && {constants.SKY_RAY_CMD} job submit '
-            '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
-            f'--submission-id {job_id}-$(whoami) --no-wait '
-            # Redirect stderr to /dev/null to avoid distracting error from ray.
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} > {remote_log_path} '
-            '2> /dev/null"')
+            # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
+            # with pid is the same driver process.
+            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+            # Do not use &>, which is not POSIX and may not work.
+            # Note that the order of ">filename 2>&1" matters.
+            f'> {remote_log_path} 2>&1')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -3347,6 +3330,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # running a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         if returncode == 255 and 'too long' in stdout + stderr:
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
@@ -3361,10 +3348,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True)
 
-        # Happens when someone calls `sky exec` but remote is outdated
-        # necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout,
-                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3391,9 +3374,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             controller = controller_utils.Controllers.from_name(name)
             if controller == controller_utils.Controllers.JOBS_CONTROLLER:
                 logger.info(
-                    f'\n📋 Useful Commands'
-                    f'\nManaged Job ID: '
+                    f'\n{fore.CYAN}Managed Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    f'\n📋 Useful Commands'
                     f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t\t'
                     f'{ux_utils.BOLD}sky jobs cancel {job_id}'
                     f'{ux_utils.RESET_BOLD}'
@@ -3410,8 +3393,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'dashboard:\t{ux_utils.BOLD}sky jobs dashboard'
                     f'{ux_utils.RESET_BOLD}')
             elif controller is None:
-                logger.info(f'\n📋 Useful Commands'
-                            f'\nJob ID: {job_id}'
+                logger.info(f'\n{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            f'\n📋 Useful Commands'
                             f'\n{ux_utils.INDENT_SYMBOL}To cancel the job:\t\t'
                             f'{ux_utils.BOLD}sky cancel {name} {job_id}'
                             f'{ux_utils.RESET_BOLD}'
@@ -3433,6 +3417,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True,
                                                           separate_stderr=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # adding a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         subprocess_utils.handle_returncode(returncode, code,
@@ -3570,10 +3558,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
         try:
-            # TODO(mraheja): remove pylint disabling when filelock
-            # version updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(
+            with timeline.FileLockEvent(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 self.teardown_no_lock(
@@ -3730,7 +3715,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   handle: CloudVmRayResourceHandle,
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
-                  follow: bool = True) -> int:
+                  follow: bool = True,
+                  tail: int = 0) -> int:
         """Tail the logs of a job.
 
         Args:
@@ -3738,10 +3724,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_id: The job ID to tail the logs of.
             managed_job_id: The managed job ID for display purpose only.
             follow: Whether to follow the logs.
+            tail: The number of lines to display from the end of the
+                log file. If 0, print all lines.
         """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
-                                               follow=follow)
+                                               follow=follow,
+                                               tail=tail)
         if job_id is None and managed_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
@@ -3994,25 +3983,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stdout = ''
                 stderr = str(e)
 
-        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-        # May, 2023 by Hysun: Allow terminate INIT cluster which may have
-        # some instances provisioning in background but not completed.
-        elif (isinstance(cloud, clouds.OCI) and terminate and
-              prev_cluster_status in (status_lib.ClusterStatus.STOPPED,
-                                      status_lib.ClusterStatus.INIT)):
-            region = config['provider']['region']
-
-            # pylint: disable=import-outside-toplevel
-            from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-
-            from sky.skylet.providers.oci.query_helper import oci_query_helper
-
-            # 0: All terminated successfully, failed count otherwise
-            returncode = oci_query_helper.terminate_instances_by_tags(
-                {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}, region)
-
-            # To avoid undefined local variables error.
-            stdout = stderr = ''
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
@@ -4081,54 +4051,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         * Removing ssh configs for the cluster;
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
-
-        Raises:
-            RuntimeError: If it fails to delete the TPU.
         """
-        log_path = os.path.join(os.path.expanduser(self.log_dir),
-                                'teardown.log')
-        log_abs_path = os.path.abspath(log_path)
         cluster_name_on_cloud = handle.cluster_name_on_cloud
-
-        # Backward compatibility for TPU nodes created before #2943. Any TPU
-        # node launched before that PR have the delete script generated (and do
-        # not have the tpu_node config set in its cluster yaml), so we have to
-        # call the deletion script to clean up the TPU node.
-        # For TPU nodes launched after the PR, deletion is done in SkyPilot's
-        # new GCP provisioner API.
-        # TODO (zhwu): Remove this after 0.6.0.
-        if (handle.tpu_delete_script is not None and
-                os.path.exists(handle.tpu_delete_script)):
-            # Only call the deletion script if the cluster config does not
-            # contain TPU node config. Otherwise, the deletion should
-            # already be handled by the new provisioner.
-            config = common_utils.read_yaml(handle.cluster_yaml)
-            tpu_node_config = config['provider'].get('tpu_node')
-            if tpu_node_config is None:
-                with rich_utils.safe_status(
-                        ux_utils.spinner_message('Terminating TPU')):
-                    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                        ['bash', handle.tpu_delete_script],
-                        log_abs_path,
-                        stream_logs=False,
-                        require_outputs=True)
-                if tpu_rc != 0:
-                    if _TPU_NOT_FOUND_ERROR in tpu_stderr:
-                        logger.info('TPU not found. '
-                                    'It should have been deleted already.')
-                    elif purge:
-                        logger.warning(
-                            _TEARDOWN_PURGE_WARNING.format(
-                                reason='stopping/terminating TPU',
-                                details=tpu_stderr))
-                    else:
-                        raise RuntimeError(
-                            _TEARDOWN_FAILURE_MESSAGE.format(
-                                extra_reason='It is caused by TPU failure.',
-                                cluster_name=common_utils.cluster_name_in_hint(
-                                    handle.cluster_name, cluster_name_on_cloud),
-                                stdout=tpu_stdout,
-                                stderr=tpu_stderr))
 
         if (terminate and handle.launched_resources.is_image_managed is True):
             # Delete the image when terminating a "cloned" cluster, i.e.,
@@ -4174,11 +4098,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
-        auth_config = config['auth']
-        backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
-                                                     handle.head_ip,
-                                                     auth_config,
-                                                     handle.docker_user)
+        backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
@@ -4187,13 +4107,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # This function could be directly called from status refresh,
             # where we need to cleanup the cluster profile.
             metadata_utils.remove_cluster_metadata(handle.cluster_name)
-            # Clean up TPU creation/deletion scripts
-            # Backward compatibility for TPU nodes created before #2943.
-            # TODO (zhwu): Remove this after 0.6.0.
-            if handle.tpu_delete_script is not None:
-                assert handle.tpu_create_script is not None
-                common_utils.remove_file_if_exists(handle.tpu_create_script)
-                common_utils.remove_file_if_exists(handle.tpu_delete_script)
 
             # Clean up generated config
             # No try-except is needed since Ray will fail to teardown the

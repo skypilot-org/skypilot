@@ -150,15 +150,15 @@ Unlike :code:`sky status` which lists only the SkyPilot resources launched by th
     bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
     bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
 
-You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --cloud kubernetes`.
+You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --cloud k8s`.
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud kubernetes
+    $ sky show-gpus --cloud k8s
     Kubernetes GPUs
-    GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-    L4    1, 2, 4       12          12
-    H100  1, 2, 4, 8    16          16
+    GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+    L4    1, 2, 4                   12          12
+    H100  1, 2, 4, 8                16          16
 
     Kubernetes per node GPU availability
     NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
@@ -174,7 +174,12 @@ You can also inspect the real-time GPU usage on the cluster with :code:`sky show
 
 Using Custom Images
 -------------------
-By default, we use and maintain a SkyPilot container image that has conda and a few other basic tools installed.
+By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
+
+1. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`__).
+2. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`__).
+
+These images are pre-installed with SkyPilot dependencies for fast startup.
 
 To use your own image, add :code:`image_id: docker:<your image tag>` to the :code:`resources` section of your task YAML.
 
@@ -256,9 +261,25 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 FAQs
 ----
 
+* **Can I use multiple Kubernetes clusters with SkyPilot?**
+
+  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+
+  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+
 * **Are autoscaling Kubernetes clusters supported?**
 
-  To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
+  To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+
+  If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
+
+  .. code-block:: yaml
+
+      # ~/.sky/config.yaml
+      kubernetes:
+        provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
+        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs in scale-to-zero setting
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
@@ -275,7 +296,7 @@ FAQs
 * **How can I specify custom configuration for the pods created by SkyPilot?**
 
   You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
-  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
+  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_.
 
   For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
 
@@ -291,6 +312,11 @@ FAQs
                 volumeMounts:       # Custom volume mounts for the pod
                   - mountPath: /foo
                     name: example-volume
+                resources:          # Custom resource requests and limits
+                  requests:
+                    rdma/rdma_shared_device_a: 1
+                  limits:
+                    rdma/rdma_shared_device_a: 1
             volumes:
               - name: example-volume
                 hostPath:

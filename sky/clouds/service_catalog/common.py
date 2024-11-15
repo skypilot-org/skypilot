@@ -5,7 +5,7 @@ import hashlib
 import os
 import time
 import typing
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 import requests
@@ -203,7 +203,8 @@ def read_catalog(filename: str,
                             f'Updating {cloud} catalog: {filename}') +
                         f'{update_frequency_str}'):
                     try:
-                        r = requests.get(url)
+                        r = requests.get(url=url,
+                                         headers={'User-Agent': 'SkyPilot/0.7'})
                         r.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         error_str = (f'Failed to fetch {cloud} catalog '
@@ -481,7 +482,7 @@ def get_instance_type_for_cpus_mem_impl(
 def get_accelerators_from_instance_type_impl(
     df: 'pd.DataFrame',
     instance_type: str,
-) -> Optional[Dict[str, int]]:
+) -> Optional[Dict[str, Union[int, float]]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
         with ux_utils.print_exception_no_traceback():
@@ -490,13 +491,19 @@ def get_accelerators_from_instance_type_impl(
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
         return None
-    return {acc_name: int(acc_count)}
+
+    def _convert(value):
+        if int(value) == value:
+            return int(value)
+        return float(value)
+
+    return {acc_name: _convert(acc_count)}
 
 
 def get_instance_type_for_accelerator_impl(
     df: 'pd.DataFrame',
     acc_name: str,
-    acc_count: int,
+    acc_count: Union[int, float],
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
@@ -509,7 +516,7 @@ def get_instance_type_for_accelerator_impl(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
-                (df['AcceleratorCount'] == acc_count)]
+                (abs(df['AcceleratorCount'] - acc_count) <= 0.01)]
     result = _filter_region_zone(result, region, zone)
     if len(result) == 0:
         fuzzy_result = df[
@@ -522,8 +529,11 @@ def get_instance_type_for_accelerator_impl(
         fuzzy_candidate_list = []
         if len(fuzzy_result) > 0:
             for _, row in fuzzy_result.iterrows():
+                acc_cnt = float(row['AcceleratorCount'])
+                acc_count_display = (int(acc_cnt) if acc_cnt.is_integer() else
+                                     f'{acc_cnt:.2f}')
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
-                                            f'{int(row["AcceleratorCount"])}')
+                                            f'{acc_count_display}')
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpus(result, cpus)

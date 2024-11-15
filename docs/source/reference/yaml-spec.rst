@@ -51,18 +51,18 @@ Available fields:
       #
       #   To specify a single type of accelerator:
       #     Format: <name>:<count> (or simply <name>, short for a count of 1).
-      #     accelerators: V100:4
+      #     accelerators: H100:4
       #
       #   To specify an ordered list of accelerators (try the accelerators in
       #   the specified order):
       #     Format: [<name>:<count>, ...]
-      #     accelerators: ['K80:1', 'V100:1', 'T4:1']
+      #     accelerators: ['L4:1', 'H100:1', 'A100:1']
       #
       #   To specify an unordered set of accelerators (optimize all specified
       #   accelerators together, and try accelerator with lowest cost first):
       #     Format: {<name>:<count>, ...}
-      #     accelerators: {'K80:1', 'V100:1', 'T4:1'}
-      accelerators: V100:4
+      #     accelerators: {'L4:1', 'H100:1', 'A100:1'}
+      accelerators: H100:8
 
       # Number of vCPUs per node (optional).
       #
@@ -107,6 +107,10 @@ Available fields:
       #
       # default: EAGER_NEXT_REGION
       job_recovery: none
+      # Or, to allow up to 3 restarts (default: 0) on user code errors:
+      # job_recovery:
+      #   strategy: EAGER_NEXT_REGION
+      #   max_restarts_on_errors: 3
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
@@ -249,9 +253,9 @@ Available fields:
       any_of:
         - cloud: aws
           region: us-west-2
-          acceraltors: V100
+          accelerators: H100
         - cloud: gcp
-          acceraltors: A100
+          accelerators: H100
 
 
     # Environment variables (optional). These values can be accessed in the

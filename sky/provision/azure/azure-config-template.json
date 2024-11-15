@@ -13,14 +13,26 @@
             "metadata": {
                 "description": "Subnet parameters."
             }
+        },
+        "location": {
+            "type": "string",
+            "metadata": {
+                "description": "Location of where the resources are allocated."
+            }
+        },
+        "nsgName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the Network Security Group associated with the SkyPilot cluster."
+            }
         }
     },
     "variables": {
         "contributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-        "location": "[resourceGroup().location]",
+        "location": "[parameters('location')]",
         "msiName": "[concat('sky-', parameters('clusterId'), '-msi')]",
         "roleAssignmentName": "[concat('sky-', parameters('clusterId'), '-ra')]",
-        "nsgName": "[concat('sky-', parameters('clusterId'), '-nsg')]",
+        "nsgName": "[parameters('nsgName')]",
         "nsg": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]",
         "vnetName": "[concat('sky-', parameters('clusterId'), '-vnet')]",
         "subnetName": "[concat('sky-', parameters('clusterId'), '-subnet')]"
