@@ -11,6 +11,7 @@ import colorama
 import rich.console as rich_console
 
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
@@ -26,7 +27,7 @@ BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
 
 # Log path hint in the spinner during launching
-_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: sky api get -l '
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs: sky api get -l '
                   '{log_path}'
                   f'{colorama.Style.RESET_ALL}')
 
@@ -123,6 +124,8 @@ def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
     expanded_home = os.path.expanduser('~')
     if log_path.startswith(expanded_home):
         log_path = '~' + log_path[len(expanded_home):]
+    log_path = log_path.removeprefix(constants.SKY_LOGS_DIRECTORY)
+    log_path = log_path.lstrip(os.path.sep)
     return _LOG_PATH_HINT.format(log_path=log_path)
 
 

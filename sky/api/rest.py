@@ -633,15 +633,24 @@ async def stream(
                 status_code=404, detail=f'Request {request_id} not found')
         log_path_to_stream = request_task.log_path
     else:
-        # Make sure the log path is under ~/sky_logs.
         assert log_path is not None, (request_id, log_path)
-        resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
-        if (not str(resolved_log_path).startswith(
-                os.path.expanduser(constants.SKY_LOGS_DIRECTORY)) and
-                str(resolved_log_path) != os.path.expanduser(
-                    constants.API_SERVER_LOGS)):
-            raise fastapi.HTTPException(
-                status_code=400, detail=f'Unauthorized log path: {log_path}')
+        if log_path == constants.API_SERVER_LOGS:
+            resolved_log_path = pathlib.Path(
+                constants.API_SERVER_LOGS).expanduser()
+        else:
+            # This should be a log path under ~/sky_logs.
+            resolved_logs_directory = pathlib.Path(
+                constants.SKY_LOGS_DIRECTORY).expanduser().resolve()
+            resolved_log_path = resolved_logs_directory.joinpath(
+                log_path).resolve()
+            # Make sure the log path is under ~/sky_logs. Prevents path
+            # gtraversal using ..
+            if os.path.commonpath([resolved_log_path, resolved_logs_directory
+                                  ]) != str(resolved_logs_directory):
+                raise fastapi.HTTPException(
+                    status_code=400,
+                    detail=f'Unauthorized log path: {log_path}')
+
         log_path_to_stream = resolved_log_path
 
     return fastapi.responses.StreamingResponse(
