@@ -396,6 +396,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                             _start_external_load_balancer,
                             load_balancer_log_file).run,
                         # TODO(tian): Let the user to customize the port.
+                        # TODO(tian): Or, default to port 80 (need root).
                         args=(service_name, lb_id, lb_cluster_name,
                               controller_external_addr,
                               constants.EXTERNAL_LB_PORT, lb_policy,
@@ -406,6 +407,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         if service_spec.external_load_balancers is not None:
             hosted_zone = service_spec.route53_hosted_zone
             if hosted_zone is not None:
+                # Wait for the LBs is ready, get the IPs and setup Route53.
                 while True:
                     if all(
                             _get_cluster_ip(lb_cluster_name) is not None

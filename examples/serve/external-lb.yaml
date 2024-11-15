@@ -1,4 +1,9 @@
 # SkyServe YAML to run multiple Load Balancers in different region.
+#
+# Usage:
+#   1. Register the hosted zone in Route53.
+#   2. Go to your DNS manager and setup name servers to Route53.
+#   3. `sky serve up examples/serve/external-lb.yaml`.
 
 name: multi-lb
 
