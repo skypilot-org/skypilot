@@ -16,6 +16,7 @@ from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.adaptors import cloudflare
 from sky.adaptors import common as adaptors_common
 from sky.dag import TaskData
 from sky.dag import TaskEdge
@@ -225,6 +226,8 @@ class Optimizer:
                 enabled_clouds = (
                     storage_lib.get_cached_enabled_storage_clouds_or_refresh(
                         raise_if_no_cloud_access=True))
+                if cloudflare.NAME in enabled_clouds:
+                    enabled_clouds.remove(cloudflare.NAME)
                 storage_node.set_resources({
                     resources_lib.Resources(
                         clouds.CLOUD_REGISTRY.from_str(cloud_name))
