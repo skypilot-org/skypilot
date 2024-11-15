@@ -465,6 +465,11 @@ def test_aws_with_ssh_proxy_command():
                 f'sky logs {name} 1 --status',
                 f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
                 f'sky logs {name} 2 --status',
+                # Start a small job to make sure the controller is created.
+                f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
+                # Wait other tests to create the job controller first, so that
+                # the job controller is not launched with proxy command.
+                'timeout 300s bash -c "until sky status sky-jobs-controller* | grep UP; do sleep 1; done"',
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
                 'sleep 300',
                 f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
@@ -976,7 +981,7 @@ def test_stale_job(generic_cloud: str):
             'sleep 100',  # Ensure this is large enough, else GCP leaks.
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -1007,7 +1012,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -1038,7 +1043,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -2663,7 +2668,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky launch -c {name} --cloud {generic_cloud} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 90',
-            f'sky exec {name} "(nvidia-smi | grep python) || '
+            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep python) || '
             # When run inside container/k8s, nvidia-smi cannot show process ids.
             # See https://github.com/NVIDIA/nvidia-docker/issues/179
             # To work around, we check if GPU utilization is greater than 0.
@@ -2671,7 +2676,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',
-            f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
+            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep \'No running process\') || '
             # Ensure Xorg is the only process running.
             '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
