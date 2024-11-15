@@ -47,6 +47,8 @@ class TaskEdge:
     source: 'task.Task'
     target: 'task.Task'
     data: Optional[TaskData] = None
+
+    # TODO(wenjie): Ensure that the region is not None
     best_storage: Optional[Tuple[StoreType, Optional[str]]] = None
 
     def with_data(self, source_path: str, target_path: str,
