@@ -293,6 +293,13 @@ def _get_cloud_dependencies_installation_commands(
                             'pip list | grep runpod > /dev/null 2>&1 || '
                             'pip install "runpod>=1.5.1" > /dev/null 2>&1')
             setup_clouds.append(str(cloud))
+        elif isinstance(cloud, clouds.OCI):
+            step_prefix = prefix_str.replace('<step>',
+                                             str(len(setup_clouds) + 1))
+            commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
+                            'pip list | grep oci > /dev/null 2>&1 || '
+                            'pip install oci > /dev/null 2>&1')
+            setup_clouds.append(str(cloud))
         if controller == Controllers.JOBS_CONTROLLER:
             if isinstance(cloud, clouds.IBM):
                 step_prefix = prefix_str.replace('<step>',
@@ -302,13 +309,6 @@ def _get_cloud_dependencies_installation_commands(
                     '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
                     'pip install ibm-cloud-sdk-core ibm-vpc '
                     'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
-                setup_clouds.append(str(cloud))
-            elif isinstance(cloud, clouds.OCI):
-                step_prefix = prefix_str.replace('<step>',
-                                                 str(len(setup_clouds) + 1))
-                commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
-                                'pip list | grep oci > /dev/null 2>&1 || '
-                                'pip install oci > /dev/null 2>&1')
                 setup_clouds.append(str(cloud))
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
