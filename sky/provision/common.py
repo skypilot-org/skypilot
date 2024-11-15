@@ -52,6 +52,8 @@ class ProvisionConfig:
     tags: Dict[str, str]
     # Whether or not to resume stopped instances.
     resume_stopped_nodes: bool
+    # Optional ports to open on launch of the cluster.
+    ports_to_open_on_launch: Optional[List[int]]
 
 
 # -------------------- output data model -------------------- #
@@ -129,7 +131,8 @@ class ClusterInfo:
         if self.head_instance_id is None:
             return None
         if self.head_instance_id not in self.instances:
-            raise ValueError('Head instance ID not in the cluster metadata.')
+            raise ValueError('Head instance ID not in the cluster metadata. '
+                             f'ClusterInfo: {self.__dict__}')
         return self.instances[self.head_instance_id][0]
 
     def get_worker_instances(self) -> List[InstanceInfo]:
@@ -203,8 +206,14 @@ class ClusterInfo:
         return ip_list
 
     def get_feasible_ips(self, force_internal_ips: bool = False) -> List[str]:
-        """Get external IPs if they exist, otherwise get internal ones."""
-        return self._get_ips(not self.has_external_ips() or force_internal_ips)
+        """Get internal or external IPs depends on the settings."""
+        if self.provider_config is not None:
+            use_internal_ips = self.provider_config.get('use_internal_ips',
+                                                        False)
+        else:
+            use_internal_ips = False
+        return self._get_ips(use_internal_ips or not self.has_external_ips() or
+                             force_internal_ips)
 
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""

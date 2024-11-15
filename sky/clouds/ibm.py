@@ -1,8 +1,7 @@
 """IBM Web Services."""
-import json
 import os
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -168,7 +167,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
@@ -184,7 +183,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        del cluster_name_on_cloud, dryrun  # Unused.
+        del cluster_name, dryrun  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
@@ -206,10 +205,8 @@ class IBM(clouds.Cloud):
             'IBM does not currently support spot instances in this framework'
 
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         instance_resources = _get_profile_resources(r.instance_type)
 
@@ -247,7 +244,7 @@ class IBM(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='ibm')
@@ -266,12 +263,15 @@ class IBM(clouds.Cloud):
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
-    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+    ) -> 'resources_utils.FeasibleResources':
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([resources],
+                                                     fuzzy_candidate_list, None)
 
         def _make(instance_list):
             resource_list = []
@@ -296,9 +296,10 @@ class IBM(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -312,8 +313,10 @@ class IBM(clouds.Cloud):
             zone=resources.zone,
             clouds='ibm')
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def get_default_image(cls, region) -> str:

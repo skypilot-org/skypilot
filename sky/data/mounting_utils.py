@@ -1,6 +1,7 @@
 """Helper functions for object store mounting in Sky Storage"""
 import os
 import random
+import shlex
 import textwrap
 from typing import Optional
 
@@ -22,6 +23,11 @@ RCLONE_VERSION = '1.67.0'
 FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
                              'sudo ln -s /bin/fusermount /bin/fusermount3 || '
                              'true')
+# https://github.com/Azure/azure-storage-fuse/releases
+BLOBFUSE2_VERSION = '2.2.0'
+_BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
+_BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
+                       '{storage_account_name}_{container_name}')
 
 
 def get_s3_mount_install_cmd() -> str:
@@ -54,6 +60,7 @@ def get_gcs_mount_install_cmd() -> str:
 
 def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
+
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
@@ -61,6 +68,59 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--rename-dir-limit {_RENAME_DIR_LIMIT} '
                  f'{bucket_name} {mount_path}')
+    return mount_cmd
+
+
+def get_az_mount_install_cmd() -> str:
+    """Returns a command to install AZ Container mount utility blobfuse2."""
+    install_cmd = ('sudo apt-get update; '
+                   'sudo apt-get install -y '
+                   '-o Dpkg::Options::="--force-confdef" '
+                   'fuse3 libfuse3-dev && '
+                   'wget -nc https://github.com/Azure/azure-storage-fuse'
+                   f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
+                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
+                   '-O /tmp/blobfuse2.deb && '
+                   'sudo dpkg --install /tmp/blobfuse2.deb && '
+                   f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
+
+    return install_cmd
+
+
+def get_az_mount_cmd(container_name: str,
+                     storage_account_name: str,
+                     mount_path: str,
+                     storage_account_key: Optional[str] = None) -> str:
+    """Returns a command to mount an AZ Container using blobfuse2.
+
+    Args:
+        container_name: Name of the mounting container.
+        storage_account_name: Name of the storage account the given container
+            belongs to.
+        mount_path: Path where the container will be mounting.
+        storage_account_key: Access key for the given storage account.
+
+    Returns:
+        str: Command used to mount AZ container with blobfuse2.
+    """
+    # Storage_account_key is set to None when mounting public container, and
+    # mounting public containers are not officially supported by blobfuse2 yet.
+    # Setting an empty SAS token value is a suggested workaround.
+    # https://github.com/Azure/azure-storage-fuse/issues/1338
+    if storage_account_key is None:
+        key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
+    else:
+        key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
+
+    cache_path = _BLOBFUSE_CACHE_DIR.format(
+        storage_account_name=storage_account_name,
+        container_name=container_name)
+    mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
+                 f'{key_env_var} '
+                 f'blobfuse2 {mount_path} --allow-other --no-symlinks '
+                 '-o umask=022 -o default_permissions '
+                 f'--tmp-path {cache_path} '
+                 f'--container-name {container_name}')
     return mount_cmd
 
 
@@ -145,10 +205,10 @@ def _get_mount_binary(mount_cmd: str) -> str:
     """Returns mounting binary in string given as the mount command.
 
     Args:
-        mount_cmd: str; command used to mount a cloud storage.
+        mount_cmd: Command used to mount a cloud storage.
 
     Returns:
-        str: name of the binary used to mount a cloud storage.
+        str: Name of the binary used to mount a cloud storage.
     """
     if 'goofys' in mount_cmd:
         return 'goofys'
@@ -184,7 +244,6 @@ def get_mounting_script(
     Returns:
         str: Mounting script as a str.
     """
-
     mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
@@ -260,23 +319,11 @@ def get_mounting_command(
     script = get_mounting_script(mount_path, mount_cmd, install_cmd,
                                  version_check_cmd)
 
-    # TODO(romilb): Get direct bash script to work like so:
-    # command = f'bash <<-\EOL' \
-    #           f'{script}' \
-    #           'EOL'
-
-    # TODO(romilb): This heredoc should have EOF after script, but it
-    #  fails with sky's ssh pipeline. Instead, we don't use EOF and use )
-    #  as the end of heredoc. This raises a warning (here-document delimited
-    #  by end-of-file) that can be safely ignored.
-
     # While these commands are run sequentially for each storage object,
     # we add random int to be on the safer side and avoid collisions.
     script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
-    first_line = r'(cat <<-\EOF > {}'.format(script_path)
-    command = (f'{first_line}'
-               f'{script}'
-               f') && chmod +x {script_path}'
-               f' && bash {script_path}'
-               f' && rm {script_path}')
+    command = (f'echo {shlex.quote(script)} > {script_path} && '
+               f'chmod +x {script_path} && '
+               f'bash {script_path} && '
+               f'rm {script_path}')
     return command

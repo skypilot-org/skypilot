@@ -1,13 +1,40 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+KUBE_CONTEXT=""
+KUBE_NAMESPACE=""
+
+# Parse flags
+while getopts ":c:n:" opt; do
+  case ${opt} in
+    c)
+      KUBE_CONTEXT="$OPTARG"
+      ;;
+    n)
+      KUBE_NAMESPACE="$OPTARG"
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Shift the processed options away so that $1 becomes the pod name
+shift $((OPTIND -1))
+
 # Check if pod name is passed as an argument
-if [ $# -eq 0 ]; then
-  echo "Usage: $0 <pod_name>" >&2
+if [ $# -lt 1 ]; then
+  echo "Usage: $0 <pod_name> [-c kube_context] [-n kube_namespace]" >&2
   exit 1
 fi
 
-POD_NAME="$1"  # The first argument is the name of the pod
+POD_NAME="$1"  # The first positional argument is the name of the pod
 
 # Checks if socat is installed
 if ! command -v socat > /dev/null; then
@@ -26,7 +53,16 @@ fi
 # This is preferred because of socket re-use issues in kubectl port-forward,
 # see - https://github.com/kubernetes/kubernetes/issues/74551#issuecomment-769185879
 KUBECTL_OUTPUT=$(mktemp)
-kubectl port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
+KUBECTL_ARGS=()
+
+if [ -n "$KUBE_CONTEXT" ]; then
+  KUBECTL_ARGS+=("--context=$KUBE_CONTEXT")
+fi
+if [ -n "$KUBE_NAMESPACE" ]; then
+  KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
+fi
+
+kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
 
 # Capture the PID for the backgrounded kubectl command
 K8S_PORT_FWD_PID=$!

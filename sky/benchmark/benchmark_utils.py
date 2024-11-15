@@ -20,6 +20,7 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
@@ -170,8 +171,13 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     # Select the bucket type.
     enabled_clouds = storage_lib.get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access=True)
-    # Already checked by raise_if_no_cloud_access=True.
-    assert enabled_clouds
+    # Sky Benchmark only supports S3 (see _download_remote_dir and
+    # _delete_remote_dir).
+    enabled_clouds = [
+        cloud for cloud in enabled_clouds if cloud in [str(clouds.AWS())]
+    ]
+    assert enabled_clouds, ('No enabled cloud storage found. Sky Benchmark '
+                            'requires GCP or AWS to store logs.')
     bucket_type = data.StoreType.from_cloud(enabled_clouds[0]).value
 
     # Create a benchmark bucket.
@@ -242,14 +248,8 @@ def _download_remote_dir(remote_dir: str, local_dir: str,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=True)
-    elif bucket_type == data.StoreType.GCS:
-        remote_dir = f'gs://{remote_dir}'
-        subprocess.run(['gsutil', '-m', 'cp', '-r', remote_dir, local_dir],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
     else:
-        raise RuntimeError('Azure Blob Storage is not supported yet.')
+        raise RuntimeError(f'{bucket_type} is not supported yet.')
 
 
 def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
@@ -260,14 +260,8 @@ def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL,
                        check=True)
-    elif bucket_type == data.StoreType.GCS:
-        remote_dir = f'gs://{remote_dir}'
-        subprocess.run(['gsutil', '-m', 'rm', '-r', remote_dir],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
     else:
-        raise RuntimeError('Azure Blob Storage is not supported yet.')
+        raise RuntimeError(f'{bucket_type} is not supported yet.')
 
 
 def _read_timestamp(path: str) -> float:
@@ -601,7 +595,8 @@ def update_benchmark_state(benchmark: str) -> None:
     remote_dir = os.path.join(bucket_name, benchmark)
     local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
     os.makedirs(local_dir, exist_ok=True)
-    with rich_utils.safe_status('[bold cyan]Downloading benchmark logs[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Downloading benchmark logs')):
         _download_remote_dir(remote_dir, local_dir, bucket_type)
 
     # Update the benchmark results in parallel.
@@ -610,9 +605,9 @@ def update_benchmark_state(benchmark: str) -> None:
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Processing {num_candidates} benchmark result{plural}[/]',
-        total=num_candidates)
+    task = progress.add_task(ux_utils.spinner_message(
+        f'Processing {num_candidates} benchmark result{plural}'),
+                             total=num_candidates)
 
     def _update_with_progress_bar(arg: Any) -> None:
         message = _update_benchmark_result(arg)

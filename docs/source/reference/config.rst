@@ -7,6 +7,10 @@ You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml
 
 Such configurations apply to all new clusters and do not affect existing clusters.
 
+.. tip::
+
+  Some config fields can be overridden on a per-task basis through the :code:`experimental.config_overrides` field. See :ref:`here <task-yaml-experimental>` for more details.
+
 Spec: ``~/.sky/config.yaml``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -83,10 +87,21 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
+  # Admin policy to be applied to all tasks. (optional).
+  #
+  # The policy class to be applied to all tasks, which can be used to validate
+  # and mutate user requests.
+  #
+  # This is useful for enforcing certain policies on all tasks, e.g.,
+  # add custom labels; enforce certain resource limits; etc.
+  #
+  # The policy class should implement the sky.AdminPolicy interface.
+  admin_policy: my_package.SkyPilotPolicyV1
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
-    # Tags to assign to all instances launched by SkyPilot (optional).
+    # Tags to assign to all instances and buckets created by SkyPilot (optional).
     #
     # Example use case: cost tracking by user/team/project.
     #
@@ -158,12 +173,65 @@ Available fields and semantics:
 
     # Security group (optional).
     #
-    # The name of the security group to use for all instances. If not specified,
+    # Security group name to use for AWS instances. If not specified,
     # SkyPilot will use the default name for the security group: sky-sg-<hash>
     # Note: please ensure the security group name specified exists in the
     # regions the instances are going to be launched or the AWS account has the
     # permission to create a security group.
+    #
+    # Some example use cases are shown below. All fields are optional.
+    # - <string>: apply the service account with the specified name to all instances.
+    #    Example:
+    #       security_group_name: my-security-group
+    # - <list of single-element dict>: A list of single-element dict mapping from the cluster name (pattern)
+    #   to the security group name to use. The matching of the cluster name is done in the same order
+    #   as the list.
+    #   NOTE: If none of the wildcard expressions in the dict match the cluster name, SkyPilot will use the default
+    #   security group name as mentioned above:  sky-sg-<hash>
+    #   To specify your default, use "*" as the wildcard expression.
+    #   Example:
+    #       security_group_name:
+    #         - my-cluster-name: my-security-group-1
+    #         - sky-serve-controller-*: my-security-group-2
+    #         - "*": my-default-security-group
     security_group_name: my-security-group
+
+    # Encrypted boot disk (optional).
+    #
+    # Set to true to encrypt the boot disk of all AWS instances launched by
+    # SkyPilot. This is useful for compliance with data protection regulations.
+    #
+    # Default: false.
+    disk_encrypted: false
+
+    # Reserved capacity (optional).
+    #
+    # Whether to prioritize capacity reservations (considered as 0 cost) in the
+    # optimizer.
+    #
+    # If you have capacity reservations in your AWS project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation within all regions and AWS will auto consume your reservations
+    # with instance match criteria to "open", and setting to false means
+    # optimizer uses regular, non-zero pricing in optimization (if by chance any
+    # matching reservation exists, AWS will still consume the reservation).
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from AWS when set to true.
+    #
+    # Default: false.
+    prioritize_reservations: false
+    #
+    # The targeted capacity reservations (CapacityReservationId) to be
+    # considered when provisioning clusters on AWS. SkyPilot will automatically
+    # prioritize this reserved capacity (considered as zero cost) if the
+    # requested resources matches the reservation.
+    #
+    # Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-reservations-launch.html
+    specific_reservations:
+      - cr-a1234567
+      - cr-b2345678
+
 
     # Identity to use for AWS instances (optional).
     #
@@ -245,6 +313,16 @@ Available fields and semantics:
     #
     # Default: false.
     use_internal_ips: true
+
+    # Should instances in a vpc where communicated with via internal IPs still
+    # have an external IP? (optional)
+    #
+    # Set to true to force VMs to be assigned an exteral IP even when vpc_name
+    # and use_internal_ips are set.
+    #
+    # Default: false
+    force_enable_external_ips: true
+
     # SSH proxy command (optional).
     #
     # Please refer to the aws.ssh_proxy_command section above for more details.
@@ -269,12 +347,15 @@ Available fields and semantics:
     # Setting this to true guarantees the optimizer will pick any matching
     # reservation and GCP will auto consume your reservation, and setting to
     # false means optimizer uses regular, non-zero pricing in optimization (if
-    # by chance any matching reservation is selected, GCP still auto consumes
-    # the reservation).
+    # by chance any matching reservation exists, GCP still auto consumes the
+    # reservation).
     #
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
     # to true.
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from GCP when set to true.
     #
     # Default: false.
     prioritize_reservations: false
@@ -312,7 +393,7 @@ Available fields and semantics:
       #
       # Default: 900
       provision_timeout: 900
-      
+
 
     # Identity to use for all GCP instances (optional).
     #
@@ -337,6 +418,33 @@ Available fields and semantics:
     #
     # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
+
+    # Enable gVNIC (optional).
+    #
+    # Set to true to use gVNIC on GCP instances. gVNIC offers higher performance
+    # for multi-node clusters, but costs more.
+    # Reference: https://cloud.google.com/compute/docs/networking/using-gvnic
+    #
+    # Default: false.
+    enable_gvnic: false
+
+  # Advanced Azure configurations (optional).
+  # Apply to all new instances but not existing ones.
+  azure:
+    # By default, SkyPilot creates a unique resource group for each VM when
+    # launched. If specified, all VMs will be launched within the provided
+    # resource group. Additionally, controllers for serve and managed jobs will
+    # be created in this resource group. Note: This setting only applies to VMs
+    # and does not affect storage accounts or containers.
+    resource_group_vm: user-resource-group-name
+    # Specify an existing Azure storage account for SkyPilot-managed containers.
+    # If not set, SkyPilot will use its default naming convention to create and
+    # use the storage account unless container endpoint URI is used as source.
+    # Note: SkyPilot cannot create new storage accounts with custom names; it
+    # can only use existing ones or create accounts with its default naming
+    # scheme.
+    # Reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview
+    storage_account: user-storage-account-name
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
@@ -401,6 +509,19 @@ Available fields and semantics:
     #
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
+
+    # Allowed context names to use for Kubernetes clusters (optional).
+    #
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
+    #
+    # If not specified, only the current active context is used for launching
+    # new clusters.
+    allowed_contexts:
+      - context1
+      - context2
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #

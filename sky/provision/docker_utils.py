@@ -12,9 +12,6 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
-DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
-                                'the Docker daemon socket')
-
 # Configure environment variables. A docker image can have environment variables
 # set in the Dockerfile with `ENV``. We need to export these variables to the
 # shell environment, so that our ssh session can access them.
@@ -23,8 +20,15 @@ SETUP_ENV_VARS_CMD = (
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
     'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
     '~/container_env_var.sh && '
-    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh'
+    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
 )
+
+# Docker daemon may not be ready when the machine is firstly started. The error
+# message starts with the following string. We should wait for a while and retry
+# the command.
+DOCKER_PERMISSION_DENIED_STR = ('permission denied while trying to connect to '
+                                'the Docker daemon socket')
+_DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS = 30
 
 
 @dataclasses.dataclass
@@ -106,8 +110,8 @@ def docker_start_cmds(
         '--cap-add=SYS_ADMIN',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
+        '--entrypoint=/bin/bash',
         image,
-        'bash',
     ]
     return ' '.join(docker_run)
 
@@ -140,7 +144,8 @@ class DockerInitializer:
              cmd,
              run_env='host',
              wait_for_docker_daemon: bool = False,
-             separate_stderr: bool = False) -> str:
+             separate_stderr: bool = False,
+             log_err_when_fail: bool = True) -> str:
 
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
@@ -153,8 +158,7 @@ class DockerInitializer:
                    f' {shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
-        cnt = 0
-        retry = 3
+        start = time.time()
         while True:
             rc, stdout, stderr = self.runner.run(
                 cmd,
@@ -162,24 +166,30 @@ class DockerInitializer:
                 stream_logs=False,
                 separate_stderr=separate_stderr,
                 log_path=self.log_path)
-            if (not wait_for_docker_daemon or
-                    DOCKER_PERMISSION_DENIED_STR not in stdout + stderr):
-                break
-
-            cnt += 1
-            if cnt > retry:
-                break
-            logger.info(
-                'Failed to run docker command, retrying in 10 seconds... '
-                f'({cnt}/{retry})')
-            time.sleep(10)
+            if (DOCKER_PERMISSION_DENIED_STR in stdout + stderr and
+                    wait_for_docker_daemon):
+                if time.time() - start > _DOCKER_SOCKET_WAIT_TIMEOUT_SECONDS:
+                    if rc == 0:
+                        # Set returncode to 1 if failed to connect to docker
+                        # daemon after timeout.
+                        rc = 1
+                    break
+                # Close the cached connection to make the permission update of
+                # ssh user take effect, e.g. usermod -aG docker $USER, called
+                # by cloud-init of Azure.
+                self.runner.close_cached_connection()
+                logger.info('Failed to connect to docker daemon. It might be '
+                            'initializing, retrying in 5 seconds...')
+                time.sleep(5)
+                continue
+            break
         subprocess_utils.handle_returncode(
             rc,
             cmd,
             error_msg='Failed to run docker setup commands.',
             stderr=stdout + stderr,
             # Print out the error message if the command failed.
-            stream_logs=True)
+            stream_logs=log_err_when_fail)
         return stdout.strip()
 
     def initialize(self) -> str:
@@ -243,12 +253,13 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
-                '[ -f /etc/docker/daemon.json ] || '
+                '{ which jq || sudo apt update && sudo apt install -y jq; } && '
+                '{ [ -f /etc/docker/daemon.json ] || '
                 'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
-                'sudo systemctl restart docker')
+                'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
@@ -325,7 +336,11 @@ class DockerInitializer:
 
     def _check_docker_installed(self):
         no_exist = 'NoExist'
+        # SkyPilot: Add the current user to the docker group first (if needed),
+        # before checking if docker is installed to avoid permission issues.
         cleaned_output = self._run(
+            'id -nG $USER | grep -qw docker || '
+            'sudo usermod -aG docker $USER > /dev/null 2>&1;'
             f'command -v {self.docker_cmd} || echo {no_exist!r}')
         if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
@@ -370,8 +385,8 @@ class DockerInitializer:
                                     'info -f "{{.Runtimes}}"'))
         if 'nvidia-container-runtime' in runtime_output:
             try:
-                self._run('nvidia-smi')
-                return run_options + ['--runtime=nvidia']
+                self._run('nvidia-smi', log_err_when_fail=False)
+                return run_options + ['--runtime=nvidia', '--gpus all']
             except Exception as e:  # pylint: disable=broad-except
                 logger.debug(
                     'Nvidia Container Runtime is present in the docker image'
@@ -414,8 +429,8 @@ class DockerInitializer:
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self._run(check_docker_running_cmd(self.container_name,
-                                                     self.docker_cmd),
-                            wait_for_docker_daemon=True))
-        return 'false' in output.lower(
-        ) and 'no such object' not in output.lower()
+        output = self._run(check_docker_running_cmd(self.container_name,
+                                                    self.docker_cmd),
+                           wait_for_docker_daemon=True)
+        return ('false' in output.lower() and
+                'no such object' not in output.lower())

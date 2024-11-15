@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
@@ -61,7 +62,9 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     handler: Type[
         instance_utils.GCPInstance] = instance_utils.GCPComputeInstance
@@ -126,8 +129,8 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
     for inst in instances:
         labels = inst.get('labels', {})
-        if (labels.get(constants.TAG_RAY_NODE_KIND) == 'head' or
-                labels.get(constants.TAG_SKYPILOT_HEAD_NODE) == '1'):
+        if (labels.get(provision_constants.TAG_RAY_NODE_KIND) == 'head' or
+                labels.get(provision_constants.TAG_SKYPILOT_HEAD_NODE) == '1'):
             head_instance_id = inst['name']
             break
     return head_instance_id
@@ -160,7 +163,9 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
-    filter_labels = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    filter_labels = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     # wait until all stopping instances are stopped/terminated
     while True:
@@ -393,7 +398,9 @@ def get_cluster_info(
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -421,7 +428,7 @@ def get_cluster_info(
         project_id,
         zone,
         {
-            **label_filters, constants.TAG_RAY_NODE_KIND: 'head'
+            **label_filters, provision_constants.TAG_RAY_NODE_KIND: 'head'
         },
         lambda h: [h.RUNNING_STATE],
     )
@@ -447,14 +454,16 @@ def stop_instances(
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
 
     tpu_node = provider_config.get('tpu_node')
     if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
     if worker_only:
-        label_filters[constants.TAG_RAY_NODE_KIND] = 'worker'
+        label_filters[provision_constants.TAG_RAY_NODE_KIND] = 'worker'
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -523,9 +532,11 @@ def terminate_instances(
             project_id, zone, cluster_name_on_cloud)
         return
 
-    label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
     if worker_only:
-        label_filters[constants.TAG_RAY_NODE_KIND] = 'worker'
+        label_filters[provision_constants.TAG_RAY_NODE_KIND] = 'worker'
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -568,7 +579,9 @@ def open_ports(
     project_id = provider_config['project_id']
     firewall_rule_name = provider_config['firewall_rule']
 
-    label_filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    label_filters = {
+        provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
+    }
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance,
         instance_utils.GCPTPUVMInstance,
@@ -619,13 +632,6 @@ def cleanup_ports(
     del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     project_id = provider_config['project_id']
-    if 'ports' in provider_config:
-        # Backward compatibility for old provider config.
-        # TODO(tian): remove this after 2 minor releases, 0.6.0.
-        for port in provider_config['ports']:
-            firewall_rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
-            instance_utils.GCPComputeInstance.delete_firewall_rule(
-                project_id, firewall_rule_name)
     if 'firewall_rule' in provider_config:
         firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(

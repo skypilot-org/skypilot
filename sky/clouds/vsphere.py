@@ -1,8 +1,7 @@
 """Vsphere cloud implementation."""
-import json
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
@@ -152,7 +151,7 @@ class Vsphere(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds=_CLOUD_VSPHERE)
 
@@ -171,21 +170,19 @@ class Vsphere(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name_on_cloud: str,
+        cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
-        del cluster_name_on_cloud, dryrun  # unused
+        del cluster_name, dryrun  # unused
         assert zones is not None, (region, zones)
         zone_names = [zone.name for zone in zones]
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': resources.instance_type,
@@ -197,11 +194,13 @@ class Vsphere(clouds.Cloud):
     def _get_feasible_launchable_resources(
             self, resources: 'resources_lib.Resources'):
         if resources.use_spot:
-            return ([], [])
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
-            return ([resources], [])
+            return resources_utils.FeasibleResources([resources], [], None)
 
         def _make(instance_list):
             resource_list = []
@@ -226,9 +225,10 @@ class Vsphere(clouds.Cloud):
                 disk_tier=resources.disk_tier,
             )
             if default_instance_type is None:
-                return ([], [])
+                return resources_utils.FeasibleResources([], [], None)
             else:
-                return (_make([default_instance_type]), [])
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -246,8 +246,10 @@ class Vsphere(clouds.Cloud):
             clouds=_CLOUD_VSPHERE,
         )
         if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -303,7 +305,7 @@ class Vsphere(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None

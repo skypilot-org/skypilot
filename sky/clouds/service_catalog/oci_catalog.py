@@ -7,14 +7,17 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  - Hysun He (hysun.he@oracle.com) @ Jun, 2023: Reduce retry times by
    excluding those unsubscribed regions.
+ - Hysun He (hysun.he@oracle.com) @ Oct 14, 2024: Bug fix for validation
+   of the Marketplace images
 """
 
 import logging
 import threading
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.adaptors import oci as oci_adaptor
+from sky.clouds import OCI
 from sky.clouds.service_catalog import common
 from sky.clouds.utils import oci_utils
 from sky.utils import resources_utils
@@ -63,7 +66,7 @@ def _get_df() -> 'pd.DataFrame':
             logger.debug(f'It is OK goes here when testing: {str(e)}')
             subscribed_regions = []
 
-        except oci_adaptor.service_exception() as e:
+        except oci_adaptor.oci.exceptions.ServiceError as e:
             # Should never expect going here. However, we still catch
             # it so that if any OCI call failed, the program can still
             # proceed with try-and-error way.
@@ -102,7 +105,6 @@ def get_default_instance_type(
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
-    del disk_tier  # unused
     if cpus is None:
         cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
 
@@ -111,12 +113,17 @@ def get_default_instance_type(
     else:
         memory_gb_or_ratio = memory
 
+    def _filter_disk_type(instance_type: str) -> bool:
+        valid, _ = OCI.check_disk_tier(instance_type, disk_tier)
+        return valid
+
     instance_type_prefix = tuple(
         f'{family}' for family in oci_utils.oci_config.DEFAULT_INSTANCE_FAMILY)
 
     df = _get_df()
     df = df[df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
 
     logger.debug(f'# get_default_instance_type: {df}')
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
@@ -124,7 +131,7 @@ def get_default_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(
         _get_df(), instance_type)
 
@@ -201,4 +208,24 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
+    # Oct.14, 2024 by Hysun He: Marketplace images are region neutral, so don't
+    # check with region for the Marketplace images.
+    df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
+    if df.empty:
+        return False
+    app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
+    if app_catalog_listing_id:
+        return True
     return common.is_image_tag_valid_impl(_image_df, tag, region)
+
+
+def get_image_os_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    del region
+    df = _image_df[_image_df['Tag'].str.fullmatch(tag)]
+    if df.empty:
+        os_type = oci_utils.oci_config.get_default_image_os()
+    else:
+        os_type = df['OS'].iloc[0]
+
+    logger.debug(f'Operation system for the image {tag} is {os_type}')
+    return os_type

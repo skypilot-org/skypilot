@@ -3,7 +3,7 @@
 # Runs a task that uses cloud buckets for uploading and accessing files.
 #
 # Usage:
-#   sky spot launch -c spot-storage examples/managed_job_with_storage.yaml
+#   sky jobs launch -c spot-storage examples/managed_job_with_storage.yaml
 #   sky down spot-storage
 
 resources:
@@ -26,8 +26,8 @@ file_mounts:
     name: sky-output-bucket
     mode: MOUNT
 
-  /imagenet-image:
-    source: s3://sky-imagenet-data
+  /public-bucket:
+    source: s3://fah-public-data-covid19-cryptic-pockets
   
   # File mounts for folder
   /tmp/workdir: ~/tmp-workdir
@@ -49,7 +49,7 @@ run: |
   set -ex
   ls ~/sky_workdir/managed_job_with_storage.yaml
   ls ~/bucket_workdir/managed_job_with_storage.yaml
-  ls -l /imagenet-image/datasets
+  ls -l /public-bucket
   
 
   mkdir -p /data/logs

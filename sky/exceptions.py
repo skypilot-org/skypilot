@@ -1,7 +1,9 @@
 """Exceptions."""
 import enum
 import typing
-from typing import List, Optional
+from typing import List, Optional, Sequence
+
+from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
     from sky import status_lib
@@ -61,12 +63,12 @@ class ProvisionPrechecksError(Exception):
     the error will be raised.
 
     Args:
-        reasons: (List[Exception]) The reasons why the prechecks failed.
+        reasons: (Sequence[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, reasons: List[Exception]) -> None:
+    def __init__(self, reasons: Sequence[Exception]) -> None:
         super().__init__()
-        self.reasons = list(reasons)
+        self.reasons = reasons
 
 
 class ManagedJobReachedMaxRetriesError(Exception):
@@ -100,9 +102,14 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
+
         if not command:
             message = error_msg
         else:
+            if (len(command) > 100 and
+                    not env_options.Options.SHOW_DEBUG_INFO.get()):
+                # Chunck the command to avoid overflow.
+                command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}')
         super().__init__(message)
@@ -187,6 +194,12 @@ class StorageModeError(StorageSpecError):
 class StorageExternalDeletionError(StorageBucketGetError):
     # Error raised when the bucket is attempted to be fetched while it has been
     # deleted externally.
+    pass
+
+
+class NonExistentStorageAccountError(StorageExternalDeletionError):
+    # Error raise when storage account provided through config.yaml or read
+    # from store handle(local db) does not exist.
     pass
 
 
@@ -276,3 +289,13 @@ class ServeUserTerminatedError(Exception):
 
 class PortDoesNotExistError(Exception):
     """Raised when the port does not exist."""
+
+
+class UserRequestRejectedByPolicy(Exception):
+    """Raised when a user request is rejected by an admin policy."""
+    pass
+
+
+class NoClusterLaunchedError(Exception):
+    """No cluster launched, so cleanup can be skipped during failover."""
+    pass

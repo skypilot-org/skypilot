@@ -17,6 +17,7 @@ import cachetools
 from sky import sky_logging
 from sky import skypilot_config
 from sky.provision.gcp import constants
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -35,7 +36,10 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu(resources):
         return False
-    assert resources is not None
+    assert (resources is not None and len(resources.accelerators) == 1)
+    acc, _ = list(resources.accelerators.items())[0]
+    if kubernetes_utils.is_tpu_on_gke(acc):
+        return False
     if resources.accelerator_args is None:
         return True
     return resources.accelerator_args.get('tpu_vm', True)
@@ -47,14 +51,6 @@ def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
     assert resources is not None
     acc, _ = list(resources.accelerators.items())[0]
     return not acc.endswith('-8')
-
-
-def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:
-    if resources is None or not is_tpu(resources):
-        raise ValueError('resources must be a valid TPU resource.')
-    acc, _ = list(resources.accelerators.items())[0]
-    num_tpu_devices = int(int(acc.split('-')[2]) / 8)
-    return num_tpu_devices
 
 
 @dataclasses.dataclass

@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3:23.3.1-0
+FROM --platform=linux/amd64 continuumio/miniconda3:23.3.1-0
 
 # TODO(romilb): Investigate if this image can be consolidated with the skypilot
 #  client image (`Dockerfile`)
@@ -33,21 +33,15 @@ ENV HOME /home/sky
 # Set current working directory
 WORKDIR /home/sky
 
-# Install SkyPilot pip dependencies preemptively to speed up provisioning time
-RUN conda init && \
-    pip install wheel Click colorama cryptography jinja2 jsonschema networkx  \
-    oauth2client pandas pendulum PrettyTable rich tabulate filelock packaging  \
-    'protobuf<4.0.0' pulp pycryptodome==3.12.0 docker kubernetes==28.1.0  \
-    grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
+# Install skypilot dependencies
+RUN conda init && export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    python3 -m venv ~/skypilot-runtime && \
+    PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
+    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
     curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# Add /home/sky/.local/bin/ to PATH
-RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
-
-# Copy SkyPilot code base. This is required for the ssh jump pod to find the
-# lifecycle management scripts
-COPY --chown=sky . /skypilot/sky/
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

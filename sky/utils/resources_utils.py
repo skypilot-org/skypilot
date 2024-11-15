@@ -1,14 +1,20 @@
 """Utility functions for resources."""
+import dataclasses
 import enum
 import itertools
+import json
+import math
 import re
 import typing
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
+from sky import skypilot_config
+from sky.clouds import cloud_registry
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import resources as resources_lib
 
 _PORT_RANGE_HINT_MSG = ('Invalid port range {}. Please use the format '
                         '"from-to", in which from <= to. e.g. "1-3".')
@@ -22,6 +28,7 @@ class DiskTier(enum.Enum):
     LOW = 'low'
     MEDIUM = 'medium'
     HIGH = 'high'
+    ULTRA = 'ultra'
     BEST = 'best'
 
     @classmethod
@@ -41,6 +48,18 @@ class DiskTier(enum.Enum):
     def __le__(self, other: 'DiskTier') -> bool:
         types = list(DiskTier)
         return types.index(self) <= types.index(other)
+
+
+@dataclasses.dataclass
+class ClusterName:
+    display_name: str
+    name_on_cloud: str
+
+    def __repr__(self) -> str:
+        return repr(self.display_name)
+
+    def __str__(self) -> str:
+        return self.display_name
 
 
 def check_port_str(port: str) -> None:
@@ -144,3 +163,52 @@ def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                            launched_resource_str)
             return f'{handle.launched_nodes}x {launched_resource_str}'
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
+
+
+def make_ray_custom_resources_str(
+        resource_dict: Optional[Dict[str, Union[int, float]]]) -> Optional[str]:
+    """Convert resources to Ray custom resources format."""
+    if resource_dict is None:
+        return None
+    # Ray does not allow fractional resources, so we need to ceil the values.
+    ceiled_dict = {k: math.ceil(v) for k, v in resource_dict.items()}
+    return json.dumps(ceiled_dict, separators=(',', ':'))
+
+
+@dataclasses.dataclass
+class FeasibleResources:
+    """Feasible resources returned by cloud.
+
+    Used to represent a collection of feasible resources returned by cloud,
+    any fuzzy candidates, and optionally a string hint if no feasible resources
+    are found.
+
+    Fuzzy candidates example: when the requested GPU is A100:1 but is not
+    available in a cloud/region, the fuzzy candidates are results of a fuzzy
+    search in the catalog that are offered in the location. E.g.,
+    ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
+    """
+    resources_list: List['resources_lib.Resources']
+    fuzzy_candidate_list: List[str]
+    hint: Optional[str]
+
+
+def need_to_query_reservations() -> bool:
+    """Checks if we need to query reservations from cloud APIs.
+
+    We need to query reservations if:
+    - The cloud has specific reservations.
+    - The cloud prioritizes reservations over on-demand instances.
+
+    This is useful to skip the potentially expensive reservation query for
+    clouds that do not use reservations.
+    """
+    for cloud_str in cloud_registry.CLOUD_REGISTRY.keys():
+        cloud_specific_reservations = skypilot_config.get_nested(
+            (cloud_str, 'specific_reservations'), None)
+        cloud_prioritize_reservations = skypilot_config.get_nested(
+            (cloud_str, 'prioritize_reservations'), False)
+        if (cloud_specific_reservations is not None or
+                cloud_prioritize_reservations):
+            return True
+    return False

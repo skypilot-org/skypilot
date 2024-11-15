@@ -1,0 +1,4 @@
+gcp:
+  vpc_name: default
+  use_internal_ips: true
+  force_enable_external_ips: true

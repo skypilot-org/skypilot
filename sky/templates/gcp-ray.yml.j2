@@ -12,9 +12,6 @@ docker:
   container_name: {{docker_container_name}}
   run_options:
     - --ulimit nofile=1048576:1048576
-    {%- if gpu is not none %}
-      --gpus all
-    {%- endif %}
     {%- for run_option in docker_run_options %}
     - {{run_option}}
     {%- endfor %}
@@ -32,7 +29,7 @@ docker:
 provider:
   # We use a custom node provider for GCP to create, stop and reuse instances.
   type: external  # type: gcp
-  module: sky.skylet.providers.gcp.GCPNodeProvider
+  module: sky.provision.gcp
   region: {{region}}
   availability_zone: {{zones}}
   # Keep (otherwise cannot reuse when re-provisioning).
@@ -50,6 +47,7 @@ provider:
   firewall_rule: {{firewall_rule}}
 {% endif %}
   use_internal_ips: {{use_internal_ips}}
+  force_enable_external_ips: {{force_enable_external_ips}}
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
@@ -66,6 +64,9 @@ provider:
   # leakage.
   disable_launch_config_check: true
   use_managed_instance_group: {{ gcp_use_managed_instance_group }}
+{%- if enable_gvnic %}
+  enable_gvnic: {{ enable_gvnic }}
+{%- endif %}
 
 auth:
   ssh_user: gcpuser
@@ -87,7 +88,9 @@ available_node_types:
       {%- if gcp_use_managed_instance_group %}
       managed-instance-group:
         run_duration: {{ run_duration }}
+        {%- if provision_timeout is defined and provision_timeout is not none %}
         provision_timeout: {{ provision_timeout }}
+        {%- endif %}
       {%- endif %}
       {%- if specific_reservations %}
       reservationAffinity:
@@ -124,6 +127,9 @@ available_node_types:
             sourceImage: {{image_id}}
           {%- endif %}
             diskType: zones/{{zones}}/diskTypes/{{disk_tier}}
+          {%- if disk_iops %}
+            provisionedIops: {{disk_iops}}
+          {%- endif %}
   {%- if gpu is not none %}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}

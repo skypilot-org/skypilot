@@ -4,7 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for Lambda.
 """
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
@@ -13,7 +13,12 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('lambda/vms.csv')
+# Keep it synced with the frequency in
+# skypilot-catalog/.github/workflows/update-lambda-catalog.yml
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('lambda/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 # Number of vCPUS for gpu_1x_a10
 _DEFAULT_NUM_VCPUS = 30
@@ -67,7 +72,7 @@ def get_default_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 

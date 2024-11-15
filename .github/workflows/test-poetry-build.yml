@@ -10,6 +10,8 @@ on:
     branches:
       - master
       - 'releases/**'
+  merge_group:
+
 jobs:
   poetry-build-test:
     runs-on: ubuntu-latest

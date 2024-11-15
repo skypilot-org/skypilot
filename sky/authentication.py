@@ -19,7 +19,6 @@ using SkyPilot, e.g., the node is used as a jobs controller. (Lambda cloud
 is an exception, due to the limitation of the cloud provider. See the
 comments in setup_lambda_authentication)
 """
-import base64
 import copy
 import functools
 import os
@@ -44,9 +43,9 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
-from sky.clouds.utils import lambda_utils
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
@@ -270,36 +269,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
-# In Azure, cloud-init script must be encoded in base64. See
-# https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
-# for more information. Here we decode it and replace the ssh user
-# and public key content, then encode it back.
-def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read().strip()
-    for node_type in config['available_node_types']:
-        node_config = config['available_node_types'][node_type]['node_config']
-        cloud_init = (
-            node_config['azure_arm_parameters']['cloudInitSetupCommands'])
-        cloud_init = base64.b64decode(cloud_init).decode('utf-8')
-        cloud_init = cloud_init.replace('skypilot:ssh_user',
-                                        config['auth']['ssh_user'])
-        cloud_init = cloud_init.replace('skypilot:ssh_public_key_content',
-                                        public_key)
-        cloud_init = base64.b64encode(
-            cloud_init.encode('utf-8')).decode('utf-8')
-        node_config['azure_arm_parameters']['cloudInitSetupCommands'] = (
-            cloud_init)
-    config_str = common_utils.dump_yaml_str(config)
-    config_str = config_str.replace('skypilot:ssh_user',
-                                    config['auth']['ssh_user'])
-    config_str = config_str.replace('skypilot:ssh_public_key_content',
-                                    public_key)
-    config = yaml.safe_load(config_str)
-    return config
-
-
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     get_or_generate_keys()
@@ -409,7 +378,16 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    context = config['provider'].get(
+        'context', kubernetes_utils.get_current_kube_config_context_name())
+    if context == kubernetes_utils.IN_CLUSTER_REGION:
+        # If the context is set to IN_CLUSTER_REGION, we are running in a pod
+        # with in-cluster configuration. We need to set the context to None
+        # to use the mounted service account.
+        context = None
+    namespace = config['provider'].get(
+        'namespace',
+        kubernetes_utils.get_kube_config_context_namespace(context))
     k8s = kubernetes.kubernetes
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read()
@@ -430,14 +408,14 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         secret = k8s.client.V1Secret(
             metadata=k8s.client.V1ObjectMeta(**secret_metadata),
             string_data={secret_field_name: public_key})
-    if kubernetes_utils.check_secret_exists(secret_name, namespace):
+    if kubernetes_utils.check_secret_exists(secret_name, namespace, context):
         logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
-        kubernetes.core_api().patch_namespaced_secret(secret_name, namespace,
-                                                      secret)
+        kubernetes.core_api(context).patch_namespaced_secret(
+            secret_name, namespace, secret)
     else:
         logger.debug(
             f'Key {secret_name} does not exist in the cluster, creating it...')
-        kubernetes.core_api().create_namespaced_secret(namespace, secret)
+        kubernetes.core_api(context).create_namespaced_secret(namespace, secret)
 
     private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
@@ -446,12 +424,13 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # Setup service for SSH jump pod. We create the SSH jump service here
         # because we need to know the service IP address and port to set the
         # ssh_proxy_command in the autoscaler config.
-        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace,
+        kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, context,
                                             service_type)
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_jump_name,
             nodeport_mode,
             private_key_path=private_key_path,
+            context=context,
             namespace=namespace)
     elif network_mode == port_forward_mode:
         # Using `kubectl port-forward` creates a direct tunnel to the pod and
@@ -467,7 +446,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   on GKE.
         ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-            ssh_target, port_forward_mode, private_key_path=private_key_path)
+            ssh_target,
+            port_forward_mode,
+            private_key_path=private_key_path,
+            context=context,
+            namespace=namespace)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')
