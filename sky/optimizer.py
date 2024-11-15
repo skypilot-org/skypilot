@@ -19,6 +19,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.dag import TaskData
 from sky.dag import TaskEdge
+from sky.data import storage as storage_lib
 from sky.data import StoreType
 from sky.utils import env_options
 from sky.utils import log_utils
@@ -178,8 +179,7 @@ class Optimizer:
     def _add_storage_nodes_for_data_transfer(
         dag: 'dag_lib.Dag'
     ) -> List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, TaskData]]:
-        """
-        Adds special nodes for storage buckets between nodes connected by
+        """Adds special nodes for storage buckets between nodes connected by
         with_data edges.
 
         Example:
@@ -194,7 +194,7 @@ class Optimizer:
 
         Algorithm:
         1. Iterate through all edges in the DAG.
-        2. For each edge with data, create a dummy storage node and set its 
+        2. For each edge with data, create a dummy storage node and set its
         resources to include all possible cloud storage options.
         3. Add the storage node between the source and destination nodes.
         4. Remove the original edge and add new edges connecting the source to
@@ -222,11 +222,13 @@ class Optimizer:
                 storage_node = task_lib.Task(
                     f'{src.name}_to_{dst.name}_storage')
                 data = edge_data['edge'].data
+                enabled_clouds = (
+                    storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+                        raise_if_no_cloud_access=True))
                 storage_node.set_resources({
-                    resources_lib.Resources(clouds.AWS()),
-                    resources_lib.Resources(clouds.GCP()),
-                    resources_lib.Resources(clouds.Azure()),
-                    resources_lib.Resources(clouds.IBM())
+                    resources_lib.Resources(
+                        clouds.CLOUD_REGISTRY.from_str(cloud_name))
+                    for cloud_name in enabled_clouds
                 })
 
                 # The time estimator is set to 0 because we use instances to
@@ -315,9 +317,9 @@ class Optimizer:
         src_cloud = parent_resources.cloud
         assert isinstance(edge_data['edge'], TaskEdge)
         task_edge = edge_data['edge']
-        n_gigabytes = 0
+        n_gigabytes = 0.0
         if task_edge.data is not None:
-            n_gigabytes = task_edge.data.size_gb
+            n_gigabytes = float(task_edge.data.size_gb)
         dst_cloud = resources.cloud
         return src_cloud, dst_cloud, n_gigabytes
 
