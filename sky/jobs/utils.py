@@ -15,6 +15,7 @@ import textwrap
 import time
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+import uuid
 
 import colorama
 import filelock
@@ -25,6 +26,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.data.storage import Storage
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants
@@ -704,9 +706,16 @@ def sync_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
                                         edge.best_storage)
         if best_storage is not None:
             assert data is not None
-            new_storage_mounts_src = {data.source_path: best_storage}
+            bucket_name_tmp = (
+                f'bucket-for-{src.name}-to-{tgt.name}{uuid.uuid4()}')
+            bucket_name = common_utils.make_cluster_name_on_cloud(
+                bucket_name_tmp, max_length=63)
+            storage_type, region = best_storage
+            new_storage = Storage(name=bucket_name)
+            new_storage.add_store(storage_type, region)
+            new_storage_mounts_src = {data.source_path: new_storage}
             src.update_storage_mounts(new_storage_mounts_src)
-            new_storage_mounts_tgt = {data.target_path: best_storage}
+            new_storage_mounts_tgt = {data.target_path: new_storage}
             tgt.update_storage_mounts(new_storage_mounts_tgt)
     return dag
 

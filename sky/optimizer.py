@@ -5,7 +5,6 @@ import enum
 import json
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
-import uuid
 
 import colorama
 import numpy as np
@@ -20,8 +19,6 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.dag import TaskData
 from sky.dag import TaskEdge
-from sky.data import Storage
-from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -174,19 +171,13 @@ class Optimizer:
                     'IBM': 'IBM'
                 }
 
-                bucket_name_tmp = (
-                    f'bucket-for-{src.name}-to-{dst.name}{uuid.uuid4()}')
-                bucket_name = common_utils.make_cluster_name_on_cloud(
-                    bucket_name_tmp, max_length=63)
-                best_storage = Storage(name=bucket_name)
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
                     cloud_name = str(storage_node.best_resources.cloud)
                     if cloud_name in instance_to_storage:
-                        best_storage.add_store(
+                        task_edge.best_storage = (
                             instance_to_storage[cloud_name],
                             storage_node.best_resources.region)
-                        task_edge.best_storage = best_storage
                     else:
                         task_edge.best_storage = None
                 else:
@@ -770,7 +761,6 @@ class Optimizer:
 
     @staticmethod
     def _print_egress_plan(graph, plan, minimize_cost):
-        logger.info('Print egress plan')
         message_data = []
         for parent, child, edge_data in graph.edges(data=True):
             src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(

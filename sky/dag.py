@@ -3,11 +3,10 @@ import dataclasses
 import tempfile
 import threading
 import typing
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import networkx as nx
 
-from sky.data.storage import Storage
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -44,7 +43,7 @@ class TaskEdge:
     source: 'task.Task'
     target: 'task.Task'
     data: Optional[TaskData] = None
-    best_storage: Optional[Storage] = None
+    best_storage: Optional[Tuple[str, Optional[str]]] = None
 
     def with_data(self, source_path: str, target_path: str,
                   size_gb: float) -> 'TaskEdge':

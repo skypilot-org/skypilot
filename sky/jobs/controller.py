@@ -442,6 +442,7 @@ class JobsController:
         # display and its results are not propagated here. Also cluster states
         # may change.
         sky.optimize(self._dag)
+        managed_job_utils.sync_storage_mounts_for_data_transfer(self._dag)
 
         all_tasks_completed = lambda: self._num_tasks == len(self._task_status)
         # TODO(andy): Serve has a logic to prevent from too many services
