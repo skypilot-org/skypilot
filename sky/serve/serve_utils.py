@@ -539,6 +539,10 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    # TODO(tian): Add a field in service record to indicate whether it has
+    # external load balancer or not. And change this timeout accordingly.
+    # timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS
+    timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB
     while True:
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
@@ -558,7 +562,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                                    'To spin up more services, please '
                                    'tear down some existing services.')
         elapsed = time.time() - start_time
-        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+        if elapsed > timeout:
             # Print the controller log to help user debug.
             controller_log_path = (
                 generate_remote_controller_log_file_name(service_name))

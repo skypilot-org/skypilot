@@ -65,6 +65,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         lb_id INTEGER, 
         service_name TEXT,
         cluster_name TEXT,
+        region TEXT,
         port INTEGER,
         PRIMARY KEY (service_name, lb_id))""")
     conn.commit()
@@ -552,18 +553,19 @@ def delete_all_versions(service_name: str) -> None:
 # === External Load Balancer functions ===
 # TODO(tian): Add a status column.
 def add_external_load_balancer(service_name: str, lb_id: int, cluster_name: str,
-                               port: int) -> None:
+                               region: str, port: int) -> None:
     """Adds an external load balancer to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO external_load_balancers
-            (service_name, lb_id, cluster_name, port)
-            VALUES (?, ?, ?, ?)""", (service_name, lb_id, cluster_name, port))
+            (service_name, lb_id, cluster_name, region, port)
+            VALUES (?, ?, ?, ?, ?)""",
+            (service_name, lb_id, cluster_name, region, port))
 
 
 def _get_external_load_balancer_from_row(row) -> Dict[str, Any]:
-    lb_id, cluster_name, port = row[:3]
+    lb_id, cluster_name, region, port = row[:4]
     lb_cluster_record = global_user_state.get_cluster_from_name(cluster_name)
     if (lb_cluster_record is None or
             lb_cluster_record['status'] != status_lib.ClusterStatus.UP):
@@ -577,6 +579,7 @@ def _get_external_load_balancer_from_row(row) -> Dict[str, Any]:
     return {
         'lb_id': lb_id,
         'cluster_name': cluster_name,
+        'region': region,
         'ip': lb_ip,
         'port': port,
     }
@@ -587,7 +590,8 @@ def get_external_load_balancers(service_name: str) -> List[Dict[str, Any]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             """\
-            SELECT lb_id, cluster_name, port FROM external_load_balancers
+            SELECT lb_id, cluster_name, region, port
+            FROM external_load_balancers
             WHERE service_name=(?)""", (service_name,)).fetchall()
     external_load_balancers = []
     for row in rows:

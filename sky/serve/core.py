@@ -625,6 +625,7 @@ def status(
         {
             'lb_id': (int) index of the external load balancer,
             'cluster_name': (str) cluster name of the external load balancer,
+            'region': (str) region of the external load balancer,
             'ip': (str) ip of the external load balancer,
             'port': (int) port of the external load balancer,
         }

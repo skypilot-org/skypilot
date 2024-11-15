@@ -11,12 +11,14 @@ import subprocess
 import tempfile
 import time
 import traceback
-from typing import Any, Dict
+import typing
+from typing import Any, Dict, Optional
 
 import filelock
 
 from sky import authentication
 from sky import exceptions
+from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
@@ -33,6 +35,9 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky.serve import service_spec
 
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.service` namespace when executed directly, so as
@@ -88,9 +93,40 @@ def cleanup_storage(task_yaml: str) -> bool:
     return True
 
 
-def _cleanup(service_name: str) -> bool:
+def _get_cluster_ip(cluster_name: str) -> Optional[str]:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    if record['handle'].head_ip is None:
+        return None
+    return record['handle'].head_ip
+
+
+def _get_route53_change(action: str, subdomain: str, hosted_zone: str,
+                        record_type: str, region: str,
+                        value: str) -> Dict[str, Any]:
+    return {
+        'Action': action,
+        'ResourceRecordSet': {
+            'Name': f'{subdomain}.{hosted_zone}',
+            'Type': record_type,
+            'TTL': 300,
+            'Region': region,
+            'SetIdentifier': f'{subdomain}-{region}',
+            'ResourceRecords': [{
+                'Value': value
+            }]
+        }
+    }
+
+
+def _cleanup(service_name: str,
+             service_spec: 'service_spec.SkyServiceSpec') -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
+    change_batch = []
+    hosted_zone = service_spec.route53_hosted_zone
+
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
@@ -111,11 +147,27 @@ def _cleanup(service_name: str) -> bool:
     for external_lb_record in external_lbs:
         lb_cluster_name = external_lb_record['cluster_name']
         lb_id = external_lb_record['lb_id']
+        lb_region = external_lb_record['region']
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(lb_cluster_name,))
         p.start()
         lbid2proc[lb_id] = p
+        lb_ip = _get_cluster_ip(lb_cluster_name)
+        assert lb_ip is not None
+        if hosted_zone is not None:
+            change_batch.append(
+                _get_route53_change('DELETE', service_name, hosted_zone, 'A',
+                                    lb_region, lb_ip))
         logger.info(f'Terminating external load balancer {lb_cluster_name} ...')
+
+    if change_batch:
+        # TODO(tian): Fix this import hack.
+        import boto3  # pylint: disable=import-outside-toplevel
+        client = boto3.client('route53')
+        client.change_resource_record_sets(
+            HostedZoneId=service_spec.target_hosted_zone_id,
+            ChangeBatch={'Changes': change_batch})
+
     for info, p in info2proc.items():
         p.join()
         if p.exitcode == 0:
@@ -158,8 +210,9 @@ def _get_external_lb_cluster_name(service_name: str, lb_id: int) -> str:
     return f'sky-{service_name}-lb-{lb_id}'
 
 
-def _start_external_load_balancer(service_name: str, controller_addr: str,
-                                  lb_id: int, lb_port: int, lb_policy: str,
+def _start_external_load_balancer(service_name: str, lb_id: int,
+                                  lb_cluster_name: str, controller_addr: str,
+                                  lb_port: int, lb_policy: str,
                                   lb_resources: Dict[str, Any]) -> None:
     # TODO(tian): Hack. We should figure out the optimal resoruces.
     if 'cpus' not in lb_resources:
@@ -168,7 +221,6 @@ def _start_external_load_balancer(service_name: str, controller_addr: str,
     assert 'ports' not in lb_resources
     lb_resources['ports'] = [lb_port]
     lbr = resources_lib.Resources.from_yaml_config(lb_resources)
-    lb_cluster_name = _get_external_lb_cluster_name(service_name, lb_id)
     # TODO(tian): Set delete=False to debug. Remove this on production.
     with tempfile.NamedTemporaryFile(prefix=lb_cluster_name,
                                      mode='w',
@@ -187,7 +239,8 @@ def _start_external_load_balancer(service_name: str, controller_addr: str,
         lb_task = task_lib.Task.from_yaml(f.name)
         lb_task.set_resources(lbr)
         serve_state.add_external_load_balancer(service_name, lb_id,
-                                               lb_cluster_name, lb_port)
+                                               lb_cluster_name,
+                                               lb_resources['region'], lb_port)
         # TODO(tian): Temporary solution for circular import. We should move
         # the import to the top of the file.
         import sky  # pylint: disable=import-outside-toplevel
@@ -289,6 +342,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
             load_balancer_processes = []
+            # TODO(tian): Combine the following two.
+            lbid2cluster = {}
+            lbid2region = {}
 
             if service_spec.external_load_balancers is None:
                 # Generate load balancer log file name.
@@ -324,19 +380,47 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                         serve_utils.
                         generate_remote_external_load_balancer_log_file_name(
                             service_name, lb_id))
+                    lb_cluster_name = (_get_external_lb_cluster_name(
+                        service_name, lb_id))
+                    lbid2cluster[lb_id] = lb_cluster_name
                     lb_policy = lb_config['load_balancing_policy']
                     lb_resources = lb_config['resources']
+                    lbid2region[lb_id] = lb_resources['region']
                     controller_external_addr = (
                         f'http://{_get_external_host()}:{controller_port}')
                     lb_process = multiprocessing.Process(
                         target=ux_utils.RedirectOutputForProcess(
                             _start_external_load_balancer,
                             load_balancer_log_file).run,
-                        args=(service_name, controller_external_addr, lb_id,
-                              lb_port, lb_policy, lb_resources))
+                        args=(service_name, lb_id, lb_cluster_name,
+                              controller_external_addr, lb_port, lb_policy,
+                              lb_resources))
                     lb_process.start()
                     load_balancer_processes.append(lb_process)
-                    serve_state.set_service_load_balancer_port(service_name, -1)
+
+        if service_spec.external_load_balancers is not None:
+            hosted_zone = service_spec.route53_hosted_zone
+            if hosted_zone is not None:
+                while True:
+                    if all(
+                            _get_cluster_ip(lb_cluster_name) is not None
+                            for lb_cluster_name in lbid2cluster.values()):
+                        break
+                    time.sleep(1)
+                # TODO(tian): Fix this import hack.
+                import boto3  # pylint: disable=import-outside-toplevel
+                client = boto3.client('route53')
+                change_batch = []
+                for lb_id, lb_cluster_name in lbid2cluster.items():
+                    lb_ip = _get_cluster_ip(lb_cluster_name)
+                    assert lb_ip is not None
+                    change_batch.append(
+                        _get_route53_change('CREATE', service_name, hosted_zone,
+                                            'A', lbid2region[lb_id], lb_ip))
+                client.change_resource_record_sets(
+                    HostedZoneId=service_spec.target_hosted_zone_id,
+                    ChangeBatch={'Changes': change_batch})
+            serve_state.set_service_load_balancer_port(service_name, -1)
 
         while True:
             _handle_signal(service_name)
@@ -355,7 +439,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             [process.pid for process in process_to_kill], force=True)
         for process in process_to_kill:
             process.join()
-        failed = _cleanup(service_name)
+        failed = _cleanup(service_name, service_spec)
         if failed:
             serve_state.set_service_status_and_active_versions(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
