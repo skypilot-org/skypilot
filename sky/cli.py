@@ -1166,7 +1166,9 @@ def launch(
         # Add ssh config for the cluster
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])
-        if not detach_run:
+        # job_id will be None if no job was submitted (e.g. no entrypoint
+        # provided)
+        if not detach_run and job_id is not None:
             sdk.stream_and_get(
                 sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True))
         click.secho(
