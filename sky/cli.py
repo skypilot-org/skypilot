@@ -4089,7 +4089,10 @@ def _generate_task_with_service(
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
-            service_port_str = service_port_str.split('-')[0]
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'as the main port. Got: {service_port_str!r}')
         # We request all the replicas using the same port for now, but it
         # should be fine to allow different replicas to use different ports
         # in the future.
