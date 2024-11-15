@@ -3876,6 +3876,15 @@ def test_skyserve_kubernetes_http():
     run_one_test(test)
 
 
+@pytest.mark.oci
+@pytest.mark.serve
+def test_skyserve_oci_http():
+    """Test skyserve on OCI"""
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'oci', 20)
+    run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str):
