@@ -945,8 +945,7 @@ def _format_external_lb_table(external_lb_records: List[Dict[str, Any]],
 
     external_lb_columns = ['SERVICE_NAME', 'ID', 'ENDPOINT']
     if show_all:
-        external_lb_columns.append('PORT')
-        external_lb_columns.append('CLUSTER_NAME')
+        external_lb_columns.extend(['IP', 'PORT', 'CLUSTER_NAME'])
     external_lb_table = log_utils.create_table(external_lb_columns)
 
     truncate_hint = ''
@@ -959,8 +958,9 @@ def _format_external_lb_table(external_lb_records: List[Dict[str, Any]],
     for record in external_lb_records:
         service_name = record['service_name']
         external_lb_id = record['lb_id']
-        endpoint = record['endpoint']
+        lb_ip = record['ip']
         port = record['port']
+        endpoint = f'{lb_ip}:{port}'
         cluster_name = record['cluster_name']
 
         external_lb_values = [
@@ -969,7 +969,7 @@ def _format_external_lb_table(external_lb_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            external_lb_values.extend([port, cluster_name])
+            external_lb_values.extend([lb_ip, port, cluster_name])
         external_lb_table.add_row(external_lb_values)
 
     return f'{external_lb_table}{truncate_hint}'

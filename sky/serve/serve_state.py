@@ -10,7 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
-from sky import exceptions
+from sky import global_user_state
+from sky import status_lib
 from sky.serve import constants
 from sky.utils import db_utils
 
@@ -562,24 +563,22 @@ def add_external_load_balancer(service_name: str, lb_id: int, cluster_name: str,
 
 
 def _get_external_load_balancer_from_row(row) -> Dict[str, Any]:
-    from sky import core  # pylint: disable=import-outside-toplevel
-
-    # TODO(tian): Temporary workaround to avoid circular import.
-    # This should be fixed.
     lb_id, cluster_name, port = row[:3]
-    try:
-        endpoint = core.endpoints(cluster_name, port)[port]
-    except exceptions.ClusterNotUpError:
-        # TODO(tian): Currently, when this cluster is not in the UP status,
-        # the endpoint query will raise an cluster is not up error. We should
-        # implement a status for external lbs as well and returns a '-' when
-        # it is still provisioning.
-        endpoint = '-'
+    lb_cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    if (lb_cluster_record is None or
+            lb_cluster_record['status'] != status_lib.ClusterStatus.UP):
+        # TODO(tian): We should implement a status for external lbs as well
+        # and returns a '-' when it is still provisioning.
+        lb_ip = '-'
+    else:
+        lb_ip = lb_cluster_record['handle'].head_ip
+        if lb_ip is None:
+            lb_ip = '-'
     return {
         'lb_id': lb_id,
         'cluster_name': cluster_name,
+        'ip': lb_ip,
         'port': port,
-        'endpoint': endpoint,
     }
 
 
