@@ -104,16 +104,16 @@ def list_accelerators_realtime(
     ) or not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
-    has_gpu = kubernetes_utils.detect_gpu_resource(context)
+    has_gpu = kubernetes_utils.detect_accelerator_resource(context)
     if not has_gpu:
         return {}, {}, {}
 
-    label_formatter, _ = kubernetes_utils.detect_gpu_label_formatter(context)
-    if not label_formatter:
+    lf, _ = kubernetes_utils.detect_gpu_label_formatter(context)
+    if not lf:
         return {}, {}, {}
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
-    key = label_formatter.get_label_key()
+    keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes(context)
     # Get the pods to get the real-time GPU usage
     try:
@@ -134,67 +134,85 @@ def list_accelerators_realtime(
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
     for node in nodes:
-        if key in node.metadata.labels:
-            allocated_qty = 0
-            accelerator_name = label_formatter.get_accelerator_from_label_value(
-                node.metadata.labels.get(key))
+        for key in keys:
+            if key in node.metadata.labels:
+                allocated_qty = 0
+                accelerator_name = lf.get_accelerator_from_label_value(
+                    node.metadata.labels.get(key))
 
-            # Check if name_filter regex matches the accelerator_name
-            regex_flags = 0 if case_sensitive else re.IGNORECASE
-            if name_filter and not re.match(
-                    name_filter, accelerator_name, flags=regex_flags):
-                continue
+                # Exclude multi-host TPUs from being processed.
+                # TODO(Doyoung): Remove the logic when adding support for
+                # multi-host TPUs.
+                if kubernetes_utils.is_multi_host_tpu(node.metadata.labels):
+                    continue
 
-            accelerator_count = int(
-                node.status.allocatable.get('nvidia.com/gpu', 0))
+                # Check if name_filter regex matches the accelerator_name
+                regex_flags = 0 if case_sensitive else re.IGNORECASE
+                if name_filter and not re.match(
+                        name_filter, accelerator_name, flags=regex_flags):
+                    continue
 
-            # Generate the GPU quantities for the accelerators
-            if accelerator_name and accelerator_count > 0:
-                count = 1
-                while count <= accelerator_count:
-                    accelerators_qtys.add((accelerator_name, count))
-                    count *= 2
-                # Add the accelerator count if it's not already in the set
-                # (e.g., if there's 12 GPUs, we should have qtys 1, 2, 4, 8, 12)
-                if accelerator_count not in accelerators_qtys:
-                    accelerators_qtys.add((accelerator_name, accelerator_count))
+                # Generate the accelerator quantities
+                accelerator_count = (
+                    kubernetes_utils.get_node_accelerator_count(
+                        node.status.allocatable))
 
-            if accelerator_count >= min_quantity_filter:
-                quantized_count = (min_quantity_filter *
-                                   (accelerator_count // min_quantity_filter))
-                if accelerator_name not in total_accelerators_capacity:
-                    total_accelerators_capacity[
-                        accelerator_name] = quantized_count
-                else:
-                    total_accelerators_capacity[
-                        accelerator_name] += quantized_count
+                if accelerator_name and accelerator_count > 0:
+                    # TPUs are counted in a different way compared to GPUs.
+                    # Multi-node GPUs can be split into smaller units and be
+                    # provisioned, but TPUs are considered as an atomic unit.
+                    if kubernetes_utils.is_tpu_on_gke(accelerator_name):
+                        accelerators_qtys.add(
+                            (accelerator_name, accelerator_count))
+                    else:
+                        count = 1
+                        while count <= accelerator_count:
+                            accelerators_qtys.add((accelerator_name, count))
+                            count *= 2
+                        # Add the accelerator count if it's not already in the
+                        # set (e.g., if there's 12 GPUs, we should have qtys 1,
+                        # 2, 4, 8, 12)
+                        if accelerator_count not in accelerators_qtys:
+                            accelerators_qtys.add(
+                                (accelerator_name, accelerator_count))
 
-            if pods is None:
-                # If we can't get the pods, we can't get the GPU usage
-                total_accelerators_available[accelerator_name] = -1
-                continue
+                if accelerator_count >= min_quantity_filter:
+                    quantized_count = (
+                        min_quantity_filter *
+                        (accelerator_count // min_quantity_filter))
+                    if accelerator_name not in total_accelerators_capacity:
+                        total_accelerators_capacity[
+                            accelerator_name] = quantized_count
+                    else:
+                        total_accelerators_capacity[
+                            accelerator_name] += quantized_count
 
-            for pod in pods:
-                # Get all the pods running on the node
-                if (pod.spec.node_name == node.metadata.name and
-                        pod.status.phase in ['Running', 'Pending']):
-                    # Iterate over all the containers in the pod and sum the
-                    # GPU requests
-                    for container in pod.spec.containers:
-                        if container.resources.requests:
-                            allocated_qty += int(
-                                container.resources.requests.get(
-                                    'nvidia.com/gpu', 0))
+                if pods is None:
+                    # If we can't get the pods, we can't get the GPU usage
+                    total_accelerators_available[accelerator_name] = -1
+                    continue
 
-            accelerators_available = accelerator_count - allocated_qty
+                for pod in pods:
+                    # Get all the pods running on the node
+                    if (pod.spec.node_name == node.metadata.name and
+                            pod.status.phase in ['Running', 'Pending']):
+                        # Iterate over all the containers in the pod and sum
+                        # the GPU requests
+                        for container in pod.spec.containers:
+                            if container.resources.requests:
+                                allocated_qty += (
+                                    kubernetes_utils.get_node_accelerator_count(
+                                        container.resources.requests))
 
-            if accelerator_name not in total_accelerators_available:
-                total_accelerators_available[accelerator_name] = 0
-            if accelerators_available >= min_quantity_filter:
-                quantized_availability = min_quantity_filter * (
-                    accelerators_available // min_quantity_filter)
-                total_accelerators_available[
-                    accelerator_name] += quantized_availability
+                accelerators_available = accelerator_count - allocated_qty
+
+                if accelerator_name not in total_accelerators_available:
+                    total_accelerators_available[accelerator_name] = 0
+                if accelerators_available >= min_quantity_filter:
+                    quantized_availability = min_quantity_filter * (
+                        accelerators_available // min_quantity_filter)
+                    total_accelerators_available[
+                        accelerator_name] += quantized_availability
 
     result = []
 
