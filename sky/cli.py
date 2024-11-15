@@ -3143,7 +3143,8 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg +
+                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
@@ -3161,11 +3162,12 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
-            available = node_info.free['nvidia.com/gpu'] if node_info.free[
-                'nvidia.com/gpu'] != -1 else no_permissions_str
+            available = node_info.free[
+                'accelerators_available'] if node_info.free[
+                    'accelerators_available'] != -1 else no_permissions_str
             node_table.add_row([
-                node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'], available
+                node_name, node_info.accelerator_type,
+                node_info.total['accelerator_count'], available
             ])
         return node_table
 
@@ -3220,8 +3222,18 @@ def show_gpus(
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
+                    # TODO(Doyoung): Update the message with the multi-host TPU
+                    # support.
+                    k8s_per_node_acc_message = (
+                        'Kubernetes per node accelerator availability ')
+                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
+                            context):
+                        k8s_per_node_acc_message += (
+                            '(Note: Multi-host TPUs are detected and excluded '
+                            'from the display as multi-host TPUs are not '
+                            'supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node GPU availability'
+                           f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
