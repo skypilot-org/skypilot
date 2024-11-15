@@ -178,8 +178,38 @@ class Optimizer:
     def _add_storage_nodes_for_data_transfer(
         dag: 'dag_lib.Dag'
     ) -> List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, TaskData]]:
-        """Adds special nodes for storage buckets. Specifically, it adds dummy
-        nodes between nodes that are connected by with_data edges."""
+        """
+        Adds special nodes for storage buckets between nodes connected by
+        with_data edges.
+
+        Example:
+        A --(data)--> B
+
+        After this function:
+        A --(data)--> A_to_B_storage --(data)--> B
+
+        These nodes represent the storage resources required for data transfer
+        between tasks, allowing us to account for the cost and time associated
+        with data transfer when optimizing the DAG.
+
+        Algorithm:
+        1. Iterate through all edges in the DAG.
+        2. For each edge with data, create a dummy storage node and set its 
+        resources to include all possible cloud storage options.
+        3. Add the storage node between the source and destination nodes.
+        4. Remove the original edge and add new edges connecting the source to
+        the storage node and the storage node to the destination.
+
+        Returns:
+            List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, TaskData]]:
+            - The source node
+            - The storage node
+            - The destination node
+            - The data associated with the original edge
+
+        This information is used later to remove the storage nodes and move the
+        storage information to the edge attributes.
+        """
         graph = dag.get_graph()
         edges_to_add = []
 
