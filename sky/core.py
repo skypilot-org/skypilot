@@ -683,8 +683,8 @@ def cancel(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    # controller_utils.check_cluster_name_not_controller(
-    #     cluster_name, operation_str='Cancelling jobs')
+    controller_utils.check_cluster_name_not_controller(
+        cluster_name, operation_str='Cancelling jobs')
 
     if all and job_ids:
         raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
