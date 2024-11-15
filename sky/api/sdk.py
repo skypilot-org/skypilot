@@ -1,7 +1,8 @@
-"""Python SDK for SkyPilot.
+"""Client-side Python SDK for SkyPilot.
 
-All the functions will return a future that can be awaited on with the `get`
-method. For example:
+All functions will return a future that can be awaited on with the `get` method.
+
+Usage example:
 
 .. code-block:: python
 

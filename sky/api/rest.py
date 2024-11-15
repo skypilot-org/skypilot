@@ -1,4 +1,4 @@
-"""REST API for SkyPilot."""
+"""SkyPilot Server exposing REST APIs."""
 
 import argparse
 import asyncio
