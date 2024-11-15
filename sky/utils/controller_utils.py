@@ -171,8 +171,7 @@ class Controllers(enum.Enum):
             return cls.SKY_SERVE_CONTROLLER
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             return cls.JOBS_CONTROLLER
-        else:
-            return None
+        return None
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
