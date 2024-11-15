@@ -18,8 +18,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import cloudflare
 from sky.adaptors import common as adaptors_common
-from sky.dag import TaskData
-from sky.dag import TaskEdge
+from sky import dag
 from sky.data import storage as storage_lib
 from sky.utils import env_options
 from sky.utils import log_utils
@@ -154,9 +153,17 @@ class Optimizer:
     def _remove_storage_nodes_and_move_to_edge_attributes(
         dag: 'dag_lib.Dag',
         edges_to_add: List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
-                                 TaskData]]):
+                                 dag.TaskData]]) -> None:
         """Removes the storage nodes and adds the storage information to the
-        edges."""
+        edges.
+
+        Args:
+            dag: The directed acyclic graph (DAG) to modify.
+            edges_to_add: A list of tuples containing the source task, storage
+                task, destination task, and the data associated with the edge.
+                These (source, dest) edges are removed before optimization, and
+                now we add them back with the storage information.
+        """
         with dag:
             for src, storage_node, dst, data in edges_to_add:
                 dag.remove_edge(src, storage_node)
@@ -178,7 +185,7 @@ class Optimizer:
     @staticmethod
     def _add_storage_nodes_for_data_transfer(
         dag: 'dag_lib.Dag'
-    ) -> List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, TaskData]]:
+    ) -> List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, dag.TaskData]]:
         """Adds special nodes for storage buckets between nodes connected by
         with_data edges.
 
@@ -190,7 +197,20 @@ class Optimizer:
 
         These nodes represent the storage resources required for data transfer
         between tasks, allowing us to account for the cost and time associated
-        with data transfer when optimizing the DAG.
+        with data transfer when optimizing the DAG. By adding a dummy node with
+        zero compute cost, it simulates an external bucket created in some cloud
+        (and region), where only the transfer cost is calculated by our
+        optimizer. The transfer cost refers to egress cost when optimizing cost
+        and time to transfer data when optimizing time.
+
+        # TODO(wenjie): Implement data transfer time estimation when optimizing time.
+        # TODO(wenjie): Currently we only calculate the egress cost. Investigate the
+        # cost for storage in those buckets and take that into account. We could
+        # reuse the time estimator here.
+        # TODO(tian): Using a bucket for intermediate storage is a temporary 
+        # olution. This incur extra cost on storage. We should consider
+        # implement data streaming directly from upstream task to downstream
+        # task.
 
         Algorithm:
         1. Iterate through all edges in the DAG.
@@ -201,7 +221,8 @@ class Optimizer:
         the storage node and the storage node to the destination.
 
         Returns:
-            List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task, TaskData]]:
+            List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
+                dag.TaskData]]:
             - The source node
             - The storage node
             - The destination node
@@ -225,6 +246,10 @@ class Optimizer:
                 enabled_clouds = (
                     storage_lib.get_cached_enabled_storage_clouds_or_refresh(
                         raise_if_no_cloud_access=True))
+                # We current does not support R2 storage since it does not have
+                # compute instance, which is not suitable for our optimizer
+                # algorithm for now.
+                # TODO(xx): Support R2 storage.
                 if cloudflare.NAME in enabled_clouds:
                     enabled_clouds.remove(cloudflare.NAME)
                 storage_node.set_resources({
@@ -242,20 +267,21 @@ class Optimizer:
                 # downstream times.
                 storage_node.set_time_estimator(lambda _: 0)
                 edges_to_add.append((src, storage_node, dst, data))
-        with dag:
-            for src, storage_node, dst, data in edges_to_add:
-                dag.remove_edge(src, dst)
-                dag.add_edge(src, storage_node).with_data(
-                    source_path=data.source_path,
-                    target_path='',
-                    size_gb=data.size_gb)
-                dag.add_edge(storage_node,
-                             dst).with_data(source_path='',
-                                            target_path=data.target_path,
-                                            size_gb=data.size_gb)
-                logger.info(
-                    f'Adding storage node between {src.name} and {dst.name}')
+
+        for src, storage_node, dst, data in edges_to_add:
+            dag.remove_edge(src, dst)
+            dag.add_edge(src, storage_node).with_data(
+                source_path=data.source_path,
+                target_path='',
+                size_gb=data.size_gb)
+            dag.add_edge(storage_node,
+                            dst).with_data(source_path='',
+                                        target_path=data.target_path,
+                                        size_gb=data.size_gb)
+            logger.info(
+                f'Adding storage node between {src.name} and {dst.name}')
         return edges_to_add
+
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
@@ -317,7 +343,7 @@ class Optimizer:
         # TODO(wenjie): Add dummy nodes for external storage when DAG nodes read
         # from buckets specified in the YAML file.
         src_cloud = parent_resources.cloud
-        assert isinstance(edge_data['edge'], TaskEdge)
+        assert isinstance(edge_data['edge'], dag.TaskEdge)
         task_edge = edge_data['edge']
         n_gigabytes = 0.0
         if task_edge.data is not None:
