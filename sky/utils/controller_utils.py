@@ -101,7 +101,6 @@ class Controllers(enum.Enum):
             # TODO(zhwu): by having the controller name loaded in common, it
             # will not respect the latest updated user hash.
             common.JOB_CONTROLLER_NAME,
-            common.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
@@ -168,10 +167,12 @@ class Controllers(enum.Enum):
             The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
-        for controller in cls:
-            if name in controller.value.candidate_cluster_names:
-                return controller
-        return None
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
+            return cls.SKY_SERVE_CONTROLLER
+        elif name.startswith(common.JOB_CONTROLLER_PREFIX):
+            return cls.JOBS_CONTROLLER
+        else:
+            return None
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
