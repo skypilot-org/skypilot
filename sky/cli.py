@@ -58,7 +58,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.api import common as api_common
-from sky.api import sdk as sdk_lib
+from sky.api import sdk
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -108,14 +108,6 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
-sdk: 'types.ModuleType'
-if env_options.Options.get(env_options.Options.CLI_LOCAL_MODE):
-    from sky import core
-    setattr(core, 'get', lambda args: args)
-    setattr(core, 'stream_and_get', lambda args: args)
-    sdk = core
-else:
-    sdk = sdk_lib
 
 
 def _get_cluster_records_and_set_ssh_config(

@@ -17,8 +17,6 @@ class Options(enum.Enum):
     # will not be multiple identities, and skipping the check can increase
     # robustness.
     SKIP_CLOUD_IDENTITY_CHECK = ('SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK', False)
-    # Run SkyPilot in local mode, without using API server.
-    CLI_LOCAL_MODE = ('SKYPILOT_CLI_LOCAL_MODE', False)
 
     def __init__(self, env_var: str, default: bool) -> None:
         self.env_var = env_var
