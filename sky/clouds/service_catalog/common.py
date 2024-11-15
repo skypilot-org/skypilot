@@ -273,7 +273,7 @@ def validate_region_zone_impl(
         if candidate_loc:
             candidate_strs = ', '.join(candidate_loc)
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
-        
+
         return candidate_strs
 
     def _get_all_supported_regions_str() -> str:
