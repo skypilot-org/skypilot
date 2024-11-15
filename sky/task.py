@@ -908,6 +908,8 @@ class Task:
             self) -> Tuple[Optional[str], Optional[str]]:
         """Returns the bucket name and store type from the job config."""
         bucket_dict = skypilot_config.get_nested(('jobs', 'bucket'), None)
+        if bucket_dict is None:
+            return None, None
         store_type, _ = self._get_preferred_store()
         if store_type.value.lower() in bucket_dict:
             bucket_name = bucket_dict[store_type.value.lower()]

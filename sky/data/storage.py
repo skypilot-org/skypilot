@@ -267,7 +267,7 @@ class AbstractStore:
         # To avoid mypy error
         self._bucket_sub_path: Optional[str] = None
         # Trigger the setter to strip any leading/trailing slashes.
-        self.bucket_sub_path = self._bucket_sub_path
+        self.bucket_sub_path = _bucket_sub_path
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -982,6 +982,10 @@ class Storage(object):
             if not is_reconstructed:
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
+
+    def is_bucket_name_auto_generated_by_sky(self) -> bool:
+        return re.match(r'^skypilot-filemounts-.+-[a-z0-9]{8}$',
+                        self.name) is not None
 
     def delete(self,
                store_type: Optional[StoreType] = None,
