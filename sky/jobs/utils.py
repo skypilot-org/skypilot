@@ -26,7 +26,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.data.storage import Storage
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants
@@ -714,7 +714,7 @@ def set_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
             bucket_name = common_utils.make_cluster_name_on_cloud(
                 bucket_name_tmp, max_length=63)
             storage_type, region = best_storage
-            new_storage = Storage(name=bucket_name)
+            new_storage = storage_lib.Storage(name=bucket_name)
             new_storage.add_store(storage_type, region)
             new_storage_mounts_src = {data.source_path: new_storage}
             src.update_storage_mounts(new_storage_mounts_src)

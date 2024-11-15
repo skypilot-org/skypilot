@@ -21,7 +21,6 @@ from sky.adaptors import common as adaptors_common
 from sky.dag import TaskData
 from sky.dag import TaskEdge
 from sky.data import storage as storage_lib
-from sky.data import StoreType
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -171,7 +170,7 @@ class Optimizer:
                 # TODO(wenjie): support r2 storage.
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
-                    storage_type = StoreType.from_cloud(
+                    storage_type = storage_lib.StoreType.from_cloud(
                         str(storage_node.best_resources.cloud))
                     task_edge.best_storage = (
                         storage_type, storage_node.best_resources.region)
