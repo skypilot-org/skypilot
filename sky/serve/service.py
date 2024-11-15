@@ -257,8 +257,11 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             # inside a kubernetes cluster to allow external load balancers
             # (example, for high availability load balancers) to communicate
             # with the controller.
+            # Also, when we are using external load balancers, in which we
+            # need to get the information from a distinct machine.
             def _get_host():
-                if 'KUBERNETES_SERVICE_HOST' in os.environ:
+                if ('KUBERNETES_SERVICE_HOST' in os.environ or
+                        service_spec.external_load_balancers is not None):
                     return '0.0.0.0'
                 # Not using localhost to avoid using ipv6 address and causing
                 # the following error:
