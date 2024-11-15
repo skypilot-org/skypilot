@@ -407,6 +407,9 @@ def get_service_schema():
                 'type': 'string',
                 'case_insensitive_enum': lb_policy_choices,
             },
+            'route53_hosted_zone': {
+                'type': 'string',
+            },
         }
     }
 
