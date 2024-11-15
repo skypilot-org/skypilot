@@ -79,7 +79,7 @@ We can launch it with the following:
 .. code-block:: console
 
   $ git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
-  $ WANDB_API_KEY=xxx sky jobs launch -n bert-qa bert_qa.yaml
+  $ sky jobs launch -n bert-qa bert_qa.yaml
 
 .. code-block:: yaml
 
@@ -227,7 +227,7 @@ cost savings from spot instances without worrying about preemption or losing pro
 
 .. code-block:: console
 
-  $ WANDB_API_KEY=xxx sky jobs launch -n bert-qa bert_qa.yaml
+  $ sky jobs launch -n bert-qa bert_qa.yaml
 
 .. tip::
 
