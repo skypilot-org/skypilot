@@ -693,13 +693,26 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
 
 
 def set_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
-    """Syncs up the file mounts for data transfer.
+    """Sets the storage mounts for data transfer.
 
-    This function is used to sync up the file mounts with the storage
-    information in the edge for data transfer before launching the task.
+    This function updates the storage mounts with the storage information
+    in the edges of the DAG for data transfer before launching the tasks.
+    It generates a unique bucket name for the storage associated with each edge,
+    creates a Store with the name as well as cloud and region in best_storage,
+    and then updates the source and target nodes with the new storage mounts.
+
+    Example:
+    a --(data, best_storage)--> b
+
+    After this function, a store is created (or reused if the bucket name
+    already exists) with its unique name and set to storage mounts of both a and
+    b with the source and target paths respectively.
 
     Args:
-        dag: The DAG containing the task to launch.
+        dag (dag_lib.Dag): The DAG containing the tasks to launch.
+
+    Returns:
+        dag_lib.Dag: The updated DAG with the storage mounts set.
     """
     for edge in dag.get_edges():
         src, tgt, data, best_storage = (edge.source, edge.target, edge.data,
