@@ -35,10 +35,11 @@ logger = sky_logging.init_logger(__name__)
 
 @functools.lru_cache()
 def get_server_url():
-    return os.environ.get(
+    url = os.environ.get(
         constants.SKY_API_SERVER_URL_ENV_VAR,
         skypilot_config.get_nested(('api_server', 'endpoint'),
                                    DEFAULT_SERVER_URL))
+    return url.rstrip('/')
 
 
 @functools.lru_cache()
