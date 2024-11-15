@@ -277,7 +277,7 @@ class Optimizer:
 
     @staticmethod
     def _get_egress_info(
-        parent_resources: resources_lib.Resources, node: task_lib.Task,
+        parent_resources: resources_lib.Resources,
         resources: resources_lib.Resources, edge_data: Dict[str, Any]
     ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
         # TODO(wenjie): Add dummy nodes for external storage when DAG nodes read
@@ -292,12 +292,11 @@ class Optimizer:
     @staticmethod
     def _egress_cost_or_time(minimize_cost: bool,
                              parent_resources: resources_lib.Resources,
-                             node: task_lib.Task,
                              resources: resources_lib.Resources,
                              edge_data: Dict[str, Any]):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(
-            parent_resources, node, resources, edge_data)
+            parent_resources, resources, edge_data)
         if not n_gigabytes:
             # n_gigabytes can be None, if the task has no inputs/outputs.
             return 0
@@ -515,7 +514,7 @@ class Optimizer:
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
-                        minimize_cost, parent_resources, node, resources,
+                        minimize_cost, parent_resources, resources,
                         graph.get_edge_data(parent, node))
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
@@ -617,8 +616,8 @@ class Optimizer:
             for r_u in node_to_cost_map[u].keys():
                 for r_v in node_to_cost_map[v].keys():
                     F[u][v].append(
-                        Optimizer._egress_cost_or_time(minimize_cost, r_u, v,
-                                                       r_v, data))
+                        Optimizer._egress_cost_or_time(minimize_cost, r_u, r_v,
+                                                       data))
 
         # Define the decision variables.
         c = {
@@ -718,7 +717,7 @@ class Optimizer:
             for pred, _, edge_data in graph.in_edges(node, data=True):
                 # FIXME: Account for egress time for multi-node clusters
                 egress_time = Optimizer._egress_cost_or_time(
-                    False, plan[pred], node, resources, edge_data)
+                    False, plan[pred], resources, edge_data)
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
             cache_finish_time[node] = execution_time + max(pred_finish_times)
@@ -750,7 +749,7 @@ class Optimizer:
             for pred, _, edge_data in graph.in_edges(node, data=True):
                 # FIXME: Account for egress costs for multi-node clusters
                 egress_cost = Optimizer._egress_cost_or_time(
-                    True, plan[pred], node, resources, edge_data)
+                    True, plan[pred], resources, edge_data)
                 total_cost += egress_cost
         return total_cost
 
@@ -759,7 +758,7 @@ class Optimizer:
         message_data = []
         for parent, child, edge_data in graph.edges(data=True):
             src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(
-                plan[parent], child, plan[child], edge_data)
+                plan[parent], plan[child], edge_data)
             if not n_gigabytes:
                 # n_gigabytes can be None, if the task has no inputs/outputs.
                 continue
