@@ -130,16 +130,31 @@ async def enabled_clouds(request: fastapi.Request) -> None:
     )
 
 
-@app.post('/realtime_gpu_availability')
-async def realtime_gpu_availability(
+@app.post('/realtime_kubernetes_gpu_availability')
+async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,
     realtime_gpu_availability_body: payloads.RealtimeGpuAvailabilityRequestBody
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='realtime_gpu_availability',
+        request_name='realtime_kubernetes_gpu_availability',
         request_body=realtime_gpu_availability_body,
-        func=core.realtime_gpu_availability,
+        func=core.realtime_kubernetes_gpu_availability,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
+    )
+
+
+@app.get('/kubernetes_node_info')
+async def kubernetes_node_info(
+    request: fastapi.Request,
+    kubernetes_node_info_body: payloads.KubernetesNodeInfoRequestBody = fastapi.
+    Depends()
+) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='kubernetes_node_info',
+        request_body=kubernetes_node_info_body,
+        func=kubernetes_utils.get_kubernetes_node_info,
         schedule_type=executor.ScheduleType.NON_BLOCKING,
     )
 

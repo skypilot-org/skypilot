@@ -117,8 +117,8 @@ class StrategyExecutor:
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
-        job_recovery_strategy = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
-            job_recovery_name)
+        job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
+                                 from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
                                      retry_until_up, max_restarts_on_errors)

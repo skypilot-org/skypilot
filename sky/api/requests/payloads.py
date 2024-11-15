@@ -323,6 +323,11 @@ class RealtimeGpuAvailabilityRequestBody(RequestBody):
     quantity_filter: Optional[int]
 
 
+class KubernetesNodeInfoRequestBody(RequestBody):
+    """The request body for the kubernetes node info endpoint."""
+    context: Optional[str] = None
+
+
 class ListAcceleratorsBody(RequestBody):
     """The request body for the list accelerators endpoint."""
     gpus_only: bool = True

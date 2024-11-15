@@ -17,6 +17,7 @@ import yaml
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -1952,18 +1953,8 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
 
 
-@dataclasses.dataclass
-class KubernetesNodeInfo:
-    """Dataclass to store Kubernetes node information."""
-    name: str
-    accelerator_type: Optional[str]
-    # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
-    total: Dict[str, int]
-    free: Dict[str, int]
-
-
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> Dict[str, KubernetesNodeInfo]:
+        context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -1993,7 +1984,7 @@ def get_kubernetes_node_info(
     else:
         label_keys = lf.get_label_keys()
 
-    node_info_dict: Dict[str, KubernetesNodeInfo] = {}
+    node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
 
     for label_key in label_keys:
         for node in nodes:
@@ -2030,7 +2021,7 @@ def get_kubernetes_node_info(
             if is_multi_host_tpu(node.metadata.labels):
                 continue
 
-            node_info_dict[node.metadata.name] = KubernetesNodeInfo(
+            node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
                 name=node.metadata.name,
                 accelerator_type=accelerator_name,
                 total={'accelerator_count': int(accelerator_count)},

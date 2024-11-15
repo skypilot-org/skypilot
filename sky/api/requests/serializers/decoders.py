@@ -5,6 +5,7 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import jobs as managed_jobs
+from sky import models
 from sky.clouds.service_catalog import common
 from sky.data import storage
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -177,3 +178,12 @@ def decode_job_status(
         else:
             job_statuses[job_id] = None
     return job_statuses
+
+
+@register_handler('kubernetes_node_info')
+def decode_kubernetes_node_info(
+        return_value: Dict[str, Any]) -> Dict[str, models.KubernetesNodeInfo]:
+    return {
+        node_name: models.KubernetesNodeInfo(**node_info)
+        for node_name, node_info in return_value.items()
+    }

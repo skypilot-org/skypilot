@@ -63,17 +63,31 @@ def enabled_clouds() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
-def realtime_gpu_availability(context: Optional[str] = None,
-                              name_filter: Optional[str] = None,
-                              quantity_filter: Optional[int] = None) -> str:
+def realtime_kubernetes_gpu_availability(
+        context: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None) -> str:
     body = payloads.RealtimeGpuAvailabilityRequestBody(
         context=context,
         name_filter=name_filter,
         quantity_filter=quantity_filter,
     )
     response = requests.post(
-        f'{api_common.get_server_url()}/realtime_gpu_availability',
+        f'{api_common.get_server_url()}/realtime_kubernetes_gpu_availability',
         json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def kubernetes_node_info(context: Optional[str] = None) -> str:
+    body = payloads.KubernetesNodeInfoRequestBody(context=context)
+    params = {}
+    for k, v in json.loads(body.model_dump_json()).items():
+        if v is not None:
+            params[k] = v
+    response = requests.get(
+        f'{api_common.get_server_url()}/kubernetes_node_info', params=params)
     return api_common.get_request_id(response)
 
 
@@ -651,8 +665,10 @@ def stream_and_get(request_id: Optional[str] = None,
 # === API server management ===
 @usage_lib.entrypoint
 @api_common.check_health
-def api_start():
+def api_start(*, api_server_reload: bool = False, deploy: bool = False):
     """Start the API server."""
+    # Only used in api_common.check_health, this is to satisfy the type checker.
+    del api_server_reload, deploy
     is_local_api_server = api_common.is_api_server_local()
     prefix_symbol = (ux_utils.INDENT_SYMBOL
                      if is_local_api_server else ux_utils.INDENT_LAST_SYMBOL)
@@ -718,7 +734,6 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
         stream_and_get(log_path=constants.API_SERVER_LOGS)
 
 
-
 @usage_lib.entrypoint
 def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint: disable=redefined-builtin
     """Abort a request or all requests."""
@@ -731,7 +746,11 @@ def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint
 
 
 @usage_lib.entrypoint
-def requests_ls(request_id: Optional[str] = None, all: bool = False) -> List[requests_lib.RequestPayload]:
+def requests_ls(
+    request_id: Optional[str] = None,
+    # pylint: disable=redefined-builtin
+    all: bool = False
+) -> List[requests_lib.RequestPayload]:
     body = payloads.RequestIdBody(request_id=request_id, all=all)
     params = {}
     for k, v in json.loads(body.model_dump_json()).items():

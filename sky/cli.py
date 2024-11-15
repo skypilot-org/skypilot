@@ -53,6 +53,7 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
+from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
@@ -64,6 +65,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -73,7 +75,6 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -3191,6 +3192,7 @@ def show_gpus(
     # Kubernetes specific bools
     enabled_clouds = sdk.get(sdk.enabled_clouds())
     cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+    # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = clouds.cloud_in_iterable(
         clouds.Kubernetes(),
@@ -3200,6 +3202,8 @@ def show_gpus(
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
+    # TODO(zhwu,romilb): We should move most of these kubernetes related
+    # queries into the backend, especially behind the server.
     def _get_kubernetes_realtime_gpu_table(
             context: Optional[str] = None,
             name_filter: Optional[str] = None,
@@ -3213,9 +3217,10 @@ def show_gpus(
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
         realtime_gpu_availability_list = sdk.stream_and_get(
-            sdk.realtime_gpu_availability(context=context,
-                                          name_filter=name_filter,
-                                          quantity_filter=quantity_filter))
+            sdk.realtime_kubernetes_gpu_availability(
+                context=context,
+                name_filter=name_filter,
+                quantity_filter=quantity_filter))
         if not realtime_gpu_availability_list:
             err_msg = 'No GPUs found in Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check '
@@ -3228,13 +3233,12 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg +
-                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
+            full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         no_permissions_str = '<no permissions>'
         for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
-            gpu_availability = common.RealtimeGpuAvailability(
+            gpu_availability = models.RealtimeGpuAvailability(
                 *realtime_gpu_availability)
             available_qty = (gpu_availability.available
                              if gpu_availability.available != -1 else
@@ -3253,7 +3257,8 @@ def show_gpus(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
         no_permissions_str = '<no permissions>'
-        node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
+        node_info_dict = sdk.stream_and_get(
+            sdk.kubernetes_node_info(context=context))
         for node_name, node_info in node_info_dict.items():
             available = node_info.free[
                 'accelerators_available'] if node_info.free[
@@ -3290,12 +3295,8 @@ def show_gpus(
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud_name is None or
                                           cloud_is_kubernetes):
-                if region:
-                    context = region
-                else:
-                    # If region is not specified, we use the current context
-                    context = (
-                        kubernetes_utils.get_current_kube_config_context_name())
+                context = region
+
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
@@ -3309,8 +3310,9 @@ def show_gpus(
                     k8s_messages += str(e)
                 else:
                     print_section_titles = True
+                    context_str = f'(Context: {context})' if context else ''
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs (Context: {context})'
+                           f'Kubernetes GPUs {context_str}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)

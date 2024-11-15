@@ -14,11 +14,13 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
+from sky import models
 from sky import sky_logging
 from sky import task
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.jobs.api import core as managed_jobs_core
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -939,11 +941,11 @@ def enabled_clouds() -> List[clouds.Cloud]:
 
 
 @usage_lib.entrypoint
-def realtime_gpu_availability(
+def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None
-) -> List[common.RealtimeGpuAvailability]:
+) -> List[models.RealtimeGpuAvailability]:
 
     counts, capacity, available = service_catalog.list_accelerator_realtime(
         gpus_only=True,
@@ -969,15 +971,15 @@ def realtime_gpu_availability(
                        'in Kubernetes cluster. ')
             debug_msg = ('To show available accelerators on kubernetes,'
                          ' run: sky show-gpus --cloud kubernetes ')
-        full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+        full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                         debug_msg)
         raise ValueError(full_err_msg)
 
-    realtime_gpu_availability_list: List[common.RealtimeGpuAvailability] = []
+    realtime_gpu_availability_list: List[models.RealtimeGpuAvailability] = []
 
     for gpu, _ in sorted(counts.items()):
         realtime_gpu_availability_list.append(
-            common.RealtimeGpuAvailability(
+            models.RealtimeGpuAvailability(
                 gpu,
                 counts.pop(gpu),
                 capacity[gpu],

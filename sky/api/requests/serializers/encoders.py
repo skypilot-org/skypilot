@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
+    from sky import models
     from sky.provision.kubernetes import utils as kubernetes_utils
 
 handlers: Dict[str, Any] = {}
@@ -150,3 +151,12 @@ def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
         if return_value[job_id] is not None:
             return_value[job_id] = return_value[job_id].value
     return return_value
+
+
+@register_handler('kubernetes_node_info')
+def encode_kubernetes_node_info(
+        return_value: Dict[str, 'models.KubernetesNodeInfo']) -> Dict[str, Any]:
+    return {
+        node_name: dataclasses.asdict(node_info)
+        for node_name, node_info in return_value.items()
+    }
