@@ -103,9 +103,13 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         follow=follow,
         controller=controller,
     )
+    params = {}
+    for k, v in json.loads(body.model_dump_json()).items():
+        if v is not None:
+            params[k] = v
     response = requests.get(
         f'{api_common.get_server_url()}/jobs/logs',
-        json=json.loads(body.model_dump_json()),
+        params=params,
         timeout=(5, None),
     )
     return api_common.get_request_id(response=response)

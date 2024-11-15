@@ -249,8 +249,8 @@ class JobsCancelBody(RequestBody):
 
 class JobsLogsBody(RequestBody):
     """The request body for the jobs logs endpoint."""
-    name: Optional[str]
-    job_id: Optional[int]
+    name: Optional[str] = None
+    job_id: Optional[int] = None
     follow: bool = True
     controller: bool = False
 

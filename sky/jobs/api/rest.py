@@ -48,8 +48,10 @@ async def cancel(request: fastapi.Request,
 
 
 @router.get('/logs')
-async def logs(request: fastapi.Request,
-               jobs_logs_body: payloads.JobsLogsBody) -> None:
+async def logs(
+        request: fastapi.Request,
+        jobs_logs_body: payloads.JobsLogsBody = fastapi.Depends(),
+) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs/logs',
