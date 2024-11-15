@@ -100,6 +100,10 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
+# Time that must elapse since the last status check before we should re-check if
+# the cluster has been terminated or autostopped.
+_CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
+
 # Filelocks for updating cluster's file_mounts.
 CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
     '~/.sky/.{}_file_mounts.lock')
@@ -1669,11 +1673,27 @@ def check_can_clone_disk_and_override_task(
 
 def _update_cluster_status_no_lock(
         cluster_name: str) -> Optional[Dict[str, Any]]:
-    """Updates the status of the cluster.
+    """Update the cluster status.
+
+    The cluster status is updated by checking ray cluster and real status from
+    cloud.
+
+    The function will update the cached cluster status in the global state. For
+    the design of the cluster status and transition, please refer to the
+    sky/design_docs/cluster_status.md
+
+    Returns:
+        If the cluster is terminated or does not exist, return None. Otherwise
+        returns the input record with status and handle potentially updated.
 
     Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
+          fetched from the cloud provider or there are leaked nodes causing
+          the node number larger than expected.
     """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
@@ -1893,52 +1913,22 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(
-    cluster_name: str,
-    acquire_per_cluster_status_lock: bool,
-    cluster_status_lock_timeout: int = CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS
-) -> Optional[Dict[str, Any]]:
-    """Update the cluster status.
+def _must_refresh_cluster_status(
+        record: Dict[str, Any],
+        force_refresh_statuses: Optional[Set[status_lib.ClusterStatus]]
+) -> bool:
+    force_refresh_for_cluster = (force_refresh_statuses is not None and
+                                 record['status'] in force_refresh_statuses)
 
-    The cluster status is updated by checking ray cluster and real status from
-    cloud.
+    use_spot = record['handle'].launched_resources.use_spot
+    has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
+                    record['autostop'] >= 0)
+    recently_refreshed = (record['status_updated_at'] is not None and
+                          time.time() - record['status_updated_at'] <
+                          _CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+    is_stale = (use_spot or has_autostop) and not recently_refreshed
 
-    The function will update the cached cluster status in the global state. For
-    the design of the cluster status and transition, please refer to the
-    sky/design_docs/cluster_status.md
-
-    Args:
-        cluster_name: The name of the cluster.
-        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status.
-        cluster_status_lock_timeout: The timeout to acquire the per-cluster
-          lock.
-
-    Returns:
-        If the cluster is terminated or does not exist, return None. Otherwise
-        returns the input record with status and handle potentially updated.
-
-    Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        exceptions.CloudUserIdentityError: if we fail to get the current user
-          identity.
-        exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider or there are leaked nodes causing
-          the node number larger than expected.
-    """
-    if not acquire_per_cluster_status_lock:
-        return _update_cluster_status_no_lock(cluster_name)
-
-    try:
-        with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
-                               timeout=cluster_status_lock_timeout):
-            return _update_cluster_status_no_lock(cluster_name)
-    except filelock.Timeout:
-        logger.debug('Refreshing status: Failed get the lock for cluster '
-                     f'{cluster_name!r}. Using the cached status.')
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        return record
+    return force_refresh_for_cluster or is_stale
 
 
 def refresh_cluster_record(
@@ -1956,16 +1946,22 @@ def refresh_cluster_record(
 
     Args:
         cluster_name: The name of the cluster.
-        force_refresh_statuses: if specified, refresh the cluster if it has one of
-          the specified statuses. Additionally, clusters satisfying the
-          following conditions will always be refreshed no matter the
-          argument is specified or not:
-            1. is a spot cluster, or
-            2. is a non-spot cluster, is not STOPPED, and autostop is set.
+        force_refresh_statuses: if specified, refresh the cluster if it has one
+          of the specified statuses. Additionally, clusters satisfying the
+          following conditions will be refreshed no matter the argument is
+          specified or not:
+            - the most latest available status update is more than
+              _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
+                1. the cluster is a spot cluster, or
+                2. cluster autostop is set and the cluster is not STOPPED.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
-          before updating the status.
+          before updating the status. Even if this is True, the lock may not be
+          acquired if the status does not need to be refreshed.
         cluster_status_lock_timeout: The timeout to acquire the per-cluster
-          lock. If timeout, the function will use the cached status.
+          lock. If timeout, the function will use the cached status. If the
+          value is <0, do not timeout (wait for the lock indefinitely). By
+          default, this is set to CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS. Warning:
+          if correctness is required, you must set this to -1.
 
     Returns:
         If the cluster is terminated or does not exist, return None.
@@ -1986,19 +1982,58 @@ def refresh_cluster_record(
         return None
     check_owner_identity(cluster_name)
 
-    handle = record['handle']
-    if isinstance(handle, backends.CloudVmRayResourceHandle):
-        use_spot = handle.launched_resources.use_spot
-        has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
-                        record['autostop'] >= 0)
-        force_refresh_for_cluster = (force_refresh_statuses is not None and
-                                     record['status'] in force_refresh_statuses)
-        if force_refresh_for_cluster or has_autostop or use_spot:
-            record = _update_cluster_status(
-                cluster_name,
-                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
-                cluster_status_lock_timeout=cluster_status_lock_timeout)
-    return record
+    if not isinstance(record['handle'], backends.CloudVmRayResourceHandle):
+        return record
+
+    # The loop logic allows us to notice if the status was updated in the
+    # global_user_state by another process and stop trying to get the lock.
+    # The core loop logic is adapted from FileLock's implementation.
+    lock = filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
+    start_time = time.perf_counter()
+
+    # Loop until we have an up-to-date status or until we acquire the lock.
+    while True:
+        # Check to see if we can return the cached status.
+        if not _must_refresh_cluster_status(record, force_refresh_statuses):
+            return record
+
+        if not acquire_per_cluster_status_lock:
+            return _update_cluster_status_no_lock(cluster_name)
+
+        # Try to acquire the lock so we can fetch the status.
+        try:
+            with lock.acquire(blocking=False):
+                # Lock acquired.
+
+                # Check the cluster status again, since it could have been
+                # updated between our last check and acquiring the lock.
+                record = global_user_state.get_cluster_from_name(cluster_name)
+                if record is None or not _must_refresh_cluster_status(
+                        record, force_refresh_statuses):
+                    return record
+
+                # Update and return the cluster status.
+                return _update_cluster_status_no_lock(cluster_name)
+        except filelock.Timeout:
+            # lock.acquire() will throw a Timeout exception if the lock is not
+            # available and we have blocking=False.
+            pass
+
+        # Logic adapted from FileLock.acquire().
+        # If cluster_status_lock_time is <0, we will never hit this. No timeout.
+        # Otherwise, if we have timed out, return the cached status. This has
+        # the potential to cause correctness issues, but if so it is the
+        # caller's responsibility to set the timeout to -1.
+        if 0 <= cluster_status_lock_timeout < time.perf_counter() - start_time:
+            logger.debug('Refreshing status: Failed get the lock for cluster '
+                         f'{cluster_name!r}. Using the cached status.')
+            return record
+        time.sleep(0.05)
+
+        # Refresh for next loop iteration.
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is None:
+            return None
 
 
 @timeline.event
