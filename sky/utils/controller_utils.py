@@ -167,6 +167,8 @@ class Controllers(enum.Enum):
             The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
+        if name is None:
+            return None
         if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
             return cls.SKY_SERVE_CONTROLLER
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
