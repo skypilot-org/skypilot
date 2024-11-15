@@ -818,8 +818,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                      '[dim]View storages: sky storage ls'))
     try:
         task.sync_storage_mounts()
-    except ValueError as e:
-        if 'No enabled cloud for storage' in str(e):
+    except (ValueError, exceptions.NoCloudAccessError) as e:
+        if 'No enabled cloud for storage' in str(e) or isinstance(
+                e, exceptions.NoCloudAccessError):
             data_src = None
             if has_local_source_paths_file_mounts:
                 data_src = 'file_mounts'
