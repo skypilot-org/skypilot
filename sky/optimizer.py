@@ -170,7 +170,7 @@ class Optimizer:
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
                     storage_type = StoreType.from_cloud(
-                        storage_node.best_resources.cloud)
+                        str(storage_node.best_resources.cloud))
                     task_edge.best_storage = (
                         storage_type, storage_node.best_resources.region)
 
