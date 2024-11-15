@@ -14,7 +14,6 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -23,6 +22,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
 
