@@ -99,6 +99,8 @@ _JOB_WAIT_NOT_RUNNING = (
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
 
 # Cluster functions
+_ALL_JOB_STATUSES = "|".join([status.value for status in JobStatus])
+_ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
 
 _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     # A while loop to wait until the cluster status
@@ -110,7 +112,8 @@ _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     'fi; '
     'current_status=$(sky status {cluster_name} --refresh | '
     'awk "/^{cluster_name}/ '
-    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(INIT|UP|STOPPED)$/) print \$i}}"); '
+    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_CLUSTER_STATUSES +
+    ')$/) print \$i}}"); '
     'if [[ "$current_status" =~ {cluster_status} ]]; '
     'then echo "Target cluster status {cluster_status} reached."; break; fi; '
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
@@ -141,7 +144,8 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'fi; '
     'current_status=$(sky queue {cluster_name} | '
     'awk "\\$1 == \\"{job_id}\\" '
-    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(INIT|PENDING|SETTING_UP|RUNNING|SUCCEEDED|FAILED|FAILED_SETUP|CANCELLED)$/) print \$i}}"); '
+    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_JOB_STATUSES +
+    ')$/) print \$i}}"); '
     'found=0; '  # Initialize found variable outside the loop
     'while read -r line; do '  # Read line by line
     '  if [[ "$line" =~ {job_status} ]]; then '  # Check each line
