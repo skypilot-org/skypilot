@@ -29,6 +29,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -3232,7 +3233,7 @@ def test_managed_jobs_storage(generic_cloud: str):
 
     yaml_str_user_config = pathlib.Path(
         'tests/test_yamls/use_intermediate_bucket.yaml').read_text()
-    intermediate_storage_name = f'bucket-jobs-s3-{timestamp}'
+    intermediate_storage_name = f'bucket-jobs-intermediate-smoke-test-{timestamp}'
 
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
@@ -3288,8 +3289,9 @@ def test_managed_jobs_storage(generic_cloud: str):
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
-    yaml_str_user_config = yaml_str_user_config.replace(
-        'bucket-jobs-s3', intermediate_storage_name)
+    yaml_str_user_config = re.sub(r'bucket-jobs-[\w\d]+',
+                                  intermediate_storage_name,
+                                  yaml_str_user_config)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f_user_config:
         f_user_config.write(yaml_str_user_config)
         f_user_config.flush()
