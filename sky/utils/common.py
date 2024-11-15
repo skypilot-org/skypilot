@@ -6,7 +6,6 @@ import importlib
 from sky import sky_logging
 from sky.utils import common_utils
 
-
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 # Add user hash so that two users don't have the same controller VM on

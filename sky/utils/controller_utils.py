@@ -79,6 +79,7 @@ class _ControllerSpec:
             cluster_name=self.cluster_name)
 
 
+# TODO: refactor controller class to not be an enum.
 class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
@@ -162,7 +163,7 @@ class Controllers(enum.Enum):
             controller = cls.SKY_SERVE_CONTROLLER
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
-        if controller and name != controller.value.cluster_name:
+        if controller is not None and name != controller.value.cluster_name:
             # Input name is not the current user's controller name,
             # so need to set the controller's cluster name to the input name.
             controller.value.cluster_name = name
