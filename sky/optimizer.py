@@ -280,20 +280,12 @@ class Optimizer:
         parent_resources: resources_lib.Resources, node: task_lib.Task,
         resources: resources_lib.Resources, edge_data: Dict[str, Any]
     ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
-        if isinstance(parent_resources.cloud, DummyCloud):
-            # Special case.  The current 'node' is a real
-            # source node, and its input may be on a different
-            # cloud from 'resources'.
-            if node.get_inputs() is None:
-                # A task_lib.Task may have no inputs specified.
-                return None, None, 0
-            src_cloud = node.get_inputs_cloud()
-            n_gigabytes = node.get_estimated_inputs_size_gigabytes()
-        else:
-            src_cloud = parent_resources.cloud
-            assert isinstance(edge_data['edge'], TaskEdge)
-            task_edge = edge_data['edge']
-            n_gigabytes = getattr(task_edge.data, 'size_gb', 0)
+        # TODO(wenjie): Add dummy nodes for external storage when DAG nodes read
+        # from buckets specified in the YAML file.
+        src_cloud = parent_resources.cloud
+        assert isinstance(edge_data['edge'], TaskEdge)
+        task_edge = edge_data['edge']
+        n_gigabytes = getattr(task_edge.data, 'size_gb', 0)
         dst_cloud = resources.cloud
         return src_cloud, dst_cloud, n_gigabytes
 

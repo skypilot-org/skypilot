@@ -3688,6 +3688,7 @@ def jobs_launch(
     dag, _ = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
     dag = sky.optimize(dag)
+    dag.plot('diamond.png')
     if not yes:
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
