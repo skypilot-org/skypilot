@@ -680,7 +680,7 @@ def get_image_id_from_tag_impl(df: 'pd.DataFrame', tag: str,
     df = _filter_region_zone(df, region, zone=None)
     assert len(df) <= 1, ('Multiple images found for tag '
                           f'{tag} in region {region}')
-    if not df:
+    if df.empty:
         return None
     image_id = df['ImageId'].iloc[0]
     if pd.isna(image_id):
@@ -694,4 +694,4 @@ def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
     df = df[df['Tag'] == tag]
     df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
-    return bool(df)
+    return not df.empty
