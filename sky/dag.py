@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import networkx as nx
 
+from sky.data.storage import StoreType
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -38,12 +39,15 @@ class TaskEdge:
         source: The upstream task.
         target: The downstream task.
         data: Optional data transfer information between tasks.
-               If None, only represents task dependency.
+              If None, only represents task dependency.
+        best_storage: Optional best storage option for data transfer.
+                      The tuple is (storage_type, storage_region). This simply
+                      records the information without creating a new store.
     """
     source: 'task.Task'
     target: 'task.Task'
     data: Optional[TaskData] = None
-    best_storage: Optional[Tuple[str, Optional[str]]] = None
+    best_storage: Optional[Tuple[StoreType, Optional[str]]] = None
 
     def with_data(self, source_path: str, target_path: str,
                   size_gb: float) -> 'TaskEdge':

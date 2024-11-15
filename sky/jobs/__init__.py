@@ -18,7 +18,7 @@ from sky.jobs.utils import format_job_table
 from sky.jobs.utils import JOB_CONTROLLER_NAME
 from sky.jobs.utils import load_managed_job_queue
 from sky.jobs.utils import ManagedJobCodeGen
-from sky.jobs.utils import sync_storage_mounts_for_data_transfer
+from sky.jobs.utils import set_storage_mounts_for_data_transfer
 
 pathlib.Path(JOBS_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                               exist_ok=True)
@@ -43,5 +43,5 @@ __all__ = [
     'format_job_table',
     'dump_managed_job_queue',
     'load_managed_job_queue',
-    'sync_storage_mounts_for_data_transfer'
+    'set_storage_mounts_for_data_transfer'
 ]

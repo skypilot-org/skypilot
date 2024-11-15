@@ -19,6 +19,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.dag import TaskData
 from sky.dag import TaskEdge
+from sky.data import StoreType
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -144,12 +145,12 @@ class Optimizer:
                 # Make sure to remove the dummy source/sink nodes, even if the
                 # optimization fails.
                 Optimizer._remove_dummy_source_sink_nodes(dag)
-                Optimizer._convert_storage_nodes_to_edge_attributes(
+                Optimizer._remove_storage_nodes_and_move_to_edge_attributes(
                     dag, storage_nodes_info)
             return dag
 
     @staticmethod
-    def _convert_storage_nodes_to_edge_attributes(
+    def _remove_storage_nodes_and_move_to_edge_attributes(
         dag: 'dag_lib.Dag',
         edges_to_add: List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
                                  TaskData]]):
@@ -164,24 +165,14 @@ class Optimizer:
                 task_edge.with_data(source_path=data.source_path,
                                     target_path=data.target_path,
                                     size_gb=data.size_gb)
-                instance_to_storage = {
-                    'AWS': 'S3',
-                    'GCP': 'GCS',
-                    'Azure': 'Azure',
-                    'IBM': 'IBM'
-                }
 
+                # TODO(wenjie): support r2 storage.
                 if storage_node.best_resources is not None:
                     assert storage_node.best_resources.cloud is not None
-                    cloud_name = str(storage_node.best_resources.cloud)
-                    if cloud_name in instance_to_storage:
-                        task_edge.best_storage = (
-                            instance_to_storage[cloud_name],
-                            storage_node.best_resources.region)
-                    else:
-                        task_edge.best_storage = None
-                else:
-                    task_edge.best_storage = None
+                    storage_type = StoreType.from_cloud(
+                        storage_node.best_resources.cloud)
+                    task_edge.best_storage = (
+                        storage_type, storage_node.best_resources.region)
 
     @staticmethod
     def _add_storage_nodes_for_data_transfer(
@@ -197,12 +188,24 @@ class Optimizer:
         # storage resources. Also, we should add the logic of selecting
         # available bucket resources before optimizing the DAG.
         for src, dst, edge_data in graph.edges(data=True):
-            if isinstance(src, task_lib.Task) and isinstance(
-                    dst, task_lib.Task) and edge_data['edge'].data:
+            if edge_data['edge'].data is not None:
                 storage_node = task_lib.Task(
                     f'{src.name}_to_{dst.name}_storage')
                 data = edge_data['edge'].data
-                storage_node.set_resources({resources_lib.Resources()})
+                storage_node.set_resources({
+                    resources_lib.Resources(clouds.AWS()),
+                    resources_lib.Resources(clouds.GCP()),
+                    resources_lib.Resources(clouds.Azure()),
+                    resources_lib.Resources(clouds.IBM())
+                })
+
+                # The time estimator is set to 0 because we use instances to
+                # represent storage here, and the price is different. Therefore,
+                # we don't want to consider the time of storage in the
+                # optimization. Once we use storage resources to represent
+                # storage, we should set the time estimator to the actual
+                # storage time, which is likely the sum of the upstream and
+                # downstream times.
                 storage_node.set_time_estimator(lambda _: 0)
                 edges_to_add.append((src, storage_node, dst, data))
         with dag:
@@ -290,7 +293,7 @@ class Optimizer:
             src_cloud = parent_resources.cloud
             assert isinstance(edge_data['edge'], TaskEdge)
             task_edge = edge_data['edge']
-            n_gigabytes = task_edge.data.size_gb if task_edge.data else 0
+            n_gigabytes = getattr(task_edge.data, 'size_gb', 0)
         dst_cloud = resources.cloud
         return src_cloud, dst_cloud, n_gigabytes
 

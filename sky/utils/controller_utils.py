@@ -32,7 +32,6 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import dag as dag_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 

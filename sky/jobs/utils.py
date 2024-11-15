@@ -692,7 +692,7 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def sync_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
+def set_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
     """Syncs up the file mounts for data transfer.
 
     This function is used to sync up the file mounts with the storage
@@ -707,7 +707,10 @@ def sync_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
         if best_storage is not None:
             assert data is not None
             bucket_name_tmp = (
-                f'bucket-for-{src.name}-to-{tgt.name}{uuid.uuid4()}')
+                f'bucket-for-{src.name}-to-{tgt.name}-{uuid.uuid4()}')
+            # Generate a valid and unique bucket name. For S3 buckets, the max
+            # length is 63 characters. Since we don't want to distinguish the
+            # storage type here, we use the same length for all storage types.
             bucket_name = common_utils.make_cluster_name_on_cloud(
                 bucket_name_tmp, max_length=63)
             storage_type, region = best_storage
