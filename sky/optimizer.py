@@ -315,7 +315,9 @@ class Optimizer:
         src_cloud = parent_resources.cloud
         assert isinstance(edge_data['edge'], TaskEdge)
         task_edge = edge_data['edge']
-        n_gigabytes = getattr(task_edge.data, 'size_gb', 0)
+        n_gigabytes = 0
+        if task_edge.data is not None:
+            n_gigabytes = task_edge.data.size_gb
         dst_cloud = resources.cloud
         return src_cloud, dst_cloud, n_gigabytes
 
