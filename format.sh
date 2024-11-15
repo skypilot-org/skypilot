@@ -132,7 +132,7 @@ elif [[ "$1" == '--all' ]]; then
     pylint "${PYLINT_FLAGS[@]}" sky
 else
     # Pylint only files in sky/ that have changed in last commit.
-    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi' ':!sky/skylet/**')
+    changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- 'sky/*.py' 'sky/*.pyi')
     if [[ -n "$changed_files" ]]; then
         echo "$changed_files" | tr '\n' '\0' | xargs -0 pylint "${PYLINT_FLAGS[@]}"
     else

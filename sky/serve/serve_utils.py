@@ -784,6 +784,8 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     # Don't use backend_utils.is_controller_accessible since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
+    if handle is None:
+        return '-'
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
@@ -882,13 +884,15 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         region = '-'
         zone = '-'
 
-        replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
-        resources_str = resources_utils.get_readable_resources_repr(
-            replica_handle, simplify=not show_all)
-        if replica_handle.launched_resources.region is not None:
-            region = replica_handle.launched_resources.region
-        if replica_handle.launched_resources.zone is not None:
-            zone = replica_handle.launched_resources.zone
+        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
+            'handle']
+        if replica_handle is not None:
+            resources_str = resources_utils.get_readable_resources_repr(
+                replica_handle, simplify=not show_all)
+            if replica_handle.launched_resources.region is not None:
+                region = replica_handle.launched_resources.region
+            if replica_handle.launched_resources.zone is not None:
+                zone = replica_handle.launched_resources.zone
 
         replica_values = [
             service_name,
