@@ -607,7 +607,10 @@ def get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/get?request_id={request_id}',
         timeout=(5, None))
-    api_common.handle_request_error(response)
+    if response.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to get request {request_id}: '
+                               f'{response.status_code} {response.text}')
     request_task = requests_lib.Request.decode(
         requests_lib.RequestPayload(**response.json()))
     error = request_task.get_error()
