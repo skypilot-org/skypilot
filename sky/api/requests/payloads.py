@@ -80,6 +80,7 @@ class LaunchBody(RequestBody):
     optimize_target: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
     no_setup: bool = False
     clone_disk_from: Optional[str] = None
+    fast: bool = False
     # Internal only:
     # pylint: disable=invalid-name
     quiet_optimizer: bool = False
