@@ -1,4 +1,5 @@
 """Rich status spinner utils."""
+import atexit
 import contextlib
 import enum
 import logging
@@ -254,3 +255,12 @@ def decode_rich_status(encoded_msg: str) -> Optional[str]:
         elif control == Control.START:
             _decoding_status.start()
     return None
+
+
+def abort_client_status():
+    if _statuses['client'] is not None:
+        _statuses['client'].stop()
+        _statuses['client'] = None
+
+
+atexit.register(abort_client_status)
