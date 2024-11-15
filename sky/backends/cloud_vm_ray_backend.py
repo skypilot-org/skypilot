@@ -3364,8 +3364,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.starting_message(f'Job submitted, ID: {job_id}'))
         rich_utils.stop_safe_status()
         if not detach_run:
-            if (handle.cluster_name in controller_utils.Controllers.
-                    JOBS_CONTROLLER.value.candidate_cluster_names):
+            if (handle.cluster_name == controller_utils.Controllers.
+                    JOBS_CONTROLLER.value.cluster_name):
                 self.tail_managed_job_logs(handle, job_id)
             else:
                 # Sky logs. Not using subprocess.run since it will make the
