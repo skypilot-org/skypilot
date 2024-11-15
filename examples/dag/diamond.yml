@@ -34,6 +34,7 @@ run: |
   echo data-processing starts
   echo "Hello World!" > /data/data-processing-output-A/world.txt
   echo "Hello World!" > /data/data-processing-output-B/world.txt
+  sleep 30
   echo data-processing ends
 
 ---
