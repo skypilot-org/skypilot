@@ -705,13 +705,12 @@ def write_cluster_config(
             # credential file uploads.
             remote_identity = schemas.get_default_remote_identity(
                 str(cloud).lower())
-        else:
-            if not cloud.supports_service_account_on_remote():
-                raise exceptions.InvalidCloudConfigs(
-                    'remote_identity: SERVICE_ACCOUNT is specified in '
-                    f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
-                    'is not supported by this cloud. Remove the config or set: '
-                    '`remote_identity: LOCAL_CREDENTIALS`.')
+        elif not cloud.supports_service_account_on_remote():
+            raise exceptions.InvalidCloudConfigs(
+                'remote_identity: SERVICE_ACCOUNT is specified in '
+                f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
+                'is not supported by this cloud. Remove the config or set: '
+                '`remote_identity: LOCAL_CREDENTIALS`.')
         excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in cloud_registry.CLOUD_REGISTRY.items():
