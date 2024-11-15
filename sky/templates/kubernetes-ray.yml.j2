@@ -283,11 +283,14 @@ available_node_types:
 
         restartPolicy: Never
 
-        # Add node selector if GPUs are requested:
+        # Add node selector if GPU/TPUs are requested:
         {% if (k8s_acc_label_key is not none and k8s_acc_label_value is not none) or (k8s_spot_label_key is not none) %}
         nodeSelector:
             {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
             {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+            {% endif %}
+            {% if k8s_topology_label_key is not none and k8s_topology_label_value is not none %}
+            {{k8s_topology_label_key}}: {{k8s_topology_label_value}}
             {% endif %}
             {% if k8s_spot_label_key is not none %}
             {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
@@ -324,6 +327,17 @@ available_node_types:
           command: ["/bin/bash", "-c", "--"]
           args: 
             - |
+              # Helper function to conditionally use sudo
+              prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
+
+              # Run apt update in background and log to a file
+              (
+                DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
+                echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
+              ) &
+
+              function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+
               # Tails file and checks every 5 sec for
               # open file handlers with write access
               # closes if none exist
@@ -333,7 +347,7 @@ available_node_types:
                 while kill -0 $TAIL_PID 2> /dev/null; do
                   # only two PIDs should be accessing the file
                   # the log appender and log tailer
-                  if [ $(lsof -w $file | wc -l) -lt 3 ]; then
+                  if [ $(mylsof $file | wc -l) -lt 2 ]; then
                     kill $TAIL_PID
                     break
                   fi
@@ -398,14 +412,24 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
-              nvidia.com/gpu: {{accelerator_count}}
+              {% if k8s_resource_key is not none %}
+              # Number of requested google.com/tpu must be equal to the total
+              # number of available TPU chips on the TPU slice node either it
+              # being a node from multi-host TPU slice or single-host TPU
+              # slice. Example reference:
+              # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
+              {{k8s_resource_key}}: {{accelerator_count}}
+              {% endif %}
               {% if k8s_fuse_device_required %}
               # Kubernetes resource exposed by the fuse device manager
               # https://gitlab.com/arm-research/smarter/smarter-device-manager
               smarter-devices/fuse: "1"
               {% endif %}
             limits:
-              nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
+              # Limits need to be defined for GPU/TPU requests
+              {% if k8s_resource_key is not none %}
+              {{k8s_resource_key}}: {{accelerator_count}}
+              {% endif %}
               {% if k8s_fuse_device_required %}
               smarter-devices/fuse: "1"
               {% endif %}
@@ -417,7 +441,18 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - sudo DEBIAN_FRONTEND=noninteractive apt install lsof gcc patch pciutils rsync fuse curl -y;
+  - |
+    PACKAGES="gcc patch pciutils rsync fuse curl";
+    MISSING_PACKAGES="";
+    for pkg in $PACKAGES; do
+      if ! dpkg -l | grep -q "^ii  $pkg "; then
+        MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+      fi
+    done;
+    if [ ! -z "$MISSING_PACKAGES" ]; then
+      echo "Installing missing packages: $MISSING_PACKAGES";
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING_PACKAGES;
+    fi;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
@@ -429,6 +464,19 @@ setup_commands:
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
+  {% if tpu_requested %}
+  # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
+  # the TPU runtime, are written. These capture runtime information about the
+  # TPU execution, including any warnings, errors, or general activity of
+  # the TPU driver. By default, the /tmp/tpu_logs directory is created with
+  # 755 permissions, and the user of the provisioned pod is not necessarily
+  # a root. Hence, we need to update the write permission so the logs can be
+  # properly written.
+  # TODO(Doyoung): Investigate to see why TPU workload fails to run without
+  # execution permission, such as granting 766 to log file. Check if it's a
+  # must and see if there's a workaround to grant minimum permission. 
+  - sudo chmod 777 /tmp/tpu_logs;
+  {% endif %}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {

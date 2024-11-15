@@ -31,6 +31,7 @@ from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
+from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -60,6 +61,9 @@ class OCI(clouds.Cloud):
                              {resources_utils.DiskTier.ULTRA})
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
@@ -71,8 +75,6 @@ class OCI(clouds.Cloud):
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -433,7 +435,7 @@ class OCI(clouds.Cloud):
             return True, None
         except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
                 oci_adaptor.oci.exceptions.InvalidConfig,
-                oci_adaptor.service_exception()) as e:
+                oci_adaptor.oci.exceptions.ServiceError) as e:
             return False, (
                 f'OCI credential is not correctly set. '
                 f'Check the credential file at {conf_file}\n'
@@ -597,25 +599,11 @@ class OCI(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         del zone, kwargs  # Unused.
-        # Check the lifecycleState definition from the page
-        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
-        status_map = {
-            'PROVISIONING': status_lib.ClusterStatus.INIT,
-            'STARTING': status_lib.ClusterStatus.INIT,
-            'RUNNING': status_lib.ClusterStatus.UP,
-            'STOPPING': status_lib.ClusterStatus.STOPPED,
-            'STOPPED': status_lib.ClusterStatus.STOPPED,
-            'TERMINATED': None,
-            'TERMINATING': None,
-        }
-
-        # pylint: disable=import-outside-toplevel
-        from sky.skylet.providers.oci.query_helper import oci_query_helper
 
         status_list = []
         try:
-            vms = oci_query_helper.query_instances_by_tags(
-                tag_filters=tag_filters, region=region)
+            vms = query_helper.query_instances_by_tags(tag_filters=tag_filters,
+                                                       region=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
@@ -625,9 +613,9 @@ class OCI(clouds.Cloud):
 
         for node in vms:
             vm_status = node.lifecycle_state
-            if vm_status in status_map:
-                sky_status = status_map[vm_status]
-                if sky_status is not None:
-                    status_list.append(sky_status)
+            sky_status = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY.get(
+                vm_status, None)
+            if sky_status is not None:
+                status_list.append(sky_status)
 
         return status_list

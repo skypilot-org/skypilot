@@ -42,8 +42,9 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
-    prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-    raise RuntimeError(prefix + error)
+    full_error = f'SKYPILOT_ERROR_NO_NODES_LAUNCHED: {error}'
+    logger.error(full_error)
+    raise RuntimeError(full_error)
 
 
 def bootstrap_instances(
@@ -222,10 +223,27 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
 
 
 @functools.lru_cache(maxsize=128)  # Keep bounded.
-def _get_route_tables(ec2, vpc_id: Optional[str], main: bool) -> List[Any]:
+def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
+                      main: bool) -> List[Any]:
+    """Get route tables associated with a VPC and region
+
+    Args:
+        ec2: ec2 resource object
+        vpc_id: vpc_id is optional, if not provided, all route tables in the
+                region will be returned
+        region: region is mandatory to allow the lru cache
+                   to return the corect results
+        main: if True, only main route tables will be returned otherwise
+                only non-main route tables will be returned
+
+    Returns:
+        A list of route tables associated with the options VPC and region
+    """
     filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
     if vpc_id is not None:
         filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
+    logger.debug(
+        f'Getting route tables with filters: {filters} in region: {region}')
     return ec2.meta.client.describe_route_tables(Filters=filters).get(
         'RouteTables', [])
 
@@ -238,7 +256,8 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
     https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Internet_Gateway.html
     """
     # Get the route tables associated with the subnet
-    all_route_tables = _get_route_tables(ec2, vpc_id, main=False)
+    region = ec2.meta.client.meta.region_name
+    all_route_tables = _get_route_tables(ec2, vpc_id, region, main=False)
     route_tables = [
         rt for rt in all_route_tables
         # An RT can be associated with multiple subnets, i.e.,
@@ -267,7 +286,8 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
     # subnets. Since the associations are implicit, the filter above won't find
     # any. Check there exists a main route table with routes pointing to an IGW.
     logger.debug('Checking main route table')
-    main_route_tables = _get_route_tables(ec2, vpc_id, main=True)
+    region = ec2.meta.client.meta.region_name
+    main_route_tables = _get_route_tables(ec2, vpc_id, region, main=True)
     return _has_igw_route(main_route_tables)
 
 

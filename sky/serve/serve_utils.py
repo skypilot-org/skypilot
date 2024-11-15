@@ -46,8 +46,14 @@ NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
-_SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
-_SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
+# NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
+# and always appear after a space. Be careful when changing UX as this
+# assumption is used to expand some log files while ignoring others.
+_SKYPILOT_LOG_DIRS = r'~/(sky_logs|\.sky)'
+_SKYPILOT_PROVISION_LOG_PATTERN = (
+    fr'.* ({_SKYPILOT_LOG_DIRS}/.*provision\.log)')
+_SKYPILOT_LOG_PATTERN = fr'.* ({_SKYPILOT_LOG_DIRS}/.*\.log)'
+
 # TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
@@ -591,16 +597,27 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _follow_replica_logs(
-        file: TextIO,
-        cluster_name: str,
-        *,
-        finish_stream: Callable[[], bool],
-        exit_if_stream_end: bool = False,
-        no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
-    line = ''
-    log_file = None
-    no_new_content_cnt = 0
+def _follow_logs_with_provision_expanding(
+    file: TextIO,
+    cluster_name: str,
+    *,
+    should_stop: Callable[[], bool],
+    stop_on_eof: bool = False,
+    idle_timeout_seconds: Optional[int] = None,
+) -> Iterator[str]:
+    """Follows logs and expands any provision.log references found.
+
+    Args:
+        file: Log file to read from.
+        cluster_name: Name of the cluster being launched.
+        should_stop: Callback that returns True when streaming should stop.
+        stop_on_eof: If True, stop when reaching end of file.
+        idle_timeout_seconds: If set, stop after these many seconds without
+            new content.
+
+    Yields:
+        Log lines, including expanded content from referenced provision logs.
+    """
 
     def cluster_is_up() -> bool:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
@@ -608,51 +625,51 @@ def _follow_replica_logs(
             return False
         return cluster_record['status'] == status_lib.ClusterStatus.UP
 
-    while True:
-        tmp = file.readline()
-        if tmp:
-            no_new_content_cnt = 0
-            line += tmp
-            if '\n' in line or '\r' in line:
-                # Tailing detailed progress for user. All logs in skypilot is
-                # of format `To view detailed progress: tail -n100 -f *.log`.
-                x = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-                if x is not None:
-                    log_file = os.path.expanduser(x.group(1))
-                elif re.match(_SKYPILOT_LOG_PATTERN, line) is None:
-                    # Not print other logs (file sync logs) since we lack
-                    # utility to determine when these log files are finished
-                    # writing.
-                    # TODO(tian): Not skip these logs since there are small
-                    # chance that error will happen in file sync. Need to find
-                    # a better way to do this.
-                    yield line
-                    # Output next line first since it indicates the process is
-                    # starting. For our launching logs, it's always:
-                    # Launching on <cloud> <region> (<zone>)
-                    if log_file is not None:
-                        with open(log_file, 'r', newline='',
-                                  encoding='utf-8') as f:
-                            # We still exit if more than 10 seconds without new
-                            # content to avoid any internal bug that causes
-                            # the launch failed and cluster status remains INIT.
-                            for l in _follow_replica_logs(
-                                    f,
-                                    cluster_name,
-                                    finish_stream=cluster_is_up,
-                                    exit_if_stream_end=exit_if_stream_end,
-                                    no_new_content_timeout=10):
-                                yield l
-                        log_file = None
-                line = ''
-        else:
-            if exit_if_stream_end or finish_stream():
-                break
-            if no_new_content_timeout is not None:
-                if no_new_content_cnt >= no_new_content_timeout:
-                    break
-                no_new_content_cnt += 1
-            time.sleep(1)
+    def process_line(line: str) -> Iterator[str]:
+        # The line might be directing users to view logs, like
+        # `✓ Cluster launched: new-http.  View logs at: *.log`
+        # We should tail the detailed logs for user.
+        provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
+        log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
+
+        if provision_log_prompt is not None:
+            nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
+
+            try:
+                with open(nested_log_path, 'r', newline='',
+                          encoding='utf-8') as f:
+                    # We still exit if more than 10 seconds without new content
+                    # to avoid any internal bug that causes the launch to fail
+                    # while cluster status remains INIT.
+                    yield from log_utils.follow_logs(f,
+                                                     should_stop=cluster_is_up,
+                                                     stop_on_eof=stop_on_eof,
+                                                     idle_timeout_seconds=10)
+            except FileNotFoundError:
+                yield line
+
+                yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
+                       f'Try to expand log file {nested_log_path} but not '
+                       f'found. Skipping...{colorama.Style.RESET_ALL}')
+                pass
+            return
+
+        if log_prompt is not None:
+            # Now we skip other logs (file sync logs) since we lack
+            # utility to determine when these log files are finished
+            # writing.
+            # TODO(tian): We should not skip these logs since there are
+            # small chance that error will happen in file sync. Need to
+            # find a better way to do this.
+            return
+
+        yield line
+
+    return log_utils.follow_logs(file,
+                                 should_stop=should_stop,
+                                 stop_on_eof=stop_on_eof,
+                                 process_line=process_line,
+                                 idle_timeout_seconds=idle_timeout_seconds)
 
 
 def stream_replica_logs(service_name: str, replica_id: int,
@@ -687,14 +704,17 @@ def stream_replica_logs(service_name: str, replica_id: int,
             raise ValueError(
                 _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
 
-    finish_stream = (
+    replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_replica_logs(f,
-                                         replica_cluster_name,
-                                         finish_stream=finish_stream,
-                                         exit_if_stream_end=not follow):
+        for line in _follow_logs_with_provision_expanding(
+                f,
+                replica_cluster_name,
+                should_stop=replica_provisioned,
+                stop_on_eof=not follow,
+        ):
             print(line, end='', flush=True)
+
     if (not follow and
             _get_replica_status() == serve_state.ReplicaStatus.PROVISIONING):
         # Early exit if not following the logs.
@@ -719,22 +739,6 @@ def stream_replica_logs(service_name: str, replica_id: int,
     return ''
 
 
-def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
-                 exit_if_stream_end: bool) -> Iterator[str]:
-    line = ''
-    while True:
-        tmp = file.readline()
-        if tmp:
-            line += tmp
-            if '\n' in line or '\r' in line:
-                yield line
-                line = ''
-        else:
-            if exit_if_stream_end or finish_stream():
-                break
-            time.sleep(1)
-
-
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
                               follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
@@ -753,9 +757,11 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 
     with open(os.path.expanduser(log_file), 'r', newline='',
               encoding='utf-8') as f:
-        for line in _follow_logs(f,
-                                 finish_stream=_service_is_terminal,
-                                 exit_if_stream_end=not follow):
+        for line in log_utils.follow_logs(
+                f,
+                should_stop=_service_is_terminal,
+                stop_on_eof=not follow,
+        ):
             print(line, end='', flush=True)
     return ''
 

@@ -75,11 +75,11 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '8'
+SKYLET_VERSION = '9'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 1
+SKYLET_LIB_VERSION = 2
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related

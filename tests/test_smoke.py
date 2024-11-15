@@ -288,13 +288,13 @@ _VALIDATE_LAUNCH_OUTPUT = (
     # (min, pid=1277)
     # (min, pid=1277) task run finish
     # ✓ Job finished (status: SUCCEEDED).
-
-    # 📋 Useful Commands
+    #
     # Job ID: 1
+    # 📋 Useful Commands
     # ├── To cancel the job:          sky cancel test 1
     # ├── To stream job logs:         sky logs test 1
     # └── To view job queue:          sky queue test
-
+    #
     # Cluster name: test
     # ├── To log into the head VM:    ssh test
     # ├── To submit a job:            sky exec test yaml_file
@@ -314,8 +314,8 @@ _VALIDATE_LAUNCH_OUTPUT = (
     'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
-    'grep "Useful Commands" && '
-    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+    'grep "Job ID:" && '
+    'echo "$s" | grep -A 1 "Job ID:" | grep "Useful Commands"')
 
 
 # ---------- A minimal task ----------
@@ -443,6 +443,40 @@ def test_aws_region():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_with_ssh_proxy_command():
+    name = _get_cluster_name()
+    with tempfile.NamedTemporaryFile(mode='w') as f:
+        f.write(
+            textwrap.dedent(f"""\
+        aws:
+            ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
+        """))
+        f.flush()
+        test = Test(
+            'aws_with_ssh_proxy_command',
+            [
+                f'sky launch -y -c jump-{name} --cloud aws --cpus 2 --region us-east-1',
+                # Use jump config
+                f'export SKYPILOT_CONFIG={f.name}; '
+                f'sky launch -y -c {name} --cloud aws --cpus 2 --region us-east-1 echo hi',
+                f'sky logs {name} 1 --status',
+                f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
+                f'sky logs {name} 2 --status',
+                # Start a small job to make sure the controller is created.
+                f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
+                # Wait other tests to create the job controller first, so that
+                # the job controller is not launched with proxy command.
+                'timeout 300s bash -c "until sky status sky-jobs-controller* | grep UP; do sleep 1; done"',
+                f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
+                'sleep 300',
+                f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
+            ],
+            f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
+        )
+        run_one_test(test)
 
 
 @pytest.mark.gcp
@@ -947,7 +981,7 @@ def test_stale_job(generic_cloud: str):
             'sleep 100',  # Ensure this is large enough, else GCP leaks.
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -978,7 +1012,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -1009,7 +1043,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED_DRIVER',
         ],
         f'sky down -y {name}',
     )
@@ -1970,6 +2004,25 @@ def test_tpu_vm_pod():
     run_one_test(test)
 
 
+# ---------- TPU Pod Slice on GKE. ----------
+@pytest.mark.kubernetes
+def test_tpu_pod_slice_gke():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod_slice_gke',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --cloud kubernetes --gpus tpu-v5-lite-podslice',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "conda activate flax; python -c \'import jax; print(jax.devices()[0].platform);\' | grep tpu || exit 1;"',  # Ensure TPU is reachable.
+            f'sky logs {name} 2 --status'
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
 # ---------- Simple apps. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
@@ -2615,7 +2668,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky launch -c {name} --cloud {generic_cloud} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 90',
-            f'sky exec {name} "(nvidia-smi | grep python) || '
+            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep python) || '
             # When run inside container/k8s, nvidia-smi cannot show process ids.
             # See https://github.com/NVIDIA/nvidia-docker/issues/179
             # To work around, we check if GPU utilization is greater than 0.
@@ -2623,7 +2676,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',
-            f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
+            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep \'No running process\') || '
             # Ensure Xorg is the only process running.
             '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
@@ -3825,6 +3878,15 @@ def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'kubernetes', 30)
+    run_one_test(test)
+
+
+@pytest.mark.oci
+@pytest.mark.serve
+def test_skyserve_oci_http():
+    """Test skyserve on OCI"""
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'oci', 20)
     run_one_test(test)
 
 

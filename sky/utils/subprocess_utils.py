@@ -11,6 +11,7 @@ import psutil
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -198,3 +199,52 @@ def run_with_retries(
                 continue
         break
     return returncode, stdout, stderr
+
+
+def kill_process_daemon(process_pid: int) -> None:
+    """Start a daemon as a safety net to kill the process.
+
+    Args:
+        process_pid: The PID of the process to kill.
+    """
+    # Get initial children list
+    try:
+        process = psutil.Process(process_pid)
+        initial_children = [p.pid for p in process.children(recursive=True)]
+    except psutil.NoSuchProcess:
+        initial_children = []
+
+    parent_pid = os.getpid()
+    daemon_script = os.path.join(
+        os.path.dirname(os.path.abspath(log_lib.__file__)),
+        'subprocess_daemon.py')
+    python_path = subprocess.check_output(constants.SKY_GET_PYTHON_PATH_CMD,
+                                          shell=True,
+                                          stderr=subprocess.DEVNULL,
+                                          encoding='utf-8').strip()
+    daemon_cmd = [
+        python_path,
+        daemon_script,
+        '--parent-pid',
+        str(parent_pid),
+        '--proc-pid',
+        str(process_pid),
+        # We pass the initial children list to avoid the race condition where
+        # the process_pid is terminated before the daemon starts and gets the
+        # children list.
+        '--initial-children',
+        ','.join(map(str, initial_children)),
+    ]
+
+    # We do not need to set `start_new_session=True` here, as the
+    # daemon script will detach itself from the parent process with
+    # fork to avoid being killed by parent process. See the reason we
+    # daemonize the process in `sky/skylet/subprocess_daemon.py`.
+    subprocess.Popen(
+        daemon_cmd,
+        # Suppress output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        # Disable input
+        stdin=subprocess.DEVNULL,
+    )

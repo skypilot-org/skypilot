@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import common_utils
@@ -582,36 +583,46 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                    if kubernetes_utils.is_tpu_on_gke(acc):
+                        self._cloud = clouds.Kubernetes()
+                    else:
+                        self._cloud = clouds.GCP()
+                assert (self.cloud.is_same_cloud(clouds.GCP()) or
+                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                            'Cloud must be GCP or Kubernetes for TPU '
+                            'accelerators.')
+
                 if accelerator_args is None:
                     accelerator_args = {}
+
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
-                if self.instance_type is not None and use_tpu_vm:
-                    if self.instance_type != 'TPU-VM':
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                'Cannot specify instance type'
-                                f' (got "{self.instance_type}") for TPU VM.')
-                if 'runtime_version' not in accelerator_args:
+                if (self.cloud.is_same_cloud(clouds.GCP()) and
+                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                    if 'runtime_version' not in accelerator_args:
 
-                    def _get_default_runtime_version() -> str:
-                        if not use_tpu_vm:
-                            return '2.12.0'
-                        # TPU V5 requires a newer runtime version.
-                        if acc.startswith('tpu-v5'):
-                            return 'v2-alpha-tpuv5'
-                        # TPU V6e requires a newer runtime version.
-                        if acc.startswith('tpu-v6e'):
-                            return 'v2-alpha-tpuv6e'
-                        return 'tpu-vm-base'
+                        def _get_default_runtime_version() -> str:
+                            if not use_tpu_vm:
+                                return '2.12.0'
+                            # TPU V5 requires a newer runtime version.
+                            if acc.startswith('tpu-v5'):
+                                return 'v2-alpha-tpuv5'
+                            # TPU V6e requires a newer runtime version.
+                            elif acc.startswith('tpu-v6e'):
+                                return 'v2-alpha-tpuv6e'
+                            return 'tpu-vm-base'
 
-                    accelerator_args['runtime_version'] = (
-                        _get_default_runtime_version())
-                    logger.info(
-                        'Missing runtime_version in accelerator_args, using'
-                        f' default ({accelerator_args["runtime_version"]})')
+                        accelerator_args['runtime_version'] = (
+                            _get_default_runtime_version())
+                        logger.info(
+                            'Missing runtime_version in accelerator_args, using'
+                            f' default ({accelerator_args["runtime_version"]})')
+
+                    if self.instance_type is not None and use_tpu_vm:
+                        if self.instance_type != 'TPU-VM':
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError(
+                                    'Cannot specify instance type (got '
+                                    f'{self.instance_type!r}) for TPU VM.')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
