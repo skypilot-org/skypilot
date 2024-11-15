@@ -2749,8 +2749,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'Tearing down other user\'s managed job controller '
-                f'{controller_name!r} is not allowed.'
-            )
+                f'{controller_name!r} is not allowed.')
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
@@ -2809,8 +2808,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'Tearing down other user\'s sky serve controller '
-                f'{controller_name!r} is not allowed.'
-            )
+                f'{controller_name!r} is not allowed.')
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):

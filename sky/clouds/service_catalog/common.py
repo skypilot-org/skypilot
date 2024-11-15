@@ -119,7 +119,6 @@ def get_modified_catalog_file_mounts() -> Dict[str, str]:
     return modified_catalog_path_map
 
 
-
 class LazyDataFrame:
     """A lazy data frame that updates and reads the catalog on demand.
 
