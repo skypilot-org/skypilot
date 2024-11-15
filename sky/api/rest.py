@@ -623,7 +623,8 @@ async def stream(
         resolved_log_path = pathlib.Path(log_path).expanduser().resolve()
         if (not str(resolved_log_path).startswith(
                 os.path.expanduser(constants.SKY_LOGS_DIRECTORY)) and
-            str(resolved_log_path) != os.path.expanduser(constants.API_SERVER_LOGS)):
+                str(resolved_log_path) != os.path.expanduser(
+                    constants.API_SERVER_LOGS)):
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Unauthorized log path: {log_path}')
         log_path_to_stream = resolved_log_path
@@ -668,7 +669,8 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
 @app.get('/requests')
 async def requests(
     request: fastapi.Request,
-    request_ls_body: payloads.RequestIdBody = fastapi.Depends()) -> List[requests_lib.RequestPayload]:
+    request_ls_body: payloads.RequestIdBody = fastapi.Depends()
+) -> List[requests_lib.RequestPayload]:
     """Get the list of requests."""
     del request  # Unused.
     if request_ls_body.request_id is None:
