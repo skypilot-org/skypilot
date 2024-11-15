@@ -686,6 +686,15 @@ def write_cluster_config(
         skypilot_config.get_nested(
             (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
 
+    # Remote identity handling can have 4 cases:
+    # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
+    # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
+    # 3. Custom service account: Use specified service account
+    # 4. NO_UPLOAD: Do not upload any credentials
+    # 
+    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In 
+    # other cases, we exclude the cloud from credential file uploads after 
+    # running required checks.
     assert cluster_name is not None
     excluded_clouds = set()
     remote_identity_config = skypilot_config.get_nested(
@@ -694,11 +703,17 @@ def write_cluster_config(
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
     if isinstance(remote_identity_config, list):
+        # Some clouds (e.g., AWS) support specifying multiple service accounts
+        # chosen based on the cluster name. Do the matching here to pick the
+        # correct one.
         for profile in remote_identity_config:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
+        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the 
+        # excluded_clouds set, but we must also check if the cloud supports 
+        # service accounts.
         if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
             # If NO_UPLOAD is specified, fall back to default remote identity
             # for downstream logic but add it to excluded_clouds to skip
