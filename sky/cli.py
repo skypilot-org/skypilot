@@ -2745,6 +2745,11 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
             to be torn down (e.g., because it has jobs running or
             it is in init state)
     """
+    if controller_name != common.JOB_CONTROLLER_NAME:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Tearing down other user\'s managed job controller {controller_name!r} is not allowed.'
+            )
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
@@ -2799,6 +2804,11 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
             to be torn down (e.g., because it has services running or
             it is in init state)
     """
+    if controller_name != common.SKY_SERVE_CONTROLLER_NAME:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Tearing down other user\'s sky serve controller {controller_name!r} is not allowed.'
+            )
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):

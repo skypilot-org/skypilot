@@ -58,9 +58,7 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    # Use a list of strings to support fallback to old names. The list is in the
-    # fallback order.
-    candidate_cluster_names: List[str]
+    cluster_name: str
     in_progress_hint: str
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
@@ -69,15 +67,6 @@ class _ControllerSpec:
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
-
-    @property
-    def cluster_name(self) -> str:
-        """The name in candidate_cluster_names that exists, else the first."""
-        for candidate_name in self.candidate_cluster_names:
-            record = global_user_state.get_cluster_from_name(candidate_name)
-            if record is not None:
-                return candidate_name
-        return self.candidate_cluster_names[0]
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -90,6 +79,7 @@ class _ControllerSpec:
             cluster_name=self.cluster_name)
 
 
+# TODO: refactor controller class to not be an enum.
 class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
@@ -97,12 +87,10 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        candidate_cluster_names=[
-            # TODO(zhwu): by having the controller name loaded in common, it
-            # will not respect the latest updated user hash.
-            common.JOB_CONTROLLER_NAME,
-            common.LEGACY_JOB_CONTROLLER_NAME
-        ],
+        # Default cluster name is the current user's controller cluster unless caller initiate with a different controller name.
+        # TODO(zhwu): by having the controller name loaded in common, it
+        # will not respect the latest updated user hash.
+        cluster_name=common.JOB_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
@@ -132,7 +120,7 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        candidate_cluster_names=[common.SKY_SERVE_CONTROLLER_NAME],
+        cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
@@ -168,10 +156,18 @@ class Controllers(enum.Enum):
             The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
-        for controller in cls:
-            if name in controller.value.candidate_cluster_names:
-                return controller
-        return None
+        if name is None:
+            return None
+        controller = None
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
+            controller = cls.SKY_SERVE_CONTROLLER
+        elif name.startswith(common.JOB_CONTROLLER_PREFIX):
+            controller = cls.JOBS_CONTROLLER
+        if controller is not None and name != controller.value.cluster_name:
+            # Input name is not the current user's controller name,
+            # so need to set the controller's cluster name to the input name.
+            controller.value.cluster_name = name
+        return controller
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
