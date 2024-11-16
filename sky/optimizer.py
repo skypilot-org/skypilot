@@ -12,11 +12,14 @@ import prettytable
 
 from sky import check as sky_check
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.adaptors import cloudflare
 from sky.adaptors import common as adaptors_common
+from sky.data import storage as storage_lib
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -27,7 +30,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import networkx as nx
 
-    from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
 
@@ -60,7 +62,7 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
     return log_utils.create_table(field_names, **table_kwargs)
 
 
-def _is_dag_resources_ordered(dag: 'dag_lib.Dag') -> bool:
+def _is_dag_resources_ordered(dag: dag_lib.Dag) -> bool:
     graph = dag.get_graph()
     topo_order = list(nx.topological_sort(graph))
     for node in topo_order:
@@ -105,7 +107,7 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    def optimize(dag: 'dag_lib.Dag',
+    def optimize(dag: dag_lib.Dag,
                  minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
@@ -129,6 +131,9 @@ class Optimizer:
             # This function is effectful: mutates every node in 'dag' by setting
             # node.best_resources if it is None.
             Optimizer._add_dummy_source_sink_nodes(dag)
+            storage_nodes_info = Optimizer._add_storage_nodes_for_data_transfer(
+                dag)
+
             try:
                 unused_best_plan = Optimizer._optimize_dag(
                     dag=dag,
@@ -139,10 +144,148 @@ class Optimizer:
                 # Make sure to remove the dummy source/sink nodes, even if the
                 # optimization fails.
                 Optimizer._remove_dummy_source_sink_nodes(dag)
+                Optimizer._remove_storage_nodes_and_move_to_edge_attributes(
+                    dag, storage_nodes_info)
             return dag
 
     @staticmethod
-    def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
+    def _remove_storage_nodes_and_move_to_edge_attributes(
+        dag: dag_lib.Dag,
+        edges_to_add: List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
+                                 dag_lib.TaskData]]
+    ) -> None:
+        """Removes the storage nodes and adds the storage information to the
+        edges.
+
+        Args:
+            dag: The directed acyclic graph (DAG) to modify.
+            edges_to_add: A list of tuples containing the source task, storage
+                task, destination task, and the data associated with the edge.
+                These (source, dest) edges are removed before optimization, and
+                now we add them back with the storage information.
+        """
+        with dag:
+            for src, storage_node, dst, data in edges_to_add:
+                dag.remove_edge(src, storage_node)
+                dag.remove_edge(storage_node, dst)
+                dag.remove(storage_node)
+                task_edge = dag.add_edge(src, dst)
+                task_edge.with_data(source_path=data.source_path,
+                                    target_path=data.target_path,
+                                    size_gb=data.size_gb)
+
+                # TODO(wenjie): support r2 storage.
+                if storage_node.best_resources is not None:
+                    assert storage_node.best_resources.cloud is not None
+                    storage_type = storage_lib.StoreType.from_cloud(
+                        str(storage_node.best_resources.cloud))
+                    task_edge.best_storage = (
+                        storage_type, storage_node.best_resources.region)
+
+    @staticmethod
+    def _add_storage_nodes_for_data_transfer(
+        dag: dag_lib.Dag
+    ) -> List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
+                    dag_lib.TaskData]]:
+        """Adds special nodes for storage buckets between nodes connected by
+        with_data edges.
+
+        Example:
+        A --(data)--> B
+
+        After this function:
+        A --(data)--> A_to_B_storage --(data)--> B
+
+        These nodes represent the storage resources required for data transfer
+        between tasks, allowing us to account for the cost and time associated
+        with data transfer when optimizing the DAG. By adding a dummy node with
+        zero compute cost, it simulates an external bucket created in some cloud
+        (and region), where only the transfer cost is calculated by our
+        optimizer. The transfer cost refers to egress cost when optimizing cost
+        and time to transfer data when optimizing time.
+
+        # TODO(wenjie): Implement data transfer time estimation when optimizing
+        # time.
+        # TODO(wenjie): Currently we only calculate the egress cost. Investigate
+        # the cost for storage in those buckets and take that into account. We
+        # could reuse the time estimator here.
+        # TODO(tian): Using a bucket for intermediate storage is a temporary
+        # olution. This incur extra cost on storage. We should consider
+        # implement data streaming directly from upstream task to downstream
+        # task.
+
+        Algorithm:
+        1. Iterate through all edges in the DAG.
+        2. For each edge with data, create a dummy storage node and set its
+        resources to include all possible cloud storage options.
+        3. Add the storage node between the source and destination nodes.
+        4. Remove the original edge and add new edges connecting the source to
+        the storage node and the storage node to the destination.
+
+        Returns:
+            List[Tuple[task_lib.Task, task_lib.Task, task_lib.Task,
+                dag_lib.TaskData]]:
+            - The source node
+            - The storage node
+            - The destination node
+            - The data associated with the original edge
+
+        This information is used later to remove the storage nodes and move the
+        storage information to the edge attributes.
+        """
+        graph = dag.get_graph()
+        edges_to_add = []
+
+        # TODO(wenjie): this is a hacky way to use the compute resources to
+        # represent the storage resources. We should have a separate class for
+        # storage resources. Also, we should add the logic of selecting
+        # available bucket resources before optimizing the DAG.
+        for src, dst, edge_data in graph.edges(data=True):
+            if edge_data['edge'].data is not None:
+                storage_node = task_lib.Task(
+                    f'{src.name}_to_{dst.name}_storage')
+                data = edge_data['edge'].data
+                enabled_clouds = (
+                    storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+                        raise_if_no_cloud_access=True))
+                # We current does not support R2 storage since it does not have
+                # compute instance, which is not suitable for our optimizer
+                # algorithm for now.
+                # TODO(wenjie): Support R2 storage.
+                if cloudflare.NAME in enabled_clouds:
+                    enabled_clouds.remove(cloudflare.NAME)
+                storage_node.set_resources({
+                    resources_lib.Resources(
+                        clouds.CLOUD_REGISTRY.from_str(cloud_name))
+                    for cloud_name in enabled_clouds
+                })
+
+                # The time estimator is set to 0 because we use instances to
+                # represent storage here, and the price is different. Therefore,
+                # we don't want to consider the time of storage in the
+                # optimization. Once we use storage resources to represent
+                # storage, we should set the time estimator to the actual
+                # storage time, which is likely the sum of the upstream and
+                # downstream times.
+                storage_node.set_time_estimator(lambda _: 0)
+                edges_to_add.append((src, storage_node, dst, data))
+
+        for src, storage_node, dst, data in edges_to_add:
+            dag.remove_edge(src, dst)
+            dag.add_edge(src,
+                         storage_node).with_data(source_path=data.source_path,
+                                                 target_path='',
+                                                 size_gb=data.size_gb)
+            dag.add_edge(storage_node,
+                         dst).with_data(source_path='',
+                                        target_path=data.target_path,
+                                        size_gb=data.size_gb)
+            logger.info(
+                f'Adding storage node between {src.name} and {dst.name}')
+        return edges_to_add
+
+    @staticmethod
+    def _add_dummy_source_sink_nodes(dag: dag_lib.Dag):
         """Adds special Source and Sink nodes.
 
         The two special nodes are for conveniently handling cases such as
@@ -182,7 +325,7 @@ class Optimizer:
                 real_sink_node >> sink  # pylint: disable=pointless-statement
 
     @staticmethod
-    def _remove_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
+    def _remove_dummy_source_sink_nodes(dag: dag_lib.Dag):
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
         sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
@@ -195,46 +338,38 @@ class Optimizer:
 
     @staticmethod
     def _get_egress_info(
-        parent: task_lib.Task,
         parent_resources: resources_lib.Resources,
-        node: task_lib.Task,
-        resources: resources_lib.Resources,
+        resources: resources_lib.Resources, task_edge: dag_lib.TaskEdge
     ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
-        if isinstance(parent_resources.cloud, DummyCloud):
-            # Special case.  The current 'node' is a real
-            # source node, and its input may be on a different
-            # cloud from 'resources'.
-            if node.get_inputs() is None:
-                # A task_lib.Task may have no inputs specified.
-                return None, None, 0
-            src_cloud = node.get_inputs_cloud()
-            nbytes = node.get_estimated_inputs_size_gigabytes()
-        else:
-            src_cloud = parent_resources.cloud
-            nbytes = parent.get_estimated_outputs_size_gigabytes()
+        # TODO(wenjie): Add dummy nodes for external storage when DAG nodes read
+        # from buckets specified in the YAML file.
+        src_cloud = parent_resources.cloud
+        n_gigabytes = 0.0
+        if task_edge.data is not None:
+            n_gigabytes = float(task_edge.data.size_gb)
         dst_cloud = resources.cloud
-        return src_cloud, dst_cloud, nbytes
+        return src_cloud, dst_cloud, n_gigabytes
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: task_lib.Task,
+    def _egress_cost_or_time(minimize_cost: bool,
                              parent_resources: resources_lib.Resources,
-                             node: task_lib.Task,
-                             resources: resources_lib.Resources):
+                             resources: resources_lib.Resources,
+                             task_edge: dag_lib.TaskEdge) -> float:
         """Computes the egress cost or time depending on 'minimize_cost'."""
-        src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
-            parent, parent_resources, node, resources)
-        if not nbytes:
-            # nbytes can be None, if the task has no inputs/outputs.
+        src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(
+            parent_resources, resources, task_edge)
+        if not n_gigabytes:
+            # n_gigabytes can be None, if the task has no inputs/outputs.
             return 0
         assert src_cloud is not None and dst_cloud is not None, (src_cloud,
                                                                  dst_cloud,
-                                                                 nbytes)
+                                                                 n_gigabytes)
 
         if minimize_cost:
             fn = Optimizer._egress_cost
         else:
             fn = Optimizer._egress_time
-        return fn(src_cloud, dst_cloud, nbytes)
+        return fn(src_cloud, dst_cloud, n_gigabytes)
 
     @staticmethod
     def _estimate_nodes_cost_or_time(
@@ -408,6 +543,7 @@ class Optimizer:
 
     @staticmethod
     def _optimize_by_dp(
+        graph: 'nx.DiGraph',
         topo_order: List[task_lib.Task],
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
@@ -439,8 +575,8 @@ class Optimizer:
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
-                        minimize_cost, parent, parent_resources, node,
-                        resources)
+                        minimize_cost, parent_resources, resources,
+                        graph.get_edge_data(parent, node)['edge'])
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
@@ -536,13 +672,13 @@ class Optimizer:
             for node, resource_cost_map in node_to_cost_map.items()
         }
         F: Dict[Any, Dict[Any, List[float]]] = collections.defaultdict(dict)  # pylint: disable=invalid-name
-        for u, v in E:
+        for u, v, data in graph.edges(data=True):
             F[u][v] = []
             for r_u in node_to_cost_map[u].keys():
                 for r_v in node_to_cost_map[v].keys():
                     F[u][v].append(
-                        Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v,
-                                                       r_v))
+                        Optimizer._egress_cost_or_time(minimize_cost, r_u, r_v,
+                                                       data['edge']))
 
         # Define the decision variables.
         c = {
@@ -639,10 +775,10 @@ class Optimizer:
                 execution_time = node.estimate_runtime(resources)
 
             pred_finish_times = [0]
-            for pred in graph.predecessors(node):
+            for pred, _, edge_data in graph.in_edges(node, data=True):
                 # FIXME: Account for egress time for multi-node clusters
                 egress_time = Optimizer._egress_cost_or_time(
-                    False, pred, plan[pred], node, resources)
+                    False, plan[pred], resources, edge_data['edge'])
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
             cache_finish_time[node] = execution_time + max(pred_finish_times)
@@ -658,7 +794,7 @@ class Optimizer:
         plan: Dict[task_lib.Task, resources_lib.Resources],
     ) -> float:
         """Estimates the total cost of running the DAG by the plan."""
-        total_cost = 0
+        total_cost = 0.0
         for node in topo_order:
             resources = plan[node]
             if node.time_estimator_func is None:
@@ -671,32 +807,30 @@ class Optimizer:
             cost_per_node = resources.get_cost(execution_time)
             total_cost += cost_per_node * node.num_nodes
 
-            for pred in graph.predecessors(node):
+            for pred, _, edge_data in graph.in_edges(node, data=True):
                 # FIXME: Account for egress costs for multi-node clusters
                 egress_cost = Optimizer._egress_cost_or_time(
-                    True, pred, plan[pred], node, resources)
+                    True, plan[pred], resources, edge_data['edge'])
                 total_cost += egress_cost
         return total_cost
 
     @staticmethod
     def _print_egress_plan(graph, plan, minimize_cost):
         message_data = []
-        for parent, child in graph.edges():
-            src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
-                parent, plan[parent], child, plan[child])
-            if not nbytes:
-                # nbytes can be None, if the task has no inputs/outputs.
-                return 0
-            assert src_cloud is not None and dst_cloud is not None, (src_cloud,
-                                                                     dst_cloud,
-                                                                     nbytes)
+        for parent, child, edge_data in graph.edges(data=True):
+            src_cloud, dst_cloud, n_gigabytes = Optimizer._get_egress_info(
+                plan[parent], plan[child], edge_data['edge'])
+            if not n_gigabytes:
+                # n_gigabytes can be None, if the task has no inputs/outputs.
+                continue
+            assert src_cloud is not None and dst_cloud is not None, (
+                src_cloud, dst_cloud, n_gigabytes)
 
             if minimize_cost:
                 fn = Optimizer._egress_cost
             else:
                 fn = Optimizer._egress_time
-            cost_or_time = fn(src_cloud, dst_cloud, nbytes)
-
+            cost_or_time = fn(src_cloud, dst_cloud, n_gigabytes)
             if cost_or_time > 0:
                 if parent.name == _DUMMY_SOURCE_NAME:
                     egress = [
@@ -707,7 +841,7 @@ class Optimizer:
                     egress = [
                         f'{parent} ({src_cloud})', f'{child} ({dst_cloud})'
                     ]
-                message_data.append((*egress, nbytes, cost_or_time))
+                message_data.append((*egress, n_gigabytes, cost_or_time))
 
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
@@ -991,7 +1125,7 @@ class Optimizer:
 
     @staticmethod
     def _optimize_dag(
-        dag: 'dag_lib.Dag',
+        dag: dag_lib.Dag,
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
         quiet: bool = False,
@@ -1067,7 +1201,8 @@ class Optimizer:
                                                    blocked_resources))
         if local_dag.is_chain():
             local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
-                local_topo_order, local_node_to_cost_map, minimize_cost)
+                local_graph, local_topo_order, local_node_to_cost_map,
+                minimize_cost)
         else:
             local_best_plan, best_total_objective = Optimizer._optimize_by_ilp(
                 local_graph, local_topo_order, local_node_to_cost_map,
@@ -1199,7 +1334,7 @@ def _filter_out_blocked_launchable_resources(
     return available_resources
 
 
-def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
+def _check_specified_clouds(dag: dag_lib.Dag) -> None:
     """Check if specified clouds are enabled in cache and refresh if needed.
 
     Our enabled cloud list is cached in a local database, and if a user

@@ -15,6 +15,7 @@ import textwrap
 import time
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+import uuid
 
 import colorama
 import filelock
@@ -25,6 +26,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants
@@ -688,6 +690,50 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
     return jobs
+
+
+def set_storage_mounts_for_data_transfer(dag: 'dag_lib.Dag') -> 'dag_lib.Dag':
+    """Sets the storage mounts for data transfer.
+
+    This function updates the storage mounts with the storage information
+    in the edges of the DAG for data transfer before launching the tasks.
+    It generates a unique bucket name for the storage associated with each edge,
+    creates a Store with the name as well as cloud and region in best_storage,
+    and then updates the source and target nodes with the new storage mounts.
+
+    Example:
+    a --(data, best_storage)--> b
+
+    After this function, a store is created (or reused if the bucket name
+    already exists) with its unique name and set to storage mounts of both a and
+    b with the source and target paths respectively.
+
+    Args:
+        dag (dag_lib.Dag): The DAG containing the tasks to launch.
+
+    Returns:
+        dag_lib.Dag: The updated DAG with the storage mounts set.
+    """
+    for edge in dag.get_edges():
+        src, tgt, data, best_storage = (edge.source, edge.target, edge.data,
+                                        edge.best_storage)
+        if best_storage is not None:
+            assert data is not None
+            bucket_name_tmp = (
+                f'bucket-for-{src.name}-to-{tgt.name}-{uuid.uuid4()}')
+            # Generate a valid and unique bucket name. For S3 buckets, the max
+            # length is 63 characters. Since we don't want to distinguish the
+            # storage type here, we use the same length for all storage types.
+            bucket_name = common_utils.make_cluster_name_on_cloud(
+                bucket_name_tmp, max_length=63)
+            storage_type, region = best_storage
+            new_storage = storage_lib.Storage(name=bucket_name)
+            new_storage.add_store(storage_type, region)
+            new_storage_mounts_src = {data.source_path: new_storage}
+            src.update_storage_mounts(new_storage_mounts_src)
+            new_storage_mounts_tgt = {data.target_path: new_storage}
+            tgt.update_storage_mounts(new_storage_mounts_tgt)
+    return dag
 
 
 def _get_job_status_from_tasks(
