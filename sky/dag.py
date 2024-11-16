@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import networkx as nx
 
-from sky.data.storage import StoreType
+from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -49,7 +49,7 @@ class TaskEdge:
     data: Optional[TaskData] = None
 
     # TODO(wenjie): Ensure that the region is not None
-    best_storage: Optional[Tuple[StoreType, Optional[str]]] = None
+    best_storage: Optional[Tuple[storage_lib.StoreType, Optional[str]]] = None
 
     def with_data(self, source_path: str, target_path: str,
                   size_gb: float) -> 'TaskEdge':
