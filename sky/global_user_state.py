@@ -61,6 +61,7 @@ def create_table(cursor, conn):
         cluster_hash TEXT DEFAULT null,
         storage_mounts_metadata BLOB DEFAULT null,
         cluster_ever_up INTEGER DEFAULT 0,
+        status_updated_at INTEGER DEFAULT null,
         config_hash TEXT DEFAULT null)""")
 
     # Table for Cluster History
@@ -132,6 +133,9 @@ def create_table(cursor, conn):
         # auto-deleted during any failover.
         value_to_replace_existing_entries=1)
 
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'status_updated_at',
+                                 'INTEGER DEFAULT null')
+
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'config_hash',
                                  'TEXT DEFAULT null')
 
@@ -165,6 +169,7 @@ def add_or_update_cluster(cluster_name: str,
     status = status_lib.ClusterStatus.INIT
     if ready:
         status = status_lib.ClusterStatus.UP
+    status_updated_at = int(time.time())
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -197,7 +202,8 @@ def add_or_update_cluster(cluster_name: str,
         # specified.
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner, cluster_hash, '
-        'storage_mounts_metadata, cluster_ever_up, config_hash) '
+        'storage_mounts_metadata, cluster_ever_up, status_updated_at, '
+        'config_hash) '
         'VALUES ('
         # name
         '?, '
@@ -235,6 +241,8 @@ def add_or_update_cluster(cluster_name: str,
         '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null), '
         # cluster_ever_up
         '((SELECT cluster_ever_up FROM clusters WHERE name=?) OR ?),'
+        # status_updated_at
+        '?,'
         # config_hash
         'COALESCE(?, (SELECT config_hash FROM clusters WHERE name=?))'
         ')',
@@ -268,6 +276,8 @@ def add_or_update_cluster(cluster_name: str,
             # cluster_ever_up
             cluster_name,
             int(ready),
+            # status_updated_at
+            status_updated_at,
             # config_hash
             config_hash,
             cluster_name,
@@ -341,11 +351,13 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         # stopped VM, which leads to timeout.
         if hasattr(handle, 'stable_internal_external_ips'):
             handle.stable_internal_external_ips = None
+        current_time = int(time.time())
         _DB.cursor.execute(
-            'UPDATE clusters SET handle=(?), status=(?) '
-            'WHERE name=(?)', (
+            'UPDATE clusters SET handle=(?), status=(?), '
+            'status_updated_at=(?) WHERE name=(?)', (
                 pickle.dumps(handle),
                 status_lib.ClusterStatus.STOPPED.value,
+                current_time,
                 cluster_name,
             ))
     _DB.conn.commit()
@@ -370,10 +382,10 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
 
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
-    _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
-        status.value,
-        cluster_name,
-    ))
+    current_time = int(time.time())
+    _DB.cursor.execute(
+        'UPDATE clusters SET status=(?), status_updated_at=(?) WHERE name=(?)',
+        (status.value, current_time, cluster_name))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
@@ -584,15 +596,15 @@ def get_cluster_from_name(
     rows = _DB.cursor.execute(
         'SELECT name, launched_at, handle, last_use, status, autostop, '
         'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
-        'cluster_ever_up, config_hash FROM clusters WHERE name=(?)',
-        (cluster_name,)).fetchall()
+        'cluster_ever_up, status_updated_at, config_hash '
+        'FROM clusters WHERE name=(?)', (cluster_name,)).fetchall()
     for row in rows:
         # Explicitly specify the number of fields to unpack, so that
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
-         config_hash) = row[:13]
+         status_updated_at, config_hash) = row[:14]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -608,6 +620,7 @@ def get_cluster_from_name(
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
+            'status_updated_at': status_updated_at,
             'config_hash': config_hash,
         }
         return record
@@ -618,13 +631,13 @@ def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select name, launched_at, handle, last_use, status, autostop, '
         'metadata, to_down, owner, cluster_hash, storage_mounts_metadata, '
-        'cluster_ever_up, config_hash from clusters order by launched_at desc'
-    ).fetchall()
+        'cluster_ever_up, status_updated_at, config_hash '
+        'from clusters order by launched_at desc').fetchall()
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
-         config_hash) = row[:13]
+         status_updated_at, config_hash) = row[:14]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -640,6 +653,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
             'cluster_ever_up': bool(cluster_ever_up),
+            'status_updated_at': status_updated_at,
             'config_hash': config_hash,
         }
 

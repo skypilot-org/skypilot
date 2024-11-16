@@ -276,6 +276,7 @@ class RayCodeGen:
             from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
+            from sky.utils import subprocess_utils
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
@@ -3332,14 +3333,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         encoded_script = shlex.quote(codegen)
         create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
-            f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-            f'{cd} && {constants.SKY_RAY_CMD} job submit '
-            '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
-            f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
+            # with pid is the same driver process.
+            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
             # Do not use &>, which is not POSIX and may not work.
             # Note that the order of ">filename 2>&1" matters.
-            f'> {remote_log_path} 2>&1"')
+            f'> {remote_log_path} 2>&1')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -3387,6 +3387,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # running a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         if returncode == 255 and 'too long' in stdout + stderr:
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
@@ -3401,10 +3405,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True)
 
-        # Happens when someone calls `sky exec` but remote is outdated
-        # necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout,
-                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3474,6 +3474,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True,
                                                           separate_stderr=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # adding a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         subprocess_utils.handle_returncode(returncode, code,
@@ -3611,7 +3615,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
         try:
-            with filelock.FileLock(
+            with timeline.FileLockEvent(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 self.teardown_no_lock(

@@ -274,6 +274,12 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
+
+                    controller = controller_utils.Controllers.from_name(
+                        cluster_name)
+                    if controller is not None:
+                        logger.info(
+                            f'Choosing resources for {controller.name}...')
                     dag = sky.optimize(dag, minimize=optimize_target)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task

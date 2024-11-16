@@ -663,6 +663,7 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 

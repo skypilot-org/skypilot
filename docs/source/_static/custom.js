@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-project-logo', 'https://avatars.githubusercontent.com/u/109387420?s=100&v=4');
        script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
-       script.setAttribute('data-button-position-bottom', '85px');
+       script.setAttribute('data-button-position-bottom', '100px');
        script.async = true;
        document.head.appendChild(script);
 });
