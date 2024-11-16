@@ -1,0 +1,25 @@
+resources:
+  cpus: 1
+
+envs:
+  DATA_BUCKET_NAME: sky-demo-data-test
+  DATA_BUCKET_STORE_TYPE: s3
+
+file_mounts:
+  /data:
+    name: $DATA_BUCKET_NAME
+    store: $DATA_BUCKET_STORE_TYPE
+
+setup: |
+  echo "Setting up dependencies for data preprocessing..."
+
+run: |
+  echo "Running data preprocessing..."
+  
+  # Generate few files with random data to simulate data preprocessing
+  for i in {0..9}; do
+      dd if=/dev/urandom of=/data/file_$i bs=1M count=10
+  done
+  
+  echo "Data preprocessing completed, wrote to $DATA_BUCKET_NAME"
+
