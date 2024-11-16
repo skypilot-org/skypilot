@@ -709,7 +709,13 @@ def write_cluster_config(
                 f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
-        excluded_clouds = [cloud]
+        # If using Kubernetes and using allowed_contexts, we need to upload 
+        # credentials for all contexts.
+        if isinstance(cloud, clouds.Kubernetes):
+            if skypilot_config.get_nested(('kubernetes', 'allowed_contexts'), None) is None:
+                excluded_clouds.append(cloud)
+        else:
+            excluded_clouds.append(cloud)
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
