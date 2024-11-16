@@ -265,7 +265,7 @@ def exec(  # pylint: disable=redefined-builtin
     backend: Optional[backends.Backend] = None,
 ) -> str:
     """Execute a task."""
-    dag = dag_utils.convert_entrypoint_to_dag(task)
+    dag = api_common.upload_mounts_to_api_server(task, workdir_only=True)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
