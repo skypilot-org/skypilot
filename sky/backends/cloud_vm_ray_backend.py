@@ -1322,7 +1322,7 @@ class RetryingVmProvisioner(object):
         """The provision retry loop.
 
         Returns a config_dict with the following fields:
-        - All fields from backend_utils.write_cluster_config(). See its
+        All fields from backend_utils.write_cluster_config(). See its
           docstring.
         - 'provisioning_skipped': True if provisioning was short-circuited
           by skip_if_config_hash_matches, False otherwise.
