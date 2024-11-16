@@ -678,7 +678,7 @@ class Optimizer:
                 for r_v in node_to_cost_map[v].keys():
                     F[u][v].append(
                         Optimizer._egress_cost_or_time(minimize_cost, r_u, r_v,
-                                                       data))
+                                                       data['edge']))
 
         # Define the decision variables.
         c = {
