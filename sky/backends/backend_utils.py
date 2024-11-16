@@ -691,9 +691,9 @@ def write_cluster_config(
     # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
     # 3. Custom service account: Use specified service account
     # 4. NO_UPLOAD: Do not upload any credentials
-    # 
-    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In 
-    # other cases, we exclude the cloud from credential file uploads after 
+    #
+    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
+    # other cases, we exclude the cloud from credential file uploads after
     # running required checks.
     assert cluster_name is not None
     excluded_clouds = set()
@@ -711,8 +711,8 @@ def write_cluster_config(
                 remote_identity = list(profile.values())[0]
                 break
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
-        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the 
-        # excluded_clouds set, but we must also check if the cloud supports 
+        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
+        # excluded_clouds set, but we must also check if the cloud supports
         # service accounts.
         if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
             # If NO_UPLOAD is specified, fall back to default remote identity
