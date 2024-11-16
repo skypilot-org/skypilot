@@ -868,7 +868,13 @@ def write_cluster_config(
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
         config_dict['ray'] = tmp_yaml_path
-        config_dict['config_hash'] = _deterministic_yaml_hash(tmp_yaml_path)
+        try:
+            config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
+                tmp_yaml_path)
+        except Exception as e:
+            logger.warning(f'Failed to calculate config_hash: {e}')
+            logger.debug('Full exception:', exc_info=e)
+            config_dict['config_hash'] = None
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
@@ -894,7 +900,13 @@ def write_cluster_config(
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be
     # deterministic.
-    config_dict['config_hash'] = _deterministic_yaml_hash(tmp_yaml_path)
+    try:
+        config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
+            tmp_yaml_path)
+    except Exception as e:
+        logger.warning(f'Failed to calculate config_hash: {e}')
+        logger.debug('Full exception:', exc_info=e)
+        config_dict['config_hash'] = None
 
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay
@@ -1005,7 +1017,7 @@ def _count_healthy_nodes_from_ray(output: str,
 
 
 @timeline.event
-def _deterministic_yaml_hash(yaml_path: str) -> str:
+def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
     """Hash the cluster yaml and contents of file mounts to a unique string.
 
     Two invocations of this function should return the same string if and only
