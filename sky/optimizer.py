@@ -251,7 +251,7 @@ class Optimizer:
                 # We current does not support R2 storage since it does not have
                 # compute instance, which is not suitable for our optimizer
                 # algorithm for now.
-                # TODO(xx): Support R2 storage.
+                # TODO(wenjie): Support R2 storage.
                 if cloudflare.NAME in enabled_clouds:
                     enabled_clouds.remove(cloudflare.NAME)
                 storage_node.set_resources({
