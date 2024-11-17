@@ -767,8 +767,8 @@ class KubernetesCommandRunner(CommandRunner):
         ]
         if self.context:
             kubectl_args += ['--context', self.context]
-        # If context is none, it means we are using incluster auth. In this case,
-        # use need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
+        # If context is none, it means we are using incluster auth. In this
+        # case, need to set KUBECONFIG to /dev/null to avoid using kubeconfig.
         if self.context is None:
             kubectl_args += ['--kubeconfig', '/dev/null']
         kubectl_args += [self.pod_name]
