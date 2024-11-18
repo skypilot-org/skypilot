@@ -1129,7 +1129,8 @@ class KubernetesInstanceType:
         name = (f'{common_utils.format_float(self.cpus)}CPU--'
                 f'{common_utils.format_float(self.memory)}GB')
         if self.accelerator_count:
-            name += f'--{self.accelerator_count}{self.accelerator_type}'
+            acc_name = self.accelerator_type.replace(' ', '_')
+            name += f'--{self.accelerator_count}{acc_name}'
         return name
 
     @staticmethod
@@ -1160,7 +1161,7 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type)
+                accelerator_type = str(accelerator_type).replace('_', ' ')
             else:
                 accelerator_count = None
                 accelerator_type = None
