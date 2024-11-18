@@ -1441,7 +1441,7 @@ class RetryingVmProvisioner(object):
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
 
-            if (skip_if_config_hash_matches is not None and
+            if ('config_hash' in config_dict and
                     skip_if_config_hash_matches == config_dict['config_hash']):
                 logger.debug('Skipping provisioning of cluster with matching '
                              'config hash.')
@@ -2890,7 +2890,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle = config_dict['handle']
                 provision_record = config_dict['provision_record']
                 resources_vars = config_dict['resources_vars']
-                config_hash = config_dict['config_hash']
+                config_hash = config_dict[
+                    'config_hash'] if 'config_hash' in config_dict else None
 
                 # Setup SkyPilot runtime after the cluster is provisioned
                 # 1. Wait for SSH to be ready.
