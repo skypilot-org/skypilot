@@ -30,6 +30,7 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import timeline
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
 # which will be customized in sky.provision.logging.
@@ -342,7 +343,7 @@ def _wait_ssh_connection_indirect(ip: str,
         return False, stderr
     return True, ''
 
-
+@timeline.event
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready.
@@ -552,7 +553,7 @@ def _post_provision_setup(
                                    provision_logging.config.log_path))
     return cluster_info
 
-
+@timeline.event
 def post_provision_runtime_setup(
         cloud_name: str, cluster_name: resources_utils.ClusterName,
         cluster_yaml: str, provision_record: provision_common.ProvisionRecord,

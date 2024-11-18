@@ -21,6 +21,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
@@ -170,6 +171,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
 
 
 @common.log_function_start_end
+@timeline.event
 def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any]) -> None:
@@ -247,6 +249,7 @@ def _ray_gpu_options(custom_resource: str) -> str:
 
 @common.log_function_start_end
 @_auto_retry()
+@timeline.event
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_info: common.ClusterInfo,
                            ssh_credentials: Dict[str, Any]) -> None:
@@ -324,6 +327,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
 
 @common.log_function_start_end
 @_auto_retry()
+@timeline.event
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               custom_resource: Optional[str], ray_port: int,
                               cluster_info: common.ClusterInfo,
@@ -421,6 +425,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 
 @common.log_function_start_end
 @_auto_retry()
+@timeline.event
 def start_skylet_on_head_node(cluster_name: str,
                               cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
@@ -504,6 +509,7 @@ def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
 
 
 @common.log_function_start_end
+@timeline.event
 def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
                          cluster_info: common.ClusterInfo,
                          ssh_credentials: Dict[str, str]) -> None:

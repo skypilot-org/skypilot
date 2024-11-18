@@ -20,6 +20,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
@@ -219,6 +220,7 @@ def _raise_command_running_error(message: str, command: str, pod_name: str,
         f'code {rc}: {command!r}\nOutput: {stdout}.')
 
 
+@timeline.event
 def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     """Wait for all pods to be scheduled.
 
@@ -366,7 +368,7 @@ def _run_function_with_retries(func: Callable,
             else:
                 raise
 
-
+@timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
 
@@ -527,7 +529,7 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
         }},
         _request_timeout=kubernetes.API_TIMEOUT)
 
-
+@timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
     """Attempts to create a Kubernetes Pod and handle any errors.
@@ -605,7 +607,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # Re-raise the exception if it's a different error
             raise e
 
-
+@timeline.event
 def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
