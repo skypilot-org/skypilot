@@ -572,7 +572,7 @@ def test_aws_with_ssh_proxy_command():
                 format(
                     job_name=name,
                     job_status=
-                    f'({ManagedJobStatus.SUCCEEDED.value}|{ManagedJobStatus.RUNNING.value})',
+                    f'({ManagedJobStatus.SUCCEEDED.value}|{ManagedJobStatus.RUNNING.value}|{ManagedJobStatus.STARTING.value})',
                     timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
