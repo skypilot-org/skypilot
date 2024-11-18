@@ -342,7 +342,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '
-                    f'sky jobs logs {job_id}{colorama.Style.RESET_ALL}'
+                    f'sky jobs logs --controller {job_id}'
+                    f'{colorama.Style.RESET_ALL}'
                     f'{job_msg}')
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
