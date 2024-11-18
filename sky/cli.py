@@ -3896,16 +3896,25 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest job logs, restarting the jobs controller if stopped.'
+)
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+              controller: bool, refresh: bool):
     """Tail the log of a managed job."""
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
                                follow=follow,
-                               controller=controller)
+                               controller=controller,
+                               refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
