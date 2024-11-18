@@ -5161,11 +5161,13 @@ class TestStorageWithCredentials:
                 for file in files
             ])
 
-        # check bucket is empty, all files under sub directory should be deleted
+        # Check bucket is empty, all files under sub directory should be deleted
         tmp_local_storage_obj_with_sub_path.delete(
             only_delete_sub_path_if_exists=True)
         files = _list_all_files()
+        assert len(files) == 0
 
+        # Now, delete the entire bucket
         tmp_local_storage_obj_with_sub_path.delete()
 
         # Run sky storage ls to check if storage object is deleted
