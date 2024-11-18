@@ -332,8 +332,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 with open(log_file, 'r', encoding='utf-8') as f:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
+                    start_streaming = False
                     for line in f:
-                        print(line, end='', flush=True)
+                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
                 return ''
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
