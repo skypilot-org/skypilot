@@ -70,6 +70,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
@@ -940,6 +941,7 @@ def _deprecate_and_hide_command(group, command_to_deprecate,
                       prog_name='skypilot',
                       message='%(prog)s, commit %(version)s',
                       help='Show the commit hash and exit')
+@annotations.public_api
 def cli():
     pass
 

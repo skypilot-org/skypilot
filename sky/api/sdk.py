@@ -32,6 +32,7 @@ from sky.api.requests import requests as requests_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import annotations
 from sky.utils import common
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -48,6 +49,7 @@ logger = sky_logging.init_logger(__name__)
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.post(f'{api_common.get_server_url()}/check',
@@ -57,6 +59,7 @@ def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def enabled_clouds() -> str:
     response = requests.get(f'{api_common.get_server_url()}/enabled_clouds')
     return api_common.get_request_id(response)
@@ -64,6 +67,7 @@ def enabled_clouds() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def realtime_kubernetes_gpu_availability(
         context: Optional[str] = None,
         name_filter: Optional[str] = None,
@@ -81,6 +85,7 @@ def realtime_kubernetes_gpu_availability(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def kubernetes_node_info(context: Optional[str] = None) -> str:
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.get(
@@ -91,6 +96,7 @@ def kubernetes_node_info(context: Optional[str] = None) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def status_kubernetes() -> str:
     response = requests.get(f'{api_common.get_server_url()}/status_kubernetes')
     return api_common.get_request_id(response)
@@ -98,6 +104,7 @@ def status_kubernetes() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def list_accelerators(gpus_only: bool = True,
                       name_filter: Optional[str] = None,
                       region_filter: Optional[str] = None,
@@ -123,6 +130,7 @@ def list_accelerators(gpus_only: bool = True,
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def list_accelerator_counts(
         gpus_only: bool = True,
         name_filter: Optional[str] = None,
@@ -144,6 +152,7 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def optimize(
         dag: 'sky.Dag',
         minimize: common.OptimizeTarget = common.OptimizeTarget.COST) -> str:
@@ -159,6 +168,7 @@ def optimize(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -257,6 +267,7 @@ def launch(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -287,6 +298,7 @@ def exec(  # pylint: disable=redefined-builtin
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
@@ -304,6 +316,7 @@ def tail_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:
     body = payloads.ClusterJobsBody(
@@ -366,6 +379,7 @@ def download_logs(cluster_name: str,
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def start(
     cluster_name: str,
     idle_minutes_to_autostop: Optional[int] = None,
@@ -391,6 +405,7 @@ def start(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def down(cluster_name: str, purge: bool = False) -> str:
     """Tear down a cluster.
 
@@ -423,6 +438,7 @@ def down(cluster_name: str, purge: bool = False) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def stop(cluster_name: str, purge: bool = False) -> str:
     """Stop a cluster.
 
@@ -456,6 +472,7 @@ def stop(cluster_name: str, purge: bool = False) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  # pylint: disable=redefined-outer-name
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
@@ -472,6 +489,7 @@ def autostop(cluster_name: str, idle_minutes: int, down: bool = False) -> str:  
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def queue(cluster_name: List[str],
           skip_finished: bool = False,
           all_users: bool = False) -> str:
@@ -487,6 +505,7 @@ def queue(cluster_name: List[str],
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
     # TODO: merge this into the queue endpoint, i.e., let the queue endpoint
     # take job_ids to filter the returned jobs.
@@ -501,6 +520,7 @@ def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def cancel(
     cluster_name: str,
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -521,6 +541,7 @@ def cancel(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def status(
     cluster_names: Optional[List[str]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
@@ -548,6 +569,7 @@ def status(
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def endpoints(cluster: str, port: Optional[Union[int, str]] = None) -> str:
     body = payloads.EndpointBody(
         cluster=cluster,
@@ -560,6 +582,7 @@ def endpoints(cluster: str, port: Optional[Union[int, str]] = None) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def cost_report() -> str:  # pylint: disable=redefined-builtin
     response = requests.get(f'{api_common.get_server_url()}/cost_report')
     return api_common.get_request_id(response)
@@ -568,6 +591,7 @@ def cost_report() -> str:  # pylint: disable=redefined-builtin
 # === Storage APIs ===
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def storage_ls() -> str:
     response = requests.get(f'{api_common.get_server_url()}/storage/ls')
     return api_common.get_request_id(response)
@@ -575,6 +599,7 @@ def storage_ls() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def storage_delete(name: str) -> str:
     body = payloads.StorageBody(name=name)
     response = requests.post(f'{api_common.get_server_url()}/storage/delete',
@@ -584,6 +609,7 @@ def storage_delete(name: str) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def local_up(gpus: bool) -> str:
     body = payloads.LocalUpBody(gpus=gpus)
     response = requests.post(f'{api_common.get_server_url()}/local_up',
@@ -593,6 +619,7 @@ def local_up(gpus: bool) -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def local_down() -> str:
     response = requests.post(f'{api_common.get_server_url()}/local_down')
     return api_common.get_request_id(response)
@@ -603,6 +630,7 @@ def local_down() -> str:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def get(request_id: str) -> Any:
     response = requests.get(
         f'{api_common.get_server_url()}/get?request_id={request_id}',
@@ -627,6 +655,7 @@ def get(request_id: str) -> Any:
 
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def stream_and_get(request_id: Optional[str] = None,
                    log_path: Optional[str] = None) -> Any:
     """Stream the logs of a request and get the final result.
@@ -664,6 +693,7 @@ def stream_and_get(request_id: Optional[str] = None,
 # === API server management ===
 @usage_lib.entrypoint
 @api_common.check_health
+@annotations.public_api
 def api_start(*, api_server_reload: bool = False, deploy: bool = False):
     """Start the API server."""
     # Only used in api_common.check_health, this is to satisfy the type checker.
@@ -680,6 +710,7 @@ def api_start(*, api_server_reload: bool = False, deploy: bool = False):
 
 
 @usage_lib.entrypoint
+@annotations.public_api
 def api_stop():
     """Kill the API server."""
     # Kill the uvicorn process by name: uvicorn sky.api.rest:app
@@ -716,6 +747,7 @@ def api_stop():
 
 # Use the same args as `docker logs`
 @usage_lib.entrypoint
+@annotations.public_api
 def api_server_logs(follow: bool = True, tail: str = 'all'):
     """Stream the API server logs."""
     if api_common.is_api_server_local():
@@ -734,6 +766,7 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 
 @usage_lib.entrypoint
+@annotations.public_api
 def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint: disable=redefined-builtin
     """Abort a request or all requests."""
     body = payloads.RequestIdBody(request_id=request_id, all=all)
@@ -745,6 +778,7 @@ def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint
 
 
 @usage_lib.entrypoint
+@annotations.public_api
 def requests_ls(
     request_id: Optional[str] = None,
     # pylint: disable=redefined-builtin

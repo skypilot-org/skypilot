@@ -8,6 +8,7 @@ from typing import Dict, Optional, Tuple, Union
 
 import rich.console as rich_console
 
+from sky.utils import annotations
 from sky.utils import message_utils
 
 console = rich_console.Console(soft_wrap=True)
@@ -161,7 +162,8 @@ class _RevertibleStatus:
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
-    if (threading.current_thread() is threading.main_thread() and
+    if (annotations.is_server and
+            threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _statuses['server'] is None:
             _statuses['server'] = EncodedStatus(msg)

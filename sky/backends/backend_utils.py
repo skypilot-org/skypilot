@@ -2241,18 +2241,6 @@ def get_clusters(
                 credentials['ssh_private_key_content'] = f.read()
         record['credentials'] = credentials
 
-    def _update_record_with_resources_str(record: Dict[str, Any]) -> None:
-        """Add the resources string to the record.
-
-        This is helpful to avoid the client side from calling
-        resources_utils.get_readable_resources_repr() which can cause
-        unnecessary pulling of service catalogs.
-        """
-        if record['handle'] is None:
-            return
-        record['resources_str'] = resources_utils.get_readable_resources_repr(
-            record['handle'])
-
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]
@@ -2273,7 +2261,6 @@ def get_clusters(
     # Add auth_config to the records
     for record in records:
         _update_record_with_credentials(record)
-        _update_record_with_resources_str(record)
 
     if refresh == common.StatusRefreshMode.NONE:
         return records
@@ -2298,7 +2285,6 @@ def get_clusters(
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
             _update_record_with_credentials(record)
-            _update_record_with_resources_str(record)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
