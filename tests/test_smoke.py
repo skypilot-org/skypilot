@@ -173,8 +173,9 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTA
 # Managed job functions
 
 _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
-    'sky queue {cluster_name}',
-    'sky jobs queue').replace('awk "\\$2 == ', 'awk "\\$3 == ')
+    'sky queue {cluster_name}', 'sky jobs queue').replace(
+        'awk "\\$2 == \\"{job_name}\\"',
+        'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"')
 
 # After the timeout, the cluster will stop if autostop is set, and our check
 # should be more than the timeout. To address this, we extend the timeout by
@@ -3021,7 +3022,10 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
         'managed_jobs_pipeline_failed_setup',
         [
             f'sky jobs launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
-            'sleep 600',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=name,
+                job_status=f'{JobStatus.FAILED_SETUP.value}',
+                timeout=600),
             # Make sure the job failed quickly.
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "FAILED_SETUP"',
             # Task 0 should be SUCCEEDED.
