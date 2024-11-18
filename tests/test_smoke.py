@@ -120,6 +120,11 @@ _WAIT_UNTIL_CLUSTER_STATUS_IS = (
     'sleep 10; '
     'done')
 
+_WAIT_UNTIL_CLUSTER_STATUS_IS_WILDCARD = _WAIT_UNTIL_CLUSTER_STATUS_IS.replace(
+    'sky status {cluster_name}',
+    'sky status "{cluster_name}"').replace('awk "/^{cluster_name}/',
+                                           'awk "/^{cluster_name_awk}/')
+
 _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     # A while loop to wait until the cluster is not found or timeout
     'start_time=$SECONDS; '
@@ -530,6 +535,7 @@ def test_aws_region():
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
     name = _get_cluster_name()
+
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
             textwrap.dedent(f"""\
@@ -551,10 +557,18 @@ def test_aws_with_ssh_proxy_command():
                 f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
-                'timeout 300s bash -c "until sky status sky-jobs-controller* | grep UP; do sleep 1; done"',
+                _WAIT_UNTIL_CLUSTER_STATUS_IS_WILDCARD.format(
+                    cluster_name=f'sky-jobs-controller-*',
+                    cluster_name_awk='sky-jobs-controller-.*',
+                    cluster_status=ClusterStatus.UP.value,
+                    timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
-                'sleep 300',
-                f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
+                _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.
+                format(
+                    job_name=name,
+                    job_status=
+                    f'({JobStatus.SUCCEEDED.value}|{JobStatus.RUNNING.value})',
+                    timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
         )
@@ -1817,6 +1831,7 @@ def test_large_job_queue(generic_cloud: str):
             f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 90',
+
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep PENDING | wc -l | grep 43',
