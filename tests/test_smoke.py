@@ -3557,8 +3557,10 @@ def test_managed_jobs_storage(generic_cloud: str):
                 *STORAGE_SETUP_COMMANDS,
                 f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
-                'sleep 60',  # Wait the spot queue to be updated
-                f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
+                _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.
+                format(job_name=name,
+                       job_status=ManagedJobStatus.SUCCEEDED.value,
+                       timeout=60 + _BUMP_UP_SECONDS),
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
