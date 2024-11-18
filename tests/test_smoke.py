@@ -3059,8 +3059,8 @@ def test_managed_jobs_recovery_aws(aws_config_region):
         'managed_jobs_recovery_aws',
         [
             f'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
-            'sleep 360',
-            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=name, job_status=JobStatus.RUNNING.value, timeout=600),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -3070,8 +3070,8 @@ def test_managed_jobs_recovery_aws(aws_config_region):
              '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            'sleep 200',
-            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RUNNING"',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=name, job_status=JobStatus.RUNNING.value, timeout=200),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}',
