@@ -663,6 +663,7 @@ class RemoteIdentityOptions(enum.Enum):
     """
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+    NO_UPLOAD = 'NO_UPLOAD'
 
 
 def get_default_remote_identity(cloud: str) -> str:

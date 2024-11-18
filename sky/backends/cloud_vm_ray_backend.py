@@ -3558,7 +3558,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
         try:
-            with filelock.FileLock(
+            with timeline.FileLockEvent(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 self.teardown_no_lock(

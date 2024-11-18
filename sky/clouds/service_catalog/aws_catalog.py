@@ -20,6 +20,7 @@ from sky.clouds.service_catalog.data_fetchers import fetch_aws
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -100,6 +101,7 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
     return az_mappings
 
 
+@timeline.event
 def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
