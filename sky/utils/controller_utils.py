@@ -380,11 +380,13 @@ def download_and_stream_latest_job_log(
         else:
             log_dir = list(log_dirs.values())[0]
             log_file = os.path.join(log_dir, 'run.log')
-
             # Print the logs to the console.
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
-                    print(f.read())
+                    # Stream the logs to the console without reading the whole
+                    # file into memory.
+                    for line in f:
+                        print(line, end='', flush=True)
             except FileNotFoundError:
                 logger.error('Failed to find the logs for the user '
                              f'program at {log_file}.')

@@ -327,10 +327,19 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
+            log_file = managed_job_state.get_local_log_file(job_id, None)
+            if log_file is not None:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    # Stream the logs to the console without reading the whole
+                    # file into memory.
+                    for line in f:
+                        print(line, end='', flush=True)
+                return ''
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
-                    f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}{job_msg}')
+                    f'{managed_job_status.value}. For more details, run: '
+                    f'sky jobs logs {job_id}{colorama.Style.RESET_ALL}'
+                    f'{job_msg}')
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))

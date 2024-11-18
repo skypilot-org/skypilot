@@ -6,7 +6,7 @@ import pathlib
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import Optional, Tuple
 
 import filelock
 
@@ -87,7 +87,7 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-            self,
+            self, task_id: Optional[int],
             handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
         """Downloads and streams the logs of the latest job.
 
@@ -97,8 +97,11 @@ class JobsController:
         """
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs')
-        controller_utils.download_and_stream_latest_job_log(
+        log_file = controller_utils.download_and_stream_latest_job_log(
             self._backend, handle, managed_job_logs_dir)
+        if log_file is not None:
+            managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                 log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
@@ -213,6 +216,10 @@ class JobsController:
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 end_time = managed_job_utils.get_job_timestamp(
                     self._backend, cluster_name, get_end_time=True)
+                _, handle = backend_utils.refresh_cluster_status_handle(
+                    cluster_name)
+                if handle is not None:
+                    self._download_log_and_stream(task_id, handle)
                 # The job is done.
                 managed_job_state.set_succeeded(self._job_id,
                                                 task_id,
@@ -226,7 +233,7 @@ class JobsController:
                 recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
-            # For single-node jobs, nonterminated job_status indicates a
+            # For single-node jobs, non-terminated job_status indicates a
             # healthy cluster. We can safely continue monitoring.
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
@@ -278,7 +285,7 @@ class JobsController:
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(handle)
+                    self._download_log_and_stream(task_id, handle)
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
