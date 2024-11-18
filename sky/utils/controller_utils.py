@@ -26,6 +26,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -385,8 +386,12 @@ def download_and_stream_latest_job_log(
                 with open(log_file, 'r', encoding='utf-8') as f:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
+                    start_streaming = False
                     for line in f:
-                        print(line, end='', flush=True)
+                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
             except FileNotFoundError:
                 logger.error('Failed to find the logs for the user '
                              f'program at {log_file}.')
