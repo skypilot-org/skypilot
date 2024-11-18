@@ -3562,24 +3562,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],
-                    cancel_all: bool = False) -> None:
+                    cancel_all: bool = False,
+                    user_hash: Optional[str] = None) -> None:
         """Cancels jobs.
 
-        CloudVMRayBackend specific method.
-
-        Args:
-            handle: The cluster handle.
-            jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
-            cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
-                set to None. If False and `jobs` is None, cancel the latest
-                running job.
+        See `skylet.job_lib.cancel_jobs_encoded_results` for more details.
         """
-        if cancel_all:
-            assert jobs is None, (
-                'If cancel_all=True, usage is to set jobs=None')
-        code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all)
-
-        # All error messages should have been redirected to stdout.
+        code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all, user_hash)
         returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
                                                  stream_logs=False,
@@ -3593,8 +3582,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             logger.info(
                 f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
         else:
-            logger.info(
-                'No jobs cancelled. They may already be in terminal states.')
+            logger.info('No jobs cancelled. They may be in terminal states.')
 
     def sync_down_logs(
             self,

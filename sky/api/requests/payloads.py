@@ -170,6 +170,7 @@ class CancelBody(RequestBody):
     cluster_name: str
     job_ids: Optional[List[int]]
     all: bool = False
+    all_users: bool = False
     # Internal only:
     try_cancel_if_cluster_is_init: bool = False
 

@@ -2156,6 +2156,12 @@ def logs(
               is_flag=True,
               required=False,
               help='Cancel all jobs on the specified cluster.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel all jobs on the specified cluster for all users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2168,6 +2174,7 @@ def logs(
 def cancel(
     cluster: str,
     all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
     jobs: List[int],  # pylint: disable=redefined-outer-name
     yes: bool,
     async_call: bool,
@@ -2184,30 +2191,36 @@ def cancel(
       sky cancel cluster_name 1
       sky cancel cluster_name 1 2 3
       \b
-      # Cancel all jobs on a cluster.
+      # Cancel all your jobs on a cluster.
       sky cancel cluster_name -a
+      \b
+      # Cancel all users' jobs on a cluster.
+      sky cancel cluster_name -u
       \b
       # Cancel the latest running job on a cluster.
       sky cancel cluster_name
 
     Job IDs can be looked up by ``sky queue cluster_name``.
     """
-    job_identity_str = None
+    job_identity_str = ''
     job_ids_to_cancel = None
-    if not jobs and not all:
-        click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
-                   'cancelling the latest running job.'
-                   f'{colorama.Style.RESET_ALL}')
+    if not jobs and not all and not all_users:
+        click.echo(
+            f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
+            'cancelling the latest running job.'
+            f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
+    elif all_users:
+        job_identity_str = 'all users\' jobs'
     else:
-        # Cancelling specific jobs or --all.
-        job_ids = ' '.join(map(str, jobs))
-        plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} {job_ids}'
-        job_ids_to_cancel = jobs
         if all:
-            job_identity_str = 'all jobs'
-            job_ids_to_cancel = None
+            job_identity_str = 'all your jobs'
+        if jobs:
+            jobs_str = ' '.join(map(str, jobs))
+            plural = 's' if len(jobs) > 1 else ''
+            connector = ' and ' if job_identity_str else ''
+            job_identity_str += f'{connector}job{plural} {jobs_str}'
+            job_ids_to_cancel = jobs
     job_identity_str += f' on cluster {cluster!r}'
 
     if not yes:
@@ -2217,7 +2230,10 @@ def cancel(
                       show_default=True)
 
     try:
-        request_id = sdk.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
+        request_id = sdk.cancel(cluster,
+                                all=all,
+                                all_users=all_users,
+                                job_ids=job_ids_to_cancel)
         _async_call_or_wait(request_id, async_call, 'Cancel')
     except exceptions.NotSupportedError as e:
         controller = controller_utils.Controllers.from_name(cluster)

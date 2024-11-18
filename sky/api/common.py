@@ -164,9 +164,13 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
     upload_list = []
     for task_ in dag.tasks:
         task_.file_mounts_mapping = {}
+        task_.file_mounts_mapping = {}
         if task_.workdir:
             workdir = task_.workdir
             upload_list.append(_full_path(workdir))
+            task_.file_mounts_mapping[workdir] = _full_path(workdir)
+        if workdir_only:
+            continue
             task_.file_mounts_mapping[workdir] = _full_path(workdir)
         if workdir_only:
             continue
@@ -174,6 +178,7 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
             for src in task_.file_mounts.values():
                 if not data_utils.is_cloud_store_url(src):
                     upload_list.append(_full_path(src))
+                    task_.file_mounts_mapping[src] = _full_path(src)
                     task_.file_mounts_mapping[src] = _full_path(src)
                 if src == constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
                     # The placeholder for the local skypilot config path is in
@@ -191,6 +196,7 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
                         storage_source = [storage_source]
                     for src in storage_source:
                         upload_list.append(_full_path(src))
+                        task_.file_mounts_mapping[src] = _full_path(src)
                         task_.file_mounts_mapping[src] = _full_path(src)
 
     server_url = get_server_url()
@@ -240,6 +246,8 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
             continue
         file_mounts_mapping = task_config.get('file_mounts_mapping', {})
         if not file_mounts_mapping:
+            # We did not mount any files to new paths on the remote server
+            # so no need to resolve filepaths.
             # We did not mount any files to new paths on the remote server
             # so no need to resolve filepaths.
             continue

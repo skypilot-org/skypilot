@@ -524,6 +524,7 @@ def job_status(cluster_name: str, job_ids: Optional[List[int]] = None) -> str:
 def cancel(
     cluster_name: str,
     all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False
@@ -531,6 +532,7 @@ def cancel(
     body = payloads.CancelBody(
         cluster_name=cluster_name,
         all=all,
+        all_users=all_users,
         job_ids=job_ids,
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )

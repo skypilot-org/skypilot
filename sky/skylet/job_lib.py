@@ -85,6 +85,7 @@ def create_table(cursor, conn):
     #    backward compatibility).
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
+    # TODO(yikaluo): username is actually user hash, should rename.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -517,25 +518,12 @@ def _get_jobs(
     """Returns jobs with the given fields, sorted by job_id, descending."""
     if status_list is None:
         status_list = list(JobStatus)
-    status_str_list = [status.value for status in status_list]
-    if username is None:
-        rows = _CURSOR.execute(
-            f"""\
-            SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))})
-            ORDER BY job_id DESC""",
-            (*status_str_list,),
-        )
-    else:
-        rows = _CURSOR.execute(
-            f"""\
-            SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?)
-            ORDER BY job_id DESC""",
-            (*status_str_list, username),
-        )
-
+    status_str_list = [repr(status.value) for status in status_list]
+    filter_str = f'WHERE status IN ({",".join(status_str_list)})'
+    if username is not None:
+        filter_str += f' AND username={username!r}'
+    rows = _CURSOR.execute(
+        f'SELECT * FROM jobs {filter_str} ORDER BY job_id DESC')
     records = _get_records_from_rows(rows)
     return records
 
@@ -849,34 +837,31 @@ def _make_ray_job_id(sky_job_id: int) -> str:
 
 
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
-                                cancel_all: bool = False) -> str:
+                                cancel_all: bool = False,
+                                user_hash: Optional[str] = None) -> str:
     """Cancel jobs.
 
     Args:
-        jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
-        cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
-            set to None. If False and `jobs` is None, cancel the latest
-            running job.
+        jobs: Job IDs to cancel.
+        cancel_all: Whether to cancel all jobs.
+        user_hash: If specified, cancels the jobs for the specified user only.
+            Otherwise, applies to all users.
 
     Returns:
         Encoded job IDs that are actually cancelled. Caller should use
         message_utils.decode_payload() to parse.
     """
-    if cancel_all:
-        # Cancel all in-progress jobs.
-        assert jobs is None, ('If cancel_all=True, usage is to set jobs=None')
-        job_records = _get_jobs(
-            None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
-    else:
-        if jobs is None:
-            # Cancel the latest (largest job ID) running job.
-            job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
-        else:
-            # Cancel jobs with specified IDs.
-            job_records = _get_jobs_by_ids(jobs)
+    job_records = []
+    all_status = [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING]
+    if jobs is None and not cancel_all:
+        # Cancel the latest (largest job ID) running job from current user.
+        job_records = _get_jobs(user_hash, [JobStatus.RUNNING])[:1]
+    elif cancel_all:
+        job_records = _get_jobs(user_hash, all_status)
+    if jobs is not None:
+        job_records.extend(_get_jobs_by_ids(jobs))
 
     cancelled_ids = []
-
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
     for job_record in job_records:
@@ -1024,14 +1009,24 @@ class JobLibCodeGen:
     @classmethod
     def cancel_jobs(cls,
                     job_ids: Optional[List[int]],
-                    cancel_all: bool = False) -> str:
+                    cancel_all: bool = False,
+                    user_hash: Optional[str] = None) -> str:
         """See job_lib.cancel_jobs()."""
         code = [
             (f'cancelled = job_lib.cancel_jobs_encoded_results('
-             f' {job_ids!r}, {cancel_all})'),
+             f'jobs={job_ids!r}, cancel_all={cancel_all}, '
+             f'user_hash={user_hash!r})'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
+        # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+        if user_hash is None:
+            code = [
+                (f'cancelled = job_lib.cancel_jobs_encoded_results('
+                 f' {job_ids!r}, {cancel_all})'),
+                # Print cancelled IDs. Caller should parse by decoding.
+                'print(cancelled, flush=True)',
+            ]
         return cls._build(code)
 
     @classmethod
