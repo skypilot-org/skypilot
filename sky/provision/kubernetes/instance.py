@@ -26,7 +26,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
-NUM_THREADS = subprocess_utils.get_parallel_threads() * 2
+NUM_THREADS = subprocess_utils.get_parallel_threads() * 3
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -121,6 +121,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
+    timeout_err_msg = ('Timed out while waiting for nodes to start. '
+                        'Cluster may be out of resources or '
+                        'may be too slow to autoscale.')
     for new_node in new_nodes:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             new_node.metadata.name, namespace)
@@ -149,9 +152,6 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
             if event.reason == 'FailedScheduling':
                 event_message = event.message
                 break
-        timeout_err_msg = ('Timed out while waiting for nodes to start. '
-                           'Cluster may be out of resources or '
-                           'may be too slow to autoscale.')
         if event_message is not None:
             if pod_status == 'Pending':
                 logger.info(event_message)
@@ -719,7 +719,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         else:
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
-            pod_uuid = str(uuid.uuid4())[:4]
+            pod_uuid = str(uuid.uuid4())[:6]
             pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
             pod_spec_copy['metadata']['name'] = f'{pod_name}-worker'
             # For multi-node support, we put a soft-constraint to schedule
@@ -828,14 +828,20 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         # Run pre-init steps in the pod.
         pre_init(namespace, context, uninitialized_pods_list)
 
-        for pod in uninitialized_pods.values():
+        def _label_pod_thread(pod):
+            """Thread function to label a single pod."""
             _label_pod(namespace,
-                       context,
-                       pod.metadata.name,
-                       label={
-                           TAG_POD_INITIALIZED: 'true',
-                           **pod.metadata.labels
-                       })
+                      context,
+                      pod.metadata.name,
+                      label={
+                          TAG_POD_INITIALIZED: 'true',
+                          **pod.metadata.labels
+                      })
+
+        # Label pods in parallel
+        subprocess_utils.run_in_parallel(_label_pod_thread,
+                                       uninitialized_pods.values(),
+                                       NUM_THREADS)
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(

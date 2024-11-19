@@ -413,11 +413,12 @@ class Kubernetes(clouds.Cloud):
         # Larger timeout may be required for autoscaling clusters, since
         # autoscaler may take some time to provision new nodes.
         # Note that this timeout includes time taken by the Kubernetes scheduler
-        # itself, which can be upto 2-3 seconds.
-        # For non-autoscaling clusters, we conservatively set this to 10s.
+        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
+        # scheduling 100s of pods.
+        # For non-autoscaling clusters, we conservatively set this to 30s.
         timeout = skypilot_config.get_nested(
             ('kubernetes', 'provision_timeout'),
-            10,
+            30,
             override_configs=resources.cluster_config_overrides)
         deploy_vars = {
             'instance_type': resources.instance_type,
