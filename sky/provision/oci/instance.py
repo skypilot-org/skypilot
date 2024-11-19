@@ -242,10 +242,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     assert head_instance_id is not None, head_instance_id
 
+    # Format: TenancyPrefix:AvailabilityDomain, e.g. bxtG:US-SANJOSE-1-AD-1
+    _, ad = str(node_config['AvailabilityDomain']).split(':', maxsplit=1)
     return common.ProvisionRecord(
         provider_name='oci',
         region=region,
-        zone=node_config['AvailabilityDomain'],
+        zone=ad,
         cluster_name=cluster_name_on_cloud,
         head_instance_id=head_instance_id,
         created_instance_ids=[n['inst_id'] for n in created_instances],
