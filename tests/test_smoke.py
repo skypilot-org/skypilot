@@ -124,7 +124,7 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 
-def get_cmd_wait_until_cluster_status_contains_wildcard(
+def _get_cmd_wait_until_cluster_status_contains_wildcard(
         cluster_name_wildcard: str, cluster_status: str, timeout: int):
     wait_cmd = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
         'sky status {cluster_name}',
@@ -571,7 +571,7 @@ def test_aws_with_ssh_proxy_command():
                 f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
-                get_cmd_wait_until_cluster_status_contains_wildcard(
+                _get_cmd_wait_until_cluster_status_contains_wildcard(
                     cluster_name_wildcard='sky-jobs-controller-*',
                     cluster_status=ClusterStatus.UP.value,
                     timeout=300),
