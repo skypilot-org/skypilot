@@ -433,11 +433,13 @@ def _post_provision_setup(
             ux_utils.spinner_message(
                 'Launching - Waiting for SSH access',
                 provision_logging.config.log_path)) as status:
-
-        logger.debug(
-            f'\nWaiting for SSH to be available for {cluster_name!r} ...')
-        wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Connection ready for {cluster_name!r}')
+        # If on Kubernetes, skip SSH check since the pods are guaranteed to be
+        # ready by the provisioner.
+        if cloud_name.lower() != 'kubernetes':
+            logger.debug(
+                f'\nWaiting for SSH to be available for {cluster_name!r} ...')
+            wait_for_ssh(cluster_info, ssh_credentials)
+            logger.debug(f'SSH Connection ready for {cluster_name!r}')
         vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
