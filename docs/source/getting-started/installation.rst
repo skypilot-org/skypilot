@@ -267,6 +267,14 @@ The :code:`~/.oci/config` file should contain the following fields:
   # Note that we should avoid using full home path for the key_file configuration, e.g. use ~/.oci instead of /home/username/.oci
   key_file=~/.oci/oci_api_key.pem
 
+By default, the provisioned nodes will be in the root compartment. To specify the compartment other than root, create/edit the file :code:`~/.sky/config.yaml`, put the compartment's OCID there, as the following:
+
+.. code-block:: text
+
+  oci:
+    default:
+      compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
+
 
 Lambda Cloud
 ~~~~~~~~~~~~~~~~~~
