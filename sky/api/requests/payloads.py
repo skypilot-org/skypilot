@@ -66,6 +66,9 @@ class OptimizeBody(RequestBody):
             f.write(self.dag)
             f.flush()
             dag = dag_utils.load_chain_dag_from_yaml(f.name)
+            # We should not validate the dag here, as the file mounts are not
+            # processed yet, but we need to validate the resources during the
+            # optimization to make sure the resources are available.
         kwargs['dag'] = dag
         return kwargs
 

@@ -1279,6 +1279,9 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
+        # Validate the resources first which may fill in missing fields
+        # automatically for the resources.
+        resources.validate()
         if (resources.cloud is not None and
                 not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
             # Skip the resources that are on a cloud that is not enabled. The
