@@ -4089,6 +4089,7 @@ def _generate_task_with_service(
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
+            # in the first ports entry (i.e. the main port).
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Port {service_port_str!r} is not a valid '
                                  'port number. Please specify a single port '
