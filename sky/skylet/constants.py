@@ -186,10 +186,16 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
+    'start_epoch=$(date +%s.%N); '
+    'end_epoch=$(date +%s.%N); '
+    'echo "=== Waiting for Kubernetes args: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; '
+    'start_epoch=$(date +%s.%N); '
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
     f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    'end_epoch=$(date +%s.%N); '
+    'echo "=== Installed ray: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; '
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -198,12 +204,14 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     #
     # Here, we add ~/.local/bin to the end of the PATH to make sure the issues
     # mentioned above are resolved.
+    
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
     # END ray package check and installation
+    'start_epoch=$(date +%s.%N); '
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     f'{{ {SKY_PIP_CMD} uninstall skypilot -y; '
@@ -211,15 +219,20 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; '
+    'end_epoch=$(date +%s.%N); '
+    'echo "=== Installed skypilot: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; '
     # END SkyPilot package check and installation
 
     # Only patch ray when the ray version is the same as the expected version.
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
+    'start_epoch=$(date +%s.%N); '
     f'{SKY_PIP_CMD} list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
-    '|| exit 1; };')
+    '|| exit 1; }; '
+    'end_epoch=$(date +%s.%N); '
+    'echo "=== Patched ray: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; ')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
