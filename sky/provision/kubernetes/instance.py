@@ -231,6 +231,21 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
 
     If timeout is set to a negative value, this method will wait indefinitely.
     """
+    def _check_pod_scheduled(node: Any) -> bool:
+        """Check if a single pod is scheduled.
+        
+        Returns:
+            bool: True if pod is scheduled, False if still pending/unscheduled
+        """
+        pod = kubernetes.core_api(context).read_namespaced_pod(
+            node.metadata.name, namespace)
+        if pod.status.phase == 'Pending':
+            # If container_statuses is None, then the pod hasn't
+            # been scheduled yet.
+            if pod.status.container_statuses is None:
+                return False
+        return True
+
     start_time = time.time()
 
     def _evaluate_timeout() -> bool:
@@ -240,19 +255,14 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
         return time.time() - start_time < timeout
 
     while _evaluate_timeout():
-        all_pods_scheduled = True
-        for node in new_nodes:
-            # Iterate over each pod to check their status
-            pod = kubernetes.core_api(context).read_namespaced_pod(
-                node.metadata.name, namespace)
-            if pod.status.phase == 'Pending':
-                # If container_statuses is None, then the pod hasn't
-                # been scheduled yet.
-                if pod.status.container_statuses is None:
-                    all_pods_scheduled = False
-                    break
-
-        if all_pods_scheduled:
+        # Check all pods in parallel
+        scheduled_results = subprocess_utils.run_in_parallel(
+            _check_pod_scheduled,
+            new_nodes,
+            NUM_THREADS)
+        
+        # If all pods are scheduled (all True), we can exit
+        if all(scheduled_results):
             return
         time.sleep(1)
 
@@ -697,24 +707,28 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
-    for _ in range(to_start_count):
-        if head_pod_name is None:
-            pod_spec['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
+    
+    def _create_pod_thread(i: int):
+        pod_spec_copy = copy.deepcopy(pod_spec)
+        if head_pod_name is None and i == 0:
+            # First pod should be head if no head exists
+            pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
             head_selector = head_service_selector(cluster_name_on_cloud)
-            pod_spec['metadata']['labels'].update(head_selector)
-            pod_spec['metadata']['name'] = f'{cluster_name_on_cloud}-head'
+            pod_spec_copy['metadata']['labels'].update(head_selector)
+            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
-            pod_spec['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
+            # Worker pods
+            pod_spec_copy['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
             pod_uuid = str(uuid.uuid4())[:4]
             pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
-            pod_spec['metadata']['name'] = f'{pod_name}-worker'
+            pod_spec_copy['metadata']['name'] = f'{pod_name}-worker'
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
             # This is not set as a hard constraint because if different nodes
             # are not available, we still want to be able to schedule worker
             # pods on larger nodes which may be able to fit multiple SkyPilot
             # "nodes".
-            pod_spec['spec']['affinity'] = {
+            pod_spec_copy['spec']['affinity'] = {
                 'podAntiAffinity': {
                     # Set as a soft constraint
                     'preferredDuringSchedulingIgnoredDuringExecution': [{
@@ -749,11 +763,19 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'value': 'present',
                 'effect': 'NoSchedule'
             }
-            pod_spec['spec']['tolerations'] = [tpu_toleration]
+            pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
 
-        pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
+        return _create_namespaced_pod_with_retries(namespace, pod_spec_copy, context)
+
+    # Create pods in parallel
+    pods = subprocess_utils.run_in_parallel(_create_pod_thread, 
+                                              range(to_start_count),
+                                              NUM_THREADS)
+    
+    # Process created pods
+    for pod in pods:
         created_pods[pod.metadata.name] = pod
-        if head_pod_name is None:
+        if head_pod_name is None and pod.metadata.labels.get(constants.TAG_RAY_NODE_KIND) == 'head':
             head_pod_name = pod.metadata.name
 
     wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags,
