@@ -123,8 +123,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # Let's create additional new nodes (if neccessary)
     to_start_count = config.count - len(resume_instances)
     created_instances = []
+    node_config = config.node_config
     if to_start_count > 0:
-        node_config = config.node_config
         compartment = query_helper.find_compartment(region)
         vcn = query_helper.find_create_vcn_subnet(region)
 
@@ -245,7 +245,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     return common.ProvisionRecord(
         provider_name='oci',
         region=region,
-        zone=None,
+        zone=node_config['AvailabilityDomain'],
         cluster_name=cluster_name_on_cloud,
         head_instance_id=head_instance_id,
         created_instance_ids=[n['inst_id'] for n in created_instances],
