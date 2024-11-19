@@ -1129,6 +1129,8 @@ class KubernetesInstanceType:
         name = (f'{common_utils.format_float(self.cpus)}CPU--'
                 f'{common_utils.format_float(self.memory)}GB')
         if self.accelerator_count:
+            # Replace spaces with underscores in accelerator type to make it a
+            # valid logical instance type name.
             acc_name = self.accelerator_type.replace(' ', '_')
             name += f'--{self.accelerator_count}{acc_name}'
         return name
@@ -1161,6 +1163,8 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
+                # This is to revert the accelerator types with spaces back to
+                # the original format.
                 accelerator_type = str(accelerator_type).replace('_', ' ')
             else:
                 accelerator_count = None
