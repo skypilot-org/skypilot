@@ -131,8 +131,6 @@ class Vast(clouds.Cloud):
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
 
-    def __repr__(self):
-        return 'Vast'
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
