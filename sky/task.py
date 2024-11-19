@@ -476,6 +476,11 @@ class Task:
         assert not experimnetal_configs, ('Invalid task args: '
                                           f'{experimnetal_configs.keys()}')
 
+        vpn_config = config.pop('vpn', None)
+        if vpn_config is not None:
+            vpn_config = vpn_utils.VPNConfig.from_yaml_config(vpn_config)
+            task.set_vpn_config(vpn_config)
+
         # Parse resources field.
         resources_config = config.pop('resources', {})
         if cluster_config_override is not None:
@@ -484,12 +489,9 @@ class Task:
                 'experimental.config_overrides')
             resources_config[
                 '_cluster_config_overrides'] = cluster_config_override
+        if task.vpn_config is not None:
+            resources_config.pop('ports', None)
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
-
-        vpn_config = config.pop('vpn', None)
-        if vpn_config is not None:
-            vpn_config = vpn_utils.VPNConfig.from_yaml_config(vpn_config)
-            task.set_vpn_config(vpn_config)
 
         service = config.pop('service', None)
         if service is not None:
@@ -669,6 +671,8 @@ class Task:
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
         new_resources_list = []
+        if self.vpn_config is not None:
+            override_params.pop('ports', None)
         for res in list(self.resources):
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
