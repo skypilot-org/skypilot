@@ -40,12 +40,10 @@ def _filter_instances(cluster_name_on_cloud: str,
 
 
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
-    head_instance_id = None
     for inst_id, inst in instances.items():
         if inst['name'].endswith('-head'):
-            head_instance_id = inst_id
-            break
-    return head_instance_id
+            return inst_id
+    return None
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
