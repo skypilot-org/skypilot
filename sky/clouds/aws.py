@@ -280,12 +280,12 @@ class AWS(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
-        client = aws.client('ec2', region_name=region)
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
         try:
+            client = aws.client('ec2', region_name=region)
             image_info = client.describe_images(ImageIds=[image_id])
             image_info = image_info.get('Images', [])
             if not image_info:
@@ -294,7 +294,8 @@ class AWS(clouds.Cloud):
             image_info = image_info[0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
-        except aws.botocore_exceptions().NoCredentialsError:
+        except (aws.botocore_exceptions().NoCredentialsError,
+                aws.botocore_exceptions().ProfileNotFound):
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
@@ -662,6 +663,7 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 

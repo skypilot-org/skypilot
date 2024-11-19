@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
@@ -22,7 +22,7 @@ import pytest
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -43,6 +43,7 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'runpod': 'runpod'
 }
 
 
@@ -72,7 +73,6 @@ def pytest_addoption(parser):
     parser.addoption(
         '--generic-cloud',
         type=str,
-        default='aws',
         choices=all_clouds_in_smoke_tests,
         help='Cloud to use for generic tests. If the generic cloud is '
         'not within the clouds to be run, it will be reset to the first '
@@ -101,14 +101,21 @@ def pytest_configure(config):
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
+
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
             if cloud == 'cloudflare':
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
-    if not cloud_to_run:
+
+    generic_cloud_option = config.getoption('--generic-cloud')
+    if generic_cloud_option is not None and generic_cloud_option not in cloud_to_run:
+        cloud_to_run.append(generic_cloud_option)
+
+    if len(cloud_to_run) == 0:
         cloud_to_run = default_clouds_to_run
+
     return cloud_to_run
 
 
@@ -186,11 +193,10 @@ def _is_generic_test(item) -> bool:
 
 
 def _generic_cloud(config) -> str:
-    c = config.getoption('--generic-cloud')
-    cloud_to_run = _get_cloud_to_run(config)
-    if c not in cloud_to_run:
-        c = cloud_to_run[0]
-    return c
+    generic_cloud_option = config.getoption('--generic-cloud')
+    if generic_cloud_option is not None:
+        return generic_cloud_option
+    return _get_cloud_to_run(config)[0]
 
 
 @pytest.fixture
@@ -206,7 +212,7 @@ def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
     from sky import skypilot_config
-    region = 'us-west-2'
+    region = 'us-east-2'
     if skypilot_config.loaded():
         ssh_proxy_command = skypilot_config.get_nested(
             ('aws', 'ssh_proxy_command'), None)

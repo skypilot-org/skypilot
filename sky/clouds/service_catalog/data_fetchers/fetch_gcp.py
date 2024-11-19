@@ -47,6 +47,10 @@ TPU_RETRY_CNT = 3
 TPU_V4_ZONES = ['us-central2-b']
 # TPU v3 pods are available in us-east1-d, but hidden in the skus.
 # We assume the TPU prices are the same as us-central1.
+# TPU v6e's pricing info is not available on the SKUs. However, in
+# https://cloud.google.com/tpu/pricing, it listed the price for 4 regions:
+# us-east1, us-east5, europe-west4, and asia-northeast1. We hardcode them here
+# and filtered out the other regions (us-central{1,2}, us-south1).
 HIDDEN_TPU_DF = pd.read_csv(
     io.StringIO(
         textwrap.dedent("""\
@@ -58,7 +62,49 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-512,1,,,tpu-v3-512,512.0,153.6,us-east1,us-east1-d
  ,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
+ ,tpu-v6e-1,1,,,tpu-v6e-1,2.7,,us-east5,us-east5-b
+ ,tpu-v6e-1,1,,,tpu-v6e-1,2.7,,us-east5,us-east5-c
+ ,tpu-v6e-1,1,,,tpu-v6e-1,2.97,,europe-west4,europe-west4-a
+ ,tpu-v6e-1,1,,,tpu-v6e-1,3.24,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-1,1,,,tpu-v6e-1,2.7,,us-east1,us-east1-d
+ ,tpu-v6e-4,1,,,tpu-v6e-4,10.8,,us-east5,us-east5-b
+ ,tpu-v6e-4,1,,,tpu-v6e-4,10.8,,us-east5,us-east5-c
+ ,tpu-v6e-4,1,,,tpu-v6e-4,11.88,,europe-west4,europe-west4-a
+ ,tpu-v6e-4,1,,,tpu-v6e-4,12.96,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-4,1,,,tpu-v6e-4,10.8,,us-east1,us-east1-d
+ ,tpu-v6e-8,1,,,tpu-v6e-8,21.6,,us-east5,us-east5-b
+ ,tpu-v6e-8,1,,,tpu-v6e-8,21.6,,us-east5,us-east5-c
+ ,tpu-v6e-8,1,,,tpu-v6e-8,23.76,,europe-west4,europe-west4-a
+ ,tpu-v6e-8,1,,,tpu-v6e-8,25.92,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-8,1,,,tpu-v6e-8,21.6,,us-east1,us-east1-d
+ ,tpu-v6e-16,1,,,tpu-v6e-16,43.2,,us-east5,us-east5-b
+ ,tpu-v6e-16,1,,,tpu-v6e-16,43.2,,us-east5,us-east5-c
+ ,tpu-v6e-16,1,,,tpu-v6e-16,47.52,,europe-west4,europe-west4-a
+ ,tpu-v6e-16,1,,,tpu-v6e-16,51.84,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-16,1,,,tpu-v6e-16,43.2,,us-east1,us-east1-d
+ ,tpu-v6e-32,1,,,tpu-v6e-32,86.4,,us-east5,us-east5-b
+ ,tpu-v6e-32,1,,,tpu-v6e-32,86.4,,us-east5,us-east5-c
+ ,tpu-v6e-32,1,,,tpu-v6e-32,95.04,,europe-west4,europe-west4-a
+ ,tpu-v6e-32,1,,,tpu-v6e-32,103.68,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-32,1,,,tpu-v6e-32,86.4,,us-east1,us-east1-d
+ ,tpu-v6e-64,1,,,tpu-v6e-64,172.8,,us-east5,us-east5-b
+ ,tpu-v6e-64,1,,,tpu-v6e-64,172.8,,us-east5,us-east5-c
+ ,tpu-v6e-64,1,,,tpu-v6e-64,190.08,,europe-west4,europe-west4-a
+ ,tpu-v6e-64,1,,,tpu-v6e-64,207.36,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-64,1,,,tpu-v6e-64,172.8,,us-east1,us-east1-d
+ ,tpu-v6e-128,1,,,tpu-v6e-128,345.6,,us-east5,us-east5-b
+ ,tpu-v6e-128,1,,,tpu-v6e-128,345.6,,us-east5,us-east5-c
+ ,tpu-v6e-128,1,,,tpu-v6e-128,380.16,,europe-west4,europe-west4-a
+ ,tpu-v6e-128,1,,,tpu-v6e-128,414.72,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-128,1,,,tpu-v6e-128,345.6,,us-east1,us-east1-d
+ ,tpu-v6e-256,1,,,tpu-v6e-256,691.2,,us-east5,us-east5-b
+ ,tpu-v6e-256,1,,,tpu-v6e-256,691.2,,us-east5,us-east5-c
+ ,tpu-v6e-256,1,,,tpu-v6e-256,760.32,,europe-west4,europe-west4-a
+ ,tpu-v6e-256,1,,,tpu-v6e-256,829.44,,asia-northeast1,asia-northeast1-b
+ ,tpu-v6e-256,1,,,tpu-v6e-256,691.2,,us-east1,us-east1-d
  """)))
+
+TPU_V6E_MISSING_REGIONS = ['us-central1', 'us-central2', 'us-south1']
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
@@ -334,7 +380,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.
-    def get_vm_price(row: pd.Series, spot: bool) -> float:
+    def get_vm_price(row: pd.Series, spot: bool) -> Optional[float]:
         series = row['InstanceType'].split('-')[0].lower()
 
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
@@ -385,12 +431,26 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         if series in ['f1', 'g1']:
             memory_price = 0.0
 
-        assert cpu_price is not None, row
-        assert memory_price is not None, row
+        # TODO(tian): (2024/11/10) Some SKUs are missing in the SKUs API. We
+        # skip them in the catalog for now. We should investigate why they are
+        # missing and add them back.
+        if cpu_price is None or memory_price is None:
+            return None
         return cpu_price + memory_price
 
     df['Price'] = df.apply(lambda row: get_vm_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_vm_price(row, spot=True), axis=1)
+    dropped_rows = df[df['Price'].isna() & df['SpotPrice'].isna()]
+    dropped_info = (dropped_rows[['InstanceType',
+                                  'AvailabilityZone']].drop_duplicates())
+    az2missing = dropped_info.groupby('AvailabilityZone').apply(
+        lambda x: x['InstanceType'].tolist())
+    print('Price not found for the following zones and instance types. '
+          'Dropping them.')
+    for az, instances in az2missing.items():
+        print('-' * 30, az, '-' * 30)
+        print(', '.join(instances))
+    df = df.dropna(subset=['Price', 'SpotPrice'], how='all')
     df = df.reset_index(drop=True)
     df = df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'])
     return df
@@ -683,11 +743,13 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
                   'not found in SKUs or hidden TPU price DF.')
         # TODO(tian): Hack. Should investigate how to retrieve the price
         # for TPU-v6e.
-        if not tpu_name.startswith('tpu-v6e'):
+        if (tpu_name.startswith('tpu-v6e') and
+                tpu_region in TPU_V6E_MISSING_REGIONS):
+            if not spot:
+                tpu_price = 0.0
+        else:
             assert spot or tpu_price is not None, (row, hidden_tpu,
                                                    HIDDEN_TPU_DF)
-        else:
-            tpu_price = 0.0
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)

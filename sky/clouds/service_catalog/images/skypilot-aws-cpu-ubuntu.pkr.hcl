@@ -4,11 +4,11 @@ variable "region" {
 }
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  date = formatdate("YYMMDD", timestamp())
 }
 
 source "amazon-ebs" "cpu-ubuntu" {
-  ami_name      = "skypilot-aws-cpu-ubuntu-${local.timestamp}"
+  ami_name      = "skypilot-aws-cpu-ubuntu-${local.date}"
   instance_type = "t2.micro"
   region        = var.region
   ssh_username  = "ubuntu"
@@ -36,12 +36,12 @@ build {
     script = "./provisioners/docker.sh"
   }
   provisioner "shell" {
-    script = "./provisioners/skypilot.sh"
-  }
-  provisioner "shell" {
     environment_vars = [
       "CLOUD=aws",
     ]
-    script = "./provisioners/cloud.sh"
+    script = "./provisioners/skypilot.sh"
+  }
+  provisioner "shell" {
+    script = "./provisioners/user-toolkit.sh"
   }
 }

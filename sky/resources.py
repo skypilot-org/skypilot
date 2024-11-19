@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import common_utils
@@ -55,7 +56,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[str] = None,
+        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
@@ -111,6 +112,12 @@ class Resources:
             job to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
+            When a dict is provided, it can have the following fields:
+
+            - strategy: the recovery strategy to use.
+            - max_restarts_on_errors: the max number of restarts on user code
+              errors.
+
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
@@ -161,10 +168,20 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery = None
+        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
         if job_recovery is not None:
-            if job_recovery.strip().lower() != 'none':
-                self._job_recovery = job_recovery.upper()
+            if isinstance(job_recovery, str):
+                job_recovery = {'strategy': job_recovery}
+            if 'strategy' not in job_recovery:
+                job_recovery['strategy'] = None
+
+            strategy_name = job_recovery['strategy']
+            if strategy_name == 'none':
+                self._job_recovery = None
+            else:
+                if strategy_name is not None:
+                    job_recovery['strategy'] = strategy_name.upper()
+                self._job_recovery = job_recovery
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -419,7 +436,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[str]:
+    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
         return self._job_recovery
 
     @property
@@ -566,33 +583,46 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                    if kubernetes_utils.is_tpu_on_gke(acc):
+                        self._cloud = clouds.Kubernetes()
+                    else:
+                        self._cloud = clouds.GCP()
+                assert (self.cloud.is_same_cloud(clouds.GCP()) or
+                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                            'Cloud must be GCP or Kubernetes for TPU '
+                            'accelerators.')
+
                 if accelerator_args is None:
                     accelerator_args = {}
+
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
-                if self.instance_type is not None and use_tpu_vm:
-                    if self.instance_type != 'TPU-VM':
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                'Cannot specify instance type'
-                                f' (got "{self.instance_type}") for TPU VM.')
-                if 'runtime_version' not in accelerator_args:
+                if (self.cloud.is_same_cloud(clouds.GCP()) and
+                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                    if 'runtime_version' not in accelerator_args:
 
-                    def _get_default_runtime_version() -> str:
-                        if not use_tpu_vm:
-                            return '2.12.0'
-                        # TPU V5 requires a newer runtime version.
-                        if acc.startswith('tpu-v5'):
-                            return 'v2-alpha-tpuv5'
-                        return 'tpu-vm-base'
+                        def _get_default_runtime_version() -> str:
+                            if not use_tpu_vm:
+                                return '2.12.0'
+                            # TPU V5 requires a newer runtime version.
+                            if acc.startswith('tpu-v5'):
+                                return 'v2-alpha-tpuv5'
+                            # TPU V6e requires a newer runtime version.
+                            elif acc.startswith('tpu-v6e'):
+                                return 'v2-alpha-tpuv6e'
+                            return 'tpu-vm-base'
 
-                    accelerator_args['runtime_version'] = (
-                        _get_default_runtime_version())
-                    logger.info(
-                        'Missing runtime_version in accelerator_args, using'
-                        f' default ({accelerator_args["runtime_version"]})')
+                        accelerator_args['runtime_version'] = (
+                            _get_default_runtime_version())
+                        logger.info(
+                            'Missing runtime_version in accelerator_args, using'
+                            f' default ({accelerator_args["runtime_version"]})')
+
+                    if self.instance_type is not None and use_tpu_vm:
+                        if self.instance_type != 'TPU-VM':
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError(
+                                    'Cannot specify instance type (got '
+                                    f'{self.instance_type!r}) for TPU VM.')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
@@ -814,12 +844,13 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._job_recovery is None:
+        if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
-        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
+        if (self._job_recovery['strategy']
+                not in managed_jobs.RECOVERY_STRATEGIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery} '
+                    f'Spot recovery strategy {self._job_recovery["strategy"]} '
                     'is not supported. The strategy should be among '
                     f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
 
