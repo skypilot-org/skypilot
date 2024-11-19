@@ -123,10 +123,19 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'sleep 10; '
     'done')
 
-_WAIT_UNTIL_CLUSTER_STATUS_CONTAINS_WILDCARD = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
-    'sky status {cluster_name}',
-    'sky status "{cluster_name}"').replace('awk "/^{cluster_name}/',
-                                           'awk "/^{cluster_name_awk}/')
+
+def get_cmd_wait_until_cluster_status_contains_wildcard(
+        cluster_name_wildcard: str, cluster_status: str, timeout: int):
+    wait_cmd = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
+        'sky status {cluster_name}',
+        'sky status "{cluster_name}"').replace('awk "/^{cluster_name}/',
+                                               'awk "/^{cluster_name_awk}/')
+    return wait_cmd.format(cluster_name=cluster_name_wildcard,
+                           cluster_name_awk=cluster_name_wildcard.replace(
+                               '*', '.*'),
+                           cluster_status=cluster_status,
+                           timeout=timeout)
+
 
 _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     # A while loop to wait until the cluster is not found or timeout
@@ -562,9 +571,8 @@ def test_aws_with_ssh_proxy_command():
                 f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
-                _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS_WILDCARD.format(
-                    cluster_name=f'sky-jobs-controller-*',
-                    cluster_name_awk='sky-jobs-controller-.*',
+                get_cmd_wait_until_cluster_status_contains_wildcard(
+                    cluster_name_wildcard='sky-jobs-controller-*',
                     cluster_status=ClusterStatus.UP.value,
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
