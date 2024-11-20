@@ -214,8 +214,7 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; '
     'end_epoch=$(date +%s); '
-    'echo "== Installed skypilot: $(($end_epoch - $start_epoch)) secs =="; '
-)
+    'echo "== Installed skypilot: $(($end_epoch - $start_epoch)) secs =="; ')
 
 # Install ray and skypilot on the remote cluster if they are not already
 # installed. {var} will be replaced with the actual value in

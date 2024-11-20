@@ -513,7 +513,7 @@ def _post_provision_setup(
                 if line.strip() and not line.startswith('Active:')
             ])
             return active_nodes
-        
+
         def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
             # Check if head node Ray is alive
             returncode, stdout, _ = head_runner.run(
@@ -536,17 +536,20 @@ def _post_provision_setup(
         if (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive
-            ray_port, ray_cluster_healthy, need_full_ray_setup = check_ray_port_and_cluster_healthy()
+            ray_port, ray_cluster_healthy, need_full_ray_setup = check_ray_port_and_cluster_healthy(
+            )
         elif cloud_name.lower() == 'kubernetes':
             timeout = 60  # 1-min maximum timeout
             start = time.time()
             while True:
                 # Wait until Ray cluster is healthy
-                (ray_port, ray_cluster_healthy, need_full_ray_setup) = check_ray_port_and_cluster_healthy()
+                (ray_port, ray_cluster_healthy,
+                 need_full_ray_setup) = check_ray_port_and_cluster_healthy()
                 if ray_cluster_healthy:
                     break
                 if time.time() - start > timeout:
-                    raise RuntimeError(f'Ray cluster on head is not up after {timeout}s.')
+                    raise RuntimeError(
+                        f'Ray cluster on head is not up after {timeout}s.')
                 time.sleep(1)
 
         # We don't start ray on Kubernetes, as it has been started in the
