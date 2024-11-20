@@ -502,59 +502,68 @@ def _post_provision_setup(
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
-        full_ray_setup = True
-        
+        need_full_ray_setup = True
 
-        # TODO(zhwu): We need to check the healthiness of ray cluster on
-        # Kubernetes, instead of directly skipping it.
-        # We need to wait for the entire ray cluster to be ready by checking
-        # the ray status on the head node.
-        if cloud_name.lower() != 'kubernetes':
-            ray_port = constants.SKY_REMOTE_RAY_PORT
-            if not provision_record.is_instance_just_booted(
-                    head_instance.instance_id):
-                # Check if head node Ray is alive
-                returncode, stdout, _ = head_runner.run(
-                    instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                    stream_logs=False,
-                    require_outputs=True)
-                if returncode:
-                    logger.debug('Ray cluster on head is not up. Restarting...')
-                else:
-                    logger.debug('Ray cluster on head is up.')
-                    ray_port = common_utils.decode_payload(stdout)['ray_port']
-                full_ray_setup = bool(returncode)
-            # We don't start ray on Kubernetes, as it has been started in the
-            # container args.
-            if full_ray_setup:
-                logger.debug('Starting Ray on the entire cluster.')
-                instance_setup.start_ray_on_head_node(
-                    cluster_name.name_on_cloud,
-                    custom_resource=custom_resource,
-                    cluster_info=cluster_info,
-                    ssh_credentials=ssh_credentials)
+        def parse_num_active_nodes(stdout: str) -> int:
+            # Extract active nodes using list comprehension and string manipulation
+            start = stdout.find('Active:')
+            end = stdout.find('Pending:', start)
+            active_nodes = len([
+                line.split()[-1]
+                for line in stdout[start:end].split('\n')
+                if line.strip() and not line.startswith('Active:')
+            ])
+            return active_nodes
 
-            # NOTE: We have to check all worker nodes to make sure they are all
-            #  healthy, otherwise we can only start Ray on newly started worker
-            #  nodes like this:
-            #
-            # worker_ips = []
-            # for inst in cluster_info.instances.values():
-            #     if provision_record.is_instance_just_booted(inst.instance_id):
-            #         worker_ips.append(inst.public_ip)
+        ray_port = constants.SKY_REMOTE_RAY_PORT
+        ray_cluster_healthy = False
+        if (not provision_record.is_instance_just_booted(
+                head_instance.instance_id) or
+                cloud_name.lower() == 'kubernetes'):
+            # Check if head node Ray is alive
+            returncode, stdout, _ = head_runner.run(
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                stream_logs=False,
+                require_outputs=True)
+            if returncode:
+                logger.debug('Ray cluster on head is not up. Restarting...')
+            else:
+                logger.debug('Ray cluster on head is up.')
+                ray_port = common_utils.decode_payload(stdout)['ray_port']
+            need_full_ray_setup = bool(returncode)
+            ray_cluster_healthy = parse_num_active_nodes(
+                stdout) == cluster_info.num_instances
 
-            if cluster_info.num_instances > 1:
-                instance_setup.start_ray_on_worker_nodes(
-                    cluster_name.name_on_cloud,
-                    no_restart=not full_ray_setup,
-                    custom_resource=custom_resource,
-                    # Pass the ray_port to worker nodes for backward compatibility
-                    # as in some existing clusters the ray_port is not dumped with
-                    # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
-                    # from the head node for worker nodes.
-                    ray_port=ray_port,
-                    cluster_info=cluster_info,
-                    ssh_credentials=ssh_credentials)
+        # We don't start ray on Kubernetes, as it has been started in the
+        # container args.
+        if need_full_ray_setup:
+            logger.debug('Starting Ray on the entire cluster.')
+            instance_setup.start_ray_on_head_node(
+                cluster_name.name_on_cloud,
+                custom_resource=custom_resource,
+                cluster_info=cluster_info,
+                ssh_credentials=ssh_credentials)
+
+        # NOTE: We have to check all worker nodes to make sure they are all
+        #  healthy, otherwise we can only start Ray on newly started worker
+        #  nodes like this:
+        #
+        # worker_ips = []
+        # for inst in cluster_info.instances.values():
+        #     if provision_record.is_instance_just_booted(inst.instance_id):
+        #         worker_ips.append(inst.public_ip)
+        if cluster_info.num_instances > 1 and not ray_cluster_healthy:
+            instance_setup.start_ray_on_worker_nodes(
+                cluster_name.name_on_cloud,
+                no_restart=not need_full_ray_setup,
+                custom_resource=custom_resource,
+                # Pass the ray_port to worker nodes for backward compatibility
+                # as in some existing clusters the ray_port is not dumped with
+                # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
+                # from the head node for worker nodes.
+                ray_port=ray_port,
+                cluster_info=cluster_info,
+                ssh_credentials=ssh_credentials)
 
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)

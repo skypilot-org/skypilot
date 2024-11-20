@@ -332,6 +332,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
             f'{{ {cmd} }}')
     else:
         cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
+    return cmd
 
 
 @common.log_function_start_end

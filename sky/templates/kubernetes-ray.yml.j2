@@ -236,17 +236,9 @@ provider:
             name: {{cluster_name_on_cloud}}-head
         spec:
             # This selector must match the head node pod's selector below.
+            clusterIP: None
             selector:
                 component: {{cluster_name_on_cloud}}-head
-            ports:
-                - name: client
-                  protocol: TCP
-                  port: 10001
-                  targetPort: 10001
-                - name: dashboard
-                  protocol: TCP
-                  port: 8265
-                  targetPort: 8265
 
 # Specify the pod type for the ray head node (as configured below).
 head_node_type: ray_head_default
@@ -280,7 +272,6 @@ available_node_types:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
-
         restartPolicy: Never
 
         # Add node selector if GPU/TPUs are requested:
@@ -336,10 +327,11 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               
               (
+                mkdir -p ~/.sky
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
-                ~/skypilot-runtime/bin/python -m pip install skypilot-nightly[kubernetes,remote]
-                ~/skypilot-runtime/bin/python -m pip uninstall -y skypilot-nightly --no-deps
+                source ~/skypilot-runtime/bin/activate
+                pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
                 if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
@@ -353,15 +345,11 @@ available_node_types:
                 (
                   set -ex
                   # Wait until the head pod is available with an IP address
-                  while [ -z "$SKYPILOT_RAY_HEAD_IP" ]; do
-                    export SKYPILOT_RAY_HEAD_IP=$(nslookup {{cluster_name_on_cloud}}.{{k8s_namespace}}.pod.cluster.local)
-                    sleep 1
-                  done
-
+                  export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
                   # Wait until the ray cluster is started on the head pod
-                  until nc -z ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
-                    sleep 1
+                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
+                    sleep 0.1
                   done
 
                   {{ ray_worker_start_command }}
@@ -520,9 +508,6 @@ setup_commands:
     {%- endfor %}
     end_epoch=$(date +%s.%N);
     echo "=== Initial setup: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
-    start_epoch_conda=$(date +%s.%N);
-    end_epoch_conda=$(date +%s.%N);
-    echo "=== Installed conda: $(echo "$end_epoch_conda - $start_epoch_conda" | bc) seconds ===";
     start_epoch=$(date +%s.%N);
     ls -l /tmp/ray_skypilot_installation_complete;
     # TODO(zhwu): Stream the logs from the current pod's args while waiting for the installation to complete.
@@ -530,7 +515,7 @@ setup_commands:
     end_epoch=$(date +%s.%N);
     echo "=== Waiting ray and skypilot installation: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
     start_epoch_ray_skypilot=$(date +%s.%N);
-    {{ ray_skypilot_installation_commands }}
+    {{ skypilot_wheel_installation_commands }}
     end_epoch_ray_skypilot=$(date +%s.%N);
     echo "=== Installed ray and skypilot: $(echo "$end_epoch_ray_skypilot - $start_epoch_ray_skypilot" | bc) seconds ===";
     start_epoch=$(date +%s.%N);

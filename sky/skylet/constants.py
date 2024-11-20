@@ -202,15 +202,9 @@ RAY_INSTALLATION_COMMANDS = (
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
-    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
-)
+    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
-# Install ray and skypilot on the remote cluster if they are not already
-# installed. {var} will be replaced with the actual value in
-# backend_utils.write_cluster_config.
-RAY_SKYPILOT_INSTALLATION_COMMANDS = (
-    f'{RAY_INSTALLATION_COMMANDS} '
-    # END ray package check and installation
+SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     'start_epoch=$(date +%s.%N); '
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
@@ -221,8 +215,14 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     'exit 1; }; '
     'end_epoch=$(date +%s.%N); '
     'echo "=== Installed skypilot: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; '
-    # END SkyPilot package check and installation
+)
 
+# Install ray and skypilot on the remote cluster if they are not already
+# installed. {var} will be replaced with the actual value in
+# backend_utils.write_cluster_config.
+RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    f'{RAY_INSTALLATION_COMMANDS} '
+    f'{SKYPILOT_WHEEL_INSTALLATION_COMMANDS} '
     # Only patch ray when the ray version is the same as the expected version.
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
