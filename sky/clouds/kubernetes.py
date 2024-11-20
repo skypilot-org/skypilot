@@ -423,7 +423,7 @@ class Kubernetes(clouds.Cloud):
             override_configs=resources.cluster_config_overrides)
         custom_ray_options = {
             'object-store-memory': 500000000,
-            'num-cpus': str(cpus),
+            'num-cpus': str(int(cpus)),
         }
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -451,6 +451,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_topology_label_value': k8s_topology_label_value,
             'k8s_resource_key': k8s_resource_key,
             'image_id': image_id,
+            'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
             'ray_head_start_command': instance_setup.ray_head_start_command(
                 custom_resources, custom_ray_options),
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,

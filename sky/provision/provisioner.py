@@ -503,22 +503,27 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
         full_ray_setup = True
-        ray_port = constants.SKY_REMOTE_RAY_PORT
-        if not provision_record.is_instance_just_booted(
-                head_instance.instance_id):
-            # Check if head node Ray is alive
-            returncode, stdout, _ = head_runner.run(
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                stream_logs=False,
-                require_outputs=True)
-            if returncode:
-                logger.debug('Ray cluster on head is not up. Restarting...')
-            else:
-                logger.debug('Ray cluster on head is up.')
-                ray_port = common_utils.decode_payload(stdout)['ray_port']
-            full_ray_setup = bool(returncode)
+        
 
+        # TODO(zhwu): We need to check the healthiness of ray cluster on
+        # Kubernetes, instead of directly skipping it.
+        # We need to wait for the entire ray cluster to be ready by checking
+        # the ray status on the head node.
         if cloud_name.lower() != 'kubernetes':
+            ray_port = constants.SKY_REMOTE_RAY_PORT
+            if not provision_record.is_instance_just_booted(
+                    head_instance.instance_id):
+                # Check if head node Ray is alive
+                returncode, stdout, _ = head_runner.run(
+                    instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                    stream_logs=False,
+                    require_outputs=True)
+                if returncode:
+                    logger.debug('Ray cluster on head is not up. Restarting...')
+                else:
+                    logger.debug('Ray cluster on head is up.')
+                    ray_port = common_utils.decode_payload(stdout)['ray_port']
+                full_ray_setup = bool(returncode)
             # We don't start ray on Kubernetes, as it has been started in the
             # container args.
             if full_ray_setup:

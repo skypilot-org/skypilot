@@ -159,10 +159,7 @@ CONDA_INSTALLATION_COMMANDS = (
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
-# Install ray and skypilot on the remote cluster if they are not already
-# installed. {var} will be replaced with the actual value in
-# backend_utils.write_cluster_config.
-RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+RAY_INSTALLATION_COMMANDS = (
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
     # Disable the pip version check to avoid the warning message, which makes
     # the output hard to read.
@@ -187,9 +184,6 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
     'start_epoch=$(date +%s.%N); '
-    'end_epoch=$(date +%s.%N); '
-    'echo "=== Waiting for Kubernetes args: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; '
-    'start_epoch=$(date +%s.%N); '
     f'{SKY_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
@@ -209,6 +203,13 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
+)
+
+# Install ray and skypilot on the remote cluster if they are not already
+# installed. {var} will be replaced with the actual value in
+# backend_utils.write_cluster_config.
+RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    f'{RAY_INSTALLATION_COMMANDS} '
     # END ray package check and installation
     'start_epoch=$(date +%s.%N); '
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '

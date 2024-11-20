@@ -337,15 +337,15 @@ available_node_types:
               
               (
                 {{ conda_installation_commands }}
-                ~/skypilot-runtime/bin/python -m pip install ray[default]==2.9.3 skypilot-nightly[kubernetes,remote]
-                ~/skypilot-runtime/bin/python -c "from sky.skylet.ray_patches import patch; patch()"
+                {{ ray_installation_commands }}
+                ~/skypilot-runtime/bin/python -m pip install skypilot-nightly[kubernetes,remote]
+                ~/skypilot-runtime/bin/python -m pip uninstall -y skypilot-nightly --no-deps
                 touch /tmp/ray_skypilot_installation_complete
-                # TODO: start ray here.
+                echo "=== Ray and skypilot installation completed ==="
                 if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
                   {{ ray_head_start_command }}
                   touch /tmp/ray_started
                 fi
-                ~/skypilot-runtime/bin/python -m pip uninstall -y skypilot-nightly
               ) &
 
               if [ "$SKYPILOT_POD_NODE_TYPE" == "worker" ]; then
@@ -354,7 +354,7 @@ available_node_types:
                   set -ex
                   # Wait until the head pod is available with an IP address
                   while [ -z "$SKYPILOT_RAY_HEAD_IP" ]; do
-                    export SKYPILOT_RAY_HEAD_IP=$(kubectl get pods -l ray-node-type=head,skypilot-cluster={{cluster_name_on_cloud}} -o jsonpath='{.items[0].status.podIP}')
+                    export SKYPILOT_RAY_HEAD_IP=$(nslookup {{cluster_name_on_cloud}}.{{k8s_namespace}}.pod.cluster.local)
                     sleep 1
                   done
 
@@ -523,8 +523,13 @@ setup_commands:
     start_epoch_conda=$(date +%s.%N);
     end_epoch_conda=$(date +%s.%N);
     echo "=== Installed conda: $(echo "$end_epoch_conda - $start_epoch_conda" | bc) seconds ===";
+    start_epoch=$(date +%s.%N);
+    ls -l /tmp/ray_skypilot_installation_complete;
+    # TODO(zhwu): Stream the logs from the current pod's args while waiting for the installation to complete.
+    until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 1; echo "Waiting for ray and skypilot installation to complete..."; done;
+    end_epoch=$(date +%s.%N);
+    echo "=== Waiting ray and skypilot installation: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
     start_epoch_ray_skypilot=$(date +%s.%N);
-    until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 1; echo "Waiting for conda, ray and SkyPilot installation to complete..."; done;
     {{ ray_skypilot_installation_commands }}
     end_epoch_ray_skypilot=$(date +%s.%N);
     echo "=== Installed ray and skypilot: $(echo "$end_epoch_ray_skypilot - $start_epoch_ray_skypilot" | bc) seconds ===";

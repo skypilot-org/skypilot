@@ -333,8 +333,6 @@ def ray_worker_start_command(custom_resource: Optional[str],
     else:
         cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
 
-    logger.info(f'Running command on worker nodes: {cmd}')
-
 
 @common.log_function_start_end
 @_auto_retry()
