@@ -505,7 +505,6 @@ def _post_provision_setup(
         need_full_ray_setup = True
 
         def parse_num_active_nodes(stdout: str) -> int:
-            # Extract active nodes using list comprehension and string manipulation
             start = stdout.find('Active:')
             end = stdout.find('Pending:', start)
             active_nodes = len([

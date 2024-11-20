@@ -497,35 +497,34 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - |
-    sudo DEBIAN_FRONTEND=noninteractive apt install -y bc;
-    start_epoch=$(date +%s.%N);
-    end_epoch=$(date +%s.%N);
-    echo "=== Installed packages: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
-    start_epoch=$(date +%s.%N);
+    start_epoch=$(date +%s);
+    end_epoch=$(date +%s);
+    echo "=== Installed packages: $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    end_epoch=$(date +%s.%N);
-    echo "=== Initial setup: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
-    start_epoch=$(date +%s.%N);
+    end_epoch=$(date +%s);
+    echo "=== Initial setup: $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
     ls -l /tmp/ray_skypilot_installation_complete;
     # TODO(zhwu): Stream the logs from the current pod's args while waiting for the installation to complete.
     until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 1; echo "Waiting for ray and skypilot installation to complete..."; done;
-    end_epoch=$(date +%s.%N);
-    echo "=== Waiting ray and skypilot installation: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
-    start_epoch_ray_skypilot=$(date +%s.%N);
+    end_epoch=$(date +%s);
+    echo "=== Waiting ray and skypilot installation: $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch_ray_skypilot=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
-    end_epoch_ray_skypilot=$(date +%s.%N);
-    echo "=== Installed ray and skypilot: $(echo "$end_epoch_ray_skypilot - $start_epoch_ray_skypilot" | bc) seconds ===";
-    start_epoch=$(date +%s.%N);
+    end_epoch_ray_skypilot=$(date +%s);
+    echo "=== Installed ray and skypilot: $(($end_epoch_ray_skypilot - $start_epoch_ray_skypilot)) secs ===";
+    start_epoch=$(date +%s);
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
-    end_epoch=$(date +%s.%N);
-    echo "=== Setup fuse: $(echo "$end_epoch - $start_epoch" | bc) seconds ===";
+    end_epoch=$(date +%s);
+    echo "=== Setup fuse: $(($end_epoch - $start_epoch)) secs ===";
     {% if tpu_requested %}
     # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
     # the TPU runtime, are written. These capture runtime information about the
