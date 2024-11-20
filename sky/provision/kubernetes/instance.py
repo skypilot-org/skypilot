@@ -249,8 +249,11 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
             namespace,
             label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
-        assert len(pods) == len(pod_names), (
-            f'Expected {len(pod_names)} pods, got {len(pods)}')
+        if len(pods) != len(pod_names):
+            logger.info('Retrying waiting for pods: '
+                        f'Expected {len(pod_names)} pods, got {len(pods)}')
+            time.sleep(0.5)
+            continue
 
         # Filter to only the pods we're waiting for
         pods = [pod for pod in pods if pod.metadata.name in pod_names]
@@ -323,8 +326,11 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
             namespace,
             label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
-        assert len(all_pods) == len(pod_names), (
-            f'Expected {len(pod_names)} pods, got {len(all_pods)}')
+        if len(all_pods) != len(pod_names):
+            logger.info('Retrying running pods check: '
+                        f'Expected {len(pod_names)} pods, got {len(all_pods)}')
+            time.sleep(0.5)
+            continue
 
         all_pods_running = True
         for pod in all_pods:
@@ -794,9 +800,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 constants.TAG_RAY_NODE_KIND) == 'head':
             head_pod_name = pod.metadata.name
 
-    wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags,
-                                                  ['Pending'])
-    wait_pods = list(wait_pods_dict.values())
+    wait_pods = pods
 
     networking_mode = network_utils.get_networking_mode(
         config.provider_config.get('networking_mode'))
@@ -812,7 +816,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     wait_str = ('indefinitely'
                 if provision_timeout < 0 else f'for {provision_timeout}s')
     logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
-                 f'run: {list(wait_pods_dict.keys())}')
+                 f'run: {[pod.metadata.name for pod in wait_pods]}')
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
@@ -820,10 +824,10 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     logger.debug(f'run_instances: waiting for pods to be running (pulling '
-                 f'images): {list(wait_pods_dict.keys())}')
+                 f'images): {[pod.metadata.name for pod in wait_pods]}')
     _wait_for_pods_to_run(namespace, context, wait_pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
-                 f'{list(wait_pods_dict.keys())}')
+                 f'{[pod.metadata.name for pod in wait_pods]}')
 
     running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                 ['Running'])
