@@ -232,6 +232,8 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     If timeout is set to a negative value, this method will wait indefinitely.
     """
     # Create a set of pod names we're waiting for
+    if len(new_nodes) == 0:
+        return
     pod_names = {node.metadata.name for node in new_nodes}
     start_time = time.time()
 
@@ -291,6 +293,9 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
     Pods may be pulling images or may be in the process of container
     creation.
     """
+    if len(new_nodes) == 0:
+        return
+
     # Create a set of pod names we're waiting for
     pod_names = {node.metadata.name for node in new_nodes}
 
@@ -800,8 +805,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 constants.TAG_RAY_NODE_KIND) == 'head':
             head_pod_name = pod.metadata.name
 
-    wait_pods = pods
-
     networking_mode = network_utils.get_networking_mode(
         config.provider_config.get('networking_mode'))
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
@@ -810,24 +813,24 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
         jump_pod = kubernetes.core_api(context).read_namespaced_pod(
             ssh_jump_pod_name, namespace)
-        wait_pods.append(jump_pod)
+        pods.append(jump_pod)
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'
                 if provision_timeout < 0 else f'for {provision_timeout}s')
     logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
-                 f'run: {[pod.metadata.name for pod in wait_pods]}')
+                 f'run: {[pod.metadata.name for pod in pods]}')
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, context, wait_pods, provision_timeout)
+    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout)
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     logger.debug(f'run_instances: waiting for pods to be running (pulling '
-                 f'images): {[pod.metadata.name for pod in wait_pods]}')
-    _wait_for_pods_to_run(namespace, context, wait_pods)
+                 f'images): {[pod.metadata.name for pod in pods]}')
+    _wait_for_pods_to_run(namespace, context, pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
-                 f'{[pod.metadata.name for pod in wait_pods]}')
+                 f'{[pod.metadata.name for pod in pods]}')
 
     # running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
     #                                             ['Running'])
