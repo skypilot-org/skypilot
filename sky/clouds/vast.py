@@ -32,9 +32,7 @@ class Vast(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            ('Mounting object stores is not supported on Vast. To read data '
-             'from object stores on Vast, use `mode: COPY` to copy the data '
-             'to local disk.'),
+            ('Mounting object stores is not supported on Vast.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
