@@ -29,8 +29,8 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
 # which will be customized in sky.provision.logging.
@@ -343,6 +343,7 @@ def _wait_ssh_connection_indirect(ip: str,
         return False, stderr
     return True, ''
 
+
 @timeline.event
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
@@ -517,35 +518,38 @@ def _post_provision_setup(
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
             full_ray_setup = bool(returncode)
 
-        if full_ray_setup:
-            logger.debug('Starting Ray on the entire cluster.')
-            instance_setup.start_ray_on_head_node(
-                cluster_name.name_on_cloud,
-                custom_resource=custom_resource,
-                cluster_info=cluster_info,
-                ssh_credentials=ssh_credentials)
+        if cloud_name.lower() != 'kubernetes':
+            # We don't start ray on Kubernetes, as it has been started in the
+            # container args.
+            if full_ray_setup:
+                logger.debug('Starting Ray on the entire cluster.')
+                instance_setup.start_ray_on_head_node(
+                    cluster_name.name_on_cloud,
+                    custom_resource=custom_resource,
+                    cluster_info=cluster_info,
+                    ssh_credentials=ssh_credentials)
 
-        # NOTE: We have to check all worker nodes to make sure they are all
-        #  healthy, otherwise we can only start Ray on newly started worker
-        #  nodes like this:
-        #
-        # worker_ips = []
-        # for inst in cluster_info.instances.values():
-        #     if provision_record.is_instance_just_booted(inst.instance_id):
-        #         worker_ips.append(inst.public_ip)
+            # NOTE: We have to check all worker nodes to make sure they are all
+            #  healthy, otherwise we can only start Ray on newly started worker
+            #  nodes like this:
+            #
+            # worker_ips = []
+            # for inst in cluster_info.instances.values():
+            #     if provision_record.is_instance_just_booted(inst.instance_id):
+            #         worker_ips.append(inst.public_ip)
 
-        if cluster_info.num_instances > 1:
-            instance_setup.start_ray_on_worker_nodes(
-                cluster_name.name_on_cloud,
-                no_restart=not full_ray_setup,
-                custom_resource=custom_resource,
-                # Pass the ray_port to worker nodes for backward compatibility
-                # as in some existing clusters the ray_port is not dumped with
-                # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
-                # from the head node for worker nodes.
-                ray_port=ray_port,
-                cluster_info=cluster_info,
-                ssh_credentials=ssh_credentials)
+            if cluster_info.num_instances > 1:
+                instance_setup.start_ray_on_worker_nodes(
+                    cluster_name.name_on_cloud,
+                    no_restart=not full_ray_setup,
+                    custom_resource=custom_resource,
+                    # Pass the ray_port to worker nodes for backward compatibility
+                    # as in some existing clusters the ray_port is not dumped with
+                    # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
+                    # from the head node for worker nodes.
+                    ray_port=ray_port,
+                    cluster_info=cluster_info,
+                    ssh_credentials=ssh_credentials)
 
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
@@ -554,6 +558,7 @@ def _post_provision_setup(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
                                    provision_logging.config.log_path))
     return cluster_info
+
 
 @timeline.event
 def post_provision_runtime_setup(

@@ -204,7 +204,6 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     #
     # Here, we add ~/.local/bin to the end of the PATH to make sure the issues
     # mentioned above are resolved.
-    
     'export PATH=$PATH:$HOME/.local/bin; '
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
@@ -232,7 +231,8 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
     '|| exit 1; }; '
     'end_epoch=$(date +%s.%N); '
-    'echo "=== Patched ray: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; ')
+    'echo "=== Patched ray: $(echo "$end_epoch - $start_epoch" | bc) seconds ==="; '
+)
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot

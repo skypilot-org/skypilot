@@ -368,6 +368,7 @@ def _run_function_with_retries(func: Callable,
             else:
                 raise
 
+
 @timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
@@ -529,6 +530,7 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
         }},
         _request_timeout=kubernetes.API_TIMEOUT)
 
+
 @timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
@@ -606,6 +608,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
         else:
             # Re-raise the exception if it's a different error
             raise e
+
 
 @timeline.event
 def _create_pods(region: str, cluster_name_on_cloud: str,
@@ -787,33 +790,33 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{list(wait_pods_dict.keys())}')
 
-    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
-                                                ['Running'])
-    initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
-        TAG_POD_INITIALIZED: 'true',
-        **tags
-    }, ['Running'])
-    uninitialized_pods = {
-        pod_name: pod
-        for pod_name, pod in running_pods.items()
-        if pod_name not in initialized_pods
-    }
-    if len(uninitialized_pods) > 0:
-        logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
-                     f'pods: {list(uninitialized_pods.keys())}')
-        uninitialized_pods_list = list(uninitialized_pods.values())
+    # running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
+    #                                             ['Running'])
+    # initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
+    #     TAG_POD_INITIALIZED: 'true',
+    #     **tags
+    # }, ['Running'])
+    # uninitialized_pods = {
+    #     pod_name: pod
+    #     for pod_name, pod in running_pods.items()
+    #     if pod_name not in initialized_pods
+    # }
+    # if len(uninitialized_pods) > 0:
+    #     logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
+    #                  f'pods: {list(uninitialized_pods.keys())}')
+    #     # uninitialized_pods_list = list(uninitialized_pods.values())
 
-        # Run pre-init steps in the pod.
-        # pre_init(namespace, context, uninitialized_pods_list)
+    # Run pre-init steps in the pod.
+    # pre_init(namespace, context, uninitialized_pods_list)
 
-        for pod in uninitialized_pods.values():
-            _label_pod(namespace,
-                       context,
-                       pod.metadata.name,
-                       label={
-                           TAG_POD_INITIALIZED: 'true',
-                           **pod.metadata.labels
-                       })
+    # for pod in uninitialized_pods.values():
+    #     _label_pod(namespace,
+    #                context,
+    #                pod.metadata.name,
+    #                label={
+    #                    TAG_POD_INITIALIZED: 'true',
+    #                    **pod.metadata.labels
+    #                })
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
