@@ -2,11 +2,16 @@
 import builtins
 import contextlib
 import logging
+import os
+import pathlib
 import sys
 import threading
+from typing import Callable, Dict, List, Union
 
 import colorama
 
+from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -96,6 +101,11 @@ _setup_logger()
 
 
 def init_logger(name: str):
+    if name in _LOGGER_NAME_INITIALIZER_MAP and not\
+          _LOGGER_NAME_INITIALIZER_MAP[name][1]:
+        # Initialize the logger if it is not initialized
+        # and configured in _LOGGER_NAME_INITIALIZER_MAP.
+        _LOGGER_NAME_INITIALIZER_MAP[name][0](name)  # type: ignore
     return logging.getLogger(name)
 
 
@@ -143,3 +153,46 @@ def is_silent():
         # threads.
         _logging_config.is_silent = False
     return _logging_config.is_silent
+
+
+def _initialize_tmp_file_logger(logger_name: str) -> None:
+    initialized = _LOGGER_NAME_INITIALIZER_MAP[logger_name][1]
+    if initialized:
+        return
+
+    # Initialize the logger
+    run_timestamp = backend_utils.get_run_timestamp()
+
+    # set up the logger to write to a tmp file
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+    log_path = os.path.expanduser(os.path.join(log_dir, logger_name))
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    log_abs_path = pathlib.Path(log_path).expanduser().absolute()
+    fh = logging.FileHandler(log_abs_path)
+
+    logger = logging.getLogger(logger_name)
+
+    for handler in logger.handlers:
+        print(handler)
+
+    fh.setFormatter(FORMATTER)
+    fh.setLevel(logging.DEBUG)
+    logger.addHandler(fh)
+
+    # Clear stream handler
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            logger.removeHandler(handler)
+
+    _LOGGER_NAME_INITIALIZER_MAP[logger_name][1] = True
+
+
+# A map from logger name to a tuple of (initializer, is_initialized).
+# The initializer is a function that initializes the logger.
+# The is_initialized is a boolean indicating if the logger is initialized.
+_LOGGER_NAME_INITIALIZER_MAP: Dict[str,
+                                   List[Union[Callable[[str], None], bool]]] = {
+                                       'sky.data.storage': [
+                                           _initialize_tmp_file_logger, False
+                                       ]
+                                   }
