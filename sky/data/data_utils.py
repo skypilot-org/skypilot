@@ -537,7 +537,7 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                 stdout_line_write_cnt += 1
 
         if stdout_line_write_cnt == 0:
-            storage_logger.info('No file upload, could be error'
+            storage_logger.info('No file uploaded, could be error'
                                 'happened or all files already exist on cloud')
 
         while True:
