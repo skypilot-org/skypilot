@@ -330,8 +330,6 @@ available_node_types:
               (
                 mkdir -p ~/.sky
                 {{ conda_installation_commands }}
-                # TODO(zhwu): dedup setting somehow get discarded.
-                echo Nproc: $(( 3 * $(nproc --all) ))
                 {{ ray_installation_commands }}
                 ~/skypilot-runtime/bin/python -m pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
