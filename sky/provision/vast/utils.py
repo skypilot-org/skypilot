@@ -15,7 +15,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
         instance['id'] = str(instance['id'])
-        info = instance.copy()
+        info = instance
 
         if isinstance(instance['actual_status'], str):
             info['status'] = instance['actual_status'].upper()
