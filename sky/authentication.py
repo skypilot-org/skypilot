@@ -381,7 +381,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     context = config['provider'].get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
     if context == kubernetes.in_cluster_context_name():
-        # If the context is a in-cluster context name, we are running in a pod
+        # If the context is an in-cluster context name, we are running in a pod
         # with in-cluster configuration. We need to set the context to None
         # to use the mounted service account.
         context = None
