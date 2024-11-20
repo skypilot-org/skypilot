@@ -320,6 +320,7 @@ available_node_types:
                   fieldPath: metadata.labels['ray-node-type']
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
+          # We need to use -i to make sure the environment variables are set.
           command: ["/bin/bash", "-c", "--"]
           args: 
             - |
@@ -330,20 +331,19 @@ available_node_types:
                 mkdir -p ~/.sky
                 {{ conda_installation_commands }}
                 # TODO(zhwu): dedup setting somehow get discarded.
+                echo Nproc: $(( 3 * $(nproc --all) ))
                 {{ ray_installation_commands }}
                 source ~/skypilot-runtime/bin/activate
-                pip install skypilot[kubernetes,remote]
+                ~/skypilot-runtime/bin/python -m pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
+                
                 if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
+                  set -ex
                   {{ ray_head_start_command }}
                   touch /tmp/ray_started
-                fi
-              ) &
-
-              if [ "$SKYPILOT_POD_NODE_TYPE" == "worker" ]; then
-                # Start ray worker on the worker pod.
-                (
+                else
+                  # Start ray worker on the worker pod.
                   set -ex
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
@@ -355,8 +355,9 @@ available_node_types:
 
                   {{ ray_worker_start_command }}
                   touch /tmp/ray_started
-                ) &
-              fi
+                fi
+              ) &
+
 
               # Run apt update in background and log to a file and install missing packages
               (
