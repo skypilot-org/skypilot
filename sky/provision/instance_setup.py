@@ -4,7 +4,6 @@ import functools
 import hashlib
 import json
 import os
-import resource
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -116,7 +115,7 @@ def _parallel_ssh_with_cache(func,
     if max_workers is None:
         # Not using the default value of `max_workers` in ThreadPoolExecutor,
         # as 32 is too large for some machines.
-        max_workers = subprocess_utils.get_parallel_threads()
+        max_workers = subprocess_utils.get_parallel_threads(cluster_info.provider_name)
     with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         runners = provision.get_command_runners(cluster_info.provider_name,
@@ -137,7 +136,6 @@ def _parallel_ssh_with_cache(func,
             results.append(pool.submit(wrapper(func), runner, log_path_abs))
 
         return [future.result() for future in results]
-
 
 @common.log_function_start_end
 def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
@@ -410,9 +408,10 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
             # Source bashrc for starting ray cluster to make sure actors started
             # by ray will have the correct PATH.
             source_bashrc=True)
-
+    
+    num_threads = subprocess_utils.get_parallel_threads(cluster_info.provider_name)
     results = subprocess_utils.run_in_parallel(
-        _setup_ray_worker, list(zip(worker_runners, cache_ids)))
+        _setup_ray_worker, list(zip(worker_runners, cache_ids)), num_threads)
     for returncode, stdout, stderr in results:
         if returncode:
             with ux_utils.print_exception_no_traceback():
@@ -487,27 +486,6 @@ def _internal_file_mounts(file_mounts: Dict,
         )
 
 
-def _max_workers_for_file_mounts(common_file_mounts: Dict[str, str]) -> int:
-    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
-
-    fd_per_rsync = 5
-    for src in common_file_mounts.values():
-        if os.path.isdir(src):
-            # Assume that each file/folder under src takes 5 file descriptors
-            # on average.
-            fd_per_rsync = max(fd_per_rsync, len(os.listdir(src)) * 5)
-
-    # Reserve some file descriptors for the system and other processes
-    fd_reserve = 100
-
-    max_workers = (fd_limit - fd_reserve) // fd_per_rsync
-    # At least 1 worker, and avoid too many workers overloading the system.
-    max_workers = min(max(max_workers, 1),
-                      subprocess_utils.get_parallel_threads())
-    logger.debug(f'Using {max_workers} workers for file mounts.')
-    return max_workers
-
-
 @common.log_function_start_end
 @timeline.event
 def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
@@ -530,4 +508,4 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
         digest=None,
         cluster_info=cluster_info,
         ssh_credentials=ssh_credentials,
-        max_workers=_max_workers_for_file_mounts(common_file_mounts))
+        max_workers=subprocess_utils.get_max_workers_for_file_mounts(common_file_mounts, cluster_info.provider_name))

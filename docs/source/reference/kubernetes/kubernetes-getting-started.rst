@@ -331,6 +331,8 @@ FAQs
 
   .. code-block:: dockerfile
 
+    FROM <your base image>
+
     # Install system dependencies
     RUN apt update -y && \
         apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat curl -y && \

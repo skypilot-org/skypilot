@@ -231,21 +231,8 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
 
     If timeout is set to a negative value, this method will wait indefinitely.
     """
-    def _check_pod_scheduled(node: Any) -> bool:
-        """Check if a single pod is scheduled.
-        
-        Returns:
-            bool: True if pod is scheduled, False if still pending/unscheduled
-        """
-        pod = kubernetes.core_api(context).read_namespaced_pod(
-            node.metadata.name, namespace)
-        if pod.status.phase == 'Pending':
-            # If container_statuses is None, then the pod hasn't
-            # been scheduled yet.
-            if pod.status.container_statuses is None:
-                return False
-        return True
-
+    # Create a set of pod names we're waiting for
+    pod_names = {node.metadata.name for node in new_nodes}
     start_time = time.time()
 
     def _evaluate_timeout() -> bool:
@@ -255,14 +242,31 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
         return time.time() - start_time < timeout
 
     while _evaluate_timeout():
-        # Check all pods in parallel
-        scheduled_results = subprocess_utils.run_in_parallel(
-            _check_pod_scheduled,
-            new_nodes,
-            NUM_THREADS)
+        # Get all pods in a single API call using the cluster name label
+        # which all pods in new_nodes should share
+        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}'
+        ).items
+
+        assert len(pods) == len(pod_names), (
+            f'Expected {len(pod_names)} pods, got {len(pods)}')
+
+        # Filter to only the pods we're waiting for
+        pods = [pod for pod in pods if pod.metadata.name in pod_names]
         
-        # If all pods are scheduled (all True), we can exit
-        if all(scheduled_results):
+        # Check if all pods are scheduled
+        all_scheduled = True
+        for pod in pods:
+            if pod.status.phase == 'Pending':
+                # If container_statuses is None, then the pod hasn't
+                # been scheduled yet.
+                if pod.status.container_statuses is None:
+                    all_scheduled = False
+                    break
+
+        if all_scheduled:
             return
         time.sleep(1)
 
@@ -278,12 +282,15 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
             f'Error: {common_utils.format_exception(e)}') from None
 
 
+@timeline.event
 def _wait_for_pods_to_run(namespace, context, new_nodes):
     """Wait for pods and their containers to be ready.
 
     Pods may be pulling images or may be in the process of container
     creation.
     """
+    # Create a set of pod names we're waiting for
+    pod_names = {node.metadata.name for node in new_nodes}
 
     def _check_init_containers(pod):
         # Check if any of the init containers failed
@@ -311,12 +318,18 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
                     f'{pod.metadata.name}. Error details: {msg}.')
 
     while True:
-        all_pods_running = True
-        # Iterate over each pod to check their status
-        for node in new_nodes:
-            pod = kubernetes.core_api(context).read_namespaced_pod(
-                node.metadata.name, namespace)
+        # Get all pods in a single API call
+        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        all_pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}'
+        ).items
 
+        assert len(all_pods) == len(pod_names), (
+            f'Expected {len(pod_names)} pods, got {len(all_pods)}')
+
+        all_pods_running = True
+        for pod in all_pods:
             # Continue if pod and all the containers within the
             # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
@@ -885,11 +898,6 @@ def _terminate_node(namespace: str, context: Optional[str],
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
-        kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, context, pod_name)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning('terminate_instances: Error occurred when analyzing '
-                       f'SSH Jump pod: {e}')
-    try:
         kubernetes.core_api(context).delete_namespaced_service(
             pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT)
         kubernetes.core_api(context).delete_namespaced_service(
@@ -925,6 +933,18 @@ def terminate_instances(
     }
     pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
 
+    # Clean up the SSH jump pod if in use
+    networking_mode = network_utils.get_networking_mode(
+        provider_config.get('networking_mode'))
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        pod_name = list(pods.keys())[0]
+        try:
+            kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, context, 
+                                                       pod_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('terminate_instances: Error occurred when analyzing '
+                        f'SSH Jump pod: {e}')
+            
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
 
