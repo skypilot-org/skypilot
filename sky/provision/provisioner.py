@@ -536,8 +536,8 @@ def _post_provision_setup(
         if (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive
-            ray_port, ray_cluster_healthy, need_full_ray_setup = check_ray_port_and_cluster_healthy(
-            )
+            (ray_port, ray_cluster_healthy,
+             need_full_ray_setup) = check_ray_port_and_cluster_healthy()
         elif cloud_name.lower() == 'kubernetes':
             timeout = 60  # 1-min maximum timeout
             start = time.time()
