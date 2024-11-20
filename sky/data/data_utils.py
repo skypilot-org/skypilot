@@ -521,17 +521,31 @@ def get_gsutil_command() -> Tuple[str, str]:
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
     # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
     # to a log file.
+    storage_logger = sky_logging.init_logger(sky_logging.STORAGE_LOGGER_NAME)
+
     with subprocess.Popen(command,
                           stderr=subprocess.PIPE,
-                          stdout=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE,
                           shell=True) as process:
         stderr = []
+        stdout_line_write_cnt = 0
         assert process.stderr is not None  # for mypy
+        if process.stdout is not None:
+            for line in process.stdout:
+                str_line = line.decode('utf-8')
+                storage_logger.info(str_line)
+                stdout_line_write_cnt += 1
+
+        if stdout_line_write_cnt == 0:
+            storage_logger.info('No file upload, could be error'
+                                'happened or all files already exist on cloud')
+
         while True:
             line = process.stderr.readline()
             if not line:
                 break
             str_line = line.decode('utf-8')
+            storage_logger.error(str_line)
             stderr.append(str_line)
             if access_denied_message in str_line:
                 process.kill()

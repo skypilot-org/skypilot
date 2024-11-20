@@ -1,16 +1,16 @@
 """Logging utilities."""
 import builtins
 import contextlib
+from datetime import datetime
 import logging
 import os
 import pathlib
 import sys
 import threading
-from typing import Callable, Dict, List, Union
+from typing import Callable, Dict, Optional, Tuple
 
 import colorama
 
-from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -20,6 +20,10 @@ _show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
                         not env_options.Options.MINIMIZE_LOGGING.get())
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
+_logging_init_lock = threading.Lock()
+# Can not be 'sky.data.storage' because it inherits
+# from the root logger which configured the stream handler
+STORAGE_LOGGER_NAME = 'data.storage'
 
 
 class NewLineFormatter(logging.Formatter):
@@ -100,13 +104,23 @@ def reload_logger():
 _setup_logger()
 
 
-def init_logger(name: str):
-    if name in _LOGGER_NAME_INITIALIZER_MAP and not\
-          _LOGGER_NAME_INITIALIZER_MAP[name][1]:
-        # Initialize the logger if it is not initialized
-        # and configured in _LOGGER_NAME_INITIALIZER_MAP.
-        _LOGGER_NAME_INITIALIZER_MAP[name][0](name)  # type: ignore
+def init_logger(name: str) -> logging.Logger:
+    with _logging_init_lock:
+        if name in _LOGGER_NAME_INITIALIZER_MAP and not\
+            _LOGGER_NAME_INITIALIZER_MAP[name][1]:
+            # Initialize the logger if it is not initialized
+            # and configured in _LOGGER_NAME_INITIALIZER_MAP.
+            log_file_path = _LOGGER_NAME_INITIALIZER_MAP[name][0](name)
+            _LOGGER_NAME_INITIALIZER_MAP[name] = (
+                _LOGGER_NAME_INITIALIZER_MAP[name][0], True, log_file_path)
     return logging.getLogger(name)
+
+
+def get_logger_log_file_path(name: str) -> Optional[str]:
+    if name in _LOGGER_NAME_INITIALIZER_MAP and _LOGGER_NAME_INITIALIZER_MAP[
+            name][1] and _LOGGER_NAME_INITIALIZER_MAP[name][2]:
+        return _LOGGER_NAME_INITIALIZER_MAP[name][2]
+    return None
 
 
 @contextlib.contextmanager
@@ -155,44 +169,34 @@ def is_silent():
     return _logging_config.is_silent
 
 
-def _initialize_tmp_file_logger(logger_name: str) -> None:
-    initialized = _LOGGER_NAME_INITIALIZER_MAP[logger_name][1]
-    if initialized:
-        return
-
-    # Initialize the logger
-    run_timestamp = backend_utils.get_run_timestamp()
+def _initialize_tmp_file_logger(logger_name: str) -> str:
+    """Initialize the logger to write to a tmp file."""
+    run_timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
     # set up the logger to write to a tmp file
     log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-    log_path = os.path.expanduser(os.path.join(log_dir, logger_name))
+    log_path = os.path.expanduser(
+        os.path.join(log_dir,
+                     logger_name.replace('.', '_') + '.log'))
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     log_abs_path = pathlib.Path(log_path).expanduser().absolute()
     fh = logging.FileHandler(log_abs_path)
 
     logger = logging.getLogger(logger_name)
 
-    for handler in logger.handlers:
-        print(handler)
-
     fh.setFormatter(FORMATTER)
-    fh.setLevel(logging.DEBUG)
+    fh.setLevel(_root_logger.level)
     logger.addHandler(fh)
 
-    # Clear stream handler
-    for handler in logger.handlers:
-        if isinstance(handler, logging.StreamHandler):
-            logger.removeHandler(handler)
-
-    _LOGGER_NAME_INITIALIZER_MAP[logger_name][1] = True
+    return log_path
 
 
-# A map from logger name to a tuple of (initializer, is_initialized).
+# A map from logger name to a tuple of (initializer, is_initialized, log_path).
 # The initializer is a function that initializes the logger.
 # The is_initialized is a boolean indicating if the logger is initialized.
 _LOGGER_NAME_INITIALIZER_MAP: Dict[str,
-                                   List[Union[Callable[[str], None], bool]]] = {
-                                       'sky.data.storage': [
-                                           _initialize_tmp_file_logger, False
-                                       ]
+                                   Tuple[Callable[[str], str], bool, str]] = {
+                                       STORAGE_LOGGER_NAME:
+                                           (_initialize_tmp_file_logger, False,
+                                            '')
                                    }

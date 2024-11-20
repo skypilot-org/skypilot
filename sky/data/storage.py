@@ -1001,7 +1001,18 @@ class Storage(object):
                 else:
                     for source in self.source:
                         warn_for_git_dir(source)
+            # init logger on demand
+            sky_logging.init_logger(sky_logging.STORAGE_LOGGER_NAME)
+            log_path = sky_logging.get_logger_log_file_path(
+                sky_logging.STORAGE_LOGGER_NAME)
+            store_name = (
+                f'{store.__class__.__name__.replace("Store", "").lower()}:'
+                f'{store.name}')
             store.upload()
+            logger.info(
+                ux_utils.finishing_message(
+                    f'Storage synced: {self.source!r} to {store_name}',
+                    log_path))
         except exceptions.StorageUploadError:
             logger.error(f'Could not upload {self.source!r} to store '
                          f'name {store.name!r}.')
