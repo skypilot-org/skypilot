@@ -2053,6 +2053,7 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
     return provider_config.get('namespace',
                                get_kube_config_context_namespace(context))
 
+
 @timeline.event
 def filter_pods(namespace: str,
                 context: Optional[str],

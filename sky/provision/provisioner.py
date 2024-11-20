@@ -29,8 +29,8 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
 # which will be customized in sky.provision.logging.
@@ -343,6 +343,7 @@ def _wait_ssh_connection_indirect(ip: str,
         return False, stderr
     return True, ''
 
+
 @timeline.event
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
@@ -554,6 +555,7 @@ def _post_provision_setup(
         ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
                                    provision_logging.config.log_path))
     return cluster_info
+
 
 @timeline.event
 def post_provision_runtime_setup(

@@ -19,6 +19,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+
 @timeline.event
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
@@ -50,9 +51,8 @@ def _get_thread_multiplier(cloud_str: Optional[str] = None) -> int:
     return 1
 
 
-
 def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
-                                  cloud_str: Optional[str] = None) -> int:
+                                    cloud_str: Optional[str] = None) -> int:
     fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
 
     fd_per_rsync = 5
@@ -75,9 +75,9 @@ def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
 
 def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
     """Returns the number of threads to use for parallel execution.
-    
+
     Args:
-        cloud_str: The cloud 
+        cloud_str: The cloud
     """
     cpu_count = os.cpu_count()
     if cpu_count is None:

@@ -3086,10 +3086,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{workdir} -> {SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
-        num_threads = subprocess_utils.get_parallel_threads(str(handle.launched_resources.cloud))
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Syncing workdir', log_path)):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners, num_threads)
+            subprocess_utils.run_in_parallel(_sync_workdir_node, runners,
+                                             num_threads)
         logger.info(ux_utils.finishing_message('Workdir synced.', log_path))
 
     def _sync_file_mounts(
@@ -4417,7 +4419,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         start = time.time()
         runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
-        num_threads = subprocess_utils.get_max_workers_for_file_mounts(file_mounts, str(handle.launched_resources.cloud))
+        num_threads = subprocess_utils.get_max_workers_for_file_mounts(
+            file_mounts, str(handle.launched_resources.cloud))
 
         # Check the files and warn
         for dst, src in file_mounts.items():
@@ -4535,7 +4538,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to create symlinks. The target destination '
                     f'may already exist. Log: {log_path}')
 
-            subprocess_utils.run_in_parallel(_symlink_node, runners, num_threads)
+            subprocess_utils.run_in_parallel(_symlink_node, runners,
+                                             num_threads)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
         logger.info(ux_utils.finishing_message('Files synced.', log_path))
@@ -4564,7 +4568,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         start = time.time()
         runners = handle.get_command_runners()
-        num_threads = subprocess_utils.get_max_workers_for_file_mounts(storage_mounts, str(handle.launched_resources.cloud))
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         plural = 's' if len(storage_mounts) > 1 else ''

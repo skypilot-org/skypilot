@@ -19,8 +19,8 @@ from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.utils import ux_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -115,7 +115,8 @@ def _parallel_ssh_with_cache(func,
     if max_workers is None:
         # Not using the default value of `max_workers` in ThreadPoolExecutor,
         # as 32 is too large for some machines.
-        max_workers = subprocess_utils.get_parallel_threads(cluster_info.provider_name)
+        max_workers = subprocess_utils.get_parallel_threads(
+            cluster_info.provider_name)
     with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         results = []
         runners = provision.get_command_runners(cluster_info.provider_name,
@@ -136,6 +137,7 @@ def _parallel_ssh_with_cache(func,
             results.append(pool.submit(wrapper(func), runner, log_path_abs))
 
         return [future.result() for future in results]
+
 
 @common.log_function_start_end
 def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
@@ -408,8 +410,9 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
             # Source bashrc for starting ray cluster to make sure actors started
             # by ray will have the correct PATH.
             source_bashrc=True)
-    
-    num_threads = subprocess_utils.get_parallel_threads(cluster_info.provider_name)
+
+    num_threads = subprocess_utils.get_parallel_threads(
+        cluster_info.provider_name)
     results = subprocess_utils.run_in_parallel(
         _setup_ray_worker, list(zip(worker_runners, cache_ids)), num_threads)
     for returncode, stdout, stderr in results:
@@ -508,4 +511,5 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
         digest=None,
         cluster_info=cluster_info,
         ssh_credentials=ssh_credentials,
-        max_workers=subprocess_utils.get_max_workers_for_file_mounts(common_file_mounts, cluster_info.provider_name))
+        max_workers=subprocess_utils.get_max_workers_for_file_mounts(
+            common_file_mounts, cluster_info.provider_name))
