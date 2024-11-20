@@ -333,7 +333,6 @@ available_node_types:
                 # TODO(zhwu): dedup setting somehow get discarded.
                 echo Nproc: $(( 3 * $(nproc --all) ))
                 {{ ray_installation_commands }}
-                source ~/skypilot-runtime/bin/activate
                 ~/skypilot-runtime/bin/python -m pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
