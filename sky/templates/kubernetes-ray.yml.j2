@@ -505,6 +505,8 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line 'for failure_indicator in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
+  # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
     start_epoch=$(date +%s);
     end_epoch=$(date +%s);
