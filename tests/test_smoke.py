@@ -25,6 +25,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 
+import enum
 import inspect
 import json
 import os
@@ -60,6 +61,8 @@ from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.skylet import events
+from sky.skylet.job_lib import JobStatus
+from sky.status_lib import ClusterStatus
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
@@ -94,6 +97,84 @@ _JOB_WAIT_NOT_RUNNING = (
     'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
     'sleep 10; s=$(sky jobs queue);'
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
+
+# Cluster functions
+_ALL_JOB_STATUSES = "|".join([status.value for status in JobStatus])
+_ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
+
+_WAIT_UNTIL_CLUSTER_STATUS_IS = (
+    # A while loop to wait until the cluster status
+    # becomes certain status, with timeout.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for cluster status \'{cluster_status}\'"; exit 1; '
+    'fi; '
+    'current_status=$(sky status {cluster_name} --refresh | '
+    'awk "/^{cluster_name}/ '
+    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_CLUSTER_STATUSES +
+    ')$/) print \$i}}"); '
+    'if [[ "$current_status" =~ {cluster_status} ]]; '
+    'then echo "Target cluster status {cluster_status} reached."; break; fi; '
+    'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
+    'sleep 10; '
+    'done')
+
+_WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
+    # A while loop to wait until the cluster is not found or timeout
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for cluster to be removed"; exit 1; '
+    'fi; '
+    'if sky status -r {cluster_name}; sky status {cluster_name} | grep "{cluster_name} not found"; then '
+    '  echo "Cluster {cluster_name} successfully removed."; break; '
+    'fi; '
+    'echo "Waiting for cluster {name} to be removed..."; '
+    'sleep 10; '
+    'done')
+
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
+    # A while loop to wait until the job status
+    # contains certain status, with timeout.
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for job status \'{job_status}\'"; exit 1; '
+    'fi; '
+    'current_status=$(sky queue {cluster_name} | '
+    'awk "\\$1 == \\"{job_id}\\" '
+    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_JOB_STATUSES +
+    ')$/) print \$i}}"); '
+    'found=0; '  # Initialize found variable outside the loop
+    'while read -r line; do '  # Read line by line
+    '  if [[ "$line" =~ {job_status} ]]; then '  # Check each line
+    '    echo "Target job status {job_status} reached."; '
+    '    found=1; '
+    '    break; '  # Break inner loop
+    '  fi; '
+    'done <<< "$current_status"; '
+    'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
+    'echo "Waiting for job status to contains {job_status}, current status: $current_status"; '
+    'sleep 10; '
+    'done')
+
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+    'awk "\\$1 == \\"{job_id}\\"', 'awk "')
+
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+    'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
+
+# Managed job functions
+
+_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
+    'sky queue {cluster_name}',
+    'sky jobs queue').replace('awk "\\$2 == ', 'awk "\\$3 == ')
+
+# After the timeout, the cluster will stop if autostop is set, and our check
+# should be more than the timeout. To address this, we extend the timeout by
+# _BUMP_UP_SECONDS before exiting.
+_BUMP_UP_SECONDS = 35
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -358,7 +439,6 @@ def test_minimal(generic_cloud: str):
         _get_timeout(generic_cloud),
     )
     run_one_test(test)
-
 
 # ---------- Test region ----------
 @pytest.mark.aws
@@ -745,6 +825,12 @@ def test_clone_disk_aws():
             f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=60),
+            # Wait for EC2 instance to be in stopped state.
+            # TODO: event based wait.
             'sleep 60',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
@@ -791,8 +877,8 @@ def test_gcp_mig():
             # Check MIG exists.
             f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
             f'sky autostop -i 0 --down -y {name}',
-            'sleep 120',
-            f'sky status -r {name}; sky status {name} | grep "{name} not found"',
+            _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND.format(cluster_name=name,
+                                                    timeout=120),
             f'gcloud compute instance-templates list | grep "sky-it-{name}"',
             # Launch again with the same region. The original instance template
             # should be removed.
@@ -859,8 +945,10 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
-        'sleep 60',
-        f'sky status -r {name} | grep "STOPPED"',
+        _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+            cluster_name=name,
+            cluster_status=ClusterStatus.STOPPED.value,
+            timeout=80),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
@@ -881,7 +969,10 @@ def test_stale_job(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
-            'sleep 100',  # Ensure this is large enough, else GCP leaks.
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=100),
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
@@ -909,13 +1000,18 @@ def test_aws_stale_job_manual_restart():
             '--output text`; '
             f'aws ec2 stop-instances --region {region} '
             '--instance-ids $id',
-            'sleep 40',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=40),
             f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+                cluster_name=name,
+                job_status=JobStatus.FAILED.value,
+                timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name}',
     )
@@ -945,8 +1041,10 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+                cluster_name=name,
+                job_status=JobStatus.FAILED.value,
+                timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
         f'sky down -y {name}',
     )
@@ -1764,7 +1862,13 @@ def test_multi_echo(generic_cloud: str):
             f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
         ] +
         # Ensure jobs succeeded.
-        [f'sky logs {name} {i + 1} --status' for i in range(32)] +
+        [
+            _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+                cluster_name=name,
+                job_id=i + 1,
+                job_status=JobStatus.SUCCEEDED.value,
+                timeout=120) for i in range(32)
+        ] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
@@ -2317,12 +2421,18 @@ def test_gcp_start_stop():
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sleep 20',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=40),
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
-            'sleep 180',
-            f'sky status -r {name} | grep "INIT\|STOPPED"',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=
+                f'({ClusterStatus.STOPPED.value}|{ClusterStatus.INIT.value})',
+                timeout=200),
         ],
         f'sky down -y {name}',
     )
@@ -2345,9 +2455,12 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            'sleep 260',
-            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep "INIT\|STOPPED"'
-            f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=
+                f'({ClusterStatus.STOPPED.value}|{ClusterStatus.INIT.value})',
+                timeout=280) +
+            f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}',
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -2383,8 +2496,10 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            f'sleep {autostop_timeout}',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=autostop_timeout),
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
             f'sky start -y {name}',
@@ -2400,8 +2515,10 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            f'sleep {autostop_timeout}',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=autostop_timeout),
 
             # Test restarting the idleness timer via exec:
             f'sky start -y {name}',
@@ -2411,8 +2528,10 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            f'sleep {autostop_timeout}',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=autostop_timeout + _BUMP_UP_SECONDS),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -2629,15 +2748,19 @@ def test_stop_gcp_spot():
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 2 --status',
             f'sky autostop {name} -i0 -y',
-            'sleep 90',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=90),
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            'sleep 120',
-            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            _WAIT_UNTIL_CLUSTER_STATUS_IS.format(
+                cluster_name=name,
+                cluster_status=ClusterStatus.STOPPED.value,
+                timeout=120),
         ],
         f'sky down -y {name}',
     )
@@ -2657,14 +2780,21 @@ def test_managed_jobs(generic_cloud: str):
         [
             f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
-            'sleep 5',
-            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep "PENDING\|SUBMITTED\|STARTING\|RUNNING"',
-            f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "PENDING\|SUBMITTED\|STARTING\|RUNNING"',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=f'{name}-1',
+                job_status=
+                f'({JobStatus.PENDING.value}|{JobStatus.INIT.value}|{JobStatus.RUNNING.value})',
+                timeout=60),
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=f'{name}-2',
+                job_status=
+                f'({JobStatus.PENDING.value}|{JobStatus.INIT.value}|{JobStatus.RUNNING.value})',
+                timeout=60),
             f'sky jobs cancel -y -n {name}-1',
-            'sleep 5',
-            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep "CANCELLING\|CANCELLED"',
-            'sleep 200',
-            f'{_GET_JOB_QUEUE} | grep {name}-1 | head -n1 | grep CANCELLED',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=f'{name}-1',
+                job_status=f'{JobStatus.CANCELLED.value}',
+                timeout=230),
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
@@ -2734,9 +2864,11 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
         'managed_jobs_failed_setup',
         [
             f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
-            'sleep 330',
             # Make sure the job failed quickly.
-            f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "FAILED_SETUP"',
+            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                job_name=name,
+                job_status=f'{JobStatus.FAILED_SETUP.value}',
+                timeout=330 + _BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
