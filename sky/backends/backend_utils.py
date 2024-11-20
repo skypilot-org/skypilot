@@ -1195,18 +1195,18 @@ def ssh_credential_from_yaml(
 
 
 def parallel_data_transfer_to_nodes(
-    runners: List[command_runner.CommandRunner],
-    source: Optional[str],
-    target: str,
-    cmd: Optional[str],
-    run_rsync: bool,
-    *,
-    action_message: str,
-    # Advanced options.
-    log_path: str = os.devnull,
-    stream_logs: bool = False,
-    source_bashrc: bool = False,
-):
+        runners: List[command_runner.CommandRunner],
+        source: Optional[str],
+        target: str,
+        cmd: Optional[str],
+        run_rsync: bool,
+        *,
+        action_message: str,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = False,
+        source_bashrc: bool = False,
+        num_threads: Optional[int] = None):
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
@@ -1218,6 +1218,7 @@ def parallel_data_transfer_to_nodes(
         log_path: str; Path to the log file
         stream_logs: bool; Whether to stream logs to stdout
         source_bashrc: bool; Source bashrc before running the command.
+        num_threads: Optional[int]; Number of threads to use.
     """
     style = colorama.Style
 
@@ -1258,7 +1259,7 @@ def parallel_data_transfer_to_nodes(
     message = (f'  {style.DIM}{action_message} (to {num_nodes} node{plural})'
                f': {origin_source} -> {target}{style.RESET_ALL}')
     logger.info(message)
-    subprocess_utils.run_in_parallel(_sync_node, runners)
+    subprocess_utils.run_in_parallel(_sync_node, runners, num_threads)
 
 
 def check_local_gpus() -> bool:
