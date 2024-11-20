@@ -928,6 +928,9 @@ def test_clone_disk_aws():
                 cluster_name=name,
                 cluster_status=ClusterStatus.STOPPED.value,
                 timeout=60),
+            # Wait for EC2 instance to be in stopped state.
+            # TODO: event based wait.
+            'sleep 60',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky logs {name}-clone 1 --status',
