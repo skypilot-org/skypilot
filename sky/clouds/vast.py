@@ -10,11 +10,6 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
-_CREDENTIAL_FILES = [
-    'config.toml',
-]
-
-
 @clouds.CLOUD_REGISTRY.register
 class Vast(clouds.Cloud):
     """ Vast GPU Cloud
@@ -266,8 +261,7 @@ class Vast(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f'~/.config/vastai/{filename}': f'~/.config/vastai/{filename}'
-            for filename in _CREDENTIAL_FILES
+            '~/.config/vastai/vast_api_key': '~/.config/vastai/vast_api_key'
         }
 
     @classmethod
