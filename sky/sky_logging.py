@@ -187,6 +187,8 @@ def _initialize_tmp_file_logger(logger_name: str) -> str:
     fh.setFormatter(FORMATTER)
     fh.setLevel(_root_logger.level)
     logger.addHandler(fh)
+    # Disable propagate to avoid streaming logs to the console
+    logger.propagate = False
 
     return log_path
 
