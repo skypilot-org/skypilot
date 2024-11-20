@@ -23,6 +23,7 @@ _DATE_FORMAT = '%m-%d %H:%M:%S'
 _logging_init_lock = threading.Lock()
 # Can not be 'sky.data.storage' because it inherits
 # from the root logger which configured the stream handler
+# we only need file logging don't need to print to console
 STORAGE_LOGGER_NAME = 'data.storage'
 
 
