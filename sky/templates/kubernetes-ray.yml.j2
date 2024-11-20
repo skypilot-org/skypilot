@@ -328,6 +328,7 @@ available_node_types:
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
               
               (
+                {
                 mkdir -p ~/.sky
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
@@ -336,12 +337,10 @@ available_node_types:
                 echo "=== Ray and skypilot installation completed ==="
                 
                 if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
-                  set -ex
                   {{ ray_head_start_command }}
                   touch /tmp/ray_started
                 else
                   # Start ray worker on the worker pod.
-                  set -ex
                   # Wait until the head pod is available with an IP address
                   export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
                   export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
@@ -353,11 +352,13 @@ available_node_types:
                   {{ ray_worker_start_command }}
                   touch /tmp/ray_started
                 fi
+                } | tee /tmp/runtime-setup.log 2>&1
               ) &
 
 
-              # Run apt update in background and log to a file and install missing packages
+              # Run apt update in background and log to a file, install missing packages, and set up ssh
               (
+                {
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
                 PACKAGES="gcc patch pciutils rsync fuse curl openssh-server rsync";
@@ -382,12 +383,21 @@ available_node_types:
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+                } | tee /tmp/apt-ssh-setup.log 2>&1 || {
+                  echo "Error: apt-ssh-setup failed. Continuing anyway..." > /tmp/apt-ssh-setup.failed
+                  exit 1
+                }
               ) &
 
               # Set up environment variables; this should be relatively fast, we don't explicitly wait for it.
               (
+                {
                 set -ex;if [ $(id -u) -eq 0 ]; then  echo 'alias sudo=""' >> ~/.bashrc; echo succeed;else   if command -v sudo >/dev/null 2>&1; then     timeout 2 sudo -l >/dev/null 2>&1 && echo succeed ||     ( echo 52;       exit 52; );   else     ( echo 52;       exit 52; );   fi; fi; 
                 printenv | while IFS='=' read -r key value; do echo "export $key=\"$value\""; done > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                } | tee /tmp/env-setup.log 2>&1 || {
+                  echo "Error: env-setup failed. Continuing anyway..." > /tmp/env-setup.failed
+                  exit 1
+                }
               ) &
 
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
@@ -524,6 +534,8 @@ setup_commands:
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);
     echo "=== Setup fuse: $(($end_epoch - $start_epoch)) secs ===";
+    FAILURE_INDICATORS="/tmp/apt-ssh-setup /tmp/runtime-setup /tmp/env-setup";
+    for failure_indicator in $FAILURE_INDICATORS; do [ -f "$failure_indicator.failed" ] && { echo "Error: $failure_indicator.failed found:"; cat $failure_indicator.log; exit 1; } || true; done;
     {% if tpu_requested %}
     # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
     # the TPU runtime, are written. These capture runtime information about the
