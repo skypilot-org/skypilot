@@ -232,7 +232,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     If timeout is set to a negative value, this method will wait indefinitely.
     """
     # Create a set of pod names we're waiting for
-    if len(new_nodes) == 0:
+    if not new_nodes:
         return
     pod_names = {node.metadata.name for node in new_nodes}
     start_time = time.time()
@@ -293,7 +293,7 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
     Pods may be pulling images or may be in the process of container
     creation.
     """
-    if len(new_nodes) == 0:
+    if not new_nodes:
         return
 
     # Create a set of pod names we're waiting for
@@ -664,7 +664,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
-    while (len(terminating_pods) > 0 and
+    while (terminating_pods and
            time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods. Waiting them to finish: '
@@ -673,7 +673,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         terminating_pods = kubernetes_utils.filter_pods(namespace, context,
                                                         tags, ['Terminating'])
 
-    if len(terminating_pods) > 0:
+    if terminating_pods:
         # If there are still terminating pods, we force delete them.
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods still in terminating state after '
