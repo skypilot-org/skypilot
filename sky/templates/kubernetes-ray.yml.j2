@@ -508,35 +508,29 @@ setup_commands:
   # Line 'for failure_indicator in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
   # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
-    start_epoch=$(date +%s);
-    end_epoch=$(date +%s);
-    echo "=== Installed packages: $(($end_epoch - $start_epoch)) secs ===";
-    start_epoch=$(date +%s);
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    end_epoch=$(date +%s);
-    echo "=== Initial setup: $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
-    ls -l /tmp/ray_skypilot_installation_complete;
-    # TODO(zhwu): Stream the logs from the current pod's args while waiting for the installation to complete.
-    until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 1; echo "Waiting for ray and skypilot installation to complete..."; done;
+    echo "=== Logs for asynchronous ray and skypilot installation ===";
+    [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/runtime-setup.log || 
+    { tail -f -n +1 /tmp/runtime-setup.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    [ -f /tmp/runtime-setup.failed ] && { echo "Error: runtime-setup failed. Exiting."; exit 1; } || true;
     end_epoch=$(date +%s);
-    echo "=== Waiting ray and skypilot installation: $(($end_epoch - $start_epoch)) secs ===";
+    echo "=== Waiting for asynchronous ray and skypilot installation: $(($end_epoch - $start_epoch)) secs ===";
     start_epoch_ray_skypilot=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
-    end_epoch_ray_skypilot=$(date +%s);
-    echo "=== Installed ray and skypilot: $(($end_epoch_ray_skypilot - $start_epoch_ray_skypilot)) secs ===";
     start_epoch=$(date +%s);
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
-    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
+    ulimit -n 1048576;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);
-    echo "=== Setup fuse: $(($end_epoch - $start_epoch)) secs ===";
-    FAILURE_INDICATORS="/tmp/apt-ssh-setup /tmp/runtime-setup /tmp/env-setup";
+    echo "=== Setup system configs and fuse: $(($end_epoch - $start_epoch)) secs ===";
+    FAILURE_INDICATORS="/tmp/apt-ssh-setup /tmp/env-setup /tmp/runtime-setup";
     for failure_indicator in $FAILURE_INDICATORS; do [ -f "$failure_indicator.failed" ] && { echo "Error: $failure_indicator.failed found:"; cat $failure_indicator.log; exit 1; } || true; done;
     {% if tpu_requested %}
     # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
