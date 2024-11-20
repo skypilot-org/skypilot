@@ -329,6 +329,7 @@ available_node_types:
               (
                 mkdir -p ~/.sky
                 {{ conda_installation_commands }}
+                # TODO(zhwu): dedup setting somehow get discarded.
                 {{ ray_installation_commands }}
                 source ~/skypilot-runtime/bin/activate
                 pip install skypilot[kubernetes,remote]
