@@ -513,12 +513,8 @@ def _post_provision_setup(
                 if line.strip() and not line.startswith('Active:')
             ])
             return active_nodes
-
-        ray_port = constants.SKY_REMOTE_RAY_PORT
-        ray_cluster_healthy = False
-        if (not provision_record.is_instance_just_booted(
-                head_instance.instance_id) or
-                cloud_name.lower() == 'kubernetes'):
+        
+        def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
             # Check if head node Ray is alive
             returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -530,8 +526,28 @@ def _post_provision_setup(
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
             need_full_ray_setup = bool(returncode)
-            ray_cluster_healthy = parse_num_active_nodes(
-                stdout) == cluster_info.num_instances
+            num_active_nodes = parse_num_active_nodes(stdout)
+            logger.debug(f'Number of active nodes: {num_active_nodes}')
+            ray_cluster_healthy = num_active_nodes == cluster_info.num_instances
+            return ray_port, ray_cluster_healthy, need_full_ray_setup
+
+        ray_port = constants.SKY_REMOTE_RAY_PORT
+        ray_cluster_healthy = False
+        if (not provision_record.is_instance_just_booted(
+                head_instance.instance_id)):
+            # Check if head node Ray is alive
+            ray_port, ray_cluster_healthy, need_full_ray_setup = check_ray_port_and_cluster_healthy()
+        elif cloud_name.lower() == 'kubernetes':
+            timeout = 60  # 1-min maximum timeout
+            start = time.time()
+            while True:
+                # Wait until Ray cluster is healthy
+                (ray_port, ray_cluster_healthy, need_full_ray_setup) = check_ray_port_and_cluster_healthy()
+                if ray_cluster_healthy:
+                    break
+                if time.time() - start > timeout:
+                    raise RuntimeError(f'Ray cluster on head is not up after {timeout}s.')
+                time.sleep(1)
 
         # We don't start ray on Kubernetes, as it has been started in the
         # container args.
