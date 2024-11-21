@@ -465,7 +465,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         'start_time=$(date +%s); '
         'while ! grep -q "Fetched" /tmp/apt-update.log 2>/dev/null; do '
         '  echo "apt update still running. Logs:"; '
-        '  cat /tmp/apt-update.log; '
+        '  cat /tmp/apt-update.log || true; '
         '  current_time=$(date +%s); '
         '  elapsed=$((current_time - start_time)); '
         '  if [ $elapsed -ge $timeout_secs ]; then '
