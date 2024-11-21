@@ -4,7 +4,7 @@ resources:
 
 
 setup: |
-  git clone https://github.com/skypilot-org/skypilot.git || true
+  git clone https://github.com/assemble-org/skypilot.git || true
   cd skypilot
   git checkout restapi
   pip install -e .[all]
