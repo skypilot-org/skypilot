@@ -422,6 +422,10 @@ class Kubernetes(clouds.Cloud):
             ('kubernetes', 'provision_timeout'),
             30,
             override_configs=resources.cluster_config_overrides)
+        # We specify object-store-memory to be 500MB to avoid taking up too
+        # much memory on the head node. 'num-cpus' should be set to limit
+        # the CPU usage on the head pod, otherwise the ray cluster will use the
+        # CPU resources on the node instead within the pod.
         custom_ray_options = {
             'object-store-memory': 500000000,
             'num-cpus': str(int(cpus)),

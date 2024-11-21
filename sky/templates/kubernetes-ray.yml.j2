@@ -330,9 +330,11 @@ available_node_types:
               # Helper function to conditionally use sudo
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
 
-              # Run apt update in background and log to a file, install missing packages, and set up ssh
+              STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
+
+              # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
-                {
+                (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
                 PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
@@ -378,15 +380,17 @@ available_node_types:
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
-                } > /tmp/apt-ssh-setup.log 2>&1 || {
-                  echo "Error: apt-ssh-setup failed. Continuing anyway..." > /tmp/apt-ssh-setup.failed
-                  cat /tmp/apt-ssh-setup.log
+                ) > /tmp/${STEPS[0]}.log 2>&1 || {
+                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
+                  cat /tmp/${STEPS[0]}.log
                   exit 1
                 }
               ) &
 
+              # STEP 2: Install conda, ray and skypilot (for dependencies); start
+              # ray cluster.
               (
-                {
+                (
                 set -e
                 mkdir -p ~/.sky
                 # Wait for `curl` package to be installed before installing conda
@@ -425,31 +429,31 @@ available_node_types:
                   set +e
                   {{ ray_worker_start_command }}
                 fi
-                } > /tmp/runtime-setup.log 2>&1 || {
-                  echo "Error: runtime-setup failed. Continuing anyway..." > /tmp/runtime-setup.failed
-                  cat /tmp/runtime-setup.log
+                ) > /tmp/${STEPS[1]}.log 2>&1 || {
+                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed
+                  cat /tmp/${STEPS[1]}.log
                   exit 1
                 }
               ) &
 
 
-              # Set up environment variables; this should be relatively fast, we don't explicitly wait for it.
+              # STEP 3: Set up environment variables; this should be relatively fast.
               (
-                {
+                (
                 set -e
                 if [ $(id -u) -eq 0 ]; then
                   echo 'alias sudo=""' >> ~/.bashrc; echo succeed;
                 else
                   if command -v sudo >/dev/null 2>&1; then
-                    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || ( echo 52; exit 52; );
+                    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || { echo 52; exit 52; };
                   else
-                    ( echo 52; exit 52; );
+                    { echo 52; exit 52; };
                   fi;
                 fi;
                 printenv | while IFS='=' read -r key value; do echo "export $key=\"$value\""; done > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
-                } > /tmp/env-setup.log 2>&1 || {
-                  echo "Error: env-setup failed. Continuing anyway..." > /tmp/env-setup.failed
-                  cat /tmp/env-setup.log
+                ) > /tmp/${STEPS[2]}.log 2>&1 || {
+                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
+                  cat /tmp/${STEPS[2]}.log
                   exit 1
                 }
               ) &
@@ -559,22 +563,24 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  # Line 'for failure_indicator in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
+  # Line 'for step in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
   # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
+    STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
     start_epoch=$(date +%s);
     echo "=== Logs for asynchronous ray and skypilot installation ===";
-    [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/runtime-setup.log || 
-    { tail -f -n +1 /tmp/runtime-setup.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
-    [ -f /tmp/runtime-setup.failed ] && { echo "Error: runtime-setup failed. Exiting."; exit 1; } || true;
-    end_epoch=$(date +%s);
-    echo "=== Waiting for asynchronous ray and skypilot installation: $(($end_epoch - $start_epoch)) secs ===";
-    start_epoch_ray_skypilot=$(date +%s);
+    [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log || 
+    { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
+    echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    end_epoch=$(date +%s);
+    echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
@@ -583,9 +589,8 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
     end_epoch=$(date +%s);
-    echo "=== Setup system configs and fuse: $(($end_epoch - $start_epoch)) secs ===";
-    FAILURE_INDICATORS="/tmp/apt-ssh-setup /tmp/env-setup /tmp/runtime-setup";
-    for failure_indicator in $FAILURE_INDICATORS; do [ -f "$failure_indicator.failed" ] && { echo "Error: $failure_indicator.failed found:"; cat $failure_indicator.log; exit 1; } || true; done;
+    echo "=== Setup system configs and fuse completed in $(($end_epoch - $start_epoch)) secs ===";
+    for step in $STEPS; do [ -f "/tmp/${step}.failed" ] && { echo "Error: /tmp/${step}.failed found:"; cat /tmp/${step}.log; exit 1; } || true; done;
     {% if tpu_requested %}
     # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
     # the TPU runtime, are written. These capture runtime information about the

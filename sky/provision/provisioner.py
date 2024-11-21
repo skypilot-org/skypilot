@@ -536,9 +536,9 @@ def _post_provision_setup(
                 stream_logs=False,
                 require_outputs=True)
             if returncode:
-                logger.debug('Ray cluster on head is not up. Restarting...')
+                logger.debug('Ray cluster on head is not ready.')
             else:
-                logger.debug('Ray cluster on head is up.')
+                logger.debug('Ray cluster on head is ready.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
             head_ray_needs_restart = bool(returncode)
             ray_cluster_healthy = is_ray_cluster_healthy(
@@ -560,14 +560,16 @@ def _post_provision_setup(
             timeout = 60  # 1-min maximum timeout
             start = time.time()
             while True:
-                # Wait until Ray cluster is healthy
+                # Wait until Ray cluster is ready
                 (ray_port, ray_cluster_healthy,
                  head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
                 if ray_cluster_healthy:
                     break
                 if time.time() - start > timeout:
                     raise RuntimeError(
-                        f'Ray cluster on head is not up after {timeout}s.')
+                        f'Ray cluster on head is not ready after {timeout}s.')
+                logger.debug('Ray cluster is not ready yet, waiting for the '
+                             'async setup to complete...')
                 time.sleep(1)
 
         if head_ray_needs_restart:
