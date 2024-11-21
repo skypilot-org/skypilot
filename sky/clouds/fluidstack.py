@@ -173,7 +173,7 @@ class Fluidstack(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name: resources_utils.ClusterName,  
+        cluster_name: resources_utils.ClusterName,
         region: clouds.Region,
         zones: Optional[List[clouds.Zone]],
         num_nodes: int,

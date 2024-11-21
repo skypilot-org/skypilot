@@ -192,7 +192,7 @@ class Cudo(clouds.Cloud):
 
     def make_deploy_resources_variables(
         self,
-            resources: 'resources_lib.Resources',
+        resources: 'resources_lib.Resources',
         cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],

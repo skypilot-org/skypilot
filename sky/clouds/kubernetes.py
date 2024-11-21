@@ -316,24 +316,23 @@ class Kubernetes(clouds.Cloud):
     @staticmethod
     def _calculate_provision_timeout(num_nodes: int) -> int:
         """Calculate provision timeout based on number of nodes.
-        
-        The timeout scales linearly with the number of nodes to account for 
+
+        The timeout scales linearly with the number of nodes to account for
         scheduling overhead, but is capped to avoid excessive waiting.
-        
+
         Args:
             num_nodes: Number of nodes being provisioned
-            
+
         Returns:
             Timeout in seconds
         """
         base_timeout = 10  # Base timeout for single node
         per_node_timeout = 0.2  # Additional seconds per node
         max_timeout = 60  # Cap at 1 minute
-        
-        return min(
-            base_timeout + (per_node_timeout * (num_nodes - 1)),
-            max_timeout
-        )
+
+        return int(
+            min(base_timeout + (per_node_timeout * (num_nodes - 1)),
+                max_timeout))
 
     def make_deploy_resources_variables(
             self,
@@ -442,7 +441,7 @@ class Kubernetes(clouds.Cloud):
         # scheduling 100s of pods.
         # We use a linear scaling formula to determine the timeout based on the
         # number of nodes.
-        
+
         timeout = self._calculate_provision_timeout(num_nodes)
         timeout = skypilot_config.get_nested(
             ('kubernetes', 'provision_timeout'),
