@@ -438,6 +438,7 @@ async def cancel(request: fastapi.Request,
 @app.post('/logs')
 async def logs(request: fastapi.Request,
                cluster_job_body: payloads.ClusterJobBody) -> None:
+    # TODO(SKY-988): make this synchronous.
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -686,7 +687,7 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     )
 
 
-@app.get('/requests')
+@app.post('/requests')
 async def requests(
     request_id: Optional[str] = None,
     all: bool = False  # pylint: disable=redefined-builtin

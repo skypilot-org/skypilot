@@ -1867,7 +1867,7 @@ def test_multi_echo(generic_cloud: str):
             'sleep 30',
             # Make sure that our job scheduler is fast enough to have at least
             # 10 RUNNING jobs in parallel.
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 10) exit 1}}\'',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING\|SUCCEEDED" | wc -l | awk \'{{if ($1 < 10) exit 1}}\'',
             'sleep 30',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',

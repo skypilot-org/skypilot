@@ -665,14 +665,14 @@ def stream_and_get(request_id: Optional[str] = None,
     This will block until the request is finished. The request id can be a
     prefix of the full request id.
     """
-    body = payloads.StreamBody(
-        request_id=request_id,
-        log_path=log_path,
-        plain_logs=False,
-    )
+    params = {
+        'request_id': request_id,
+        'log_path': log_path,
+        'plain_logs': False,
+    }
     response = requests.get(
         f'{api_common.get_server_url()}/stream',
-        params=api_common.request_body_to_params(body),
+        params=params,
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)
