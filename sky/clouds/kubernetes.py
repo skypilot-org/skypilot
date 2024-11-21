@@ -549,7 +549,11 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # Test using python API
-        existing_allowed_contexts = cls._existing_allowed_contexts()
+        try:
+            existing_allowed_contexts = cls._existing_allowed_contexts()
+        except ImportError as e:
+            return (False,
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
         if not existing_allowed_contexts:
             if skypilot_config.loaded_config_path() is None:
                 check_skypilot_config_msg = ''

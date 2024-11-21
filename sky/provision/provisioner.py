@@ -500,21 +500,36 @@ def _post_provision_setup(
                                                 **ssh_credentials)
         head_runner = runners[0]
 
-        status.update(
-            runtime_preparation_str.format(step=3, step_name='runtime'))
-        need_full_ray_setup = True
+        def is_ray_cluster_healthy(ray_status_output: str,
+                                   expected_num_nodes: int) -> bool:
+            """Parse the output of `ray status` to get #active nodes.
 
-        def parse_num_active_nodes(stdout: str) -> int:
-            start = stdout.find('Active:')
-            end = stdout.find('Pending:', start)
-            active_nodes = len([
-                line.split()[-1]
-                for line in stdout[start:end].split('\n')
-                if line.strip() and not line.startswith('Active:')
-            ])
-            return active_nodes
+            The output of `ray status` looks like:
+            Node status
+            ---------------------------------------------------------------
+            Active:
+              1 node_291a8b849439ad6186387c35dc76dc43f9058108f09e8b68108cf9ec
+              1 node_0945fbaaa7f0b15a19d2fd3dc48f3a1e2d7c97e4a50ca965f67acbfd
+            Pending:
+            (no pending nodes)
+            Recent failures:
+            (no failures)
+            """
+            start = ray_status_output.find('Active:')
+            end = ray_status_output.find('Pending:', start)
+            if start == -1 or end == -1:
+                return False
+            num_active_nodes = 0
+            for line in ray_status_output[start:end].split('\n'):
+                if line.strip() and not line.startswith('Active:'):
+                    num_active_nodes += 1
+            return num_active_nodes == expected_num_nodes
 
         def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
+            head_ray_needs_restart = True
+            ray_cluster_healthy = False
+            ray_port = constants.SKY_REMOTE_RAY_PORT
+
             # Check if head node Ray is alive
             returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -525,26 +540,29 @@ def _post_provision_setup(
             else:
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
-            need_full_ray_setup = bool(returncode)
-            num_active_nodes = parse_num_active_nodes(stdout)
-            logger.debug(f'Number of active nodes: {num_active_nodes}')
-            ray_cluster_healthy = num_active_nodes == cluster_info.num_instances
-            return ray_port, ray_cluster_healthy, need_full_ray_setup
+            head_ray_needs_restart = bool(returncode)
+            ray_cluster_healthy = is_ray_cluster_healthy(
+                stdout, cluster_info.num_instances)
+            return ray_port, ray_cluster_healthy, head_ray_needs_restart
+
+        status.update(
+            runtime_preparation_str.format(step=3, step_name='runtime'))
 
         ray_port = constants.SKY_REMOTE_RAY_PORT
+        head_ray_needs_restart = True
         ray_cluster_healthy = False
         if (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
-             need_full_ray_setup) = check_ray_port_and_cluster_healthy()
+             head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
         elif cloud_name.lower() == 'kubernetes':
             timeout = 60  # 1-min maximum timeout
             start = time.time()
             while True:
                 # Wait until Ray cluster is healthy
                 (ray_port, ray_cluster_healthy,
-                 need_full_ray_setup) = check_ray_port_and_cluster_healthy()
+                 head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
                 if ray_cluster_healthy:
                     break
                 if time.time() - start > timeout:
@@ -552,9 +570,7 @@ def _post_provision_setup(
                         f'Ray cluster on head is not up after {timeout}s.')
                 time.sleep(1)
 
-        # We don't start ray on Kubernetes, as it has been started in the
-        # container args.
-        if need_full_ray_setup:
+        if head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
@@ -570,10 +586,14 @@ def _post_provision_setup(
         # for inst in cluster_info.instances.values():
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
+
+        # We don't need to restart ray on worker nodes if the ray cluster is
+        # already healthy, i.e. the head node has expected number of nodes
+        # connected to the ray cluster.
         if cluster_info.num_instances > 1 and not ray_cluster_healthy:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
-                no_restart=not need_full_ray_setup,
+                no_restart=not head_ray_needs_restart,
                 custom_resource=custom_resource,
                 # Pass the ray_port to worker nodes for backward compatibility
                 # as in some existing clusters the ray_port is not dumped with
