@@ -19,6 +19,8 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_fd_limit_warning_shown = False
+
 
 @timeline.event
 def run(cmd, **kwargs):
@@ -53,7 +55,16 @@ def _get_thread_multiplier(cloud_str: Optional[str] = None) -> int:
 
 def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
                                     cloud_str: Optional[str] = None) -> int:
+    global _fd_limit_warning_shown
     fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    
+    # Raise warning for low fd_limit (only once)
+    if fd_limit < 1024 and not _fd_limit_warning_shown:
+        logger.warning(
+            f'Open file descriptor limit ({fd_limit}) is low. File sync to '
+            'remote clusters may be slow. Consider increasing the limit using '
+            '`ulimit -n <number>` or modifying system limits.')
+        _fd_limit_warning_shown = True
 
     fd_per_rsync = 5
     for src in common_file_mounts.values():
