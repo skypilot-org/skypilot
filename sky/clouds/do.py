@@ -4,6 +4,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky import sky_logging
 from sky.adaptors import do
 from sky.clouds import service_catalog
 from sky.provision.do import utils as do_utils
@@ -13,6 +14,8 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 _CREDENTIAL_FILE = 'config.yaml'
+
+logger = sky_logging.init_logger(__name__)
 
 
 @clouds.CLOUD_REGISTRY.register(aliases=['digitalocean'])
@@ -261,10 +264,14 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        do_utils.client()  # to initialize `do_utils.CREDENTIALS_PATH`
-        return {
-            f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
-        }
+        try:
+            do_utils.client()  # to initialize `do_utils.CREDENTIALS_PATH`
+            return {
+                f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
+            }
+        except do_utils.DigitalOceanError as err:
+            logger.debug(err)
+            return {}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
