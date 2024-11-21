@@ -1,31 +1,34 @@
-#!/usr/bin/env python
-import json, re
+"""A script that generates the Vast Cloud catalog. """
+
+# pylint: disable=assignment-from-no-return
+import csv
+import json
+import re
+import sys
+
 from vastai_sdk import VastAI
-import csv, sys
+
 
 def create_instance_type(obj):
     stubify = lambda x: re.sub(r'\s', '_', x)
-    return "{}x-{}-{}".format(obj['num_gpus'], stubify(obj['gpu_name']), obj['cpu_cores'])
+    return '{}x-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
+                              obj['cpu_cores'])
+
 
 def dot_get(d, key):
-    for k in key.split("."):
-       d = d[k]
+    for k in key.split('.'):
+        d = d[k]
     return d
+
 
 # InstanceType and gpuInfo are basically just stubs
 # so that the dictwriter is happy without weird
 # code.
-mapped_keys = (
-    ('gpu_name', 'InstanceType'), 
-    ('gpu_name', 'AcceleratorName'),
-    ('num_gpus', 'AcceleratorCount'),
-    ('cpu_cores', 'vCPUs'),
-    ('gpu_total_ram', 'MemoryGiB'),
-    ('search.totalHour', 'Price'),
-    ('geolocation', 'Region'),
-    ('gpu_name', 'GpuInfo'),
-    ('search.totalHour', 'SpotPrice')
-)
+mapped_keys = (('gpu_name', 'InstanceType'), ('gpu_name', 'AcceleratorName'),
+               ('num_gpus', 'AcceleratorCount'), ('cpu_cores', 'vCPUs'),
+               ('gpu_total_ram', 'MemoryGiB'), ('search.totalHour', 'Price'),
+               ('geolocation', 'Region'), ('gpu_name', 'GpuInfo'),
+               ('search.totalHour', 'SpotPrice'))
 writer = csv.DictWriter(sys.stdout, fieldnames=[x[1] for x in mapped_keys])
 writer.writeheader()
 
@@ -35,16 +38,30 @@ for offer in offerList:
     for ours, theirs in mapped_keys:
         field = dot_get(offer, ours)
         if 'Price' in theirs:
-            field = "{:.2f}".format(field)
+            field = '{:.2f}'.format(field)
         entry[theirs] = field
 
     entry['InstanceType'] = create_instance_type(offer)
 
     # the documentation says
-    # "{'gpus': [{'name': 'v100', 'manufacturer': 'nvidia', 'count': 8.0, 'memoryinfo': {'sizeinmib': 16384}}], 'totalgpumemoryinmib': 16384}",
+    # "{'gpus': [{
+    #   'name': 'v100',
+    #   'manufacturer': 'nvidia',
+    #   'count': 8.0,
+    #   'memoryinfo': {'sizeinmib': 16384}
+    #   }],
+    #   'totalgpumemoryinmib': 16384}",
     # we can do that.
     entry['MemoryGiB'] /= 1024
-    entry['GpuInfo'] = json.dumps({'Gpus': [{'Name': offer['gpu_name'], 'Count': offer['num_gpus'], 'MemoryInfo': {'SizeInMiB': offer['gpu_total_ram']}}], 'TotalGpuMemoryInMiB': offer['gpu_total_ram']}).replace('"', "'")
+    entry['GpuInfo'] = json.dumps({
+        'Gpus': [{
+            'Name': offer['gpu_name'],
+            'Count': offer['num_gpus'],
+            'MemoryInfo': {
+                'SizeInMiB': offer['gpu_total_ram']
+            }
+        }],
+        'TotalGpuMemoryInMiB': offer['gpu_total_ram']
+    }).replace('"', "'")  # pylint: disable=invalid-string-quote
 
     writer.writerow(entry)
-
