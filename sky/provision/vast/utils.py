@@ -1,6 +1,6 @@
 # pylint: disable=assignment-from-no-return
 """Vast library wrapper for SkyPilot."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.adaptors import vast
