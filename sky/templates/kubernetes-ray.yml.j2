@@ -222,7 +222,9 @@ provider:
             - protocol: TCP
               port: 22
               targetPort: 22
-      # Service that maps to the head node of the Ray cluster.
+      # Service that maps to the head node of the Ray cluster, so that the
+      # worker nodes can find the head node using
+      # {{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local
       - apiVersion: v1
         kind: Service
         metadata:
@@ -235,8 +237,10 @@ provider:
             # names.
             name: {{cluster_name_on_cloud}}-head
         spec:
-            # This selector must match the head node pod's selector below.
+            # Create a headless service so that the head node can be reached by
+            # the worker nodes with any port number.
             clusterIP: None
+            # This selector must match the head node pod's selector below.
             selector:
                 component: {{cluster_name_on_cloud}}-head
 
