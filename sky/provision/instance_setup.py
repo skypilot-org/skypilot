@@ -296,9 +296,8 @@ def ray_worker_start_command(custom_resource: Optional[str],
     """Returns the command to start Ray on the worker node."""
     # We need to use the ray port in the env variable, because the head node
     # determines the port to be used for the worker node.
-    ray_options = (
-        '--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
-        '--object-manager-port=8076')
+    ray_options = ('--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
+                   '--object-manager-port=8076')
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''

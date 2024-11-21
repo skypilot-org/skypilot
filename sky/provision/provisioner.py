@@ -435,7 +435,9 @@ def _post_provision_setup(
                 'Launching - Waiting for SSH access',
                 provision_logging.config.log_path)) as status:
         # If on Kubernetes, skip SSH check since the pods are guaranteed to be
-        # ready by the provisioner.
+        # ready by the provisioner, and we use kubectl instead of SSH to run the
+        # commands and rsync on the pods. SSH will still be ready after a while
+        # for the users to SSH into the pod.
         if cloud_name.lower() != 'kubernetes':
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')

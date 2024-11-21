@@ -335,7 +335,7 @@ FAQs
 
     # Install system dependencies
     RUN apt update -y && \
-        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat curl -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
         rm -rf /var/lib/apt/lists/*
 
     # Install conda and other python dependencies
