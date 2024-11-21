@@ -39,6 +39,7 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
+# Prefer SKY_UV_PIP_CMD, which is faster. TODO(cooper): remove all usages.
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
 # We need to add SKY_PYTHON_CMD before ray executable because:
