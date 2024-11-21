@@ -496,9 +496,28 @@ def _post_provision_setup(
                                                 **ssh_credentials)
         head_runner = runners[0]
 
+        def is_ray_cluster_healthy(ray_status_output: str,
+                                   expected_num_nodes: int) -> bool:
+            """Parse the output of `ray status` to get #active nodes.
+            
+            The output of `ray status` looks like:
+
+            """
+            start = ray_status_output.find('Active:')
+            end = ray_status_output.find('Pending:', start)
+            if start == -1 or end == -1:
+                return False
+            active_nodes = len([
+                line.split()[-1]
+                for line in ray_status_output[start:end].split('\n')
+                if line.strip() and not line.startswith('Active:')
+            ])
+            return active_nodes == expected_num_nodes
+
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
-        full_ray_setup = True
+        head_ray_needs_restart = True
+        ray_cluster_healthy = False
         ray_port = constants.SKY_REMOTE_RAY_PORT
         if not provision_record.is_instance_just_booted(
                 head_instance.instance_id):
@@ -512,9 +531,13 @@ def _post_provision_setup(
             else:
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
-            full_ray_setup = bool(returncode)
+            head_ray_needs_restart = bool(returncode)
+            # This is a best effort check to see if the ray cluster has expected
+            # number of nodes connected.
+            ray_cluster_healthy = is_ray_cluster_healthy(
+                stdout, cluster_info.num_instances)
 
-        if full_ray_setup:
+        if head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
@@ -531,10 +554,13 @@ def _post_provision_setup(
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
-        if cluster_info.num_instances > 1:
+        # We don't need to restart ray on worker nodes if the ray cluster is
+        # already healthy, i.e. the head node has expected number of nodes
+        # connected to the ray cluster.
+        if cluster_info.num_instances > 1 and not ray_cluster_healthy:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
-                no_restart=not full_ray_setup,
+                no_restart=not head_ray_needs_restart,
                 custom_resource=custom_resource,
                 # Pass the ray_port to worker nodes for backward compatibility
                 # as in some existing clusters the ray_port is not dumped with
