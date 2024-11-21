@@ -25,69 +25,15 @@
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 
-import enum
-import inspect
-import json
-import os
-import pathlib
-import shlex
-import shutil
-import subprocess
-import sys
-import tempfile
-import textwrap
-import time
-from typing import Dict, List, NamedTuple, Optional, Tuple
-import urllib.parse
-import uuid
-
-import colorama
-import jinja2
 import pytest
 from smoke_tests.util import _get_cluster_name
-from smoke_tests.util import (
-    _get_cmd_wait_until_cluster_status_contains_wildcard)
-from smoke_tests.util import _GET_JOB_QUEUE
 from smoke_tests.util import _get_timeout
-from smoke_tests.util import _JOB_WAIT_NOT_RUNNING
 from smoke_tests.util import _VALIDATE_LAUNCH_OUTPUT
-from smoke_tests.util import _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND
 from smoke_tests.util import _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS
-from smoke_tests.util import _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID
-from smoke_tests.util import (
-    _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB)
-from smoke_tests.util import (
-    _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME)
-from smoke_tests.util import FLUIDSTACK_TYPE
-from smoke_tests.util import LAMBDA_TYPE
 from smoke_tests.util import run_one_test
-from smoke_tests.util import SCP_GPU_V100
-from smoke_tests.util import SCP_TYPE
-from smoke_tests.util import STORAGE_SETUP_COMMANDS
 from smoke_tests.util import Test
 
-import sky
-from sky import global_user_state
-from sky import jobs
-from sky import serve
-from sky import skypilot_config
-from sky.adaptors import azure
-from sky.adaptors import cloudflare
-from sky.adaptors import ibm
-from sky.clouds import AWS
-from sky.clouds import Azure
-from sky.clouds import GCP
-from sky.data import data_utils
-from sky.data import storage as storage_lib
-from sky.data.data_utils import Rclone
-from sky.jobs.state import ManagedJobStatus
-from sky.skylet import constants
-from sky.skylet import events
-from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
-from sky.utils import common_utils
-from sky.utils import resources_utils
-from sky.utils import subprocess_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
