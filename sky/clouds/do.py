@@ -1,6 +1,5 @@
 """ Digital Ocean Cloud. """
 
-import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -176,7 +175,8 @@ class DO(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        custom_resources = resources_utils.make_ray_custom_resources_str(acc_dict)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
         image_id = None
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
@@ -199,8 +199,8 @@ class DO(clouds.Cloud):
     ) -> resources_utils.FeasibleResources:
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
-            # TODO(asaiacai): Add hints to all return values in this method to help
-            #  users understand why the resources are not launchable.
+            # TODO(asaiacai): Add hints to all return values in this method
+            # to help users understand why the resources are not launchable.
             return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -261,7 +261,7 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        do_utils.client() # to initialize `do_utils.CREDENTIALS_PATH`
+        do_utils.client()  # to initialize `do_utils.CREDENTIALS_PATH`
         return {
             f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
         }
@@ -279,7 +279,7 @@ class DO(clouds.Cloud):
             response = do_utils.client().images.get(image_id=image_id)
             if not response:
                 raise do_utils.DigitalOceanError(
-                    f'No image_id `{image_id}` found') from err
+                    f'No image_id `{image_id}` found')
             return response['image']['size_gigabytes']
         except do.exceptions().HttpResponseError as err:
             raise do_utils.DigitalOceanError(
