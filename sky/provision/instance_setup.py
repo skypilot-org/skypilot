@@ -327,7 +327,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
         # Instead, we check whether the raylet process is running on gcs address
         # that is connected to the head with the correct port.
         cmd = (f'ps aux | grep "ray/raylet/raylet" | '
-               'grep "gcs-address=.*:${SKYPILOT_RAY_PORT}" '
+               'grep "gcs-address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT}" '
                f'|| {{ {cmd} }}')
     else:
         cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd

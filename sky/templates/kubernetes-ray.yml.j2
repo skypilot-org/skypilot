@@ -326,51 +326,43 @@ available_node_types:
             - |
               # Helper function to conditionally use sudo
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
-              
-              (
-                {
-                mkdir -p ~/.sky
-                {{ conda_installation_commands }}
-                {{ ray_installation_commands }}
-                ~/skypilot-runtime/bin/python -m pip install skypilot[kubernetes,remote]
-                touch /tmp/ray_skypilot_installation_complete
-                echo "=== Ray and skypilot installation completed ==="
-                
-                if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
-                  {{ ray_head_start_command }}
-                  touch /tmp/ray_started
-                else
-                  # Start ray worker on the worker pod.
-                  # Wait until the head pod is available with an IP address
-                  export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
-                  export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
-                  # Wait until the ray cluster is started on the head pod
-                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
-                    sleep 0.1
-                  done
-
-                  {{ ray_worker_start_command }}
-                  touch /tmp/ray_started
-                fi
-                } | tee /tmp/runtime-setup.log 2>&1
-              ) &
-
 
               # Run apt update in background and log to a file, install missing packages, and set up ssh
               (
                 {
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
-                PACKAGES="gcc patch pciutils rsync fuse curl openssh-server rsync";
+                PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
+
+                # Separate packages into two groups: packages that are installed first
+                # so that curl and rsync are available sooner to unblock the following
+                # conda installation and rsync.
+                set -e
+                INSTALL_FIRST="";
                 MISSING_PACKAGES="";
                 for pkg in $PACKAGES; do
-                  if ! dpkg -l | grep -q "^ii  $pkg "; then
-                    MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+                  if [ "$pkg" == "netcat" ]; then
+                    if ! dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; then
+                      INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
+                    fi
+                  elif ! dpkg -l | grep -q "^ii  $pkg "; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ]; then
+                      INSTALL_FIRST="$INSTALL_FIRST $pkg";
+                    else
+                      MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+                    fi
                   fi
                 done;
+                if [ ! -z "$INSTALL_FIRST" ]; then
+                  echo "Installing core packages: $INSTALL_FIRST";
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y $INSTALL_FIRST;
+                fi;
+                # SSH and other packages are not necessary, so we disable set -e
+                set +e
+                
                 if [ ! -z "$MISSING_PACKAGES" ]; then
                   echo "Installing missing packages: $MISSING_PACKAGES";
-                  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING_PACKAGES;
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y $MISSING_PACKAGES;
                 fi;
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
@@ -383,19 +375,78 @@ available_node_types:
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
-                } | tee /tmp/apt-ssh-setup.log 2>&1 || {
+                } > /tmp/apt-ssh-setup.log 2>&1 || {
                   echo "Error: apt-ssh-setup failed. Continuing anyway..." > /tmp/apt-ssh-setup.failed
+                  cat /tmp/apt-ssh-setup.log
                   exit 1
                 }
               ) &
 
+              (
+                {
+                set -e
+                mkdir -p ~/.sky
+                # Wait for `curl` package to be installed before installing conda
+                # and ray.
+                until dpkg -l | grep -q "^ii  curl "; do
+                  sleep 0.1
+                  echo "Waiting for curl package to be installed..."
+                done
+                {{ conda_installation_commands }}
+                {{ ray_installation_commands }}
+                ~/skypilot-runtime/bin/python -m pip install skypilot[kubernetes,remote]
+                touch /tmp/ray_skypilot_installation_complete
+                echo "=== Ray and skypilot installation completed ==="
+
+                # Disable set -e, as we have some commands that are ok to fail
+                # after the ray start.
+                # TODO(zhwu): this is a hack, we should fix the commands that are
+                # ok to fail.
+                if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
+                  set +e
+                  {{ ray_head_start_command }}
+                else
+                  # Start ray worker on the worker pod.
+                  # Wait until the head pod is available with an IP address
+                  export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+                  export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
+                  # Wait until the ray cluster is started on the head pod
+                  until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
+                    sleep 0.1
+                    echo "Waiting for netcat package to be installed..."
+                  done
+                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
+                    sleep 0.1
+                  done
+
+                  set +e
+                  {{ ray_worker_start_command }}
+                fi
+                } > /tmp/runtime-setup.log 2>&1 || {
+                  echo "Error: runtime-setup failed. Continuing anyway..." > /tmp/runtime-setup.failed
+                  cat /tmp/runtime-setup.log
+                  exit 1
+                }
+              ) &
+
+
               # Set up environment variables; this should be relatively fast, we don't explicitly wait for it.
               (
                 {
-                set -ex;if [ $(id -u) -eq 0 ]; then  echo 'alias sudo=""' >> ~/.bashrc; echo succeed;else   if command -v sudo >/dev/null 2>&1; then     timeout 2 sudo -l >/dev/null 2>&1 && echo succeed ||     ( echo 52;       exit 52; );   else     ( echo 52;       exit 52; );   fi; fi; 
+                set -e
+                if [ $(id -u) -eq 0 ]; then
+                  echo 'alias sudo=""' >> ~/.bashrc; echo succeed;
+                else
+                  if command -v sudo >/dev/null 2>&1; then
+                    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || ( echo 52; exit 52; );
+                  else
+                    ( echo 52; exit 52; );
+                  fi;
+                fi;
                 printenv | while IFS='=' read -r key value; do echo "export $key=\"$value\""; done > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
-                } | tee /tmp/env-setup.log 2>&1 || {
+                } > /tmp/env-setup.log 2>&1 || {
                   echo "Error: env-setup failed. Continuing anyway..." > /tmp/env-setup.failed
+                  cat /tmp/env-setup.log
                   exit 1
                 }
               ) &

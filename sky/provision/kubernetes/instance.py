@@ -832,40 +832,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: all pods are scheduled and running: '
                  f'{[pod.metadata.name for pod in pods]}')
 
-    # running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
-    #                                             ['Running'])
-    # initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
-    #     TAG_POD_INITIALIZED: 'true',
-    #     **tags
-    # }, ['Running'])
-    # uninitialized_pods = {
-    #     pod_name: pod
-    #     for pod_name, pod in running_pods.items()
-    #     if pod_name not in initialized_pods
-    # }
-    # if len(uninitialized_pods) > 0:
-    #     logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
-    #                  f'pods: {list(uninitialized_pods.keys())}')
-    #     uninitialized_pods_list = list(uninitialized_pods.values())
-
-    #     # Run pre-init steps in the pod.
-    #     pre_init(namespace, context, uninitialized_pods_list)
-
-    #     def _label_pod_thread(pod):
-    #         """Thread function to label a single pod."""
-    #         _label_pod(namespace,
-    #                    context,
-    #                    pod.metadata.name,
-    #                    label={
-    #                        TAG_POD_INITIALIZED: 'true',
-    #                        **pod.metadata.labels
-    #                    })
-
-    #     # Label pods in parallel
-    #     subprocess_utils.run_in_parallel(_label_pod_thread,
-    #                                      uninitialized_pods.values(),
-    #                                      NUM_THREADS)
-
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
         provider_name='kubernetes',
