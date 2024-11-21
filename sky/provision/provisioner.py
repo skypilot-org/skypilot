@@ -557,7 +557,7 @@ def _post_provision_setup(
             (ray_port, ray_cluster_healthy,
              head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
         elif cloud_name.lower() == 'kubernetes':
-            timeout = 60  # 1-min maximum timeout
+            timeout = 90  # 1.5-min maximum timeout
             start = time.time()
             while True:
                 # Wait until Ray cluster is ready
@@ -568,8 +568,10 @@ def _post_provision_setup(
                                  'node ray cluster setup.')
                     break
                 if time.time() - start > timeout:
-                    raise RuntimeError(
-                        f'Ray cluster on head is not ready after {timeout}s.')
+                    # In most cases, the ray cluster will be ready after a few
+                    # seconds. Trigger ray start on head or worker nodes to be
+                    # safe, if the ray cluster is not ready after timeout.
+                    break
                 logger.debug('Ray cluster is not ready yet, waiting for the '
                              'async setup to complete...')
                 time.sleep(1)
