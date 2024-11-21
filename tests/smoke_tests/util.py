@@ -226,7 +226,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     if log_to_stdout:
         write = test.echo
         flush = lambda: None
-        out = sys.stdout
+        subprocess_out = sys.stderr
         test.echo(f'Test started. Log to stdout')
     else:
         log_file = tempfile.NamedTemporaryFile('a',
@@ -235,7 +235,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                                delete=False)
         write = log_file.write
         flush = log_file.flush
-        out = log_file
+        subprocess_out = log_file
         test.echo(f'Test started. Log: less {log_file.name}')
 
     env_dict = os.environ.copy()
@@ -246,7 +246,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         flush()
         proc = subprocess.Popen(
             command,
-            stdout=out,
+            stdout=subprocess_out,
             stderr=subprocess.STDOUT,
             shell=True,
             executable='/bin/bash',
@@ -286,7 +286,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
-            stdout=out,
+            stdout=subprocess_out,
             stderr=subprocess.STDOUT,
             timeout=10 * 60,  # 10 mins
             shell=True,
