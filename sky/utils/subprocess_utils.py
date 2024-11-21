@@ -57,7 +57,7 @@ def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
                                     cloud_str: Optional[str] = None) -> int:
     global _fd_limit_warning_shown
     fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
-    
+
     # Raise warning for low fd_limit (only once)
     if fd_limit < 1024 and not _fd_limit_warning_shown:
         logger.warning(
