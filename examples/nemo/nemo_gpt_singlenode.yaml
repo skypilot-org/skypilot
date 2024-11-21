@@ -21,9 +21,11 @@ resources:
   cpus: 8+
   memory: 64+
   accelerators: A100-80GB:1
-  image_id: docker:nvcr.io/nvidia/nemo:24.05
+  image_id: docker:berkeleyskypilot/nemo-optimized:24.05.01
 
 num_nodes: 1
+
+workdir: ~/tmp-workdir
 
 envs:
   DATASET_ROOT: /wiki

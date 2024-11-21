@@ -1041,6 +1041,7 @@ class Resources:
     def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
                               region: clouds.Region,
                               zones: Optional[List[clouds.Zone]],
+                              num_nodes: int,
                               dryrun: bool) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
@@ -1062,7 +1063,7 @@ class Resources:
 
         # Cloud specific variables
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, dryrun)
+            self, cluster_name, region, zones, num_nodes, dryrun)
 
         # Docker run options
         docker_run_options = skypilot_config.get_nested(

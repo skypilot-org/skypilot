@@ -1535,7 +1535,7 @@ class RetryingVmProvisioner(object):
                             to_provision,
                             resources_utils.ClusterName(
                                 cluster_name, handle.cluster_name_on_cloud),
-                            region, zones))
+                            region, zones, num_nodes))
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
