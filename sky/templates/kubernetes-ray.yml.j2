@@ -576,6 +576,7 @@ setup_commands:
     [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log || 
     { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
     [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
+    end_epoch=$(date +%s);
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
