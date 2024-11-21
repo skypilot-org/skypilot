@@ -528,17 +528,18 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                           stdout=subprocess.PIPE,
                           shell=True) as process:
         stderr = []
-        stdout_line_write_cnt = 0
+        stdout_line_count = 0
         assert process.stderr is not None  # for mypy
         if process.stdout is not None:
             for line in process.stdout:
                 str_line = line.decode('utf-8')
                 storage_logger.info(str_line)
-                stdout_line_write_cnt += 1
+                stdout_line_count += 1
 
-        if stdout_line_write_cnt == 0:
-            storage_logger.info('No file uploaded, could be error'
-                                'happened or all files already exist on cloud')
+        if stdout_line_count == 0:
+            storage_logger.info(
+                'No file uploaded. This could be due to an error or '
+                'because all files already exist on the cloud.')
 
         while True:
             line = process.stderr.readline()
