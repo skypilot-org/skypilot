@@ -499,20 +499,27 @@ def _post_provision_setup(
         def is_ray_cluster_healthy(ray_status_output: str,
                                    expected_num_nodes: int) -> bool:
             """Parse the output of `ray status` to get #active nodes.
-            
-            The output of `ray status` looks like:
 
+            The output of `ray status` looks like:
+            Node status
+            ---------------------------------------------------------------
+            Active:
+              1 node_291a8b849439ad6186387c35dc76dc43f9058108f09e8b68108cf9ec
+              1 node_0945fbaaa7f0b15a19d2fd3dc48f3a1e2d7c97e4a50ca965f67acbfd
+            Pending:
+            (no pending nodes)
+            Recent failures:
+            (no failures)
             """
             start = ray_status_output.find('Active:')
             end = ray_status_output.find('Pending:', start)
             if start == -1 or end == -1:
                 return False
-            active_nodes = len([
-                line.split()[-1]
-                for line in ray_status_output[start:end].split('\n')
-                if line.strip() and not line.startswith('Active:')
-            ])
-            return active_nodes == expected_num_nodes
+            num_active_nodes = 0
+            for line in ray_status_output[start:end].split('\n'):
+                if line.strip() and not line.startswith('Active:'):
+                    num_active_nodes += 1
+            return num_active_nodes == expected_num_nodes
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
