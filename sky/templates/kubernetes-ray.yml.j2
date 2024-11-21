@@ -328,7 +328,9 @@ available_node_types:
           args: 
             - |
               # Helper function to conditionally use sudo
+              # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
+              [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
               STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
 
