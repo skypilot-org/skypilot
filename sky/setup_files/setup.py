@@ -238,7 +238,7 @@ extras_require: Dict[str, List[str]] = {
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
-    'vast': ['vastai_sdk'],  # As of now, any version will do
+    'vast': ['vastai_sdk>=0.1.2'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
