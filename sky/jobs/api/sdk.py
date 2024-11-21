@@ -63,7 +63,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> str:
         refresh=refresh,
         skip_finished=skip_finished,
     )
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/jobs/queue',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
@@ -103,13 +103,9 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         follow=follow,
         controller=controller,
     )
-    params = {}
-    for k, v in json.loads(body.model_dump_json()).items():
-        if v is not None:
-            params[k] = v
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/jobs/logs',
-        params=params,
+        json=json.loads(body.model_dump_json()),
         timeout=(5, None),
     )
     return api_common.get_request_id(response=response)

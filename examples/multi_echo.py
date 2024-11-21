@@ -3,6 +3,7 @@ import hashlib
 from multiprocessing import pool
 import socket
 import sys
+import time
 from typing import Optional
 
 import sky
@@ -31,13 +32,17 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
     # `setup` are still blocking.
     request_id = sky.launch(dag, cluster_name=cluster)
     sky.stream_and_get(request_id)
+    # TODO(SKY-981): figure out why cluster is not ready immediately here.
+    # Then remove sleep.
+    time.sleep(5)
 
     # Submit multiple tasks in parallel to trigger queueing behaviors.
     def _exec(i):
         task = sky.Task(run=f'echo {i}; sleep 60')
         resources = sky.Resources(accelerators={'T4': 0.05})
         task.set_resources(resources)
-        sky.exec(task, cluster_name=cluster)
+        request_id = sky.exec(task, cluster_name=cluster)
+        print(f'Submitting task {i}...request_id={request_id}')
 
     print('Submitting tasks...')
     with pool.ThreadPool(8) as p:

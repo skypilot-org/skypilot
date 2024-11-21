@@ -261,7 +261,7 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
 
 
-class RequestIdBody(RequestBody):
+class RequestIdBody(pydantic.BaseModel):
     """The request body for the API request endpoint."""
     request_id: Optional[str] = None
     all: bool = False
@@ -372,7 +372,7 @@ class KillRequestProcessesBody(RequestBody):
     request_ids: List[str]
 
 
-class StreamBody(RequestBody):
+class StreamBody(pydantic.BaseModel):
     """The request body for the stream endpoint."""
     request_id: Optional[str] = None
     log_path: Optional[str] = None

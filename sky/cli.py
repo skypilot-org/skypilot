@@ -1348,6 +1348,7 @@ def _get_managed_jobs(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
+    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     try:
         if not is_called_by_user:
@@ -1831,8 +1832,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     job_info = (
                         f'{num_in_progress_jobs} managed job{plural_and_verb} '
                         'in progress')
-                    if (num_in_progress_jobs >
-                            _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
+                    if (num_in_progress_jobs
+                            > _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
                         job_info += (
                             f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
                             'ones shown)')
@@ -2141,8 +2142,15 @@ def logs(
     logger.info(f'{colorama.Fore.YELLOW}'
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
-    request = sdk.tail_logs(cluster, job_id, follow, tail=tail)
-    sdk.stream_and_get(request)
+    
+    # Stream logs from the server.
+    log_request_id = None
+    try:
+        log_request_id = sdk.tail_logs(cluster, job_id, follow, tail=tail)
+        sdk.stream_and_get(log_request_id)
+    finally:
+        if log_request_id is not None:
+            sdk.abort(log_request_id)
 
 
 @cli.command()
@@ -4027,15 +4035,19 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool):
     """Tail the log of a managed job."""
+    log_request_id = None
     try:
-        sdk.stream_and_get(
-            managed_jobs.tail_logs(name=name,
-                                   job_id=job_id,
-                                   follow=follow,
-                                   controller=controller))
+        log_request_id = managed_jobs.tail_logs(name=name,
+                                             job_id=job_id,
+                                             follow=follow,
+                                             controller=controller)
+        sdk.stream_and_get(log_request_id)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
+    finally:
+        if log_request_id is not None:
+            sdk.abort(log_request_id)
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
@@ -5670,6 +5682,7 @@ def api_abort(request_id: Optional[str], all: bool):
 @api.command('ls', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
 @click.option('--all',
+              '-a',
               is_flag=True,
               default=False,
               required=False,
@@ -5678,7 +5691,7 @@ def api_abort(request_id: Optional[str], all: bool):
 # pylint: disable=redefined-builtin
 def api_ls(request_id: Optional[str], all: bool):
     """List requests on API server."""
-    request_list = sdk.requests_ls(request_id)
+    request_list = sdk.requests_ls(request_id, all)
     table = log_utils.create_table([
         'ID',
         'Name',

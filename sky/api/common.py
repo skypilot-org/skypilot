@@ -29,6 +29,8 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/tasks.db'
 DEFAULT_SERVER_URL = 'http://0.0.0.0:46580'
 API_SERVER_CMD = 'python -m sky.api.rest'
 CLIENT_DIR = pathlib.Path('~/.sky/clients')
+FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                    'file_uploads')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -171,9 +173,6 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
             task_.file_mounts_mapping[workdir] = _full_path(workdir)
         if workdir_only:
             continue
-            task_.file_mounts_mapping[workdir] = _full_path(workdir)
-        if workdir_only:
-            continue
         if task_.file_mounts is not None:
             for src in task_.file_mounts.values():
                 if not data_utils.is_cloud_store_url(src):
@@ -200,13 +199,25 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
                         task_.file_mounts_mapping[src] = _full_path(src)
 
     server_url = get_server_url()
+
     if upload_list:
+        os.makedirs(os.path.expanduser(FILE_UPLOAD_LOGS_DIR), exist_ok=True)
+        log_file = os.path.join(FILE_UPLOAD_LOGS_DIR,
+                                f'{time.strftime("%Y-%m-%d-%H%M%S")}.log')
+        with open(os.path.expanduser(log_file), 'w', encoding='utf-8') as f:
+            f.write(
+                'Uploading your files (e.g. workdir, file_mounts) to the remote SkyPilot Server...\n'
+            )
+
         with rich_utils.client_status(
-                ux_utils.spinner_message('Uploading files to API server')):
+                ux_utils.spinner_message(
+                    'Uploading files to the SkyPilot Server...', log_file)):
             with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-                common_utils.zip_files_and_folders(upload_list, f)
+                common_utils.zip_files_and_folders(upload_list, f,
+                                                   os.path.expanduser(log_file))
                 f.seek(0)
                 files = {'file': (f.name, f)}
+
                 # Send the POST request with the file
                 response = requests.post(
                     f'{server_url}/upload?'
@@ -215,6 +226,13 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
                 if response.status_code != 200:
                     err_msg = response.content.decode('utf-8')
                     raise RuntimeError(f'Failed to upload files: {err_msg}')
+
+        with open(os.path.expanduser(log_file), 'a', encoding='utf-8') as f:
+            f.write(f'Uploaded these files: {upload_list}\n')
+        logger.info(
+            ux_utils.finishing_message('Files Uploaded.',
+                                       log_file,
+                                       is_local=True))
 
     return dag
 

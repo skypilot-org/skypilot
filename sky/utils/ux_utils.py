@@ -30,6 +30,9 @@ RESET_BOLD = '\033[0m'
 _LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs: sky api get -l '
                   '{log_path}'
                   f'{colorama.Style.RESET_ALL}')
+_LOG_PATH_HINT_LOCAL = (f'{colorama.Style.DIM}View logs: '
+                  '{log_path}'
+                  f'{colorama.Style.RESET_ALL}')
 
 
 def console_newline():
@@ -118,12 +121,14 @@ class RedirectOutputForProcess:
                 raise
 
 
-def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
+def log_path_hint(log_path: Union[str, 'pathlib.Path'], is_local: bool = False) -> str:
     """Gets the log path hint for the given log path."""
     log_path = str(log_path)
     expanded_home = os.path.expanduser('~')
     if log_path.startswith(expanded_home):
         log_path = '~' + log_path[len(expanded_home):]
+    if is_local:
+        return _LOG_PATH_HINT_LOCAL.format(log_path=log_path)
     if log_path.startswith(constants.SKY_LOGS_DIRECTORY):
         log_path = log_path[len(constants.SKY_LOGS_DIRECTORY):]
     log_path = log_path.lstrip(os.path.sep)
@@ -140,7 +145,8 @@ def starting_message(message: str) -> str:
 
 def finishing_message(
         message: str,
-        log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+        log_path: Optional[Union[str, 'pathlib.Path']] = None,
+        is_local: bool = False) -> str:
     """Gets the finishing message for the given message."""
     # We have to reset the color before the message, because sometimes if a
     # previous spinner with dimmed color overflows in a narrow terminal, the
@@ -149,7 +155,7 @@ def finishing_message(
                       f'{message}{colorama.Style.RESET_ALL}')
     if log_path is None:
         return success_prefix
-    path_hint = log_path_hint(log_path)
+    path_hint = log_path_hint(log_path, is_local)
     return f'{success_prefix}  {path_hint}'
 
 

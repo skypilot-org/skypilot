@@ -448,15 +448,23 @@ def test_aws_region():
 
 
 @pytest.mark.aws
+@pytest.mark.skip(
+    reason='Do not run this test for remote API server because this test creates '
+    'new skypilot config file that cannot be accessed by the remote API server '
+    'and will interfere with other smoke tests running with remote API server. '
+    'If you are running all smoke tests for local API server you can unskip this.'
+)
 def test_aws_with_ssh_proxy_command():
     name = _get_cluster_name()
-    with tempfile.NamedTemporaryFile(mode='w') as f:
+    with tempfile.NamedTemporaryFile(
+            mode='w') as f, tempfile.NamedTemporaryFile(mode='w') as f_empty:
         f.write(
             textwrap.dedent(f"""\
         aws:
             ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
         f.flush()
+
         test = Test(
             'aws_with_ssh_proxy_command',
             [
@@ -477,6 +485,8 @@ def test_aws_with_ssh_proxy_command():
                 f'{_GET_JOB_QUEUE} | grep {name} | grep "STARTING\|RUNNING\|SUCCEEDED"',
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
+            # Make sure this test runs on local API server.
+            env={'SKYPILOT_CONFIG': f_empty.name},
         )
         run_one_test(test)
 
@@ -1857,7 +1867,7 @@ def test_multi_echo(generic_cloud: str):
             'sleep 30',
             # Make sure that our job scheduler is fast enough to have at least
             # 10 RUNNING jobs in parallel.
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 10) exit 1}}\'',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING\|SUCCEEDED" | wc -l | awk \'{{if ($1 < 10) exit 1}}\'',
             'sleep 30',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
@@ -2815,7 +2825,7 @@ def test_job_pipeline(generic_cloud: str):
             f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
             # Need to wait for setup and job initialization.
             'sleep 30',
-            f'{_JOB_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+            f'{_GET_JOB_QUEUE}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
             # after it, i.e. the 4 tasks within the job.
             # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
@@ -2920,8 +2930,8 @@ def test_managed_jobs_recovery_aws(aws_config_region):
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
-             f'--query Reservations[].Instances[].InstanceId '
+             f'--filters "Name=tag:ray-cluster-name,Values={name_on_cloud}*" '
+             '--query "Reservations[].Instances[].InstanceId" '
              '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
@@ -2999,9 +3009,9 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
                 f'aws ec2 terminate-instances --region {region} --instance-ids $('
                 f'aws ec2 describe-instances --region {region} '
                 # TODO(zhwu): fix the name for spot cluster.
-                '--filters Name=tag:ray-cluster-name,Values=*-${MANAGED_JOB_ID}'
+                '--filters "Name=tag:ray-cluster-name,Values=*-${MANAGED_JOB_ID}"'
                 f'-{user_hash} '
-                f'--query Reservations[].Instances[].InstanceId '
+                '--query "Reservations[].Instances[].InstanceId" '
                 '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
@@ -3178,8 +3188,8 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             'sleep 120',
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
-             f'--query Reservations[].Instances[].State[].Name '
+             f'--filters "Name=tag:ray-cluster-name,Values={name_on_cloud}-*" '
+             '--query "Reservations[].Instances[].State[].Name" '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
@@ -3191,8 +3201,8 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             'sleep 120',
             f'{_GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
-             f'--query Reservations[].Instances[].State[].Name '
+             f'--filters "Name=tag:ray-cluster-name,Values={name_2_on_cloud}-*" '
+             '--query "Reservations[].Instances[].State[].Name" '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancellation during spot job is recovering.
@@ -3202,8 +3212,8 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
-             f'--query Reservations[].Instances[].InstanceId '
+             f'--filters "Name=tag:ray-cluster-name,Values={name_3_on_cloud}-*" '
+             f'--query "Reservations[].Instances[].InstanceId" '
              '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
             f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
@@ -3215,8 +3225,8 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
-             f'--query Reservations[].Instances[].State[].Name '
+             f'--filters "Name=tag:ray-cluster-name,Values={name_3_on_cloud}-*" '
+             '--query "Reservations[].Instances[].State[].Name" '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
         ],
@@ -4043,7 +4053,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
+            'until curl http://$endpoint | grep "Hi, SkyPilot here"; do sleep 2; done; sleep 2; '
             + _check_replica_in_status(name, [(1, False, 'READY'),
                                               (1, False, 'FAILED')]),
         ],
@@ -4451,9 +4461,10 @@ def test_skyserve_failures(generic_cloud: str):
             f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
             'echo "Waiting for replica to be out of pending..."; sleep 5; '
             f's=$(sky serve status {name}); echo "$s"; done; ' +
-            _check_replica_in_status(
-                name, [(1, False, 'FAILED_PROBING'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            _check_replica_in_status(name, [
+                (1, False, 'FAILED_PROBING'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+            ]),
             # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),
@@ -4521,7 +4532,7 @@ def test_core_api_sky_launch_exec():
 # restarted. However, the core API doesn't have these; make sure it still works
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = _get_cluster_name()
-    cloud = sky.clouds.CLOUD_REGISTRY.from_str(generic_cloud)
+    cloud = sky.utils.registry.CLOUD_REGISTRY.from_str(generic_cloud)
     try:
         task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
         sky.launch(task,

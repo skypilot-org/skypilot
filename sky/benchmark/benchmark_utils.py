@@ -184,6 +184,7 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')
     storage = data.Storage(bucket_name, source=None, persistent=True)
+    storage.construct()
     storage.add_store(bucket_type)
 
     # Save the bucket name and type to the config.
@@ -629,9 +630,12 @@ def update_benchmark_state(benchmark: str) -> None:
 
 def remove_benchmark_logs(benchmark: str, bucket_name: str,
                           bucket_type: data.StoreType) -> None:
-    # Delete logs in the benchmark bucket.
-    remote_dir = os.path.join(bucket_name, benchmark)
-    _delete_remote_dir(remote_dir, bucket_type)
-    # Delete logs in the local storage.
-    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
-    subprocess.run(['rm', '-rf', local_dir], check=False)
+    try:
+        # Delete logs in the benchmark bucket.
+        remote_dir = os.path.join(bucket_name, benchmark)
+        _delete_remote_dir(remote_dir, bucket_type)
+        # Delete logs in the local storage.
+        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
+        subprocess.run(['rm', '-rf', local_dir], check=False)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to remove benchmark logs: {e}')

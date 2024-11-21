@@ -667,7 +667,7 @@ def deprecated_function(
     return new_func
 
 
-def zip_files_and_folders(items: List[str], output_file):
+def zip_files_and_folders(items: List[str], output_file, log_file: Optional[str] = None):
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
@@ -682,6 +682,9 @@ def zip_files_and_folders(items: List[str], output_file):
                             zipf.write(os.path.join(root, file))
                 else:
                     raise ValueError(f'{item} does not exist.')
+                if log_file is not None:
+                    with open(log_file, 'a', encoding='utf-8') as f:
+                        f.write(f'Zipped {item}\n')
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
