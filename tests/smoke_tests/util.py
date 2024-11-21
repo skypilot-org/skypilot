@@ -222,20 +222,31 @@ def _terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 def run_one_test(test: Test) -> Tuple[int, str, str]:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
-    log_file = tempfile.NamedTemporaryFile('a',
-                                           prefix=f'{test.name}-',
-                                           suffix='.log',
-                                           delete=False)
-    test.echo(f'Test started. Log: less {log_file.name}')
+    log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
+    if log_to_stdout:
+        write = test.echo
+        flush = lambda: None
+        out = sys.stdout
+        test.echo(f'Test started. Log to stdout')
+    else:
+        log_file = tempfile.NamedTemporaryFile('a',
+                                               prefix=f'{test.name}-',
+                                               suffix='.log',
+                                               delete=False)
+        write = log_file.write
+        flush = log_file.flush
+        out = log_file
+        test.echo(f'Test started. Log: less {log_file.name}')
+
     env_dict = os.environ.copy()
     if test.env:
         env_dict.update(test.env)
     for command in test.commands:
-        log_file.write(f'+ {command}\n')
-        log_file.flush()
+        write(f'+ {command}\n')
+        flush()
         proc = subprocess.Popen(
             command,
-            stdout=log_file,
+            stdout=out,
             stderr=subprocess.STDOUT,
             shell=True,
             executable='/bin/bash',
@@ -244,11 +255,11 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         try:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
-            log_file.flush()
+            flush()
             test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(str(e))
-            log_file.write(f'Timeout after {test.timeout} seconds.\n')
-            log_file.flush()
+            write(f'Timeout after {test.timeout} seconds.\n')
+            flush()
             # Kill the current process.
             proc.terminate()
             proc.returncode = 1  # None if we don't set it.
@@ -263,22 +274,29 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
     msg = (f'{outcome}.'
-           f'{reason}'
-           f'\nLog: less {log_file.name}\n')
-    test.echo(msg)
-    log_file.write(msg)
+           f'{reason}')
+    if log_to_stdout:
+        test.echo(msg)
+    else:
+        msg += f'\nLog: less {log_file.name}\n'
+        test.echo(msg)
+        write(msg)
+
     if (proc.returncode == 0 or
             pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
-            stdout=log_file,
+            stdout=out,
             stderr=subprocess.STDOUT,
             timeout=10 * 60,  # 10 mins
             shell=True,
         )
 
     if proc.returncode:
-        raise Exception(f'test failed: less {log_file.name}')
+        if log_to_stdout:
+            raise Exception(f'test failed')
+        else:
+            raise Exception(f'test failed: less {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:

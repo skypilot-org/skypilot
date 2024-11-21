@@ -1,0 +1,5 @@
+steps:
+  - label: "smoke test -> test_minimal"
+    command: "pytest tests/smoke_tests/test_basic.py::test_minimal"
+    env:
+      LOG_TO_STDOUT: "1"
