@@ -26,7 +26,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
-NUM_THREADS = subprocess_utils.get_parallel_threads() * 3
+NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
