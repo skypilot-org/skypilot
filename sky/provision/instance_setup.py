@@ -247,21 +247,9 @@ def _ray_gpu_options(custom_resource: str) -> str:
     return f' --num-gpus={acc_count}'
 
 
-@common.log_function_start_end
-@_auto_retry()
-@timeline.event
-def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
-                           cluster_info: common.ClusterInfo,
-                           ssh_credentials: Dict[str, Any]) -> None:
-    """Start Ray on the head node."""
-    runners = provision.get_command_runners(cluster_info.provider_name,
-                                            cluster_info, **ssh_credentials)
-    head_runner = runners[0]
-    assert cluster_info.head_instance_id is not None, (cluster_name,
-                                                       cluster_info)
-
-    # Log the head node's output to the provision.log
-    log_path_abs = str(provision_logging.get_log_path())
+def ray_head_start_command(custom_resource: Optional[str],
+                           custom_ray_options: Optional[Dict[str, Any]]) -> str:
+    """Returns the command to start Ray on the head node."""
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
         f'--disable-usage-stats '
@@ -273,11 +261,10 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
         ray_options += _ray_gpu_options(custom_resource)
-
-    if cluster_info.custom_ray_options:
-        if 'use_external_ip' in cluster_info.custom_ray_options:
-            cluster_info.custom_ray_options.pop('use_external_ip')
-        for key, value in cluster_info.custom_ray_options.items():
+    if custom_ray_options:
+        if 'use_external_ip' in custom_ray_options:
+            custom_ray_options.pop('use_external_ip')
+        for key, value in custom_ray_options.items():
             ray_options += f' --{key}={value}'
 
     cmd = (
@@ -300,6 +287,63 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
         'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
         f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
         _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+    return cmd
+
+
+def ray_worker_start_command(custom_resource: Optional[str],
+                             custom_ray_options: Optional[Dict[str, Any]],
+                             no_restart: bool) -> str:
+    """Returns the command to start Ray on the worker node."""
+    # We need to use the ray port in the env variable, because the head node
+    # determines the port to be used for the worker node.
+    ray_options = (
+        '--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
+        '--object-manager-port=8076')
+
+    if custom_resource:
+        ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
+
+    if custom_ray_options:
+        for key, value in custom_ray_options.items():
+            ray_options += f' --{key}={value}'
+
+    cmd = (
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
+        'exit 1;' + _RAY_PRLIMIT)
+    if no_restart:
+        # We do not use ray status to check whether ray is running, because
+        # on worker node, if the user started their own ray cluster, ray status
+        # will return 0, i.e., we don't know skypilot's ray cluster is running.
+        # Instead, we check whether the raylet process is running on gcs address
+        # that is connected to the head with the correct port.
+        cmd = (
+            f'ps aux | grep "ray/raylet/raylet" | '
+            'grep "gcs-address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT}" '
+            f'|| {{ {cmd} }}')
+    else:
+        cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
+    return cmd
+
+
+@common.log_function_start_end
+@_auto_retry()
+@timeline.event
+def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
+                           cluster_info: common.ClusterInfo,
+                           ssh_credentials: Dict[str, Any]) -> None:
+    """Start Ray on the head node."""
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
+    assert cluster_info.head_instance_id is not None, (cluster_name,
+                                                       cluster_info)
+
+    # Log the head node's output to the provision.log
+    log_path_abs = str(provision_logging.get_log_path())
+    cmd = ray_head_start_command(custom_resource,
+                                 cluster_info.custom_ray_options)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = head_runner.run(
@@ -354,42 +398,17 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     head_ip = (head_instance.internal_ip
                if not use_external_ip else head_instance.external_ip)
 
-    ray_options = (f'--address={head_ip}:{constants.SKY_REMOTE_RAY_PORT} '
-                   f'--object-manager-port=8076')
+    ray_cmd = ray_worker_start_command(custom_resource,
+                                       cluster_info.custom_ray_options,
+                                       no_restart)
 
-    if custom_resource:
-        ray_options += f' --resources=\'{custom_resource}\''
-        ray_options += _ray_gpu_options(custom_resource)
-
-    if cluster_info.custom_ray_options:
-        for key, value in cluster_info.custom_ray_options.items():
-            ray_options += f' --{key}={value}'
-
-    # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
-    # `start_ray_on_head_node`.
-    cmd = (
-        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
-        'exit 1;' + _RAY_PRLIMIT)
-    if no_restart:
-        # We do not use ray status to check whether ray is running, because
-        # on worker node, if the user started their own ray cluster, ray status
-        # will return 0, i.e., we don't know skypilot's ray cluster is running.
-        # Instead, we check whether the raylet process is running on gcs address
-        # that is connected to the head with the correct port.
-        cmd = (f'RAY_PORT={ray_port}; ps aux | grep "ray/raylet/raylet" | '
-               f'grep "gcs-address={head_ip}:${{RAY_PORT}}" || '
-               f'{{ {cmd} }}')
-    else:
-        cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
+    cmd = (f'export SKYPILOT_RAY_HEAD_IP="{head_ip}"; '
+           f'export SKYPILOT_RAY_PORT={ray_port}; ' + ray_cmd)
 
     logger.info(f'Running command on worker nodes: {cmd}')
 
     def _setup_ray_worker(runner_and_id: Tuple[command_runner.CommandRunner,
                                                str]):
-        # for cmd in config_from_yaml['worker_start_ray_commands']:
-        #     cmd = cmd.replace('$RAY_HEAD_IP', ip_list[0][0])
-        #     runner.run(cmd)
         runner, instance_id = runner_and_id
         log_dir = metadata_utils.get_instance_log_dir(cluster_name, instance_id)
         log_path_abs = str(log_dir / ('ray_cluster' + '.log'))
