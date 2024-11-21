@@ -687,7 +687,7 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     )
 
 
-@app.post('/requests')
+@app.get('/requests')
 async def requests(
     request_id: Optional[str] = None,
     all: bool = False  # pylint: disable=redefined-builtin
