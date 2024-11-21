@@ -10,6 +10,7 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
+
 @clouds.CLOUD_REGISTRY.register
 class Vast(clouds.Cloud):
     """ Vast GPU Cloud
@@ -123,8 +124,6 @@ class Vast(clouds.Cloud):
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
-
-
 
     @classmethod
     def get_default_instance_type(
@@ -265,7 +264,7 @@ class Vast(clouds.Cloud):
         }
 
     @classmethod
-    def get_user_identities(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
