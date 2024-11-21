@@ -26,7 +26,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
-NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
+_NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -549,7 +549,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
 
     # Run pre_init in parallel across all new_nodes
-    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, NUM_THREADS)
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, _NUM_THREADS)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -796,7 +796,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
 
     # Create pods in parallel
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
-                                            range(to_start_count), NUM_THREADS)
+                                            range(to_start_count), _NUM_THREADS)
 
     # Process created pods
     for pod in pods:
@@ -933,7 +933,7 @@ def terminate_instances(
 
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(),
-                                     NUM_THREADS)
+                                     _NUM_THREADS)
 
 
 def get_cluster_info(
