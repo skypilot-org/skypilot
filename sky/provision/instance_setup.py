@@ -266,16 +266,9 @@ def ray_head_start_command(custom_resource: Optional[str],
             custom_ray_options.pop('use_external_ip')
         for key, value in custom_ray_options.items():
             ray_options += f' --{key}={value}'
+
     cmd = (
         f'{constants.SKY_RAY_CMD} stop; '
-        # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using
-        # credentials from environment variables set by user. SkyPilot's ray
-        # cluster should use the `~/.aws/` credentials, as that is the one used
-        # to create the cluster, and the autoscaler module started by the
-        # `ray start` command should use the same credentials. Otherwise,
-        # `ray status` will fail to fetch the available nodes.
-        # Reference: https://github.com/skypilot-org/skypilot/issues/2441
-        'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         # worker_maximum_startup_concurrency controls the maximum number of
         # workers that can be started concurrently. However, it also controls

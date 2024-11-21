@@ -269,6 +269,13 @@ class RayCodeGen:
             import time
             from typing import Dict, List, Optional, Tuple, Union
 
+            # Set the environment variables to avoid deduplicating logs and
+            # scheduler events. This should be set in driver code, since we are
+            # not using `ray job submit` anymore, and the environment variables
+            # from the ray cluster is not inherited.
+            os.environ['RAY_DEDUP_LOGS'] = '0'
+            os.environ['RAY_SCHEDULER_EVENTS'] = '0'
+
             import ray
             import ray.util as ray_util
 
