@@ -320,7 +320,6 @@ available_node_types:
                   fieldPath: metadata.labels['ray-node-type']
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
-          # We need to use -i to make sure the environment variables are set.
           command: ["/bin/bash", "-c", "--"]
           args: 
             - |
