@@ -55,10 +55,10 @@ def _init_client():
             CREDENTIALS_PATH = path
             credentials_found += 1
             logger.debug(f'Digital Ocean credential path found at {path}')
-    if credentials_found == 1:
+    if not credentials_found == 1:
         raise DigitalOceanError(
-            (f'{credentials_found} credentials'
-             'found, expected == 1',
+            (f'{credentials_found} credentials '
+             'found, expected == 1, ',
              'try setting a new API token with `doctl auth init`'))
     if CREDENTIALS_PATH is None:
         raise DigitalOceanError(
