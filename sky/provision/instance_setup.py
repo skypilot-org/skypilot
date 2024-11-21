@@ -294,9 +294,11 @@ def ray_worker_start_command(custom_resource: Optional[str],
                              custom_ray_options: Optional[Dict[str, Any]],
                              no_restart: bool) -> str:
     """Returns the command to start Ray on the worker node."""
+    # We need to use the ray port in the env variable, because the head node
+    # determines the port to be used for the worker node.
     ray_options = (
-        f'--address=${{SKYPILOT_RAY_HEAD_IP}}:{constants.SKY_REMOTE_RAY_PORT} '
-        f'--object-manager-port=8076')
+        '--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
+        '--object-manager-port=8076')
 
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -306,10 +308,7 @@ def ray_worker_start_command(custom_resource: Optional[str],
         for key, value in custom_ray_options.items():
             ray_options += f' --{key}={value}'
 
-    # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
-    # `start_ray_on_head_node`.
     cmd = (
-        f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
         'exit 1;' + _RAY_PRLIMIT)
