@@ -171,9 +171,6 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
             task_.file_mounts_mapping[workdir] = _full_path(workdir)
         if workdir_only:
             continue
-            task_.file_mounts_mapping[workdir] = _full_path(workdir)
-        if workdir_only:
-            continue
         if task_.file_mounts is not None:
             for src in task_.file_mounts.values():
                 if not data_utils.is_cloud_store_url(src):

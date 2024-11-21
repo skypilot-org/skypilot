@@ -88,9 +88,9 @@ def realtime_kubernetes_gpu_availability(
 @annotations.public_api
 def kubernetes_node_info(context: Optional[str] = None) -> str:
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/kubernetes_node_info',
-        params=api_common.request_body_to_params(body))
+        json=json.loads(body.model_dump_json()))
     return api_common.get_request_id(response)
 
 
@@ -676,7 +676,6 @@ def stream_and_get(request_id: Optional[str] = None,
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)
-
     if response.status_code != 200:
         return get(request_id)
     try:
@@ -788,8 +787,8 @@ def requests_ls(
 ) -> List[requests_lib.RequestPayload]:
     body = payloads.RequestIdBody(request_id=request_id, all=all)
     response = requests.get(f'{api_common.get_server_url()}/requests',
-                            params=api_common.request_body_to_params(body),
-                            timeout=5)
+                             params=api_common.request_body_to_params(body),
+                             timeout=5)
     api_common.handle_request_error(response)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()

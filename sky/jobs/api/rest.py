@@ -22,7 +22,7 @@ async def launch(request: fastapi.Request,
     )
 
 
-@router.get('/queue')
+@router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
     executor.schedule_request(
@@ -47,10 +47,10 @@ async def cancel(request: fastapi.Request,
     )
 
 
-@router.get('/logs')
+@router.post('/logs')
 async def logs(
-        request: fastapi.Request,
-        jobs_logs_body: payloads.JobsLogsBody = fastapi.Depends(),
+    request: fastapi.Request,
+    jobs_logs_body: payloads.JobsLogsBody,
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,

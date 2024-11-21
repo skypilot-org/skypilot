@@ -1348,6 +1348,7 @@ def _get_managed_jobs(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
+    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
     try:
         if not is_called_by_user:
@@ -5670,6 +5671,7 @@ def api_abort(request_id: Optional[str], all: bool):
 @api.command('ls', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
 @click.option('--all',
+              '-a',
               is_flag=True,
               default=False,
               required=False,
@@ -5678,7 +5680,7 @@ def api_abort(request_id: Optional[str], all: bool):
 # pylint: disable=redefined-builtin
 def api_ls(request_id: Optional[str], all: bool):
     """List requests on API server."""
-    request_list = sdk.requests_ls(request_id)
+    request_list = sdk.requests_ls(request_id, all)
     table = log_utils.create_table([
         'ID',
         'Name',
