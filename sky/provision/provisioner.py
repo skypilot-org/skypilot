@@ -564,6 +564,8 @@ def _post_provision_setup(
                 (ray_port, ray_cluster_healthy,
                  head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
                 if ray_cluster_healthy:
+                    logger.debug('Ray cluster is ready. Skip head and worker '
+                                 'node ray cluster setup.')
                     break
                 if time.time() - start > timeout:
                     raise RuntimeError(
