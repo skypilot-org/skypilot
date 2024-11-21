@@ -3735,7 +3735,7 @@ def test_azure_start_stop_two_nodes():
                 cluster_name=name,
                 cluster_status=
                 f'({ClusterStatus.INIT.value}|{ClusterStatus.STOPPED.value})',
-                timeout=200 + _BUMP_UP_SECONDS),
+                timeout=200 + _BUMP_UP_SECONDS) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
@@ -4746,7 +4746,10 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
                    idle_minutes_to_autostop=1,
                    fast=True)
         # Sleep to let the cluster autostop
-        time.sleep(120)
+        _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            cluster_name=name,
+            cluster_status=ClusterStatus.STOPPED,
+            timeout=120)
         # Run it again - should work with fast=True
         sky.launch(task,
                    cluster_name=name,
