@@ -10,8 +10,10 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
+from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -311,12 +313,34 @@ class Kubernetes(clouds.Cloud):
         # we don't have a notion of disk size in Kubernetes.
         return 0
 
+    @staticmethod
+    def _calculate_provision_timeout(num_nodes: int) -> int:
+        """Calculate provision timeout based on number of nodes.
+
+        The timeout scales linearly with the number of nodes to account for
+        scheduling overhead, but is capped to avoid excessive waiting.
+
+        Args:
+            num_nodes: Number of nodes being provisioned
+
+        Returns:
+            Timeout in seconds
+        """
+        base_timeout = 10  # Base timeout for single node
+        per_node_timeout = 0.2  # Additional seconds per node
+        max_timeout = 60  # Cap at 1 minute
+
+        return int(
+            min(base_timeout + (per_node_timeout * (num_nodes - 1)),
+                max_timeout))
+
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
             cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, zones, dryrun  # Unused.
         if region is None:
@@ -413,12 +437,24 @@ class Kubernetes(clouds.Cloud):
         # Larger timeout may be required for autoscaling clusters, since
         # autoscaler may take some time to provision new nodes.
         # Note that this timeout includes time taken by the Kubernetes scheduler
-        # itself, which can be upto 2-3 seconds.
-        # For non-autoscaling clusters, we conservatively set this to 10s.
+        # itself, which can be upto 2-3 seconds, and up to 10-15 seconds when
+        # scheduling 100s of pods.
+        # We use a linear scaling formula to determine the timeout based on the
+        # number of nodes.
+
+        timeout = self._calculate_provision_timeout(num_nodes)
         timeout = skypilot_config.get_nested(
             ('kubernetes', 'provision_timeout'),
-            10,
+            timeout,
             override_configs=resources.cluster_config_overrides)
+        # We specify object-store-memory to be 500MB to avoid taking up too
+        # much memory on the head node. 'num-cpus' should be set to limit
+        # the CPU usage on the head pod, otherwise the ray cluster will use the
+        # CPU resources on the node instead within the pod.
+        custom_ray_options = {
+            'object-store-memory': 500000000,
+            'num-cpus': str(int(cpus)),
+        }
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -445,6 +481,12 @@ class Kubernetes(clouds.Cloud):
             'k8s_topology_label_value': k8s_topology_label_value,
             'k8s_resource_key': k8s_resource_key,
             'image_id': image_id,
+            'ray_installation_commands': constants.RAY_INSTALLATION_COMMANDS,
+            'ray_head_start_command': instance_setup.ray_head_start_command(
+                custom_resources, custom_ray_options),
+            'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
+            'ray_worker_start_command': instance_setup.ray_worker_start_command(
+                custom_resources, custom_ray_options, no_restart=False),
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

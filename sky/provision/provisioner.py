@@ -29,6 +29,7 @@ from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
@@ -343,6 +344,7 @@ def _wait_ssh_connection_indirect(ip: str,
     return True, ''
 
 
+@timeline.event
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready.
@@ -432,11 +434,15 @@ def _post_provision_setup(
             ux_utils.spinner_message(
                 'Launching - Waiting for SSH access',
                 provision_logging.config.log_path)) as status:
-
-        logger.debug(
-            f'\nWaiting for SSH to be available for {cluster_name!r} ...')
-        wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Connection ready for {cluster_name!r}')
+        # If on Kubernetes, skip SSH check since the pods are guaranteed to be
+        # ready by the provisioner, and we use kubectl instead of SSH to run the
+        # commands and rsync on the pods. SSH will still be ready after a while
+        # for the users to SSH into the pod.
+        if cloud_name.lower() != 'kubernetes':
+            logger.debug(
+                f'\nWaiting for SSH to be available for {cluster_name!r} ...')
+            wait_for_ssh(cluster_info, ssh_credentials)
+            logger.debug(f'SSH Connection ready for {cluster_name!r}')
         vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
@@ -521,13 +527,11 @@ def _post_provision_setup(
                     num_active_nodes += 1
             return num_active_nodes == expected_num_nodes
 
-        status.update(
-            runtime_preparation_str.format(step=3, step_name='runtime'))
-        head_ray_needs_restart = True
-        ray_cluster_healthy = False
-        ray_port = constants.SKY_REMOTE_RAY_PORT
-        if not provision_record.is_instance_just_booted(
-                head_instance.instance_id):
+        def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
+            head_ray_needs_restart = True
+            ray_cluster_healthy = False
+            ray_port = constants.SKY_REMOTE_RAY_PORT
+
             # Check if head node Ray is alive
             returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
@@ -543,6 +547,38 @@ def _post_provision_setup(
             ray_cluster_healthy = (not head_ray_needs_restart and
                                    is_ray_cluster_healthy(
                                        stdout, cluster_info.num_instances))
+            return ray_port, ray_cluster_healthy, head_ray_needs_restart
+
+        status.update(
+            runtime_preparation_str.format(step=3, step_name='runtime'))
+
+        ray_port = constants.SKY_REMOTE_RAY_PORT
+        head_ray_needs_restart = True
+        ray_cluster_healthy = False
+        if (not provision_record.is_instance_just_booted(
+                head_instance.instance_id)):
+            # Check if head node Ray is alive
+            (ray_port, ray_cluster_healthy,
+             head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
+        elif cloud_name.lower() == 'kubernetes':
+            timeout = 90  # 1.5-min maximum timeout
+            start = time.time()
+            while True:
+                # Wait until Ray cluster is ready
+                (ray_port, ray_cluster_healthy,
+                 head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
+                if ray_cluster_healthy:
+                    logger.debug('Ray cluster is ready. Skip head and worker '
+                                 'node ray cluster setup.')
+                    break
+                if time.time() - start > timeout:
+                    # In most cases, the ray cluster will be ready after a few
+                    # seconds. Trigger ray start on head or worker nodes to be
+                    # safe, if the ray cluster is not ready after timeout.
+                    break
+                logger.debug('Ray cluster is not ready yet, waiting for the '
+                             'async setup to complete...')
+                time.sleep(1)
 
         if head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
@@ -592,6 +628,7 @@ def _post_provision_setup(
     return cluster_info
 
 
+@timeline.event
 def post_provision_runtime_setup(
         cloud_name: str, cluster_name: resources_utils.ClusterName,
         cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
