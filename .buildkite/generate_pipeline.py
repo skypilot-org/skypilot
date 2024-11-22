@@ -7,6 +7,10 @@ from typing import Any, Dict, List
 import yaml
 
 DEFAULT_CLOUDS_TO_RUN = ['aws', 'azure']
+# We only have credentials for aws, azure, and gcp.
+# For those test cases that run on other clouds,
+# we currently ignore them.
+ALL_CLOUDS_WITH_CREDENTIALS = ['aws', 'azure', 'gcp']
 
 
 def _get_full_decorator_path(decorator: ast.AST) -> str:
@@ -59,6 +63,16 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                 cloud for cloud in clouds_to_include
                 if cloud not in clouds_to_exclude
             ]
+            final_clouds_to_include = [
+                cloud for cloud in clouds_to_include
+                if cloud in ALL_CLOUDS_WITH_CREDENTIALS
+            ]
+            if clouds_to_include and not final_clouds_to_include:
+                print(f'Warning: {file_path}:{node.name} '
+                      f'is marked to run on {clouds_to_include}, '
+                      f'but we do not have credentials for those clouds. '
+                      f'Skipped.')
+                continue
             function_name = (f'{class_name}::{node.name}'
                              if class_name else node.name)
             function_cloud_map[function_name] = (clouds_to_include)
@@ -100,7 +114,7 @@ def main():
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
             yaml.dump(pipeline, file, default_flow_style=False)
-        print(f'Convert {test_file_path} to {yaml_file_path}')
+        print(f'Convert {test_file_path} to {yaml_file_path}\n\n')
 
 
 if __name__ == '__main__':

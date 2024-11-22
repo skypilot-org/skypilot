@@ -39,10 +39,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_cli_logs on aws
-- command: pytest tests/smoke_tests/test_basic.py::test_scp_logs --scp
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_scp_logs on scp
 - command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_exec --gcp
   env:
     LOG_TO_STDOUT: '1'
@@ -79,11 +75,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_sky_bench on aws
-- command: pytest tests/smoke_tests/test_basic.py::test_kubernetes_context_failover
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_kubernetes_context_failover on kubernetes
 - command: pytest tests/smoke_tests/test_basic.py::TestYamlSpecs::test_load_dump_yaml_config_equivalent
     --aws
   env:

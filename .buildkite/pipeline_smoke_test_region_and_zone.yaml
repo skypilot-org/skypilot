@@ -14,10 +14,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_gcp_region_and_service_account on gcp
-- command: pytest tests/smoke_tests/test_region_and_zone.py::test_ibm_region --ibm
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_ibm_region on ibm
 - command: pytest tests/smoke_tests/test_region_and_zone.py::test_azure_region --azure
   env:
     LOG_TO_STDOUT: '1'
@@ -26,10 +22,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_aws_zone on aws
-- command: pytest tests/smoke_tests/test_region_and_zone.py::test_ibm_zone --ibm
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_ibm_zone on ibm
 - command: pytest tests/smoke_tests/test_region_and_zone.py::test_gcp_zone --gcp
   env:
     LOG_TO_STDOUT: '1'

@@ -9,18 +9,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_job_queue_with_docker on aws
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_lambda_job_queue --lambda_cloud
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_lambda_job_queue on lambda_cloud
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_ibm_job_queue --ibm
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_ibm_job_queue on ibm
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_scp_job_queue --scp
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_scp_job_queue on scp
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_multinode
     --aws
   env:
@@ -35,11 +23,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_fast_large_job_queue on aws
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_ibm_job_queue_multinode
-    --ibm
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_ibm_job_queue_multinode on ibm
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_docker_preinstalled_package
     --aws
   env:
@@ -53,14 +36,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_huggingface on aws
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_lambda_huggingface --lambda_cloud
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_lambda_huggingface on lambda_cloud
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_scp_huggingface --scp
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_scp_huggingface on scp
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_inferentia --aws
   env:
     LOG_TO_STDOUT: '1'
@@ -77,10 +52,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_tpu_vm_pod on gcp
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_pod_slice_gke --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_tpu_pod_slice_gke on kubernetes
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_hostname --aws
   env:
     LOG_TO_STDOUT: '1'
@@ -104,21 +75,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_azure_http_server_with_custom_ports on azure
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_kubernetes_http_server_with_custom_ports
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_kubernetes_http_server_with_custom_ports on kubernetes
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_paperspace_http_server_with_custom_ports
-    --paperspace
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_paperspace_http_server_with_custom_ports on paperspace
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_runpod_http_server_with_custom_ports
-    --runpod
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_runpod_http_server_with_custom_ports on runpod
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_aws --aws
   env:
     LOG_TO_STDOUT: '1'
@@ -127,36 +83,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_task_labels_gcp on gcp
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_kubernetes
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_task_labels_kubernetes on kubernetes
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_add_pod_annotations_for_autodown_with_launch
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_add_pod_annotations_for_autodown_with_launch on kubernetes
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_add_and_remove_pod_annotations_with_autostop
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_add_and_remove_pod_annotations_with_autostop on kubernetes
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_multinode_kubernetes
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_container_logs_multinode_kubernetes on kubernetes
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_two_jobs_kubernetes
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_container_logs_two_jobs_kubernetes on kubernetes
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_two_simultaneous_jobs_kubernetes
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_container_logs_two_simultaneous_jobs_kubernetes on kubernetes
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_distributed_tf --aws
   env:
     LOG_TO_STDOUT: '1'
@@ -177,10 +103,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_autodown on aws
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_scp_autodown --scp
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_scp_autodown on scp
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_aws --aws
   env:
     LOG_TO_STDOUT: '1'
@@ -197,10 +119,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_cancel_pytorch on aws
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_ibm --ibm
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_cancel_ibm on ibm
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_use_spot --aws
   env:
     LOG_TO_STDOUT: '1'
@@ -221,11 +139,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_aws_custom_image on aws
-- command: pytest tests/smoke_tests/test_cluster_job.py::test_kubernetes_custom_image
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_kubernetes_custom_image on kubernetes
 - command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop_two_nodes
     --azure
   env:

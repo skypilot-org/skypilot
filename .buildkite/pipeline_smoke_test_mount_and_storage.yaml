@@ -4,11 +4,6 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_file_mounts on aws
-- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_scp_file_mounts
-    --scp
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_scp_file_mounts on scp
 - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_using_file_mounts_with_env_vars
     --aws
   env:
@@ -29,31 +24,11 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_azure_storage_mounts_with_stop on azure
-- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_storage_mounts
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_kubernetes_storage_mounts on kubernetes
-- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_context_switch
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_kubernetes_context_switch on kubernetes
 - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_docker_storage_mounts
     --aws
   env:
     LOG_TO_STDOUT: '1'
   label: test_docker_storage_mounts on aws
-- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_cloudflare_storage_mounts
-    --cloudflare
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_cloudflare_storage_mounts on cloudflare
-- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_ibm_storage_mounts
-    --ibm
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_ibm_storage_mounts on ibm
 - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_new_bucket_creation_and_deletion
     --aws
   env:

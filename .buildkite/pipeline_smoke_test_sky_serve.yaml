@@ -12,94 +12,21 @@ steps:
   env:
     LOG_TO_STDOUT: '1'
   label: test_skyserve_azure_http on azure
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_kubernetes_http
-    --kubernetes
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_kubernetes_http on kubernetes
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_oci_http --oci
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_oci_http on oci
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_llm --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_llm on serve
 - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_spot_recovery
     --gcp
   env:
     LOG_TO_STDOUT: '1'
   label: test_skyserve_spot_recovery on gcp
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_base_ondemand_fallback
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_base_ondemand_fallback on serve
 - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_dynamic_ondemand_fallback
     --gcp
   env:
     LOG_TO_STDOUT: '1'
   label: test_skyserve_dynamic_ondemand_fallback on gcp
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_user_bug_restart
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_user_bug_restart on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_load_balancer
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_load_balancer on serve
 - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_auto_restart
     --gcp
   env:
     LOG_TO_STDOUT: '1'
   label: test_skyserve_auto_restart on gcp
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_cancel --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_cancel on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_streaming --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_streaming on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_readiness_timeout_fail
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_readiness_timeout_fail on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_large_readiness_timeout
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_large_readiness_timeout on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_update on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_rolling_update
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_rolling_update on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_fast_update --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_fast_update on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update_autoscale
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_update_autoscale on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
-    --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_new_autoscaler_update on serve
-- command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_failures --serve
-  env:
-    LOG_TO_STDOUT: '1'
-  label: test_skyserve_failures on serve
 - command: pytest tests/smoke_tests/test_sky_serve.py::test_user_dependencies --aws
   env:
     LOG_TO_STDOUT: '1'
