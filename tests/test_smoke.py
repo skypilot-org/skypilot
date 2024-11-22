@@ -2352,6 +2352,23 @@ def test_paperspace_http_server_with_custom_ports():
     run_one_test(test)
 
 
+# ---------- Web apps with custom ports on Vast. ----------
+@pytest.mark.vast
+def test_vast_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'vast_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud vast examples/http_server_with_custom_ports/task.yaml',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Web apps with custom ports on RunPod. ----------
 @pytest.mark.runpod
 def test_runpod_http_server_with_custom_ports():
