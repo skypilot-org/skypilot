@@ -130,7 +130,7 @@ def kill_children_processes(parent_pids: Optional[Union[
         if not proc.is_running():
             # Skip if the process is not running.
             return
-        print(f'Killing process {proc.pid}', flush=True)
+        logger.debug(f'Killing process {proc.pid}', flush=True)
         try:
             if force:
                 proc.kill()
@@ -141,11 +141,12 @@ def kill_children_processes(parent_pids: Optional[Union[
             # The child process may have already been terminated.
             pass
         except psutil.TimeoutExpired:
-            print(f'Process {proc.pid} did not terminate after 10 seconds',
-                  flush=True)
+            logger.debug(
+                f'Process {proc.pid} did not terminate after 10 seconds',
+                flush=True)
             # Attempt to force kill if the normal termination fails
             if not force:
-                print(f'Force killing process {proc.pid}', flush=True)
+                logger.debug(f'Force killing process {proc.pid}', flush=True)
                 proc.kill()
                 proc.wait(timeout=5)  # Shorter timeout after force kill
 
@@ -164,7 +165,7 @@ def kill_children_processes(parent_pids: Optional[Union[
         child_processes = parent_process.children(recursive=True)
         if parent_pids is not None:
             kill(parent_process)
-        print(f'Killing child processes: {child_processes}', flush=True)
+        logger.debug(f'Killing child processes: {child_processes}', flush=True)
         for child in child_processes:
             kill(child)
 
