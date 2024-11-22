@@ -1832,8 +1832,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     job_info = (
                         f'{num_in_progress_jobs} managed job{plural_and_verb} '
                         'in progress')
-                    if (num_in_progress_jobs
-                            > _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
+                    if (num_in_progress_jobs >
+                            _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
                         job_info += (
                             f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
                             'ones shown)')
@@ -2142,7 +2142,7 @@ def logs(
     logger.info(f'{colorama.Fore.YELLOW}'
                 f'Tailing logs of {job_str} on cluster {cluster!r}...'
                 f'{colorama.Style.RESET_ALL}')
-    
+
     # Stream logs from the server.
     log_request_id = None
     try:
@@ -4038,9 +4038,9 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     log_request_id = None
     try:
         log_request_id = managed_jobs.tail_logs(name=name,
-                                             job_id=job_id,
-                                             follow=follow,
-                                             controller=controller)
+                                                job_id=job_id,
+                                                follow=follow,
+                                                controller=controller)
         sdk.stream_and_get(log_request_id)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():

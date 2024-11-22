@@ -170,6 +170,8 @@ install_requires = [
     'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3,>2',
     # Required for Form data by pydantic
     'python-multipart',
+    'aiofiles',
+    'httpx',
 ]
 
 local_ray = [

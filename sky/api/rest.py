@@ -11,6 +11,7 @@ from typing import List, Optional
 import uuid
 import zipfile
 
+import aiofiles
 import colorama
 import fastapi
 from fastapi.middleware import cors
@@ -210,8 +211,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
 
 
 @app.post('/upload')
-async def upload_zip_file(user_hash: str,
-                          file: fastapi.UploadFile = fastapi.File(...)):
+async def upload_zip_file(request: fastapi.Request, user_hash: str):
     client_file_mounts_dir = (common.CLIENT_DIR.expanduser().resolve() /
                               user_hash / 'file_mounts')
     os.makedirs(client_file_mounts_dir, exist_ok=True)
@@ -219,9 +219,9 @@ async def upload_zip_file(user_hash: str,
     try:
         # Save the uploaded zip file temporarily
         zip_file_path = client_file_mounts_dir / f'{timestamp}.zip'
-        with open(zip_file_path, 'wb') as f:
-            contents = await file.read()
-            f.write(contents)
+        async with aiofiles.open(zip_file_path, 'wb') as f:
+            async for chunk in request.stream():
+                await f.write(chunk)
 
         with zipfile.ZipFile(zip_file_path, 'r') as zipf:
             for member in zipf.namelist():

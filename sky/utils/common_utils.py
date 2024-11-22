@@ -667,7 +667,9 @@ def deprecated_function(
     return new_func
 
 
-def zip_files_and_folders(items: List[str], output_file, log_file: Optional[str] = None):
+def zip_files_and_folders(items: List[str],
+                          output_file,
+                          log_file: Optional[str] = None):
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore',
                                 category=UserWarning,

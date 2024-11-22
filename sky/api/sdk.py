@@ -787,8 +787,8 @@ def requests_ls(
 ) -> List[requests_lib.RequestPayload]:
     body = payloads.RequestIdBody(request_id=request_id, all=all)
     response = requests.get(f'{api_common.get_server_url()}/requests',
-                             params=api_common.request_body_to_params(body),
-                             timeout=5)
+                            params=api_common.request_body_to_params(body),
+                            timeout=5)
     api_common.handle_request_error(response)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()

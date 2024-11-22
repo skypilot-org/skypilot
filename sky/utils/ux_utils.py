@@ -31,8 +31,8 @@ _LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs: sky api get -l '
                   '{log_path}'
                   f'{colorama.Style.RESET_ALL}')
 _LOG_PATH_HINT_LOCAL = (f'{colorama.Style.DIM}View logs: '
-                  '{log_path}'
-                  f'{colorama.Style.RESET_ALL}')
+                        '{log_path}'
+                        f'{colorama.Style.RESET_ALL}')
 
 
 def console_newline():
@@ -121,7 +121,8 @@ class RedirectOutputForProcess:
                 raise
 
 
-def log_path_hint(log_path: Union[str, 'pathlib.Path'], is_local: bool = False) -> str:
+def log_path_hint(log_path: Union[str, 'pathlib.Path'],
+                  is_local: bool = False) -> str:
     """Gets the log path hint for the given log path."""
     log_path = str(log_path)
     expanded_home = os.path.expanduser('~')
@@ -143,10 +144,9 @@ def starting_message(message: str) -> str:
     return f'{colorama.Style.RESET_ALL}⚙︎ {message}'
 
 
-def finishing_message(
-        message: str,
-        log_path: Optional[Union[str, 'pathlib.Path']] = None,
-        is_local: bool = False) -> str:
+def finishing_message(message: str,
+                      log_path: Optional[Union[str, 'pathlib.Path']] = None,
+                      is_local: bool = False) -> str:
     """Gets the finishing message for the given message."""
     # We have to reset the color before the message, because sometimes if a
     # previous spinner with dimmed color overflows in a narrow terminal, the
@@ -182,14 +182,14 @@ def retry_message(message: str) -> str:
             f'{colorama.Style.RESET_ALL} {message}')
 
 
-def spinner_message(
-        message: str,
-        log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+def spinner_message(message: str,
+                    log_path: Optional[Union[str, 'pathlib.Path']] = None,
+                    is_local: bool = False) -> str:
     """Gets the spinner message for the given message and log path."""
     colored_spinner = f'[bold cyan]{message}[/]'
     if log_path is None:
         return colored_spinner
-    path_hint = log_path_hint(log_path)
+    path_hint = log_path_hint(log_path, is_local)
     return f'{colored_spinner}  {path_hint}'
 
 

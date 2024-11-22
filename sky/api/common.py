@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Union
 
 import colorama
 import filelock
+import httpx
 import pydantic
 import requests
 
@@ -204,35 +205,44 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
         os.makedirs(os.path.expanduser(FILE_UPLOAD_LOGS_DIR), exist_ok=True)
         log_file = os.path.join(FILE_UPLOAD_LOGS_DIR,
                                 f'{time.strftime("%Y-%m-%d-%H%M%S")}.log')
-        with open(os.path.expanduser(log_file), 'w', encoding='utf-8') as f:
-            f.write(
-                'Uploading your files (e.g. workdir, file_mounts) to the remote SkyPilot Server...\n'
-            )
-
         with rich_utils.client_status(
                 ux_utils.spinner_message(
-                    'Uploading files to the SkyPilot Server...', log_file)):
-            with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
+                    'Uploading files to the SkyPilot Server',
+                    log_file,
+                    is_local=True)):
+            with tempfile.NamedTemporaryFile('wb+',
+                                             suffix='.zip') as f, open(
+                                                 os.path.expanduser(log_file),
+                                                 'w',
+                                                 encoding='utf-8') as f_log:
+                f_log.write('Start zipping files to prepare for upload...\n')
+                f_log.flush()
+                start = time.time()
                 common_utils.zip_files_and_folders(upload_list, f,
                                                    os.path.expanduser(log_file))
+                f_log.write(
+                    f'Finished zipping files in {time.time() - start}s. '
+                    'Start uploading zipped files via HTTP...\n')
+                f_log.flush()
+                # Upload files to the server via HTTP.
+                start = time.time()
                 f.seek(0)
                 files = {'file': (f.name, f)}
-
-                # Send the POST request with the file
-                response = requests.post(
-                    f'{server_url}/upload?'
-                    f'user_hash={common_utils.get_user_hash()}',
-                    files=files)
-                if response.status_code != 200:
-                    err_msg = response.content.decode('utf-8')
-                    raise RuntimeError(f'Failed to upload files: {err_msg}')
-
-        with open(os.path.expanduser(log_file), 'a', encoding='utf-8') as f:
-            f.write(f'Uploaded these files: {upload_list}\n')
-        logger.info(
-            ux_utils.finishing_message('Files Uploaded.',
-                                       log_file,
-                                       is_local=True))
+                timeout = httpx.Timeout(None, read=180.0)
+                with httpx.Client(timeout=timeout) as client:
+                    response = client.post(
+                        f'{server_url}/upload?'
+                        f'user_hash={common_utils.get_user_hash()}',
+                        files=files)
+                    if response.status_code != 200:
+                        err_msg = response.content.decode('utf-8')
+                        raise RuntimeError(f'Failed to upload files: {err_msg}')
+                    f_log.write(f'Finished uploading these files in '
+                                f'{time.time() - start}s: {upload_list}\n')
+                    logger.info(
+                        ux_utils.finishing_message('Files Uploaded.',
+                                                   log_file,
+                                                   is_local=True))
 
     return dag
 
