@@ -167,7 +167,6 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
     upload_list = []
     for task_ in dag.tasks:
         task_.file_mounts_mapping = {}
-        task_.file_mounts_mapping = {}
         if task_.workdir:
             workdir = task_.workdir
             upload_list.append(_full_path(workdir))
@@ -178,7 +177,6 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
             for src in task_.file_mounts.values():
                 if not data_utils.is_cloud_store_url(src):
                     upload_list.append(_full_path(src))
-                    task_.file_mounts_mapping[src] = _full_path(src)
                     task_.file_mounts_mapping[src] = _full_path(src)
                 if src == constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
                     # The placeholder for the local skypilot config path is in
