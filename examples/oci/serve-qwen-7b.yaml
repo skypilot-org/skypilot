@@ -13,8 +13,8 @@ resources:
 setup: |
   conda create -n vllm python=3.12 -y
   conda activate vllm
-  pip install vllm
-  pip install vllm-flash-attn
+  pip install vllm==0.6.3.post1
+  pip install vllm-flash-attn==2.6.2
 
 run: |
   conda activate vllm

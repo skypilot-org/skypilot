@@ -283,6 +283,7 @@ class Cloud:
         cluster_name: resources_utils.ClusterName,
         region: 'Region',
         zones: Optional[List['Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
