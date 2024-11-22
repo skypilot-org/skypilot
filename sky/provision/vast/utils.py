@@ -93,8 +93,18 @@ def get_ssh_ports(cluster_name) -> List[int]:
 
     for instance in instances.values():
         if instance['name'] in possible_names:
-            ssh_ports.append(instance['ssh_port'])
+            ssh_ports.append((instance['name'], instance['ssh_port']))
     assert ssh_ports, (
         f'Could not find any instances for cluster {cluster_name}.')
 
+    # So now we have
+    # [(name, port) ... ]
+    #
+    # We want to put head first and otherwise sort numerically
+    # and then extract the ports.
+    ssh_ports = list(
+        x[1]
+        for x in sorted(ssh_ports,
+                        key=lambda x: -1
+                        if x[0].endswith('head') else int(x[0].split('-')[-1])))
     return ssh_ports
