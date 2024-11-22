@@ -234,7 +234,7 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     # Create a set of pod names we're waiting for
     if not new_nodes:
         return
-    pod_names = {node.metadata.name for node in new_nodes}
+    expected_pod_names = {node.metadata.name for node in new_nodes}
     start_time = time.time()
 
     def _evaluate_timeout() -> bool:
@@ -250,20 +250,20 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
             label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
-
-        if len(pods) != len(pod_names):
+        
+        # Get the set of found pod names and check if we have all expected pods
+        found_pod_names = {pod.metadata.name for pod in pods}
+        missing_pods = expected_pod_names - found_pod_names
+        if missing_pods:
             logger.info('Retrying waiting for pods: '
-                        f'Expected {len(pod_names)} pods, got {len(pods)}')
+                       f'Missing pods: {missing_pods}')
             time.sleep(0.5)
             continue
-
-        # Filter to only the pods we're waiting for
-        pods = [pod for pod in pods if pod.metadata.name in pod_names]
 
         # Check if all pods are scheduled
         all_scheduled = True
         for pod in pods:
-            if pod.status.phase == 'Pending':
+            if pod.metadata.name in expected_pod_names and pod.status.phase == 'Pending':
                 # If container_statuses is None, then the pod hasn't
                 # been scheduled yet.
                 if pod.status.container_statuses is None:
@@ -297,7 +297,7 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         return
 
     # Create a set of pod names we're waiting for
-    pod_names = {node.metadata.name for node in new_nodes}
+    expected_pod_names = {node.metadata.name for node in new_nodes}
 
     def _check_init_containers(pod):
         # Check if any of the init containers failed
@@ -331,14 +331,19 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
             namespace,
             label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
-        if len(all_pods) != len(pod_names):
+        # Get the set of found pod names and check if we have all expected pods
+        found_pod_names = {pod.metadata.name for pod in all_pods}
+        missing_pods = expected_pod_names - found_pod_names
+        if missing_pods:
             logger.info('Retrying running pods check: '
-                        f'Expected {len(pod_names)} pods, got {len(all_pods)}')
+                       f'Missing pods: {missing_pods}')
             time.sleep(0.5)
             continue
 
         all_pods_running = True
         for pod in all_pods:
+            if pod.metadata.name not in expected_pod_names:
+                continue
             # Continue if pod and all the containers within the
             # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
