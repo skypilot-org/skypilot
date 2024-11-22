@@ -56,7 +56,7 @@ def get_hosts_by_cluster_names(content, vcenter_name, cluster_name_dicts=None):
             'name': cluster.name
         } for cluster in cluster_view.view]
         cluster_view.Destroy()
-        if len(cluster_name_dicts) == 0:
+        if not cluster_name_dicts:
             logger.warning(f'vCenter \'{vcenter_name}\' has no clusters')
 
     # Retrieve all cluster names from the cluster_name_dicts

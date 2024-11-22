@@ -223,7 +223,7 @@ class ServiceStatus(enum.Enum):
                for status in ReplicaStatus.failed_statuses()) > 0:
             return cls.FAILED
         # When min_replicas = 0, there is no (provisioning) replica.
-        if len(replica_statuses) == 0:
+        if not replica_statuses:
             return cls.NO_REPLICA
         return cls.REPLICA_INIT
 

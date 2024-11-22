@@ -633,7 +633,7 @@ def get_cleaned_username(username: str = '') -> str:
     return username
 
 
-def fill_template(template_name: str, variables: Dict,
+def fill_template(template_name: str, variables: Dict[str, Any],
                   output_path: str) -> None:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name

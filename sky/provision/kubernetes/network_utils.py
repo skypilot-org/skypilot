@@ -230,7 +230,7 @@ def get_ingress_external_ip_and_ports(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
         if item.metadata.name == 'ingress-nginx-controller'
     ]
-    if len(ingress_services) == 0:
+    if not ingress_services:
         return (None, None)
 
     ingress_service = ingress_services[0]

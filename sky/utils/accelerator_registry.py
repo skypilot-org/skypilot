@@ -106,7 +106,7 @@ def canonicalize_accelerator_name(accelerator: str,
         return names[0]
 
     # Do not print an error message here. Optimizer will handle it.
-    if len(names) == 0:
+    if not names:
         return accelerator
 
     # Currently unreachable.

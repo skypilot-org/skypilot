@@ -96,8 +96,8 @@ def test_empty_fields_storage(tmp_path):
     storage = task.storage_mounts['/mystorage']
     assert storage.name == 'sky-dataset'
     assert storage.source is None
-    assert len(storage.stores) == 0
-    assert storage.persistent is True
+    assert not storage.stores
+    assert storage.persistent
 
 
 def test_invalid_fields_storage(tmp_path):

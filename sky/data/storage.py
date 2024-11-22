@@ -1067,7 +1067,7 @@ class Storage(object):
         add_if_not_none('source', self.source)
 
         stores = None
-        if len(self.stores) > 0:
+        if self.stores:
             stores = ','.join([store.value for store in self.stores])
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)

@@ -320,8 +320,8 @@ class RequestRateAutoscaler(Autoscaler):
         """Select outdated replicas to scale down."""
 
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
-            latest_ready_replicas = []
-            old_nonterminal_replicas = []
+            latest_ready_replicas: List['replica_managers.ReplicaInfo'] = []
+            old_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
             for info in replica_infos:
                 if info.version == self.latest_version:
                     if info.is_ready:

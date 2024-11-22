@@ -248,7 +248,7 @@ class QueryHelper:
                 limit=1)
 
         compartments = list_compartments_response.data
-        if len(compartments) > 0:
+        if compartments:
             skypilot_compartment = compartments[0].id
             return skypilot_compartment
 
@@ -274,7 +274,7 @@ class QueryHelper:
             display_name=oci_utils.oci_config.VCN_NAME,
             lifecycle_state='AVAILABLE')
         vcns = list_vcns_response.data
-        if len(vcns) > 0:
+        if vcns:
             # Found the VCN.
             skypilot_vcn = vcns[0].id
             list_subnets_response = net_client.list_subnets(
@@ -359,7 +359,7 @@ class QueryHelper:
                 if str(s.cidr_block).startswith('all-') and str(s.cidr_block).
                 endswith('-services-in-oracle-services-network')
             ]
-            if len(services) > 0:
+            if services:
                 # Create service gateway for regional services.
                 create_sg_response = net_client.create_service_gateway(
                     create_service_gateway_details=oci_adaptor.oci.core.models.

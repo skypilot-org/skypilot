@@ -107,7 +107,7 @@ class ZoneConfig:
                 for item in subnet_contents
                 if item['subnetState'] == 'ACTIVE' and item["vpcId"] == vpc
             ]
-            if len(subnet_list) > 0:
+            if subnet_list:
                 vpc_subnets[vpc] = subnet_list
 
         return vpc_subnets
