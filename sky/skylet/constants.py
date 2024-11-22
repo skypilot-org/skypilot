@@ -154,7 +154,7 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Install uv for venv management and pip installation.
-    'which uv >/dev/null 2>&1 || '
+    f'{SKY_UV_INSTALL_DIR}/uv --version >/dev/null 2>&1 || '
     'curl -LsSf https://astral.sh/uv/install.sh '
     f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh;'
     # Create a separate conda environment for SkyPilot dependencies.
@@ -162,7 +162,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # Do NOT use --system-site-packages here, because if users upgrade any
     # packages in the base env, they interfere with skypilot dependencies.
     # Reference: https://github.com/skypilot-org/skypilot/issues/4097
-    f'{SKY_UV_CMD} venv {SKY_REMOTE_PYTHON_ENV};'
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV};'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 

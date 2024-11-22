@@ -34,11 +34,12 @@ ENV HOME /home/sky
 WORKDIR /home/sky
 
 # Install skypilot dependencies
-RUN conda init && export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-    python3 -m venv ~/skypilot-runtime && \
-    PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=$HOME/.local/bin sh && \
+    export PATH=$PATH:$HOME/.local/bin && \
+    conda init && uv venv --seed ~/skypilot-runtime && \
+    UV_PIP_EXEC="env VIRTUAL_ENV=$(echo ~/skypilot-runtime) uv pip" && \
+    $UV_PIP_EXEC install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $UV_PIP_EXEC uninstall skypilot-nightly && \
     curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc

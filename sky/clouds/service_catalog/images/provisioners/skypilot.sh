@@ -32,36 +32,39 @@ conda init
 conda config --set auto_activate_base true
 conda activate base
 
-# Conda, Python
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=$HOME/.local/bin sh
+export PATH=$PATH:$HOME/.local/bin
+
+# Set up Conda, uv, Python
 echo "Creating conda env with Python 3.10"
 conda create -y -n skypilot-runtime python=3.10
 conda activate skypilot-runtime
-export PIP_DISABLE_PIP_VERSION_CHECK=1
 echo PATH=$PATH
-python3 -m venv ~/skypilot-runtime
+uv venv --seed ~/skypilot-runtime
 PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python
+UV_EXEC_PIP="env VIRTUAL_ENV=$(echo ~/skypilot-runtime) uv pip"
 
 # Install SkyPilot
-$PYTHON_EXEC -m pip install "skypilot-nightly[remote]"
+$UV_EXEC_PIP install "skypilot-nightly[remote]"
 
 # Install Ray
 RAY_ADDRESS=127.0.0.1:6380
-$PYTHON_EXEC -m pip install --exists-action w -U "ray[default]==2.9.3"
-export PATH=$PATH:$HOME/.local/bin
+$UV_EXEC_PIP install -U "ray[default]==2.9.3"
 source ~/skypilot-runtime/bin/activate
 which ray > ~/.sky/ray_path || exit 1
-$PYTHON_EXEC -m pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+$UV_EXEC_PIP list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
   $PYTHON_EXEC -c "from sky.skylet.ray_patches import patch; patch()" || exit 1
 }
 
 # Install cloud dependencies
 if [ "$CLOUD" = "azure" ]; then
-    $PYTHON_EXEC -m pip install "skypilot-nightly[azure]"
+    $UV_EXEC_PIP install "skypilot-nightly[azure]"
 elif [ "$CLOUD" = "gcp" ]; then
     # We don't have to install the google-cloud-sdk since it is installed by default in GCP machines.
-    $PYTHON_EXEC -m pip install "skypilot-nightly[gcp]"
+    $UV_EXEC_PIP install "skypilot-nightly[gcp]"
 elif [ "$CLOUD" = "aws" ]; then
-    $PYTHON_EXEC -m pip install "skypilot-nightly[aws]"
+    $UV_EXEC_PIP install "skypilot-nightly[aws]"
 else
     echo "Error: Unknown cloud $CLOUD so not installing any cloud dependencies."
 fi
@@ -81,5 +84,5 @@ sudo systemctl disable jupyter > /dev/null 2>&1 || true
 
 # Cleanup
 # Remove SkyPilot in OS image because when user sky launch we will install whatever version of SkyPilot user has on their local machine.
-$PYTHON_EXEC -m pip uninstall "skypilot-nightly" -y
+$UV_EXEC_PIP uninstall "skypilot-nightly"
 rm -rf ~/.sky

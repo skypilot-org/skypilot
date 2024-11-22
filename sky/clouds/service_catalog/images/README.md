@@ -7,8 +7,9 @@ You only need to do this once.
 ```bash
 packer init plugins.pkr.hcl
 ```
-3. Setup cloud credentials
-4. `cd sky/clouds/service_catalog/images`
+3. Check that docker buildx is installed: `docker buildx` should show a help page. buildx is installed with Docker Desktop but you may have to install separately on Linux.
+4. Setup cloud credentials
+5. `cd sky/clouds/service_catalog/images`
 
 ## Generate Images
 FYI time to packer build images:
