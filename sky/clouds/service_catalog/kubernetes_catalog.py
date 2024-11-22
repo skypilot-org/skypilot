@@ -65,9 +65,15 @@ def list_accelerators(
     # TODO(romilb): We should consider putting a lru_cache() with TTL to
     #   avoid multiple calls to kubernetes API in a short period of time (e.g.,
     #   from the optimizer).
-    return _list_accelerators(gpus_only, name_filter, region_filter,
-                              quantity_filter, case_sensitive,
-                              all_regions, require_price, realtime=False)[0]
+    return _list_accelerators(gpus_only,
+                              name_filter,
+                              region_filter,
+                              quantity_filter,
+                              case_sensitive,
+                              all_regions,
+                              require_price,
+                              realtime=False)[0]
+
 
 def list_accelerators_realtime(
     gpus_only: bool,
@@ -79,9 +85,14 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
-    return _list_accelerators(gpus_only, name_filter, region_filter,
-                             quantity_filter, case_sensitive,
-                             all_regions, require_price, realtime=True)
+    return _list_accelerators(gpus_only,
+                              name_filter,
+                              region_filter,
+                              quantity_filter,
+                              case_sensitive,
+                              all_regions,
+                              require_price,
+                              realtime=True)
 
 
 def _list_accelerators(
@@ -98,8 +109,8 @@ def _list_accelerators(
     """List accelerators in the Kubernetes cluster.
 
     If realtime is True, the function will query the cluster to fetch real-time
-    GPU usage, which is returned in total_accelerators_available. Note that 
-    this may require an expensive list_pod_for_all_namespaces call, which  
+    GPU usage, which is returned in total_accelerators_available. Note that
+    this may require an expensive list_pod_for_all_namespaces call, which
     requires cluster-wide pod read permissions.
 
     If the user does not have sufficient permissions to list pods in all
@@ -142,10 +153,11 @@ def _list_accelerators(
             pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
-                logger.warning('Failed to get pods in the Kubernetes cluster '
-                            '(forbidden). Please check if your account has '
-                            'necessary permissions to list pods. Realtime GPU '
-                            'availability information may be incorrect.')
+                logger.warning(
+                    'Failed to get pods in the Kubernetes cluster '
+                    '(forbidden). Please check if your account has '
+                    'necessary permissions to list pods. Realtime GPU '
+                    'availability information may be incorrect.')
             else:
                 raise
     # Total number of GPUs in the cluster
