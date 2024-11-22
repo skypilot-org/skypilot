@@ -238,7 +238,7 @@ def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
                     f_log.write(f'Finished uploading these files in '
                                 f'{time.time() - start}s: {upload_list}\n')
                     logger.info(
-                        ux_utils.finishing_message('Files Uploaded.',
+                        ux_utils.finishing_message('Files uploaded.',
                                                    log_file,
                                                    is_local=True))
 
