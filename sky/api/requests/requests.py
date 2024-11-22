@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import filelock
 
-from sky import exceptions
+from sky import exceptions, sky_logging
 from sky.api import common
 from sky.api.requests import payloads
 from sky.api.requests.serializers import decoders
@@ -19,6 +19,8 @@ from sky.api.requests.serializers import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import subprocess_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
@@ -223,14 +225,13 @@ def kill_requests(request_ids: List[str]):
     for request_id in request_ids:
         with update_request(request_id) as request_record:
             if request_record is None:
-                print(f'No request ID {request_id}')
+                logger.debug(f'No request ID {request_id}')
                 continue
             if request_record.status > RequestStatus.RUNNING:
-                print(f'Request {request_id} already finished')
+                logger.debug(f'Request {request_id} already finished')
                 continue
             if request_record.pid is not None:
-                print(f'Killing request process {request_record.pid}',
-                      flush=True)
+                logger.debug(f'Killing request process {request_record.pid}')
                 subprocess_utils.kill_children_processes(
                     parent_pids=[request_record.pid], force=True)
             request_record.status = RequestStatus.ABORTED
