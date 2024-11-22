@@ -1,0 +1,139 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+steps:
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_file_mounts --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_file_mounts on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_scp_file_mounts
+    --scp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_scp_file_mounts on scp
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_using_file_mounts_with_env_vars
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_using_file_mounts_with_env_vars on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_aws_storage_mounts_with_stop
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_aws_storage_mounts_with_stop on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_gcp_storage_mounts_with_stop
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_storage_mounts_with_stop on gcp
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_azure_storage_mounts_with_stop
+    --azure
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_azure_storage_mounts_with_stop on azure
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_storage_mounts
+    --kubernetes
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_kubernetes_storage_mounts on kubernetes
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_context_switch
+    --kubernetes
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_kubernetes_context_switch on kubernetes
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_docker_storage_mounts
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_docker_storage_mounts on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_cloudflare_storage_mounts
+    --cloudflare
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_cloudflare_storage_mounts on cloudflare
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::test_ibm_storage_mounts
+    --ibm
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_ibm_storage_mounts on ibm
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_new_bucket_creation_and_deletion
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_new_bucket_creation_and_deletion on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion on
+    aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_source_with_spaces
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_upload_source_with_spaces on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_external_deletion
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_bucket_external_deletion on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_bulk_deletion
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_bucket_bulk_deletion on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_public_bucket
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_public_bucket on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_nonexistent_bucket
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_nonexistent_bucket on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_private_bucket
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_private_bucket on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_to_existing_bucket
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_upload_to_existing_bucket on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_copy_mount_existing_storage
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_copy_mount_existing_storage on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_list_source
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_list_source on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_invalid_names
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_invalid_names on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+    on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+    on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_aws_regions
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_aws_regions on aws
+- command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_gcs_regions
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestStorageWithCredentials::test_gcs_regions on aws

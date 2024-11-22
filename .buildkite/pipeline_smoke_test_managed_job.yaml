@@ -1,0 +1,79 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+steps:
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs on managed_jobs
+- command: pytest tests/smoke_tests/test_managed_job.py::test_job_pipeline --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_job_pipeline on managed_jobs
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_failed_setup
+    --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_failed_setup on managed_jobs
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_failed_setup
+    --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_pipeline_failed_setup on managed_jobs
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_aws
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_recovery_aws on aws
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_gcp
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_recovery_gcp on gcp
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_aws
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_pipeline_recovery_aws on aws
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_gcp
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_pipeline_recovery_gcp on gcp
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_default_resources
+    --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_recovery_default_resources on managed_jobs
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_aws
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_recovery_multi_node_aws on aws
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_gcp
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_recovery_multi_node_gcp on gcp
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_aws
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_cancellation_aws on aws
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_gcp
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_cancellation_gcp on gcp
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_storage
+    --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_storage on managed_jobs
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_tpu --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_tpu on gcp
+- command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_inline_env
+    --managed_jobs
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_managed_jobs_inline_env on managed_jobs

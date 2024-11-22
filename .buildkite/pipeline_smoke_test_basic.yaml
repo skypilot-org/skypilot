@@ -1,0 +1,91 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+steps:
+- command: pytest tests/smoke_tests/test_basic.py::test_example_app --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_example_app on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_minimal --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_minimal on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_launch_fast --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_launch_fast on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_launch_fast_with_autostop
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_launch_fast_with_autostop on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_stale_job --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_stale_job on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_aws_stale_job_manual_restart
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_aws_stale_job_manual_restart on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_gcp_stale_job_manual_restart
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_stale_job_manual_restart on gcp
+- command: pytest tests/smoke_tests/test_basic.py::test_env_check --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_env_check on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_cli_logs --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_cli_logs on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_scp_logs --scp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_scp_logs on scp
+- command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_exec --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_core_api_sky_launch_exec on gcp
+- command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_fast --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_core_api_sky_launch_fast on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_multiple_accelerators_ordered on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered_with_default
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_multiple_accelerators_ordered_with_default on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_multiple_accelerators_unordered on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered_with_default
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_multiple_accelerators_unordered_with_default on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_multiple_resources --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_multiple_resources on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_sky_bench --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_sky_bench on aws
+- command: pytest tests/smoke_tests/test_basic.py::test_kubernetes_context_failover
+    --kubernetes
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_kubernetes_context_failover on kubernetes
+- command: pytest tests/smoke_tests/test_basic.py::TestYamlSpecs::test_load_dump_yaml_config_equivalent
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: TestYamlSpecs::test_load_dump_yaml_config_equivalent on aws

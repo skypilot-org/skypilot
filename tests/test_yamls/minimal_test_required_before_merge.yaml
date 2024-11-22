@@ -1,0 +1,13 @@
+resources:
+  cloud: aws
+  instance_type: t3.small
+
+file_mounts:
+  ~/aws: .
+
+workdir: .
+
+num_nodes: 1
+
+run: |
+  ls -l ~/aws/tests/test_yamls/minimal_test_required_before_merge.yaml

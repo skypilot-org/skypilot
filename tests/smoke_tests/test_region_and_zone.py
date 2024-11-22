@@ -1,56 +1,34 @@
-# Smoke tests for SkyPilot
+# Smoke tests for SkyPilot for reg
 # Default options are set in pyproject.toml
 # Example usage:
 # Run all tests except for AWS and Lambda Cloud
-# > pytest tests/test_smoke.py
+# > pytest tests/smoke_tests/test_region_and_zone.py
 #
 # Terminate failed clusters after test finishes
-# > pytest tests/test_smoke.py --terminate-on-failure
+# > pytest tests/smoke_tests/test_region_and_zone.py --terminate-on-failure
 #
 # Re-run last failed tests
 # > pytest --lf
 #
 # Run one of the smoke tests
-# > pytest tests/test_smoke.py::test_minimal
-#
-# Only run managed job tests
-# > pytest tests/test_smoke.py --managed-jobs
-#
-# Only run sky serve tests
-# > pytest tests/test_smoke.py --sky-serve
+# > pytest tests/smoke_tests/test_region_and_zone.py::test_aws_region
 #
 # Only run test for AWS + generic tests
-# > pytest tests/test_smoke.py --aws
+# > pytest tests/smoke_tests/test_region_and_zone.py --aws
 #
 # Change cloud for generic tests to aws
-# > pytest tests/test_smoke.py --generic-cloud aws
+# > pytest tests/smoke_tests/test_region_and_zone.py --generic-cloud aws
 
-import enum
-import inspect
-import json
-import os
-import pathlib
-import shlex
-import shutil
-import subprocess
-import sys
 import tempfile
 import textwrap
-import time
-from typing import Dict, List, NamedTuple, Optional, Tuple
-import urllib.parse
-import uuid
 
-import colorama
-import jinja2
 import pytest
-from smoke_tests.util import _get_cluster_name
-from smoke_tests.util import (
-    _get_cmd_wait_until_cluster_status_contains_wildcard)
-from smoke_tests.util import (
-    _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME)
+from smoke_tests.util import get_cluster_name
+from smoke_tests.util import get_cmd_wait_until_cluster_status_contains_wildcard
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
+from smoke_tests.util import (
+    WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME)
 
 from sky.jobs.state import ManagedJobStatus
 from sky.skylet import constants
@@ -60,7 +38,7 @@ from sky.status_lib import ClusterStatus
 # ---------- Test region ----------
 @pytest.mark.aws
 def test_aws_region():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'aws_region',
         [
@@ -81,7 +59,7 @@ def test_aws_region():
 
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
-    name = _get_cluster_name()
+    name = get_cluster_name()
 
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
@@ -104,13 +82,12 @@ def test_aws_with_ssh_proxy_command():
                 f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
-                _get_cmd_wait_until_cluster_status_contains_wildcard(
+                get_cmd_wait_until_cluster_status_contains_wildcard(
                     cluster_name_wildcard='sky-jobs-controller-*',
                     cluster_status=ClusterStatus.UP.value,
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
-                _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.
-                format(
+                WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
                     job_name=name,
                     job_status=
                     f'({ManagedJobStatus.SUCCEEDED.value}|{ManagedJobStatus.RUNNING.value}|{ManagedJobStatus.STARTING.value})',
@@ -123,7 +100,7 @@ def test_aws_with_ssh_proxy_command():
 
 @pytest.mark.gcp
 def test_gcp_region_and_service_account():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'gcp_region',
         [
@@ -146,7 +123,7 @@ def test_gcp_region_and_service_account():
 
 @pytest.mark.ibm
 def test_ibm_region():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     region = 'eu-de'
     test = Test(
         'region',
@@ -163,7 +140,7 @@ def test_ibm_region():
 
 @pytest.mark.azure
 def test_azure_region():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'azure_region',
         [
@@ -187,7 +164,7 @@ def test_azure_region():
 # ---------- Test zone ----------
 @pytest.mark.aws
 def test_aws_zone():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'aws_zone',
         [
@@ -203,7 +180,7 @@ def test_aws_zone():
 
 @pytest.mark.ibm
 def test_ibm_zone():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     zone = 'eu-de-2'
     test = Test(
         'zone',
@@ -220,7 +197,7 @@ def test_ibm_zone():
 
 @pytest.mark.gcp
 def test_gcp_zone():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'gcp_zone',
         [

@@ -1,0 +1,66 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+steps:
+- command: pytest tests/smoke_tests/test_images.py::test_aws_images --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_aws_images on aws
+- command: pytest tests/smoke_tests/test_images.py::test_gcp_images --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_images on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_azure_images --azure
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_azure_images on azure
+- command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_aws_image_id_dict on aws
+- command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_image_id_dict on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_region
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_aws_image_id_dict_region on aws
+- command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict_region
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_image_id_dict_region on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_zone --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_aws_image_id_dict_zone on aws
+- command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict_zone --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_image_id_dict_zone on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_clone_disk_aws --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_clone_disk_aws on aws
+- command: pytest tests/smoke_tests/test_images.py::test_clone_disk_gcp --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_clone_disk_gcp on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_gcp_mig --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_mig on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_gcp_force_enable_external_ips
+    --gcp
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_gcp_force_enable_external_ips on gcp
+- command: pytest tests/smoke_tests/test_images.py::test_image_no_conda --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_image_no_conda on aws
+- command: pytest tests/smoke_tests/test_images.py::test_custom_default_conda_env
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_custom_default_conda_env on aws

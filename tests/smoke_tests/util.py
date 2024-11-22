@@ -1,44 +1,22 @@
-import enum
 import inspect
-import json
 import os
-import pathlib
-import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
-import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
-import urllib.parse
 import uuid
 
 import colorama
-import jinja2
 import pytest
 
 import sky
-from sky import global_user_state
-from sky import jobs
 from sky import serve
-from sky import skypilot_config
-from sky.adaptors import azure
-from sky.adaptors import cloudflare
-from sky.adaptors import ibm
 from sky.clouds import AWS
-from sky.clouds import Azure
 from sky.clouds import GCP
-from sky.data import data_utils
-from sky.data import storage as storage_lib
-from sky.data.data_utils import Rclone
 from sky.jobs.state import ManagedJobStatus
-from sky.skylet import constants
-from sky.skylet import events
 from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
 from sky.utils import common_utils
-from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
@@ -64,9 +42,9 @@ STORAGE_SETUP_COMMANDS = [
 
 # Get the job queue, and print it once on its own, then print it again to
 # use with grep by the caller.
-_GET_JOB_QUEUE = 's=$(sky jobs queue); echo "$s"; echo "$s"'
+GET_JOB_QUEUE = 's=$(sky jobs queue); echo "$s"; echo "$s"'
 # Wait for a job to be not in RUNNING state. Used to check for RECOVERING.
-_JOB_WAIT_NOT_RUNNING = (
+JOB_WAIT_NOT_RUNNING = (
     's=$(sky jobs queue);'
     'until ! echo "$s" | grep "{job_name}" | grep "RUNNING"; do '
     'sleep 10; s=$(sky jobs queue);'
@@ -78,7 +56,7 @@ _ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
 _ALL_MANAGED_JOB_STATUSES = "|".join(
     [status.value for status in ManagedJobStatus])
 
-_WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
+WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     # A while loop to wait until the cluster status
     # becomes certain status, with timeout.
     'start_time=$SECONDS; '
@@ -97,9 +75,9 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 
-def _get_cmd_wait_until_cluster_status_contains_wildcard(
+def get_cmd_wait_until_cluster_status_contains_wildcard(
         cluster_name_wildcard: str, cluster_status: str, timeout: int):
-    wait_cmd = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
+    wait_cmd = WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
         'sky status {cluster_name}',
         'sky status "{cluster_name}"').replace('awk "/^{cluster_name}/',
                                                'awk "/^{cluster_name_awk}/')
@@ -110,7 +88,7 @@ def _get_cmd_wait_until_cluster_status_contains_wildcard(
                            timeout=timeout)
 
 
-_WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
+WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     # A while loop to wait until the cluster is not found or timeout
     'start_time=$SECONDS; '
     'while true; do '
@@ -124,7 +102,7 @@ _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     'sleep 10; '
     'done')
 
-_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
+WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.
     'start_time=$SECONDS; '
@@ -149,15 +127,15 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'sleep 10; '
     'done')
 
-_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "')
 
-_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
 
 # Managed job functions
 
-_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
+WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
     'sky queue {cluster_name}', 'sky jobs queue').replace(
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
@@ -166,7 +144,7 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
 # After the timeout, the cluster will stop if autostop is set, and our check
 # should be more than the timeout. To address this, we extend the timeout by
 # _BUMP_UP_SECONDS before exiting.
-_BUMP_UP_SECONDS = 35
+BUMP_UP_SECONDS = 35
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -191,13 +169,13 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_timeout(generic_cloud: str,
-                 override_timeout: int = DEFAULT_CMD_TIMEOUT):
+def get_timeout(generic_cloud: str,
+                override_timeout: int = DEFAULT_CMD_TIMEOUT):
     timeouts = {'fluidstack': 60 * 60}  # file_mounts
     return timeouts.get(generic_cloud, override_timeout)
 
 
-def _get_cluster_name() -> str:
+def get_cluster_name() -> str:
     """Returns a user-unique cluster name for each test_<name>().
 
     Must be called from each test_<name>().
@@ -210,7 +188,7 @@ def _get_cluster_name() -> str:
     return f'{test_name}-{test_id}'
 
 
-def _terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
+def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name:{cluster_name})" '
@@ -352,7 +330,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
     return None
 
 
-_VALIDATE_LAUNCH_OUTPUT = (
+VALIDATE_LAUNCH_OUTPUT = (
     # Validate the output of the job submission:
     # ⚙️ Launching on Kubernetes.
     #   Pod is up.

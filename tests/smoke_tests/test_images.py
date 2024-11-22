@@ -1,34 +1,28 @@
-# Smoke tests for SkyPilot
+# Smoke tests for SkyPilot for image functionality
 # Default options are set in pyproject.toml
 # Example usage:
 # Run all tests except for AWS and Lambda Cloud
-# > pytest tests/test_smoke.py
+# > pytest tests/smoke_tests/test_images.py
 #
 # Terminate failed clusters after test finishes
-# > pytest tests/test_smoke.py --terminate-on-failure
+# > pytest tests/smoke_tests/test_images.py --terminate-on-failure
 #
 # Re-run last failed tests
 # > pytest --lf
 #
 # Run one of the smoke tests
-# > pytest tests/test_smoke.py::test_minimal
-#
-# Only run managed job tests
-# > pytest tests/test_smoke.py --managed-jobs
-#
-# Only run sky serve tests
-# > pytest tests/test_smoke.py --sky-serve
+# > pytest tests/smoke_tests/test_images.py::test_aws_images
 #
 # Only run test for AWS + generic tests
-# > pytest tests/test_smoke.py --aws
+# > pytest tests/smoke_tests/test_images.py --aws
 #
 # Change cloud for generic tests to aws
-# > pytest tests/test_smoke.py --generic-cloud aws
+# > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import pytest
-from smoke_tests.util import _get_cluster_name
 from smoke_tests.util import _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND
 from smoke_tests.util import _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS
+from smoke_tests.util import get_cluster_name
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
 
@@ -38,7 +32,7 @@ from sky.status_lib import ClusterStatus
 # ---------- Test the image ----------
 @pytest.mark.aws
 def test_aws_images():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'aws_images',
         [
@@ -58,7 +52,7 @@ def test_aws_images():
 
 @pytest.mark.gcp
 def test_gcp_images():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'gcp_images',
         [
@@ -78,7 +72,7 @@ def test_gcp_images():
 
 @pytest.mark.azure
 def test_azure_images():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'azure_images',
         [
@@ -98,7 +92,7 @@ def test_azure_images():
 
 @pytest.mark.aws
 def test_aws_image_id_dict():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'aws_image_id_dict',
         [
@@ -117,7 +111,7 @@ def test_aws_image_id_dict():
 
 @pytest.mark.gcp
 def test_gcp_image_id_dict():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'gcp_image_id_dict',
         [
@@ -136,7 +130,7 @@ def test_gcp_image_id_dict():
 
 @pytest.mark.aws
 def test_aws_image_id_dict_region():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'aws_image_id_dict_region',
         [
@@ -173,7 +167,7 @@ def test_aws_image_id_dict_region():
 
 @pytest.mark.gcp
 def test_gcp_image_id_dict_region():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'gcp_image_id_dict_region',
         [
@@ -206,7 +200,7 @@ def test_gcp_image_id_dict_region():
 
 @pytest.mark.aws
 def test_aws_image_id_dict_zone():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'aws_image_id_dict_zone',
         [
@@ -244,7 +238,7 @@ def test_aws_image_id_dict_zone():
 
 @pytest.mark.gcp
 def test_gcp_image_id_dict_zone():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'gcp_image_id_dict_zone',
         [
@@ -278,7 +272,7 @@ def test_gcp_image_id_dict_zone():
 
 @pytest.mark.aws
 def test_clone_disk_aws():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'clone_disk_aws',
         [
@@ -305,7 +299,7 @@ def test_clone_disk_aws():
 
 @pytest.mark.gcp
 def test_clone_disk_gcp():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'clone_disk_gcp',
         [
@@ -324,7 +318,7 @@ def test_clone_disk_gcp():
 
 @pytest.mark.gcp
 def test_gcp_mig():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     region = 'us-central1'
     test = Test(
         'gcp_mig',
@@ -354,7 +348,7 @@ def test_gcp_mig():
 
 @pytest.mark.gcp
 def test_gcp_force_enable_external_ips():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test_commands = [
         f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
@@ -376,7 +370,7 @@ def test_gcp_force_enable_external_ips():
 
 @pytest.mark.aws
 def test_image_no_conda():
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test(
         'image_no_conda',
         [
@@ -396,7 +390,7 @@ def test_image_no_conda():
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
-    name = _get_cluster_name()
+    name = get_cluster_name()
     test = Test('custom_default_conda_env', [
         f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky status -r {name} | grep "UP"',

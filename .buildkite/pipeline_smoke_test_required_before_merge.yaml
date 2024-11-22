@@ -1,0 +1,7 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+steps:
+- command: pytest tests/smoke_tests/test_required_before_merge.py::test_yaml_launch_and_mount
+    --aws
+  env:
+    LOG_TO_STDOUT: '1'
+  label: test_yaml_launch_and_mount on aws
