@@ -98,7 +98,7 @@ class Controllers(enum.Enum):
         controller_type='jobs',
         name='managed jobs controller',
         candidate_cluster_names=[
-                managed_job_utils.JOB_CONTROLLER_NAME,
+            managed_job_utils.JOB_CONTROLLER_NAME,
             managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
         ],
         in_progress_hint=(
