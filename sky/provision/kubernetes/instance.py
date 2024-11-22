@@ -250,20 +250,21 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
         pods = kubernetes.core_api(context).list_namespaced_pod(
             namespace,
             label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
-        
+
         # Get the set of found pod names and check if we have all expected pods
         found_pod_names = {pod.metadata.name for pod in pods}
         missing_pods = expected_pod_names - found_pod_names
         if missing_pods:
             logger.info('Retrying waiting for pods: '
-                       f'Missing pods: {missing_pods}')
+                        f'Missing pods: {missing_pods}')
             time.sleep(0.5)
             continue
 
         # Check if all pods are scheduled
         all_scheduled = True
         for pod in pods:
-            if pod.metadata.name in expected_pod_names and pod.status.phase == 'Pending':
+            if (pod.metadata.name in expected_pod_names and
+                    pod.status.phase == 'Pending'):
                 # If container_statuses is None, then the pod hasn't
                 # been scheduled yet.
                 if pod.status.container_statuses is None:
@@ -336,7 +337,7 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
         missing_pods = expected_pod_names - found_pod_names
         if missing_pods:
             logger.info('Retrying running pods check: '
-                       f'Missing pods: {missing_pods}')
+                        f'Missing pods: {missing_pods}')
             time.sleep(0.5)
             continue
 
