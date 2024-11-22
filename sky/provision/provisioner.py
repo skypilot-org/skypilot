@@ -533,16 +533,16 @@ def _post_provision_setup(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True)
-            if returncode:
-                logger.debug('Ray cluster on head is not up. Restarting...')
-            else:
-                logger.debug('Ray cluster on head is up.')
+            if not returncode:
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
+                logger.debug(f'Ray cluster on head is up with port {ray_port}.')
+
             head_ray_needs_restart = bool(returncode)
             # This is a best effort check to see if the ray cluster has expected
             # number of nodes connected.
-            ray_cluster_healthy = is_ray_cluster_healthy(
-                stdout, cluster_info.num_instances)
+            ray_cluster_healthy = (not head_ray_needs_restart and
+                                   is_ray_cluster_healthy(
+                                       stdout, cluster_info.num_instances))
 
         if head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
@@ -551,6 +551,9 @@ def _post_provision_setup(
                 custom_resource=custom_resource,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+        else:
+            logger.debug('Ray cluster on head is ready. Skip starting ray '
+                         'cluster on head node.')
 
         # NOTE: We have to check all worker nodes to make sure they are all
         #  healthy, otherwise we can only start Ray on newly started worker
@@ -576,6 +579,9 @@ def _post_provision_setup(
                 ray_port=ray_port,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+        elif ray_cluster_healthy:
+            logger.debug('Ray cluster is ready. Skip starting ray cluster on '
+                         'worker nodes.')
 
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
