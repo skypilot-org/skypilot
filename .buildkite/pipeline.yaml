@@ -1,5 +1,10 @@
 steps:
-  - label: "smoke test -> test_minimal"
+  - label: "test_minimal"
     command: "pytest tests/smoke_tests/test_basic.py::test_minimal"
+    env:
+      LOG_TO_STDOUT: "1"
+
+  - label: "test_aws_stale_job_manual_restart"
+    command: "pytest tests/smoke_tests/test_basic.py::test_aws_stale_job_manual_restart"
     env:
       LOG_TO_STDOUT: "1"
