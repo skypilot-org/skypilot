@@ -28,6 +28,7 @@ from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -2053,6 +2054,7 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
                                get_kube_config_context_namespace(context))
 
 
+@timeline.event
 def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
