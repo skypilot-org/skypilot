@@ -4,7 +4,7 @@ steps:
     env:
       LOG_TO_STDOUT: "1"
 
-  - label: "test_aws_stale_job_manual_restart"
-    command: "pytest tests/smoke_tests/test_basic.py::test_aws_stale_job_manual_restart"
+  - label: "test_launch_fast"
+    command: "pytest tests/smoke_tests/test_basic.py::test_launch_fast"
     env:
       LOG_TO_STDOUT: "1"
