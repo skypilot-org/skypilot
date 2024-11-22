@@ -148,15 +148,15 @@ class Vast(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
-    # TODO: Function signature is different from the fluffy cloud
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun, cluster_name  # unused
+        del zones, dryrun, cluster_name, num_nodes  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
