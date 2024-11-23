@@ -270,7 +270,7 @@ FAQs
 * **Are autoscaling Kubernetes clusters supported?**
 
   To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
-  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud).
 
   If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
 
@@ -344,12 +344,12 @@ FAQs
         eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
         grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
         rm Miniconda3-Linux-x86_64.sh && \
-        export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-        python3 -m venv ~/skypilot-runtime && \
-        PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-        $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+        curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=$HOME/.local/bin sh && \
+        export PATH=$PATH:$HOME/.local/bin && \
+        uv venv --seed ~/skypilot-runtime && \
+        UV_PIP_EXEC="env VIRTUAL_ENV=$(echo ~/skypilot-runtime) uv pip" && \
+        $UV_PIP_EXEC install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $UV_PIP_EXEC uninstall skypilot-nightly && \
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
-
