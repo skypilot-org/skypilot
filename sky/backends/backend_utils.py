@@ -683,41 +683,68 @@ def write_cluster_config(
         resources_utils.ClusterName(
             cluster_name,
             cluster_name_on_cloud,
-        ), region, zones, dryrun)
+        ), region, zones, num_nodes, dryrun)
     config_dict = {}
 
     specific_reservations = set(
         skypilot_config.get_nested(
             (str(to_provision.cloud).lower(), 'specific_reservations'), set()))
 
+    # Remote identity handling can have 4 cases:
+    # 1. LOCAL_CREDENTIALS (default for most clouds): Upload local credentials
+    # 2. SERVICE_ACCOUNT: SkyPilot creates and manages a service account
+    # 3. Custom service account: Use specified service account
+    # 4. NO_UPLOAD: Do not upload any credentials
+    #
+    # We need to upload credentials only if LOCAL_CREDENTIALS is specified. In
+    # other cases, we exclude the cloud from credential file uploads after
+    # running required checks.
     assert cluster_name is not None
-    excluded_clouds = []
+    excluded_clouds = set()
     remote_identity_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
     if isinstance(remote_identity_config, list):
+        # Some clouds (e.g., AWS) support specifying multiple service accounts
+        # chosen based on the cluster name. Do the matching here to pick the
+        # correct one.
         for profile in remote_identity_config:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
                 break
     if remote_identity != schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value:
-        if not cloud.supports_service_account_on_remote():
+        # If LOCAL_CREDENTIALS is not specified, we add the cloud to the
+        # excluded_clouds set, but we must also check if the cloud supports
+        # service accounts.
+        if remote_identity == schemas.RemoteIdentityOptions.NO_UPLOAD.value:
+            # If NO_UPLOAD is specified, fall back to default remote identity
+            # for downstream logic but add it to excluded_clouds to skip
+            # credential file uploads.
+            remote_identity = schemas.get_default_remote_identity(
+                str(cloud).lower())
+        elif not cloud.supports_service_account_on_remote():
             raise exceptions.InvalidCloudConfigs(
                 'remote_identity: SERVICE_ACCOUNT is specified in '
                 f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
-        # If using Kubernetes and using allowed_contexts, we need to upload
-        # credentials for all contexts. This is required when a SkyPilot 
-        # controller is running on Kubernetes.
         if isinstance(cloud, clouds.Kubernetes):
             if skypilot_config.get_nested(
-                ('kubernetes', 'allowed_contexts'), None) is None:
-                excluded_clouds.append(cloud)
+                    ('kubernetes', 'allowed_contexts'), None) is None:
+                excluded_clouds.add(cloud)
         else:
-            excluded_clouds.append(cloud)
+            excluded_clouds.add(cloud)
+
+    for cloud_str, cloud_obj in cloud_registry.CLOUD_REGISTRY.items():
+        remote_identity_config = skypilot_config.get_nested(
+            (cloud_str.lower(), 'remote_identity'), None)
+        if remote_identity_config:
+            if (remote_identity_config ==
+                    schemas.RemoteIdentityOptions.NO_UPLOAD.value):
+                excluded_clouds.add(cloud_obj)
+
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
@@ -822,7 +849,11 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower())),
-
+                'skypilot_wheel_installation_commands':
+                    constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
+                        '{sky_wheel_hash}',
+                        wheel_hash).replace('{cloud}',
+                                            str(cloud).lower()),
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -1169,18 +1200,18 @@ def ssh_credential_from_yaml(
 
 
 def parallel_data_transfer_to_nodes(
-    runners: List[command_runner.CommandRunner],
-    source: Optional[str],
-    target: str,
-    cmd: Optional[str],
-    run_rsync: bool,
-    *,
-    action_message: str,
-    # Advanced options.
-    log_path: str = os.devnull,
-    stream_logs: bool = False,
-    source_bashrc: bool = False,
-):
+        runners: List[command_runner.CommandRunner],
+        source: Optional[str],
+        target: str,
+        cmd: Optional[str],
+        run_rsync: bool,
+        *,
+        action_message: str,
+        # Advanced options.
+        log_path: str = os.devnull,
+        stream_logs: bool = False,
+        source_bashrc: bool = False,
+        num_threads: Optional[int] = None):
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
@@ -1192,6 +1223,7 @@ def parallel_data_transfer_to_nodes(
         log_path: str; Path to the log file
         stream_logs: bool; Whether to stream logs to stdout
         source_bashrc: bool; Source bashrc before running the command.
+        num_threads: Optional[int]; Number of threads to use.
     """
     style = colorama.Style
 
@@ -1232,7 +1264,7 @@ def parallel_data_transfer_to_nodes(
     message = (f'  {style.DIM}{action_message} (to {num_nodes} node{plural})'
                f': {origin_source} -> {target}{style.RESET_ALL}')
     logger.info(message)
-    subprocess_utils.run_in_parallel(_sync_node, runners)
+    subprocess_utils.run_in_parallel(_sync_node, runners, num_threads)
 
 
 def check_local_gpus() -> bool:

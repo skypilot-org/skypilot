@@ -208,6 +208,7 @@ class OCI(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
