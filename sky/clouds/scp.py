@@ -55,8 +55,6 @@ class SCP(clouds.Cloud):
             (f'Spot instances are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            (f'Opening ports is currently not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
