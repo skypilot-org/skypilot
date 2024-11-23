@@ -208,10 +208,14 @@ RAY_INSTALLATION_COMMANDS = (
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
-    f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
-    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
-    f'{{ {SKY_UV_PIP_CMD} uninstall skypilot; '
-    f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
+    # Try uv first, fall back to regular pip if uv is not available.
+    # This is only for backwards compatibility with pre-nimbus SkyPilot versions.
+    # TODO(romilb): Change to using SKY_UV_PIP_CMD after v0.10.0.
+    f'PIP_CMD=$(which uv >/dev/null 2>&1 && echo "{SKY_UV_PIP_CMD}" || echo "{SKY_PIP_CMD}"); '
+    f'{{ $PIP_CMD list | grep "skypilot " && '
+    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '
+    f'{{ $PIP_CMD uninstall skypilot; '
+    f'$PIP_CMD install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; ')
