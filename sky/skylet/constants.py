@@ -54,9 +54,16 @@ ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 SKY_UV_CMD = f'{SKY_UV_INSTALL_DIR}/uv'
-SKY_UV_PIP_CMD = f'env VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
+SKY_UV_PIP_CMD = f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
 # environment. `deactivate` command does not work when conda is used.
+
+# Define SKY_GET_PIP_CMD to try uv first, fall back to regular pip if uv is not
+# available. This is only for backwards compatibility with pre-nimbus SkyPilot
+# versions.
+# TODO(romilb): Change to using SKY_UV_PIP_CMD after v0.10.0.
+SET_SKY_PIP = f'SKY_PIP() {{ which uv >/dev/null 2>&1 && {SKY_UV_PIP_CMD} "$@" || {SKY_PIP_CMD} "$@"; }};'  # pylint: disable=line-too-long
+
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
     f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
@@ -169,13 +176,14 @@ CONDA_INSTALLATION_COMMANDS = (
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 RAY_INSTALLATION_COMMANDS = (
+    f'{SET_SKY_PIP} '
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
-    f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
+    f'SKY_PIP install "setuptools<70"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -189,10 +197,10 @@ RAY_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
+    f'SKY_PIP list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    f'SKY_PIP install -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -208,14 +216,11 @@ RAY_INSTALLATION_COMMANDS = (
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
-    # Try uv first, fall back to regular pip if uv is not available.
-    # This is only for backwards compatibility with pre-nimbus SkyPilot versions.
-    # TODO(romilb): Change to using SKY_UV_PIP_CMD after v0.10.0.
-    f'PIP_CMD=$(which uv >/dev/null 2>&1 && echo "{SKY_UV_PIP_CMD}" || echo "{SKY_PIP_CMD}"); ' # pylint: disable=line-too-long
-    f'{{ $PIP_CMD list | grep "skypilot " && '
+    f'{SET_SKY_PIP} '
+    f'{{ SKY_PIP list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || ' # pylint: disable=line-too-long
-    f'{{ $PIP_CMD uninstall skypilot; '
-    f'$PIP_CMD install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
+    f'{{ SKY_PIP uninstall skypilot; '
+    f'SKY_PIP install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
     'exit 1; }; ')
@@ -224,13 +229,14 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
 # installed. {var} will be replaced with the actual value in
 # backend_utils.write_cluster_config.
 RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    f'{SET_SKY_PIP} '
     f'{RAY_INSTALLATION_COMMANDS} '
     f'{SKYPILOT_WHEEL_INSTALLATION_COMMANDS} '
     # Only patch ray when the ray version is the same as the expected version.
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
-    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
+    f'SKY_PIP list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null && '
     f'{{ {SKY_PYTHON_CMD} -c '
     '"from sky.skylet.ray_patches import patch; patch()" || exit 1; }; ')
