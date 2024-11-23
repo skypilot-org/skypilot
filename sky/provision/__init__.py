@@ -22,6 +22,7 @@ from sky.provision import kubernetes
 from sky.provision import lambda_cloud
 from sky.provision import oci
 from sky.provision import runpod
+from sky.provision import scp
 from sky.provision import vsphere
 from sky.utils import command_runner
 from sky.utils import timeline
