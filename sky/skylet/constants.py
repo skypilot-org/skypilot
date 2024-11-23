@@ -53,12 +53,6 @@ ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
 # environment. `deactivate` command does not work when conda is used.
 
-# Define SKY_GET_PIP_CMD to try uv first, fall back to regular pip if uv is not
-# available. This is only for backwards compatibility with pre-nimbus SkyPilot
-# versions.
-# TODO(romilb): Change to using SKY_UV_PIP_CMD after v0.10.0.
-SET_SKY_PIP = f'SKY_PIP() {{ which uv >/dev/null 2>&1 && {SKY_UV_PIP_CMD} "$@" || {SKY_PIP_CMD} "$@"; }};'  # pylint: disable=line-too-long
-
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
     f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
