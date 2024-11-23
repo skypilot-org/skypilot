@@ -398,7 +398,7 @@ class SCPClient:
         url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}'
         return self._delete(url)
 
-    def del_firwall_rules(self, firewall_id, rule_id_list):
+    def del_firewall_rules(self, firewall_id, rule_id_list):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
         request_body = {'ruleDeletionType': 'PARTIAL', 'ruleIds': rule_id_list}
         return self._delete(url, request_body=request_body)
@@ -422,11 +422,11 @@ class SCPClient:
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
         return self._get(url, contents_key=None)
 
-    def get_firewal_rule_info(self, firewall_id, rule_id):
+    def get_firewall_rule_info(self, firewall_id, rule_id):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'  # pylint: disable=line-too-long
         return self._get(url, contents_key=None)
 
-    def list_firwalls(self):
+    def list_firewalls(self):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls'
         return self._get(url)
 
@@ -442,3 +442,156 @@ class SCPClient:
     def stop_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}/stop'
         return self._post(url=url, request_body={})
+
+    def list_security_group_rules(self, sg_id):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+        return self._get(url)
+
+    def _check_existing_security_group_in_rule(self, sg_id, port):
+        response = self.list_security_group_rules(sg_id)
+        rules = []
+        for rule in response:
+            rule_direction = rule['ruleDirection']
+            if rule_direction == 'IN':
+                rules.append(rule)
+        for rule in rules:
+            port_list = rule['tcpServices']
+            if port in port_list:
+                return False
+        return True
+
+    def _check_existing_security_group_out_rule(self, sg_id, port):
+        response = self.list_security_group_rules(sg_id)
+        rules = []
+        for rule in response:
+            rule_direction = rule['ruleDirection']
+            if rule_direction == 'OUT':
+                rules.append(rule)
+        for rule in rules:
+            port_list = rule['tcpServices']
+            if port in port_list:
+                return False
+        return True
+
+    def add_new_security_group_in_rule(self, sg_id, port):
+        if self._check_existing_security_group_in_rule(sg_id, port):
+            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+            request_body = {
+                'ruleDirection': 'IN',
+                'services': [{
+                    'serviceType': 'TCP',
+                    'serviceValue': port
+                }],
+                'sourceIpAddresses': ['0.0.0.0/0'],
+                'ruleDescription': 'skyserve rule'
+            }
+            return self._post(url, request_body)
+
+    def add_new_security_group_out_rule(self, sg_id, port):
+        if self._check_existing_security_group_out_rule(sg_id, port):
+            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+            request_body = {
+                'ruleDirection': 'OUT',
+                'services': [{
+                    'serviceType': 'TCP',
+                    'serviceValue': port
+                }],
+                'destinationIpAddresses': ['0.0.0.0/0'],
+                'ruleDescription': 'skyserve rule'
+            }
+            return self._post(url, request_body)
+
+    def list_firewall_rules(self, firewall_id):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+        return self._get(url)
+
+    def _check_existing_firewall_in_rule(self, firewall_id, internal_ip, port):
+        response = self.list_firewall_rules(firewall_id)
+        rule_list = []
+        for rule in response:
+            rule_direction = rule['ruleDirection']
+            if rule_direction == 'IN' and internal_ip == rule[
+                    'destinationIpAddresses'][0]:
+                rule_list.append(rule)
+        for rule in rule_list:
+            port_list = rule['tcpServices']
+            if port in port_list:
+                return False
+        return True
+
+    def _check_existing_firewall_out_rule(self, firewall_id, internal_ip, port):
+        response = self.list_firewall_rules(firewall_id)
+        rule_list = []
+        for rule in response:
+            rule_direction = rule['ruleDirection']
+            if rule_direction == 'OUT' and internal_ip == rule[
+                    'sourceIpAddresses'][0]:
+                rule_list.append(rule)
+        for rule in rule_list:
+            port_list = rule['tcpServices']
+            if port in port_list:
+                return False
+        return True
+
+    def add_new_firewall_inbound_rule(self, firewall_id, internal_ip, port):
+        if self._check_existing_firewall_in_rule(firewall_id, internal_ip,
+                                                 port):
+            url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+            request_body = {
+                'sourceIpAddresses': ['0.0.0.0/0'],
+                'destinationIpAddresses': [internal_ip],
+                'services': [{
+                    'serviceType': 'TCP',
+                    'serviceValue': port
+                }],
+                'ruleDirection': 'IN',
+                'ruleAction': 'ALLOW',
+                'isRuleEnabled': True,
+                'ruleLocationType': 'FIRST',
+                'ruleDescription': 'skyserve rule'
+            }
+            return self._post(url, request_body)
+
+    def add_new_firewall_outbound_rule(self, firewall_id, internal_ip, port):
+        if self._check_existing_firewall_out_rule(firewall_id, internal_ip,
+                                                  port):
+            url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+            request_body = {
+                'sourceIpAddresses': [internal_ip],
+                'destinationIpAddresses': ['0.0.0.0/0'],
+                'services': [{
+                    'serviceType': 'TCP',
+                    'serviceValue': port
+                }],
+                'ruleDirection': 'OUT',
+                'ruleAction': 'ALLOW',
+                'isRuleEnabled': True,
+                'ruleLocationType': 'FIRST',
+                'ruleDescription': 'skyserve rule'
+            }
+            return self._post(url, request_body)
+
+    def wait_firewall_inbound_rule_complete(self, firewall_id, rule_id):
+        while True:
+            time.sleep(5)
+            rule_info = self.get_firewall_rule_info(firewall_id, rule_id)
+            if rule_info['ruleState'] == "ACTIVE":
+                break
+        return
+
+    def wait_firewall_outbound_rule_complete(self, firewall_id, rule_id):
+        while True:
+            time.sleep(5)
+            rule_info = self.get_firewall_rule_info(firewall_id, rule_id)
+            if rule_info['ruleState'] == "ACTIVE":
+                break
+        return
+
+    def get_virtual_server_info(self, vm_id):
+        url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
+        return self._get(url=url, contents_key=None)
+
+    def del_security_group_rules(self, sg_id, rule_id_list):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{securityGroupId}/rules'
+        request_body = {'ruleDeletionType': 'ALL', 'ruleIds': rule_id_list}
+        return self._delete(url, request_body=request_body)
