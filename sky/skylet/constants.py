@@ -218,7 +218,7 @@ RAY_INSTALLATION_COMMANDS = (
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SET_SKY_PIP} '
     f'{{ SKY_PIP list | grep "skypilot " && '
-    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || ' # pylint: disable=line-too-long
+    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     f'{{ SKY_PIP uninstall skypilot; '
     f'SKY_PIP install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
