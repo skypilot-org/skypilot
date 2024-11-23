@@ -376,4 +376,5 @@ class StreamBody(pydantic.BaseModel):
     """The request body for the stream endpoint."""
     request_id: Optional[str] = None
     log_path: Optional[str] = None
+    tail: Optional[int] = None
     plain_logs: bool = True

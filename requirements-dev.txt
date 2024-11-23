@@ -17,6 +17,7 @@ types-requests<2.31
 types-setuptools
 types-cachetools
 types-pyvmomi
+types-aiofiles
 
 # testing
 pytest

@@ -141,7 +141,8 @@ def kill_children_processes(parent_pids: Optional[Union[
             # The child process may have already been terminated.
             pass
         except psutil.TimeoutExpired:
-            logger.debug(f'Process {proc.pid} did not terminate after 10 seconds')
+            logger.debug(
+                f'Process {proc.pid} did not terminate after 10 seconds')
             # Attempt to force kill if the normal termination fails
             if not force:
                 logger.debug(f'Force killing process {proc.pid}')

@@ -124,7 +124,7 @@ def check_health(func):
         with filelock.FileLock(
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             if not is_api_server_running():
-                with rich_utils.client_status('Starting API server'):
+                with rich_utils.client_status('Starting SkyPilot server'):
                     if server_url == DEFAULT_SERVER_URL:
                         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                                     f'SkyPilot API server at {server_url}. '

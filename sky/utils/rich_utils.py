@@ -1,15 +1,18 @@
 """Rich status spinner utils."""
-import atexit
 import contextlib
 import enum
 import logging
 import threading
-from typing import Dict, Optional, Tuple, Union
+import typing
+from typing import Dict, Iterator, Optional, Tuple, Union
 
 import rich.console as rich_console
 
 from sky.utils import annotations
 from sky.utils import message_utils
+
+if typing.TYPE_CHECKING:
+    import requests
 
 console = rich_console.Console(soft_wrap=True)
 _statuses: Dict[str, Optional[Union['EncodedStatus',
@@ -17,7 +20,6 @@ _statuses: Dict[str, Optional[Union['EncodedStatus',
                                         'server': None,
                                         'client': None,
                                     }
-_decoding_status: Optional['_RevertibleStatus'] = None
 _status_nesting_level = 0
 
 _logging_lock = threading.RLock()
@@ -80,24 +82,24 @@ class EncodedStatus:
     def __init__(self, msg: str):
         self.status = msg
         self.encoded_msg = EncodedStatusMessage(msg)
-        print(self.encoded_msg.init(), flush=True)
+        print(self.encoded_msg.init(), end='', flush=True)
 
     def __enter__(self):
-        print(self.encoded_msg.enter(), flush=True)
+        print(self.encoded_msg.enter(), end='', flush=True)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        print(self.encoded_msg.exit(), flush=True)
+        print(self.encoded_msg.exit(), end='', flush=True)
 
     def update(self, msg: str):
         self.status = msg
-        print(self.encoded_msg.update(msg), flush=True)
+        print(self.encoded_msg.update(msg), end='', flush=True)
 
     def stop(self):
-        print(self.encoded_msg.stop(), flush=True)
+        print(self.encoded_msg.stop(), end='', flush=True)
 
     def start(self):
-        print(self.encoded_msg.start(), flush=True)
+        print(self.encoded_msg.start(), end='', flush=True)
 
 
 class _NoOpConsoleStatus:
@@ -222,47 +224,46 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     return _NoOpConsoleStatus()
 
 
-def decode_rich_status(encoded_msg: str) -> Optional[str]:
+def decode_rich_status(
+        response: 'requests.Response') -> Iterator[Optional[str]]:
     """Decode the rich status message."""
-    is_payload, encoded_msg = message_utils.decode_payload(
-        encoded_msg, raise_for_mismatch=False)
-    # print(f'encoded_msg: {encoded_msg}', flush=True)
-    control = None
-    if is_payload:
-        control, encoded_status = Control.decode(encoded_msg)
-    if control is None:
-        return encoded_msg
+    decoding_status = None
+    try:
+        for encoded_msg in response.iter_lines():
+            if encoded_msg is None:
+                return
+            encoded_msg = encoded_msg.decode('utf-8')
+            is_payload, encoded_msg = message_utils.decode_payload(
+                encoded_msg, raise_for_mismatch=False)
+            control = None
+            if is_payload:
+                control, encoded_status = Control.decode(encoded_msg)
+            if control is None:
+                yield encoded_msg
 
-    global _decoding_status
-    if threading.current_thread() is not threading.main_thread():
-        if control is not None:
-            return None
-        else:
-            return encoded_msg
+            if threading.current_thread() is not threading.main_thread():
+                if control is not None:
+                    yield None
+                else:
+                    yield encoded_msg
 
-    if control == Control.INIT:
-        if _statuses['client'] is None:
-            _statuses['client'] = console.status(encoded_status)
-        _decoding_status = _RevertibleStatus(encoded_status, 'client')
-    else:
-        assert _decoding_status is not None, (
-            f'Rich status not initialized: {encoded_msg}')
-        if control == Control.UPDATE:
-            _decoding_status.update(encoded_status)
-        elif control == Control.STOP:
-            _decoding_status.stop()
-        elif control == Control.EXIT:
-            _decoding_status.__exit__(None, None, None)
-            _decoding_status = None
-        elif control == Control.START:
-            _decoding_status.start()
-    return None
-
-
-def abort_client_status():
-    if _statuses['client'] is not None:
-        _statuses['client'].stop()
-        _statuses['client'] = None
-
-
-atexit.register(abort_client_status)
+            if control == Control.INIT:
+                decoding_status = client_status(encoded_status)
+            else:
+                if decoding_status is None:
+                    # status may not be initialized if a user use --tail for
+                    # sky api get.
+                    continue
+                assert decoding_status is not None, (
+                    f'Rich status not initialized: {encoded_msg}')
+                if control == Control.UPDATE:
+                    decoding_status.update(encoded_status)
+                elif control == Control.STOP:
+                    decoding_status.stop()
+                elif control == Control.EXIT:
+                    decoding_status.__exit__(None, None, None)
+                elif control == Control.START:
+                    decoding_status.start()
+    finally:
+        if decoding_status is not None:
+            decoding_status.__exit__(None, None, None)

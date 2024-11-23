@@ -138,7 +138,7 @@ def _get_cluster_records_and_set_ssh_config(
         if handle is not None and handle.cached_external_ips is not None:
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                # Replace the proxy command to proxy through the API server
+                # Replace the proxy command to proxy through the SkyPilot server
                 # with websocet.
                 key_path = (
                     cluster_utils.SSHConfigHelper.generate_local_key_file(
@@ -207,8 +207,11 @@ def _async_call_or_wait(request_id: str, async_call: bool,
         try:
             return sdk.stream_and_get(request_id)
         except KeyboardInterrupt:
-            click.secho(f'Interrupted {request_name} request: {request_id}',
-                        fg='red')
+            click.secho(
+                f'\n{colorama.Style.DIM}Request will continue running '
+                f'asynchronously. '
+                f'To stream logs from SkyPilot server: sky api get {request_id}'
+                f'{colorama.Style.RESET_ALL}',)
             raise
     else:
         click.secho(f'Submitted {request_name} request: {request_id}',
@@ -963,7 +966,7 @@ def cli():
               is_flag=True,
               help='If True, do not actually run the job.')
 # Detach setup/run should always be true to avoid blocking the request queue on
-# API server.
+# SkyPilot server.
 @click.option(
     '--detach-setup/--no-detach-setup',
     '-s/-no-s',
@@ -3127,7 +3130,8 @@ def check(clouds: Tuple[str], verbose: bool):
     sdk.stream_and_get(request_id)
     api_server_url = api_common.get_server_url()
     click.echo()
-    click.echo(click.style(f'Using API server: {api_server_url}', fg='green'))
+    click.echo(
+        click.style(f'Using SkyPilot server: {api_server_url}', fg='green'))
 
 
 @cli.command()
@@ -4849,7 +4853,7 @@ def benchmark_launch(
     Alternatively, specify the benchmarking resources in your YAML (see doc),
     which allows benchmarking on many more resource fields.
     """
-    # TODO(zhwu): move benchmark to API server
+    # TODO(zhwu): move benchmark to SkyPilot server
     env = _merge_env_vars(env_file, env)
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
@@ -5612,7 +5616,7 @@ def local_down(async_call: bool):
 
 @cli.group(cls=_NaturalOrderGroup)
 def api():
-    """Managed Spot commands (spot instances with auto-recovery)."""
+    """SkyPilot server commands."""
     pass
 
 
@@ -5622,23 +5626,24 @@ def api():
               is_flag=True,
               default=False,
               required=False,
-              help='Automatically reload the API server when code changes.')
+              help='Automatically reload the SkyPilot server when code changes.'
+             )
 @click.option('--deploy',
               type=bool,
               is_flag=True,
               default=False,
               required=False,
-              help='Deploy the API server as a service.')
+              help='Deploy the SkyPilot server as a service.')
 @usage_lib.entrypoint
 def api_start(reload: bool, deploy: bool):
-    """Starts the API server locally."""
+    """Starts the SkyPilot server locally."""
     sdk.api_start(api_server_reload=reload, deploy=deploy)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def api_stop():
-    """Stops the API server locally."""
+    """Stops the SkyPilot server locally."""
     sdk.api_stop()
 
 
@@ -5649,16 +5654,22 @@ def api_stop():
               required=False,
               type=str,
               help='The path to the log file to stream.')
+@click.option('--tail',
+              required=False,
+              type=int,
+              help=('Number of lines to show from the end of the logs. '
+                    '(default: None)'))
 @usage_lib.entrypoint
-def api_get(request_id: Optional[str], log_path: Optional[str]):
-    """Stream the logs of a request running on API server."""
+def api_get(request_id: Optional[str], log_path: Optional[str],
+            tail: Optional[int]):
+    """Stream the logs of a request running on SkyPilot server."""
     if request_id is None and log_path is None:
         # TODO(zhwu): get the latest request ID.
         raise click.BadParameter('Please provide the request ID or log path.')
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(request_id, log_path)
+    sdk.stream_and_get(request_id, log_path, tail)
 
 
 @api.command('abort', cls=_DocumentedCodeCommand)
@@ -5672,7 +5683,7 @@ def api_get(request_id: Optional[str], log_path: Optional[str]):
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_abort(request_id: Optional[str], all: bool):
-    """Abort a request running on API server."""
+    """Abort a request running on SkyPilot server."""
     if request_id is None and not all:
         raise click.BadParameter('Either specify a request ID or use --all to '
                                  'abort all requests.')
@@ -5690,7 +5701,7 @@ def api_abort(request_id: Optional[str], all: bool):
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_ls(request_id: Optional[str], all: bool):
-    """List requests on API server."""
+    """List requests on SkyPilot server."""
     request_list = sdk.requests_ls(request_id, all)
     table = log_utils.create_table([
         'ID',
@@ -5724,7 +5735,7 @@ def api_ls(request_id: Optional[str], all: bool):
 # Follow the arguments of `docker logs` command.
 @usage_lib.entrypoint
 def api_server_logs(follow: bool, tail: str):
-    """Shows the API server logs."""
+    """Shows the SkyPilot server logs."""
     sdk.api_server_logs(follow, tail)
 
 
@@ -5732,11 +5743,12 @@ def api_server_logs(follow: bool, tail: str):
 @click.option('--endpoint',
               '-e',
               required=False,
-              help='The API server endpoint.')
+              help='The SkyPilot server endpoint.')
 @usage_lib.entrypoint
 def api_login(endpoint: Optional[str]):
+    """Logs into a SkyPilot server."""
     if endpoint is None:
-        endpoint = click.prompt('Enter your API server endpoint')
+        endpoint = click.prompt('Enter your SkyPilot server endpoint')
     # Check endpoint is a valid URL
     if endpoint and not endpoint.startswith(
             'http://') and not endpoint.startswith('https://'):
@@ -5754,7 +5766,16 @@ def api_login(endpoint: Optional[str]):
             config = skypilot_config.set_nested(('api_server', 'endpoint'),
                                                 endpoint)
         common_utils.dump_yaml(str(config_path), config)
-        click.secho(f'Logged in to API server at {endpoint}', fg='green')
+        click.secho(f'Logged in to SkyPilot server at {endpoint}', fg='green')
+
+
+@api.command('info', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def api_info():
+    """Shows the SkyPilot server URL."""
+    # TODO(zongheng): in the future, show server's commit / version.
+    api_server_url = api_common.get_server_url()
+    click.echo(f'Using SkyPilot server: {api_server_url}')
 
 
 def main():

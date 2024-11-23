@@ -2,12 +2,13 @@
 
 import argparse
 import asyncio
+import collections
 import contextlib
 import os
 import pathlib
 import sys
 import time
-from typing import List, Optional
+from typing import AsyncGenerator, Deque, List, Optional
 import uuid
 import zipfile
 
@@ -571,24 +572,55 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
         await asyncio.sleep(1)
 
 
+async def _yield_log_file_with_payloads_skipped(
+        log_file) -> AsyncGenerator[str, None]:
+    async for line in log_file:
+        if not line:
+            return
+        is_payload, line_str = message_utils.decode_payload(
+            line.decode('utf-8'), raise_for_mismatch=False)
+        if is_payload:
+            continue
+
+        yield line_str
+
+
 async def log_streamer(request_id: Optional[str],
                        log_path: pathlib.Path,
-                       plain_logs: bool = False):
+                       plain_logs: bool = False,
+                       tail: Optional[int] = None) -> AsyncGenerator[str, None]:
     if request_id is not None:
+        status_msg = rich_utils.EncodedStatusMessage(
+            f'[dim]Checking request: {request_id}[/dim]')
         request_task = requests_lib.get_request(request_id)
-        rich_status = rich_utils.safe_status(f'Checking request: {request_id}')
+
         if not plain_logs:
-            rich_status.start()
+            yield status_msg.init()
+            yield status_msg.start()
         while request_task.status < requests_lib.RequestStatus.RUNNING:
-            rich_status.update(f'Waiting for request to start: {request_id}')
+            if not plain_logs:
+                yield status_msg.update(
+                    f'[dim]Waiting for {request_task.name} request: '
+                    f'{request_id}[/dim]')
             await asyncio.sleep(1)
             request_task = requests_lib.get_request(request_id)
         if not plain_logs:
-            rich_status.stop()
+            yield status_msg.stop()
 
-    with log_path.open('rb') as f:
+    # Find last n lines of the log file. Do not read the whole file into memory.
+    async with aiofiles.open(str(log_path), 'rb') as f:
+        if tail is not None:
+            # TODO(zhwu): this will include the control lines for rich status,
+            # which may not lead to exact tail lines when showing on the client
+            # side.
+            lines: Deque[str] = collections.deque(maxlen=tail)
+            async for line_str in _yield_log_file_with_payloads_skipped(f):
+                lines.append(line_str)
+            for line_str in lines:
+                yield line_str
+
         while True:
-            line = f.readline()
+            line: Optional[bytes] = await f.readline()
             if not line:
                 if request_id is not None:
                     request_task = requests_lib.get_request(request_id)
@@ -612,7 +644,8 @@ async def log_streamer(request_id: Optional[str],
 async def stream(
         request_id: Optional[str] = None,
         log_path: Optional[str] = None,
-        plain_logs: bool = True) -> fastapi.responses.StreamingResponse:
+        plain_logs: bool = True,
+        tail: Optional[int] = None) -> fastapi.responses.StreamingResponse:
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
@@ -651,7 +684,7 @@ async def stream(
 
         log_path_to_stream = resolved_log_path
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, log_path_to_stream, plain_logs),
+        log_streamer(request_id, log_path_to_stream, plain_logs, tail),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache',
@@ -828,7 +861,7 @@ if __name__ == '__main__':
         num_queue_workers *= 2
         workers = executor.start(num_queue_workers=num_queue_workers)
 
-        logger.info('Starting API server')
+        logger.info('Starting SkyPilot server')
         uvicorn.run('sky.api.rest:app',
                     host=cmd_args.host,
                     port=cmd_args.port,

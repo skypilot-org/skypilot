@@ -659,7 +659,8 @@ def get(request_id: str) -> Any:
 @api_common.check_health
 @annotations.public_api
 def stream_and_get(request_id: Optional[str] = None,
-                   log_path: Optional[str] = None) -> Any:
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None) -> Any:
     """Stream the logs of a request and get the final result.
 
     This will block until the request is finished. The request id can be a
@@ -669,6 +670,7 @@ def stream_and_get(request_id: Optional[str] = None,
         'request_id': request_id,
         'log_path': log_path,
         'plain_logs': False,
+        'tail': str(tail) if tail is not None else None,
     }
     response = requests.get(
         f'{api_common.get_server_url()}/stream',
@@ -679,15 +681,12 @@ def stream_and_get(request_id: Optional[str] = None,
     if response.status_code != 200:
         return get(request_id)
     try:
-        for line in response.iter_lines():
-            if line:
-                msg = line.decode('utf-8')
-                msg = rich_utils.decode_rich_status(msg)
-                if msg is not None:
-                    print(msg, flush=True)
+        for line in rich_utils.decode_rich_status(response):
+            if line is not None:
+                print(line, flush=True)
         return get(request_id)
     except Exception:  # pylint: disable=broad-except
-        logger.debug(f'Check more loggings with: sky api get {request_id}')
+        logger.debug(f'To stream request logs: sky api get {request_id}')
         raise
 
 

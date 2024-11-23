@@ -11,7 +11,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import filelock
 
-from sky import exceptions, sky_logging
+from sky import exceptions
+from sky import sky_logging
 from sky.api import common
 from sky.api.requests import payloads
 from sky.api.requests.serializers import decoders

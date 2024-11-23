@@ -857,7 +857,8 @@ class AWS(clouds.Cloud):
         Returns:
             False if the quota is found to be zero, and True otherwise.
         Raises:
-            ImportError: if the dependencies for AWS are not able to be installed.
+            ImportError: if the dependencies for AWS are not able to be
+                installed.
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
 
@@ -871,7 +872,8 @@ class AWS(clouds.Cloud):
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
         if quota_code is None:
-            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            # Quota code not found in the catalog for the chosen instance_type,
+            # try provisioning anyway.
             return True
 
         if aws_utils.use_reservations():
@@ -885,7 +887,8 @@ class AWS(clouds.Cloud):
             response = client.get_service_quota(ServiceCode='ec2',
                                                 QuotaCode=quota_code)
         except aws.botocore_exceptions().ClientError:
-            # Botocore client connection not established, try provisioning anyways
+            # Botocore client connection not established, try provisioning
+            # anyways
             return True
 
         if response['Quota']['Value'] == 0:
