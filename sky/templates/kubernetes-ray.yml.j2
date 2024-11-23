@@ -329,7 +329,9 @@ available_node_types:
             - |
               # For backwards compatibility, we put a marker file in the pod
               # to indicate that the pod is running with the changes introduced 
-              # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393 
+              # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
+              # TODO: Remove this marker file and it's usage in setup_commands
+              # after v0.10.0 release.
               touch /tmp/skypilot_is_nimbus
               
               # Helper function to conditionally use sudo

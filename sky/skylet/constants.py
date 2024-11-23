@@ -54,7 +54,7 @@ ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 SKY_UV_CMD = f'{SKY_UV_INSTALL_DIR}/uv'
-SKY_UV_PIP_CMD = f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
+SKY_UV_PIP_CMD = f'env VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
 # environment. `deactivate` command does not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
@@ -211,9 +211,9 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     # Try uv first, fall back to regular pip if uv is not available.
     # This is only for backwards compatibility with pre-nimbus SkyPilot versions.
     # TODO(romilb): Change to using SKY_UV_PIP_CMD after v0.10.0.
-    f'PIP_CMD=$(which uv >/dev/null 2>&1 && echo "{SKY_UV_PIP_CMD}" || echo "{SKY_PIP_CMD}"); '
+    f'PIP_CMD=$(which uv >/dev/null 2>&1 && echo "{SKY_UV_PIP_CMD}" || echo "{SKY_PIP_CMD}"); ' # pylint: disable=line-too-long
     f'{{ $PIP_CMD list | grep "skypilot " && '
-    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '
+    '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || ' # pylint: disable=line-too-long
     f'{{ $PIP_CMD uninstall skypilot; '
     f'$PIP_CMD install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
