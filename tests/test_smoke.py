@@ -105,6 +105,15 @@ _ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
 _ALL_MANAGED_JOB_STATUSES = "|".join(
     [status.value for status in ManagedJobStatus])
 
+
+def _statuses_to_str(statuses: List[enum.Enum]):
+    """Convert a list of enums to a string with all the values separated by |."""
+    if len(statuses) > 1:
+        return '(' + '|'.join([status.value for status in statuses]) + ')'
+    else:
+        return statuses[0].value
+
+
 _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     # A while loop to wait until the cluster status
     # becomes certain status, with timeout.
@@ -124,8 +133,17 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 
+def _get_cmd_wait_until_cluster_status_contains(
+        cluster_name: str, cluster_status: List[ClusterStatus], timeout: int):
+    return _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+        cluster_name=cluster_name,
+        cluster_status=(cluster_status),
+        timeout=timeout)
+
+
 def _get_cmd_wait_until_cluster_status_contains_wildcard(
-        cluster_name_wildcard: str, cluster_status: str, timeout: int):
+        cluster_name_wildcard: str, cluster_status: List[ClusterStatus],
+        timeout: int):
     wait_cmd = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
         'sky status {cluster_name}',
         'sky status "{cluster_name}"').replace('awk "/^{cluster_name}/',
@@ -133,7 +151,7 @@ def _get_cmd_wait_until_cluster_status_contains_wildcard(
     return wait_cmd.format(cluster_name=cluster_name_wildcard,
                            cluster_name_awk=cluster_name_wildcard.replace(
                                '*', '.*'),
-                           cluster_status=cluster_status,
+                           cluster_status=_statuses_to_str(cluster_status),
                            timeout=timeout)
 
 
@@ -147,9 +165,15 @@ _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     'if sky status -r {cluster_name}; sky status {cluster_name} | grep "{cluster_name} not found"; then '
     '  echo "Cluster {cluster_name} successfully removed."; break; '
     'fi; '
-    'echo "Waiting for cluster {name} to be removed..."; '
+    'echo "Waiting for cluster {cluster_name} to be removed..."; '
     'sleep 10; '
     'done')
+
+
+def _get_cmd_wait_until_cluster_is_not_found(cluster_name: str, timeout: int):
+    return _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND.format(cluster_name=cluster_name,
+                                                   timeout=timeout)
+
 
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
@@ -182,6 +206,35 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CO
 _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
 
+
+def _get_cmd_wait_until_job_status_contains_matching_job_id(
+        cluster_name: str, job_id: str, job_status: List[JobStatus],
+        timeout: int):
+    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+        cluster_name=cluster_name,
+        job_id=job_id,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
+
+def _get_cmd_wait_until_job_status_contains_without_matching_job(
+        cluster_name: str, job_status: List[JobStatus], timeout: int):
+    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+        cluster_name=cluster_name,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
+
+def _get_cmd_wait_until_job_status_contains_matching_job_name(
+        cluster_name: str, job_name: str, job_status: List[JobStatus],
+        timeout: int):
+    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+        cluster_name=cluster_name,
+        job_name=job_name,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
+
 # Managed job functions
 
 _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
@@ -189,6 +242,15 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
             _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+
+
+def _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+        job_name: str, job_status: List[JobStatus], timeout: int):
+    return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+        job_name=job_name,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
 
 # After the timeout, the cluster will stop if autostop is set, and our check
 # should be more than the timeout. To address this, we extend the timeout by
@@ -508,9 +570,9 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             f'sky status -r {name} | grep UP',
 
             # Ensure cluster is stopped
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
             # Launch again. Do full output validation - we expect the cluster to re-launch
@@ -573,14 +635,15 @@ def test_aws_with_ssh_proxy_command():
                 # the job controller is not launched with proxy command.
                 _get_cmd_wait_until_cluster_status_contains_wildcard(
                     cluster_name_wildcard='sky-jobs-controller-*',
-                    cluster_status=ClusterStatus.UP.value,
+                    cluster_status=[ClusterStatus.UP],
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
-                _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.
-                format(
+                _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
-                    job_status=
-                    f'({ManagedJobStatus.SUCCEEDED.value}|{ManagedJobStatus.RUNNING.value}|{ManagedJobStatus.STARTING.value})',
+                    job_status=[
+                        ManagedJobStatus.SUCCEEDED, ManagedJobStatus.RUNNING,
+                        ManagedJobStatus.STARTING
+                    ],
                     timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
@@ -951,9 +1014,9 @@ def test_clone_disk_aws():
             f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=60),
             # Wait for EC2 instance to be in stopped state.
             # TODO: event based wait.
@@ -1003,8 +1066,8 @@ def test_gcp_mig():
             # Check MIG exists.
             f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
             f'sky autostop -i 0 --down -y {name}',
-            _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND.format(cluster_name=name,
-                                                    timeout=120),
+            _get_cmd_wait_until_cluster_is_not_found(cluster_name=name,
+                                                     timeout=120),
             f'gcloud compute instance-templates list | grep "sky-it-{name}"',
             # Launch again with the same region. The original instance template
             # should be removed.
@@ -1071,9 +1134,9 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
-        _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+        _get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
-            cluster_status=ClusterStatus.STOPPED.value,
+            cluster_status=[ClusterStatus.STOPPED],
             timeout=80),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
@@ -1095,9 +1158,9 @@ def test_stale_job(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=100),
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
@@ -1126,17 +1189,17 @@ def test_aws_stale_job_manual_restart():
             '--output text`; '
             f'aws ec2 stop-instances --region {region} '
             '--instance-ids $id',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=40),
             f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+            _get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=JobStatus.FAILED_DRIVER.value,
+                job_status=[JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name}',
@@ -1167,9 +1230,9 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+            _get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=JobStatus.FAILED_DRIVER.value,
+                job_status=[JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
         f'sky down -y {name}',
@@ -1990,10 +2053,10 @@ def test_multi_echo(generic_cloud: str):
         ] +
         # Ensure jobs succeeded.
         [
-            _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+            _get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id=i + 1,
-                job_status=JobStatus.SUCCEEDED.value,
+                job_status=[JobStatus.SUCCEEDED],
                 timeout=120) for i in range(32)
         ] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
@@ -2567,17 +2630,16 @@ def test_gcp_start_stop():
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=40),
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=
-                f'({ClusterStatus.STOPPED.value}|{ClusterStatus.INIT.value})',
+                cluster_status=[ClusterStatus.STOPPED, ClusterStatus.INIT],
                 timeout=200),
         ],
         f'sky down -y {name}',
@@ -2601,10 +2663,9 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=
-                f'({ClusterStatus.STOPPED.value}|{ClusterStatus.INIT.value})',
+                cluster_status=[ClusterStatus.STOPPED, ClusterStatus.INIT],
                 timeout=280) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}',
         ],
@@ -2642,9 +2703,9 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
@@ -2661,9 +2722,9 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
             # Test restarting the idleness timer via exec:
@@ -2673,9 +2734,9 @@ def test_autostop(generic_cloud: str):
             'sleep 45',  # Almost reached the threshold.
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout + _BUMP_UP_SECONDS),
         ],
         f'sky down -y {name}',
@@ -2893,18 +2954,18 @@ def test_stop_gcp_spot():
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 2 --status',
             f'sky autostop {name} -i0 -y',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=90),
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=120),
         ],
         f'sky down -y {name}',
@@ -2925,20 +2986,24 @@ def test_managed_jobs(generic_cloud: str):
         [
             f'sky jobs launch -n {name}-1 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
             f'sky jobs launch -n {name}-2 --cloud {generic_cloud} examples/managed_job.yaml -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
-                job_status=
-                f'({ManagedJobStatus.PENDING.value}|{ManagedJobStatus.INIT.value}|{ManagedJobStatus.RUNNING.value})',
+                job_status=[
+                    ManagedJobStatus.PENDING, ManagedJobStatus.INIT,
+                    ManagedJobStatus.RUNNING
+                ],
                 timeout=60),
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
-                job_status=
-                f'({ManagedJobStatus.PENDING.value}|{ManagedJobStatus.INIT.value}|{ManagedJobStatus.RUNNING.value})',
+                job_status=[
+                    ManagedJobStatus.PENDING, ManagedJobStatus.INIT,
+                    ManagedJobStatus.RUNNING
+                ],
                 timeout=60),
             f'sky jobs cancel -y -n {name}-1',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
-                job_status=f'{ManagedJobStatus.CANCELLED.value}',
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=230),
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
@@ -3010,9 +3075,9 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
         [
             f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             # Make sure the job failed quickly.
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=f'{ManagedJobStatus.FAILED_SETUP.value}',
+                job_status=[ManagedJobStatus.FAILED_SETUP],
                 timeout=330 + _BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
@@ -3036,9 +3101,9 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
         'managed_jobs_pipeline_failed_setup',
         [
             f'sky jobs launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=f'{ManagedJobStatus.FAILED_SETUP.value}',
+                job_status=[ManagedJobStatus.FAILED_SETUP],
                 timeout=600),
             # Make sure the job failed quickly.
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "FAILED_SETUP"',
@@ -3073,9 +3138,9 @@ def test_managed_jobs_recovery_aws(aws_config_region):
         'managed_jobs_recovery_aws',
         [
             f'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=600),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
@@ -3086,9 +3151,9 @@ def test_managed_jobs_recovery_aws(aws_config_region):
              '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=200),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
@@ -3117,18 +3182,18 @@ def test_managed_jobs_recovery_gcp():
         'managed_jobs_recovery_gcp',
         [
             f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=300),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=200),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
         ],
@@ -3152,9 +3217,9 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
         'managed_jobs_pipeline_recovery_aws',
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=400),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
@@ -3174,9 +3239,9 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
                 '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=200),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
@@ -3207,9 +3272,9 @@ def test_managed_jobs_pipeline_recovery_gcp():
         'managed_jobs_pipeline_recovery_gcp',
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=400),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids',
@@ -3221,9 +3286,9 @@ def test_managed_jobs_pipeline_recovery_gcp():
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=200),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
             f'RUN_IDS=$(sky jobs logs -n {name} --no-follow | grep -A 4 SKYPILOT_TASK_IDS | cut -d")" -f2); echo "$RUN_IDS" | tee /tmp/{name}-run-ids-new',
@@ -3250,10 +3315,11 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
         'managed-spot-recovery-default-resources',
         [
             f'sky jobs launch -n {name} --cloud {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=
-                f'({ManagedJobStatus.RUNNING.value}|{ManagedJobStatus.RECOVERING.value})',
+                job_status=[
+                    ManagedJobStatus.RUNNING, ManagedJobStatus.RECOVERING
+                ],
                 timeout=360),
         ],
         f'sky jobs cancel -y -n {name}',
@@ -3274,9 +3340,9 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
         'managed_jobs_recovery_multi_node_aws',
         [
             f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=450),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
@@ -3288,9 +3354,9 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
              '--output text)'),
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=560),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
@@ -3319,18 +3385,18 @@ def test_managed_jobs_recovery_multi_node_gcp():
         'managed_jobs_recovery_multi_node_gcp',
         [
             f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=400),
             f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             terminate_cmd,
             _JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{_GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=560),
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
@@ -3356,15 +3422,16 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
         [
             # Test cancellation during spot cluster being launched.
             f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=
-                f'({ManagedJobStatus.STARTING.value}|{ManagedJobStatus.RUNNING.value})',
+                job_status=[
+                    ManagedJobStatus.STARTING, ManagedJobStatus.RUNNING
+                ],
                 timeout=60 + _BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.CANCELLED.value,
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=120 + _BUMP_UP_SECONDS),
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
@@ -3374,14 +3441,14 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Test cancelling the spot cluster during spot job being setup.
             f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=300 + _BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}-2',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
-                job_status=ManagedJobStatus.CANCELLED.value,
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=120 + _BUMP_UP_SECONDS),
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
@@ -3391,9 +3458,9 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             # Test cancellation during spot job is recovering.
             f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000"  -y -d',
             # The job is running in the cluster, will shown as RUNNING.
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=300 + _BUMP_UP_SECONDS),
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -3404,9 +3471,9 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             _JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
             f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky jobs cancel -y -n {name}-3',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
-                job_status=ManagedJobStatus.CANCELLED.value,
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=120 + _BUMP_UP_SECONDS),
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
@@ -3442,41 +3509,41 @@ def test_managed_jobs_cancellation_gcp():
         [
             # Test cancellation during spot cluster being launched.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.STARTING.value,
+                job_status=[ManagedJobStatus.STARTING],
                 timeout=60 + _BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.CANCELLED.value,
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=120 + _BUMP_UP_SECONDS),
             # Test cancelling the spot cluster during spot job being setup.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=300 + _BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}-2',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
-                job_status=ManagedJobStatus.CANCELLED.value,
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=120 + _BUMP_UP_SECONDS),
             # Test cancellation during spot job is recovering.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000"  -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
-                job_status=ManagedJobStatus.RUNNING.value,
+                job_status=[ManagedJobStatus.RUNNING],
                 timeout=300 + _BUMP_UP_SECONDS),
             # Terminate the cluster manually.
             terminate_cmd,
             _JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
             f'{_GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky jobs cancel -y -n {name}-3',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
-                job_status=ManagedJobStatus.CANCELLED.value,
+                job_status=[ManagedJobStatus.CANCELLED],
                 timeout=120 + _BUMP_UP_SECONDS),
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
@@ -3567,10 +3634,10 @@ def test_managed_jobs_storage(generic_cloud: str):
                 *STORAGE_SETUP_COMMANDS,
                 f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
-                _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.
-                format(job_name=name,
-                       job_status=ManagedJobStatus.SUCCEEDED.value,
-                       timeout=60 + _BUMP_UP_SECONDS),
+                _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[ManagedJobStatus.SUCCEEDED],
+                    timeout=60 + _BUMP_UP_SECONDS),
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
@@ -3594,15 +3661,16 @@ def test_managed_jobs_tpu():
         'test-spot-tpu',
         [
             f'sky jobs launch -n {name} --use-spot examples/tpu/tpuvm_mnist.yaml -y -d',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.STARTING.value,
+                job_status=[ManagedJobStatus.STARTING],
                 timeout=60 + _BUMP_UP_SECONDS),
             # TPU takes a while to launch
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=
-                f'({ManagedJobStatus.RUNNING.value}|{ManagedJobStatus.SUCCEEDED.value})',
+                job_status=[
+                    ManagedJobStatus.RUNNING, ManagedJobStatus.SUCCEEDED
+                ],
                 timeout=900 + _BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
@@ -3621,9 +3689,9 @@ def test_managed_jobs_inline_env(generic_cloud: str):
         'test-managed-jobs-inline-env',
         [
             f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
-            _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=ManagedJobStatus.SUCCEEDED.value,
+                job_status=[ManagedJobStatus.SUCCEEDED],
                 timeout=20 + _BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
@@ -3731,10 +3799,9 @@ def test_azure_start_stop_two_nodes():
             f'sky start -y {name} -i 1',
             f'sky exec --num-nodes=2 {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=
-                f'({ClusterStatus.INIT.value}|{ClusterStatus.STOPPED.value})',
+                cluster_status=[ClusterStatus.INIT, ClusterStatus.STOPPED],
                 timeout=200 + _BUMP_UP_SECONDS) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
@@ -4746,9 +4813,9 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
                    idle_minutes_to_autostop=1,
                    fast=True)
         # Sleep to let the cluster autostop
-        _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+        _get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
-            cluster_status=ClusterStatus.STOPPED,
+            cluster_status=[ClusterStatus.STOPPED],
             timeout=120)
         # Run it again - should work with fast=True
         sky.launch(task,
