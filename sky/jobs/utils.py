@@ -384,8 +384,29 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_statuses = backend.get_job_status(handle, stream_logs=False)
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
+                assert task_id is not None, job_id
+                if job_status == job_lib.JobStatus.FAILED:
+                    task_specs = managed_job_state.get_task_specs(
+                        job_id, task_id)
+                    if task_specs.get('max_restarts_on_errors', 0) == 0:
+                        # We don't need to wait for the managed job status
+                        # update, as the job is guaranteed to be in terminal
+                        # state afterwards.
+                        break
+                    print()
+                    status_display.update(
+                        ux_utils.spinner_message(
+                            'Waiting for next restart for the failed task'))
+                    status_display.start()
+                    while True:
+                        _, managed_job_status = (
+                            managed_job_state.get_latest_task_id_status(job_id))
+                        if (managed_job_status !=
+                                managed_job_state.ManagedJobStatus.RUNNING):
+                            break
+                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                    continue
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    assert task_id is not None, job_id
                     if task_id < num_tasks - 1 and follow:
                         # The log for the current job is finished. We need to
                         # wait until next job to be started.
@@ -410,27 +431,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         continue
                     else:
-                        task_specs = managed_job_state.get_task_specs(
-                            job_id, task_id)
-                        if task_specs.get('max_restarts_on_errors', 0) == 0:
-                            # We don't need to wait for the managed job status
-                            # update, as the job is guaranteed to be in terminal
-                            # state afterwards.
-                            break
-                        print()
-                        status_display.update(
-                            ux_utils.spinner_message(
-                                'Waiting for next restart for the failed task'))
-                        status_display.start()
-                        while True:
-                            _, managed_job_status = (
-                                managed_job_state.get_latest_task_id_status(
-                                    job_id))
-                            if (managed_job_status !=
-                                    managed_job_state.ManagedJobStatus.RUNNING):
-                                break
-                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                        continue
+                        break
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
                 logger.debug(
