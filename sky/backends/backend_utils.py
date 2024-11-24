@@ -732,7 +732,7 @@ def write_cluster_config(
                 '`remote_identity: LOCAL_CREDENTIALS`.')
         if isinstance(cloud, clouds.Kubernetes):
             if skypilot_config.get_nested(
-                    ('kubernetes', 'allowed_contexts'), None) is None:
+                ('kubernetes', 'allowed_contexts'), None) is None:
                 excluded_clouds.add(cloud)
         else:
             excluded_clouds.add(cloud)
