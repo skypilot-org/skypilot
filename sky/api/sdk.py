@@ -62,6 +62,15 @@ def check(clouds: Optional[Tuple[str]], verbose: bool) -> str:
 @usage_lib.entrypoint
 @api_common.check_health
 @annotations.public_api
+def server_info() -> str:
+    """Returns the server's commit and version."""
+    response = requests.get(f'{api_common.get_server_url()}/server_info')
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+@annotations.public_api
 def enabled_clouds() -> str:
     response = requests.get(f'{api_common.get_server_url()}/enabled_clouds')
     return api_common.get_request_id(response)

@@ -5773,9 +5773,9 @@ def api_login(endpoint: Optional[str]):
 @usage_lib.entrypoint
 def api_info():
     """Shows the SkyPilot server URL."""
-    # TODO(zongheng): in the future, show server's commit / version.
-    api_server_url = api_common.get_server_url()
-    click.echo(f'Using SkyPilot server: {api_server_url}')
+    url = api_common.get_server_url()
+    api_server_info = sdk.stream_and_get(sdk.server_info())
+    click.echo(f'Using SkyPilot server: {url} ({api_server_info})')
 
 
 def main():

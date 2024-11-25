@@ -121,6 +121,17 @@ async def check(request: fastapi.Request, check_body: payloads.CheckBody):
     )
 
 
+@app.get('/server_info')
+async def server_info(request: fastapi.Request) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='server_info',
+        request_body=payloads.RequestBody(),
+        func=core.server_info,
+        schedule_type=executor.ScheduleType.NON_BLOCKING,
+    )
+
+
 @app.get('/enabled_clouds')
 async def enabled_clouds(request: fastapi.Request) -> None:
     executor.schedule_request(

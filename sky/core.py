@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
+import sky  # TODO(zongheng): import speed?
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
@@ -936,6 +937,16 @@ def storage_delete(name: str) -> None:
                                       source=handle.source,
                                       sync_on_reconstruction=False)
         storage_object.delete()
+
+
+# ===================
+# = Server Info =
+# ===================
+@usage_lib.entrypoint
+def server_info() -> str:
+    commit = sky.__commit__[:7]  # pylint: disable=no-member
+    version = sky.__version__  # pylint: disable=no-member
+    return f'version: {version}, commit: {commit}'
 
 
 # ===================
