@@ -27,13 +27,14 @@ import time
 
 import pytest
 from smoke_tests.util import get_cluster_name
+from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
+from smoke_tests.util import (
+    get_cmd_wait_until_job_status_contains_without_matching_job)
 from smoke_tests.util import get_timeout
 from smoke_tests.util import run_one_test
 from smoke_tests.util import SCP_TYPE
 from smoke_tests.util import Test
 from smoke_tests.util import VALIDATE_LAUNCH_OUTPUT
-from smoke_tests.util import WAIT_UNTIL_CLUSTER_STATUS_CONTAINS
-from smoke_tests.util import WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB
 
 import sky
 from sky.skylet import events
@@ -142,9 +143,9 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             f'sky status -r {name} | grep UP',
 
             # Ensure cluster is stopped
-            WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
             # Launch again. Do full output validation - we expect the cluster to re-launch
@@ -170,9 +171,9 @@ def test_stale_job(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
-            WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=100),
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
@@ -201,17 +202,17 @@ def test_aws_stale_job_manual_restart():
             '--output text`; '
             f'aws ec2 stop-instances --region {region} '
             '--instance-ids $id',
-            WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=40),
             f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+            get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=JobStatus.FAILED_DRIVER.value,
+                job_status=[JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name}',
@@ -242,9 +243,9 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+            get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=JobStatus.FAILED_DRIVER.value,
+                job_status=[JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
         f'sky down -y {name}',
@@ -354,9 +355,9 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
                    idle_minutes_to_autostop=1,
                    fast=True)
         # Sleep to let the cluster autostop
-        WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+        get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
-            cluster_status=ClusterStatus.STOPPED,
+            cluster_status=[ClusterStatus.STOPPED],
             timeout=120)
         # Run it again - should work with fast=True
         sky.launch(task,

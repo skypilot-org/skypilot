@@ -20,9 +20,9 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import pytest
-from smoke_tests.util import _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND
-from smoke_tests.util import _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS
 from smoke_tests.util import get_cluster_name
+from smoke_tests.util import get_cmd_wait_until_cluster_is_not_found
+from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
 
@@ -279,9 +279,9 @@ def test_clone_disk_aws():
             f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
-            _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+            get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=ClusterStatus.STOPPED.value,
+                cluster_status=[ClusterStatus.STOPPED],
                 timeout=60),
             # Wait for EC2 instance to be in stopped state.
             # TODO: event based wait.
@@ -331,7 +331,7 @@ def test_gcp_mig():
             # Check MIG exists.
             f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
             f'sky autostop -i 0 --down -y {name}',
-            _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND.format(cluster_name=name,
+            get_cmd_wait_until_cluster_is_not_found(cluster_name=name,
                                                     timeout=120),
             f'gcloud compute instance-templates list | grep "sky-it-{name}"',
             # Launch again with the same region. The original instance template
@@ -399,9 +399,9 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
-        _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+        get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
-            cluster_status=ClusterStatus.STOPPED.value,
+            cluster_status=[ClusterStatus.STOPPED],
             timeout=80),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',

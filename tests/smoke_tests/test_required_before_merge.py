@@ -20,9 +20,10 @@
 # > pytest tests/smoke_tests/test_required_before_merge.py --generic-cloud aws
 
 from smoke_tests.util import get_cluster_name
+from smoke_tests.util import (
+    get_cmd_wait_until_job_status_contains_matching_job_id)
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
-from smoke_tests.util import WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID
 
 from sky.skylet import events
 from sky.skylet.job_lib import JobStatus
@@ -34,10 +35,10 @@ def test_yaml_launch_and_mount(generic_cloud: str):
         'test_yaml_launch_and_mount',
         [
             f'sky launch -y -c {name} tests/test_yamls/minimal_test_required_before_merge.yaml',
-            WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+            get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id=1,
-                job_status=JobStatus.SUCCEEDED.value,
+                job_status=[JobStatus.SUCCEEDED],
                 timeout=2 * 60),
         ],
         f'sky down -y {name}',

@@ -25,10 +25,10 @@ import textwrap
 import pytest
 from smoke_tests.util import get_cluster_name
 from smoke_tests.util import get_cmd_wait_until_cluster_status_contains_wildcard
+from smoke_tests.util import (
+    get_cmd_wait_until_managed_job_status_contains_matching_job_name)
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
-from smoke_tests.util import (
-    WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME)
 
 from sky.jobs.state import ManagedJobStatus
 from sky.skylet import constants
@@ -87,10 +87,12 @@ def test_aws_with_ssh_proxy_command():
                     cluster_status=ClusterStatus.UP.value,
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
-                WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
-                    job_status=
-                    f'({ManagedJobStatus.SUCCEEDED.value}|{ManagedJobStatus.RUNNING.value}|{ManagedJobStatus.STARTING.value})',
+                    job_status=[
+                        ManagedJobStatus.SUCCEEDED, ManagedJobStatus.RUNNING,
+                        ManagedJobStatus.STARTING
+                    ],
                     timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',

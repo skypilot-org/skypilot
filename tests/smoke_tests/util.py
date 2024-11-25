@@ -1,3 +1,4 @@
+import enum
 import inspect
 import os
 import subprocess
@@ -56,7 +57,16 @@ _ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
 _ALL_MANAGED_JOB_STATUSES = "|".join(
     [status.value for status in ManagedJobStatus])
 
-WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
+
+def _statuses_to_str(statuses: List[enum.Enum]):
+    """Convert a list of enums to a string with all the values separated by |."""
+    if len(statuses) > 1:
+        return '(' + '|'.join([status.value for status in statuses]) + ')'
+    else:
+        return statuses[0].value
+
+
+_WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     # A while loop to wait until the cluster status
     # becomes certain status, with timeout.
     'start_time=$SECONDS; '
@@ -75,20 +85,29 @@ WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 
+def get_cmd_wait_until_cluster_status_contains(
+        cluster_name: str, cluster_status: List[ClusterStatus], timeout: int):
+    return _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
+        cluster_name=cluster_name,
+        cluster_status=_statuses_to_str(cluster_status),
+        timeout=timeout)
+
+
 def get_cmd_wait_until_cluster_status_contains_wildcard(
-        cluster_name_wildcard: str, cluster_status: str, timeout: int):
-    wait_cmd = WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
+        cluster_name_wildcard: str, cluster_status: List[ClusterStatus],
+        timeout: int):
+    wait_cmd = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
         'sky status {cluster_name}',
         'sky status "{cluster_name}"').replace('awk "/^{cluster_name}/',
                                                'awk "/^{cluster_name_awk}/')
     return wait_cmd.format(cluster_name=cluster_name_wildcard,
                            cluster_name_awk=cluster_name_wildcard.replace(
                                '*', '.*'),
-                           cluster_status=cluster_status,
+                           cluster_status=_statuses_to_str(cluster_status),
                            timeout=timeout)
 
 
-WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
+_WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     # A while loop to wait until the cluster is not found or timeout
     'start_time=$SECONDS; '
     'while true; do '
@@ -98,11 +117,17 @@ WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     'if sky status -r {cluster_name}; sky status {cluster_name} | grep "{cluster_name} not found"; then '
     '  echo "Cluster {cluster_name} successfully removed."; break; '
     'fi; '
-    'echo "Waiting for cluster {name} to be removed..."; '
+    'echo "Waiting for cluster {cluster_name} to be removed..."; '
     'sleep 10; '
     'done')
 
-WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
+
+def get_cmd_wait_until_cluster_is_not_found(cluster_name: str, timeout: int):
+    return _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND.format(cluster_name=cluster_name,
+                                                   timeout=timeout)
+
+
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     # A while loop to wait until the job status
     # contains certain status, with timeout.
     'start_time=$SECONDS; '
@@ -127,19 +152,57 @@ WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'sleep 10; '
     'done')
 
-WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "')
 
-WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
+_WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.replace(
     'awk "\\$1 == \\"{job_id}\\"', 'awk "\\$2 == \\"{job_name}\\"')
+
+
+def get_cmd_wait_until_job_status_contains_matching_job_id(
+        cluster_name: str, job_id: str, job_status: List[JobStatus],
+        timeout: int):
+    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
+        cluster_name=cluster_name,
+        job_id=job_id,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
+
+def get_cmd_wait_until_job_status_contains_without_matching_job(
+        cluster_name: str, job_status: List[JobStatus], timeout: int):
+    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
+        cluster_name=cluster_name,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
+
+def get_cmd_wait_until_job_status_contains_matching_job_name(
+        cluster_name: str, job_name: str, job_status: List[JobStatus],
+        timeout: int):
+    return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+        cluster_name=cluster_name,
+        job_name=job_name,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
 
 # Managed job functions
 
-WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
+_WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.replace(
     'sky queue {cluster_name}', 'sky jobs queue').replace(
         'awk "\\$2 == \\"{job_name}\\"',
         'awk "\\$2 == \\"{job_name}\\" || \\$3 == \\"{job_name}\\"').replace(
             _ALL_JOB_STATUSES, _ALL_MANAGED_JOB_STATUSES)
+
+
+def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+        job_name: str, job_status: List[JobStatus], timeout: int):
+    return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+        job_name=job_name,
+        job_status=_statuses_to_str(job_status),
+        timeout=timeout)
+
 
 # After the timeout, the cluster will stop if autostop is set, and our check
 # should be more than the timeout. To address this, we extend the timeout by
