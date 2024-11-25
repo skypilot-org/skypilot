@@ -1,10 +1,11 @@
 """SCP instance provisioning."""
 
-from sky.clouds.utils import scp_utils
 from typing import Any, Dict, List, Optional
 
+from sky.clouds.utils import scp_utils
 
-def open_ports(
+
+def open_ports(  # pylint: disable=unused-argument
     cluster_name_on_cloud: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
@@ -22,7 +23,7 @@ def open_ports(
         firewall_list = scp_client.list_firewalls()
         internal_ip = vm_info['ip']
         for firewall in firewall_list:
-            if (firewall['vpcId'] == vpc_id):
+            if firewall['vpcId'] == vpc_id:
                 firewall_id = firewall['firewallId']
                 rule_info = scp_client.add_new_firewall_inbound_rule(
                     firewall_id, internal_ip, ports[0])
@@ -38,12 +39,14 @@ def open_ports(
                         firewall_id, rule_id)
 
 
-def cleanup_ports(
+# pylint: disable=unused-argument, pointless-string-statement
+def cleanup_ports(  # pylint: disable=unused-argument
     cluster_name_on_cloud: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    """cleanup_ports is implemented in skypilot/sky/skylet/providers/scp/node_provider.py$terminate_node
-       cleanup_ports cannot be not reached for SCP because the program terminates after terminate_node
+    """cleanup_ports is implemented 
+       in sky/skylet/providers/scp/node_provider.py$terminate_node
+       and it cannot be not reached for SCP after terminate_node
     """
