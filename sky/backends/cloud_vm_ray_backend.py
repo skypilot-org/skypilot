@@ -1367,8 +1367,7 @@ class RetryingVmProvisioner(object):
                 f'in {to_provision.cloud}. '
                 f'{colorama.Style.RESET_ALL}'
                 f'To request quotas, check the instruction: '
-                f'https://docs.skypilot.co/en/latest/cloud-setup/quota.html.'
-            )
+                f'https://docs.skypilot.co/en/latest/cloud-setup/quota.html.')
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
