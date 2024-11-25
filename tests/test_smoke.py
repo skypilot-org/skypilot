@@ -3537,9 +3537,14 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     test = Test(
         'test-managed-jobs-inline-env',
         [
-            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
+            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "echo "\\$TEST_ENV"; ([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             'sleep 20',
             f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
+            f'JOB_ID=$(sky jobs list -n {name} | grep {name} | head -n1 | awk \'{{print $1}}\') && '
+            # Test that logs are still available after the job finishes.
+            's=$(sky jobs logs $JOB_ID) && echo "$s" && echo "$s" | grep "hello world" && '
+            # Make sure we skip the unnecessary logs.
+            'echo "$s" | head -n1 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
