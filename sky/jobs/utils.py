@@ -385,7 +385,11 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
-                if job_status == job_lib.JobStatus.FAILED:
+
+                user_code_failure_states = [
+                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
+                ]
+                if job_status in user_code_failure_states:
                     task_specs = managed_job_state.get_task_specs(
                         job_id, task_id)
                     if task_specs.get('max_restarts_on_errors', 0) == 0:
