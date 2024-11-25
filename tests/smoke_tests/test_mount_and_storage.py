@@ -38,7 +38,6 @@ from smoke_tests.util import run_one_test
 from smoke_tests.util import SCP_TYPE
 from smoke_tests.util import STORAGE_SETUP_COMMANDS
 from smoke_tests.util import Test
-from smoke_tests.util import TestStorageWithCredentials
 
 import sky
 from sky import global_user_state

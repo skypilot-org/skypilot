@@ -27,6 +27,7 @@ import tempfile
 import time
 
 import pytest
+from smoke_tests.test_mount_and_storage import TestStorageWithCredentials
 from smoke_tests.util import BUMP_UP_SECONDS
 from smoke_tests.util import get_cluster_name
 from smoke_tests.util import (
@@ -36,7 +37,6 @@ from smoke_tests.util import JOB_WAIT_NOT_RUNNING
 from smoke_tests.util import run_one_test
 from smoke_tests.util import STORAGE_SETUP_COMMANDS
 from smoke_tests.util import Test
-from smoke_tests.util import TestStorageWithCredentials
 
 from sky import jobs
 from sky.data import storage as storage_lib
