@@ -473,6 +473,7 @@ def start(job_id, dag_yaml, retry_until_up):
     """Start the controller."""
     controller_process = None
     cancelling = False
+    task_id = None
     try:
         _handle_signal(job_id)
         # TODO(suquark): In theory, we should make controller process a
@@ -491,6 +492,7 @@ def start(job_id, dag_yaml, retry_until_up):
     except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
         task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
+        assert task_id is not None, job_id
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
         managed_job_state.set_cancelling(
@@ -522,6 +524,7 @@ def start(job_id, dag_yaml, retry_until_up):
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
+            assert task_id is not None, job_id  # Since it's set with cancelling
             managed_job_state.set_cancelled(
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(
