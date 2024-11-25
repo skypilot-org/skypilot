@@ -42,7 +42,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX}  $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
         # pylint: disable=line-too-long
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html'
     )
 
     _PROJECT_HINT = (
@@ -51,7 +51,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX} $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
         # pylint: disable=line-too-long
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html'
     )
 
     _CLOUD_UNSUPPORTED_FEATURES = {

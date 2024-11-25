@@ -972,7 +972,7 @@ def is_kubeconfig_exec_auth(
                     '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
-                    '    More: https://skypilot.readthedocs.io/en/latest/'
+                    '    More: https://docs.skypilot.co/en/latest/'
                     'reference/config.html')
         return True, exec_msg
     return False, None
