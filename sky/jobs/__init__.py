@@ -6,6 +6,7 @@ from sky.jobs.constants import JOBS_CONTROLLER_TEMPLATE
 from sky.jobs.constants import JOBS_CONTROLLER_YAML_PREFIX
 from sky.jobs.constants import JOBS_TASK_YAML_PREFIX
 from sky.jobs.core import cancel
+from sky.jobs.core import download_logs
 from sky.jobs.core import launch
 from sky.jobs.core import queue
 from sky.jobs.core import queue_from_kubernetes_pod
@@ -37,6 +38,7 @@ __all__ = [
     'queue',
     'queue_from_kubernetes_pod',
     'tail_logs',
+    'download_logs',
     # utils
     'ManagedJobCodeGen',
     'format_job_table',
