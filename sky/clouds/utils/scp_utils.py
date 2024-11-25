@@ -475,7 +475,7 @@ class SCPClient:
 
     def add_new_security_group_in_rule(self, sg_id, port):
         if self._check_existing_security_group_in_rule(sg_id, port):
-            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'  # pylint: disable=line-too-long
             request_body = {
                 'ruleDirection': 'IN',
                 'services': [{
@@ -489,7 +489,7 @@ class SCPClient:
 
     def add_new_security_group_out_rule(self, sg_id, port):
         if self._check_existing_security_group_out_rule(sg_id, port):
-            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'  # pylint: disable=line-too-long
             request_body = {
                 'ruleDirection': 'OUT',
                 'services': [{
@@ -575,7 +575,7 @@ class SCPClient:
         while True:
             time.sleep(5)
             rule_info = self.get_firewall_rule_info(firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE":
+            if rule_info['ruleState'] == 'ACTIVE':
                 break
         return
 
@@ -583,15 +583,10 @@ class SCPClient:
         while True:
             time.sleep(5)
             rule_info = self.get_firewall_rule_info(firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE":
+            if rule_info['ruleState'] == 'ACTIVE':
                 break
         return
 
     def get_virtual_server_info(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
         return self._get(url=url, contents_key=None)
-
-    def del_security_group_rules(self, sg_id, rule_id_list):
-        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{securityGroupId}/rules'
-        request_body = {'ruleDeletionType': 'ALL', 'ruleIds': rule_id_list}
-        return self._delete(url, request_body=request_body)
