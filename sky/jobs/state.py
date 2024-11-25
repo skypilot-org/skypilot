@@ -575,11 +575,10 @@ def get_latest_task_id_status(
     id_statuses = _get_all_task_ids_statuses(job_id)
     if len(id_statuses) == 0:
         return None, None
-    task_id, status = id_statuses[-1]
-    for task_id, status in id_statuses:
-        if not status.is_terminal():
-            break
-    return task_id, status
+    return next(
+        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
+        id_statuses[-1],
+    )
 
 
 def get_status(job_id: int) -> Optional[ManagedJobStatus]:
