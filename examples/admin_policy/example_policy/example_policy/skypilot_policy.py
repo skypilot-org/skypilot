@@ -139,7 +139,7 @@ def update_current_kubernetes_clusters_from_registry():
 def get_allowed_contexts():
     """Mock implementation of getting allowed kubernetes contexts."""
     from sky.provision.kubernetes import utils
-    contexts = utils.get_all_kube_config_context_names()
+    contexts = utils.get_all_kube_context_names()
     return contexts[:2]
 
 

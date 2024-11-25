@@ -172,7 +172,7 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                                     idle_minutes_to_autostop=None)
 
 
-@mock.patch('sky.provision.kubernetes.utils.get_all_kube_config_context_names',
+@mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
             return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
 def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
     _, config = _load_task_and_apply_policy(
