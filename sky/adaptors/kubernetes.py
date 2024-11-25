@@ -19,6 +19,13 @@ urllib3 = common.LazyImport('urllib3',
 # Timeout to use for API calls
 API_TIMEOUT = 5
 
+DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
+# The name for the environment variable that stores the in-cluster context name
+# for Kubernetes clusters. This is used to associate a name with the current
+# context when running with in-cluster auth. If not set, the context name is
+# set to DEFAULT_IN_CLUSTER_REGION.
+IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
+
 
 def _decorate_methods(obj: Any, decorator: Callable, decoration_type: str):
     for attr_name in dir(obj):
@@ -57,16 +64,8 @@ def _api_logging_decorator(logger: str, level: int):
 
 def _load_config(context: Optional[str] = None):
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    try:
-        # Load in-cluster config if running in a pod
-        # Kubernetes set environment variables for service discovery do not
-        # show up in SkyPilot tasks. For now, we work around by using
-        # DNS name instead of environment variables.
-        # See issue: https://github.com/skypilot-org/skypilot/issues/2287
-        os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
-        os.environ['KUBERNETES_SERVICE_PORT'] = '443'
-        kubernetes.config.load_incluster_config()
-    except kubernetes.config.config_exception.ConfigException:
+
+    def _load_config_from_kubeconfig(context: Optional[str] = None):
         try:
             kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
@@ -89,6 +88,21 @@ def _load_config(context: Optional[str] = None):
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
+
+    if context == in_cluster_context_name() or context is None:
+        try:
+            # Load in-cluster config if running in a pod and context is None.
+            # Kubernetes set environment variables for service discovery do not
+            # show up in SkyPilot tasks. For now, we work around by using
+            # DNS name instead of environment variables.
+            # See issue: https://github.com/skypilot-org/skypilot/issues/2287
+            os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
+            os.environ['KUBERNETES_SERVICE_PORT'] = '443'
+            kubernetes.config.load_incluster_config()
+        except kubernetes.config.config_exception.ConfigException:
+            _load_config_from_kubeconfig()
+    else:
+        _load_config_from_kubeconfig(context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
@@ -154,3 +168,13 @@ def max_retry_error():
 
 def stream():
     return kubernetes.stream.stream
+
+
+def in_cluster_context_name() -> Optional[str]:
+    """Returns the name of the in-cluster context from the environment.
+
+    If the environment variable is not set, returns the default in-cluster
+    context name.
+    """
+    return (os.environ.get(IN_CLUSTER_CONTEXT_NAME_ENV_VAR) or
+            DEFAULT_IN_CLUSTER_REGION)

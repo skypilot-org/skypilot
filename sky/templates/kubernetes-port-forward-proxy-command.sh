@@ -58,6 +58,11 @@ KUBECTL_ARGS=()
 if [ -n "$KUBE_CONTEXT" ]; then
   KUBECTL_ARGS+=("--context=$KUBE_CONTEXT")
 fi
+# If context is not provided, it means we are using incluster auth. In this case,
+# we need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
+if [ -z "$KUBE_CONTEXT" ]; then
+  KUBECTL_ARGS+=("--kubeconfig=/dev/null")
+fi
 if [ -n "$KUBE_NAMESPACE" ]; then
   KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
 fi

@@ -16,7 +16,9 @@ echo "context: $context" >&2
 context_lower=$(echo "$context" | tr '[:upper:]' '[:lower:]')
 shift
 if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
-    kubectl exec -i $pod -n $namespace -- "$@"
+    # If context is none, it means we are using incluster auth. In this case,
+    # use need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
+    kubectl exec -i $pod -n $namespace --kubeconfig=/dev/null -- "$@"
 else
     kubectl exec -i $pod -n $namespace --context=$context -- "$@"
 fi
