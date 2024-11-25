@@ -162,7 +162,9 @@ CONDA_INSTALLATION_COMMANDS = (
     # Do NOT use --system-site-packages here, because if users upgrade any
     # packages in the base env, they interfere with skypilot dependencies.
     # Reference: https://github.com/skypilot-org/skypilot/issues/4097
-    f'{SKY_UV_CMD} venv {SKY_REMOTE_PYTHON_ENV};'
+    # --seed will include pip and setuptools, which are present in venvs created
+    # with python -m venv.
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV};'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
