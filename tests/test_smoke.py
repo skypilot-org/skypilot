@@ -574,7 +574,9 @@ def test_launch_fast_with_autostop(generic_cloud: str):
                 cluster_name=name,
                 cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
-
+            # Even the cluster is stopped, cloud platform may take a while to
+            # delete the VM.
+            f'sleep {_BUMP_UP_SECONDS}',
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {_VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
@@ -2989,15 +2991,15 @@ def test_managed_jobs(generic_cloud: str):
             _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
                 job_status=[
-                    ManagedJobStatus.PENDING, ManagedJobStatus.INIT,
-                    ManagedJobStatus.RUNNING
+                    ManagedJobStatus.PENDING, ManagedJobStatus.SUBMITTED,
+                    ManagedJobStatus.STARTING, ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[
-                    ManagedJobStatus.PENDING, ManagedJobStatus.INIT,
-                    ManagedJobStatus.RUNNING
+                    ManagedJobStatus.PENDING, ManagedJobStatus.SUBMITTED,
+                    ManagedJobStatus.STARTING, ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             f'sky jobs cancel -y -n {name}-1',
