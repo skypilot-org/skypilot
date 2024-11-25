@@ -306,7 +306,7 @@ def _create_vm(
         identity=compute.VirtualMachineIdentity(
             type='UserAssigned',
             user_assigned_identities={provider_config['msi']: {}}),
-        priority=node_config['azure_arm_parameters']['priority'])
+        priority=node_config['azure_arm_parameters'].get('priority', None))
     vm_poller = compute_client.virtual_machines.begin_create_or_update(
         resource_group_name=provider_config['resource_group'],
         vm_name=vm_name,
