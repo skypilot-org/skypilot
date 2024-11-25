@@ -52,6 +52,12 @@ _DEFAULT_DRAIN_SECONDS = 120
 # concurrent sky.launch process to avoid overloading the machine.
 _MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 
+A100_REGION_SET = [
+    'us-central1',
+    # 'europe-west4',
+    'asia-northeast1',
+]
+
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
@@ -633,6 +639,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
+        self.region_rrb_idx = 0
 
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -656,6 +663,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        resources_override = resources_override or {}
+        resources_override['cloud'] = sky.GCP()
+        resources_override['region'] = A100_REGION_SET[self.region_rrb_idx]
+        self.region_rrb_idx = (self.region_rrb_idx + 1) % len(A100_REGION_SET)
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
