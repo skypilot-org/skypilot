@@ -27,7 +27,7 @@ import tempfile
 import time
 
 import pytest
-from smoke_tests.util import _BUMP_UP_SECONDS
+from smoke_tests.util import BUMP_UP_SECONDS
 from smoke_tests.util import get_cluster_name
 from smoke_tests.util import (
     get_cmd_wait_until_managed_job_status_contains_matching_job_name)
@@ -147,10 +147,10 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
         [
             f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             # Make sure the job failed quickly.
-            WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
-                job_status=f'{ManagedJobStatus.FAILED_SETUP.value}',
-                timeout=330 + _BUMP_UP_SECONDS),
+                job_status=[ManagedJobStatus.FAILED_SETUP],
+                timeout=330 + BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
@@ -499,12 +499,12 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                 job_status=[
                     ManagedJobStatus.STARTING, ManagedJobStatus.RUNNING
                 ],
-                timeout=60 + _BUMP_UP_SECONDS),
+                timeout=60 + BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}',
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[ManagedJobStatus.CANCELLED],
-                timeout=120 + _BUMP_UP_SECONDS),
+                timeout=120 + BUMP_UP_SECONDS),
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -516,12 +516,12 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[ManagedJobStatus.RUNNING],
-                timeout=300 + _BUMP_UP_SECONDS),
+                timeout=300 + BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}-2',
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[ManagedJobStatus.CANCELLED],
-                timeout=120 + _BUMP_UP_SECONDS),
+                timeout=120 + BUMP_UP_SECONDS),
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -533,7 +533,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
                 job_status=[ManagedJobStatus.RUNNING],
-                timeout=300 + _BUMP_UP_SECONDS),
+                timeout=300 + BUMP_UP_SECONDS),
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
@@ -546,7 +546,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
                 job_status=[ManagedJobStatus.CANCELLED],
-                timeout=120 + _BUMP_UP_SECONDS),
+                timeout=120 + BUMP_UP_SECONDS),
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
@@ -584,30 +584,30 @@ def test_managed_jobs_cancellation_gcp():
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[ManagedJobStatus.STARTING],
-                timeout=60 + _BUMP_UP_SECONDS),
+                timeout=60 + BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}',
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[ManagedJobStatus.CANCELLED],
-                timeout=120 + _BUMP_UP_SECONDS),
+                timeout=120 + BUMP_UP_SECONDS),
             # Test cancelling the spot cluster during spot job being setup.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[ManagedJobStatus.RUNNING],
-                timeout=300 + _BUMP_UP_SECONDS),
+                timeout=300 + BUMP_UP_SECONDS),
             f'sky jobs cancel -y -n {name}-2',
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[ManagedJobStatus.CANCELLED],
-                timeout=120 + _BUMP_UP_SECONDS),
+                timeout=120 + BUMP_UP_SECONDS),
             # Test cancellation during spot job is recovering.
             f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000"  -y -d',
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
                 job_status=[ManagedJobStatus.RUNNING],
-                timeout=300 + _BUMP_UP_SECONDS),
+                timeout=300 + BUMP_UP_SECONDS),
             # Terminate the cluster manually.
             terminate_cmd,
             JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
@@ -616,7 +616,7 @@ def test_managed_jobs_cancellation_gcp():
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
                 job_status=[ManagedJobStatus.CANCELLED],
-                timeout=120 + _BUMP_UP_SECONDS),
+                timeout=120 + BUMP_UP_SECONDS),
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'
@@ -709,7 +709,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[ManagedJobStatus.SUCCEEDED],
-                    timeout=60 + _BUMP_UP_SECONDS),
+                    timeout=60 + BUMP_UP_SECONDS),
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
@@ -736,14 +736,14 @@ def test_managed_jobs_tpu():
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[ManagedJobStatus.STARTING],
-                timeout=60 + _BUMP_UP_SECONDS),
+                timeout=60 + BUMP_UP_SECONDS),
             # TPU takes a while to launch
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[
                     ManagedJobStatus.RUNNING, ManagedJobStatus.SUCCEEDED
                 ],
-                timeout=900 + _BUMP_UP_SECONDS),
+                timeout=900 + BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
@@ -764,7 +764,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[ManagedJobStatus.SUCCEEDED],
-                timeout=20 + _BUMP_UP_SECONDS),
+                timeout=20 + BUMP_UP_SECONDS),
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
