@@ -54,6 +54,10 @@ ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 SKY_UV_CMD = f'{SKY_UV_INSTALL_DIR}/uv'
+# This won't reinstall uv if it's already installed, so it's safe to re-run.
+SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
+                      'curl -LsSf https://astral.sh/uv/install.sh '
+                      f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
 SKY_UV_PIP_CMD = f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
 # environment. `deactivate` command does not work when conda is used.
@@ -154,9 +158,7 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Install uv for venv management and pip installation.
-    'which uv >/dev/null 2>&1 || '
-    'curl -LsSf https://astral.sh/uv/install.sh '
-    f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh;'
+    f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     # Do NOT use --system-site-packages here, because if users upgrade any
@@ -171,6 +173,7 @@ CONDA_INSTALLATION_COMMANDS = (
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
 RAY_INSTALLATION_COMMANDS = (
+    f'{SKY_UV_INSTALL_CMD};'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
