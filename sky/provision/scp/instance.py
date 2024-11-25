@@ -39,8 +39,7 @@ def open_ports(  # pylint: disable=unused-argument
                         firewall_id, rule_id)
 
 
-# pylint: disable=unused-argument, pointless-string-statement
-def cleanup_ports(  # pylint: disable=unused-argument
+def cleanup_ports(  # pylint: disable=unused-argument, pointless-string-statement
     cluster_name_on_cloud: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
