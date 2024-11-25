@@ -48,5 +48,5 @@ def cleanup_ports(  # pylint: disable=unused-argument
     """See sky/provision/__init__.py"""
     """cleanup_ports is implemented 
        in sky/skylet/providers/scp/node_provider.py$terminate_node
-       and it cannot be not reached for SCP after terminate_node
+       because it cannot be not reached for SCP after terminate_node
     """
