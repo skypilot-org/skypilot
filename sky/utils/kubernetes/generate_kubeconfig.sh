@@ -12,6 +12,7 @@
 #   * Specify SKYPILOT_NAMESPACE env var to override the default namespace where the service account is created.
 #   * Specify SKYPILOT_SA_NAME env var to override the default service account name.
 #   * Specify SKIP_SA_CREATION=1 to skip creating the service account and use an existing one
+#   * Specify SUPER_USER=1 to create a service account with cluster-admin permissions
 #
 # Usage:
 #   # Create "sky-sa" service account with minimal permissions in "default" namespace and generate kubeconfig
@@ -22,6 +23,9 @@
 #
 #   # Use an existing service account "my-sa" in "my-namespace" namespace and generate kubeconfig
 #   $ SKIP_SA_CREATION=1 SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
+#
+#   # Create "sky-sa" service account with cluster-admin permissions in "default" namespace
+#   $ SUPER_USER=1 ./generate_kubeconfig.sh
 
 set -eu -o pipefail
 
@@ -29,9 +33,11 @@ set -eu -o pipefail
 # use default.
 SKYPILOT_SA=${SKYPILOT_SA_NAME:-sky-sa}
 NAMESPACE=${SKYPILOT_NAMESPACE:-default}
+SUPER_USER=${SUPER_USER:-0}
 
 echo "Service account: ${SKYPILOT_SA}"
 echo "Namespace: ${NAMESPACE}"
+echo "Super user permissions: ${SUPER_USER}"
 
 # Set OS specific values.
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
@@ -47,8 +53,43 @@ fi
 
 # If the user has set SKIP_SA_CREATION=1, skip creating the service account.
 if [ -z ${SKIP_SA_CREATION+x} ]; then
-  echo "Creating the Kubernetes Service Account with minimal RBAC permissions."
-  kubectl apply -f - <<EOF
+  echo "Creating the Kubernetes Service Account with ${SUPER_USER:+super user}${SUPER_USER:-minimal} RBAC permissions."
+  if [ "${SUPER_USER}" = "1" ]; then
+    # Create service account with cluster-admin permissions
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    parent: skypilot
+---
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: ${SKYPILOT_SA}
+  namespace: ${NAMESPACE}
+  labels:
+    parent: skypilot
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ${SKYPILOT_SA}-cluster-admin
+  labels:
+    parent: skypilot
+subjects:
+  - kind: ServiceAccount
+    name: ${SKYPILOT_SA}
+    namespace: ${NAMESPACE}
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+EOF
+  else
+    # Original RBAC rules for minimal permissions
+    kubectl apply -f - <<EOF
 # Create/update namespace specified by the user
 apiVersion: v1
 kind: Namespace
@@ -173,6 +214,7 @@ roleRef:
   name: skypilot-system-service-account-role
   apiGroup: rbac.authorization.k8s.io
 EOF
+  fi
 # Apply optional ingress-related roles, but don't make the script fail if it fails
 kubectl apply -f - <<EOF || echo "Failed to apply optional ingress-related roles. Nginx ingress is likely not installed. This is not critical and the script will continue."
 # Optional: Role for accessing ingress resources
