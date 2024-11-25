@@ -216,9 +216,15 @@ extras_require: Dict[str, List[str]] = {
     # We need azure-identity>=1.13.0 to enable the customization of the
     # timeout of AzureCliCredential.
     'azure': [
-        'azure-cli>=2.65.0', 'azure-core>=1.31.0', 'azure-identity>=1.19.0',
-        'azure-mgmt-network>=27.0.0', 'azure-mgmt-compute>=33.0.0',
-        'azure-storage-blob>=12.23.1', 'msgraph-sdk'
+        # If you update the azure-cli dependency, update in sky/skylet/constants.py
+        # SKYPILOT_WHEEL_INSTALLATION_COMMANDS as well.
+        'azure-cli>=2.65.0',
+        'azure-core>=1.31.0',
+        'azure-identity>=1.19.0',
+        'azure-mgmt-network>=27.0.0',
+        'azure-mgmt-compute>=33.0.0',
+        'azure-storage-blob>=12.23.1',
+        'msgraph-sdk',
     ] + local_ray,
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances.

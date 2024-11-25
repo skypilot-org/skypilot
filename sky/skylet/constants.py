@@ -211,6 +211,16 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     f'{{ {SKY_UV_PIP_CMD} uninstall skypilot; '
+    # uv cannot install azure-cli normally, since it depends on pre-release
+    # packages. Manually install azure-cli with the --prerelease=allow flag
+    # first. This will allow skypilot to successfully install. See
+    # https://docs.astral.sh/uv/pip/compatibility/#pre-release-compatibility.
+    # We don't want to use --prerelease=allow for all packages, because it will
+    # cause uv to use pre-releases for some other packages that have sufficient
+    # stable releases.
+    'if [ "{cloud}" = "azure" ]; then '
+    f'{SKY_UV_PIP_CMD} install --prerelease=allow "azure-cli>=2.65.0"; fi;'
+    # Install skypilot from wheel
     f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
