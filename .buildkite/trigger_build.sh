@@ -3,6 +3,9 @@
 # Parse the webhook payload (read from stdin)
 PAYLOAD=$(cat)
 
+echo "PAYLOAD: $PAYLOAD"
+echo "KEYWORD: $1"
+
 # Define the allowed user(s)
 ALLOWED_USERS=("zpoint" "Michaelvll" "concretevitamin" "romilbhardwaj" "cg505" "yika-luo") # GitHub usernames
 
