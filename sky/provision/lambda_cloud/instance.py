@@ -203,7 +203,7 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['private_ip'],
+                internal_ip=instance_info.get('private_ip', instance_info.get('ip')),  # Fallback to public IP if private not available
                 external_ip=instance_info['ip'],
                 ssh_port=22,
                 tags={},
