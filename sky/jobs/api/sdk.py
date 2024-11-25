@@ -29,11 +29,7 @@ def launch(
     """Launch a managed job."""
     from sky.api import sdk  # pylint: disable=import-outside-toplevel
 
-    dag = api_common.upload_mounts_to_api_server(task)
-    with tempfile.NamedTemporaryFile(mode='r') as f:
-        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        dag_str = f.read()
-
+    dag = dag_utils.convert_entrypoint_to_dag(task)
     if need_confirmation:
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)
@@ -41,6 +37,10 @@ def launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
+    dag = api_common.upload_mounts_to_api_server(dag)
+    with tempfile.NamedTemporaryFile(mode='r') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_str = f.read()
     body = payloads.JobsLaunchBody(
         task=dag_str,
         name=name,

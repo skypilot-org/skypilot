@@ -11,6 +11,7 @@ Usage example:
 
 """
 import json
+import logging
 import os
 import pathlib
 import subprocess
@@ -45,6 +46,7 @@ if typing.TYPE_CHECKING:
     import sky
 
 logger = sky_logging.init_logger(__name__)
+logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 
 @usage_lib.entrypoint
@@ -198,8 +200,7 @@ def launch(
     #     clone_source_str = f' from the disk of {clone_disk_from!r}'
     #     task, _ = backend_utils.check_can_clone_disk_and_override_task(
     #         clone_disk_from, cluster_name, task)
-
-    dag = api_common.upload_mounts_to_api_server(task)
+    dag = dag_utils.convert_entrypoint_to_dag(task)
 
     confirm_shown = False
 
@@ -233,6 +234,8 @@ def launch(
 
     if not confirm_shown:
         click.secho(f'Running task on cluster {cluster_name}...', fg='yellow')
+
+    dag = api_common.upload_mounts_to_api_server(dag)
 
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
@@ -276,7 +279,8 @@ def exec(  # pylint: disable=redefined-builtin
     backend: Optional[backends.Backend] = None,
 ) -> str:
     """Execute a task."""
-    dag = api_common.upload_mounts_to_api_server(task, workdir_only=True)
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+    dag = api_common.upload_mounts_to_api_server(dag, workdir_only=True)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()

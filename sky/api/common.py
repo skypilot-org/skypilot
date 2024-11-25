@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 import colorama
 import filelock
@@ -149,14 +149,10 @@ def check_health(func):
     return wrapper
 
 
-def upload_mounts_to_api_server(task: Union['sky.Task', 'sky.Dag'],
+def upload_mounts_to_api_server(dag: 'sky.Dag',
                                 workdir_only: bool = False) -> 'dag_lib.Dag':
-    from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
-
     # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
     # TODO(zhwu): Handle .skyignore file.
-
-    dag = dag_utils.convert_entrypoint_to_dag(task)
 
     if is_api_server_local():
         return dag
