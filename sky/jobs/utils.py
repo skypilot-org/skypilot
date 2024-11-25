@@ -398,12 +398,21 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         ux_utils.spinner_message(
                             'Waiting for next restart for the failed task'))
                     status_display.start()
-                    while True:
+
+                    def is_managed_job_status_updated():
+                        """Check if local managed job status reflects remote
+                        job failure.
+
+                        Ensures synchronization between remote cluster failure
+                        detection (JobStatus.FAILED) and controller retry logic.
+                        """
+                        nonlocal managed_job_status
                         _, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
-                        if (managed_job_status !=
-                                managed_job_state.ManagedJobStatus.RUNNING):
-                            break
+                        return (managed_job_status !=
+                                managed_job_state.ManagedJobStatus.RUNNING)
+
+                    while not is_managed_job_status_updated():
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                     continue
                 if job_status != job_lib.JobStatus.CANCELLED:
