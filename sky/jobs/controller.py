@@ -90,7 +90,7 @@ class JobsController:
         self, task_id: Optional[int],
         handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
     ) -> None:
-        """Downloads and streams the logs of the latest job.
+        """Downloads and streams the logs of the current job with given task ID.
 
         We do not stream the logs from the cluster directly, as the
         donwload and stream should be faster, and more robust against
@@ -105,6 +105,8 @@ class JobsController:
         log_file = controller_utils.download_and_stream_latest_job_log(
             self._backend, handle, managed_job_logs_dir)
         if log_file is not None:
+            # Set the path of the log file for the current task, so it can be
+            # accessed even after the job is finished
             managed_job_state.set_local_log_file(self._job_id, task_id,
                                                  log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
@@ -235,6 +237,7 @@ class JobsController:
                     refresh=False,
                     include_controller=False)
                 if clusters:
+                    assert len(clusters) == 1, (clusters, cluster_name)
                     handle = clusters[0].get('handle')
                     # Best effort to download and stream the logs.
                     self._download_log_and_stream(task_id, handle)

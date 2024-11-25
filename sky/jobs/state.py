@@ -519,11 +519,15 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
 def set_local_log_file(job_id: int, task_id: Optional[int],
                        local_log_file: str):
     """Set the local log file for a job."""
-    task_str = '' if task_id is None else f' AND task_id={task_id}'
+    filter_str = 'spot_job_id=(?)'
+    filter_args = [local_log_file, job_id]
+    if task_id is not None:
+        filter_str += ' AND task_id=(?)'
+        filter_args.append(task_id)
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             'UPDATE spot SET local_log_file=(?) '
-            f'WHERE spot_job_id=(?){task_str}', (local_log_file, job_id))
+            f'WHERE {filter_str}', filter_args)
 
 
 # ======== utility functions ========
@@ -680,9 +684,13 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 
 def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
     """Get the local log directory for a job."""
-    task_str = '' if task_id is None else f' AND task_id={task_id}'
+    filter_str = 'spot_job_id=(?)'
+    filter_args = [job_id]
+    if task_id is not None:
+        filter_str += ' AND task_id=(?)'
+        filter_args.append(task_id)
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         local_log_file = cursor.execute(
             f'SELECT local_log_file FROM spot '
-            f'WHERE spot_job_id=(?){task_str}', (job_id,)).fetchone()
+            f'WHERE {filter_str}', filter_args).fetchone()
         return local_log_file[-1] if local_log_file else None

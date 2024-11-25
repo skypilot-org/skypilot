@@ -382,6 +382,8 @@ def download_and_stream_latest_job_log(
             log_dir = list(log_dirs.values())[0]
             log_file = os.path.join(log_dir, 'run.log')
             # Print the logs to the console.
+            # TODO(zhwu): refactor this into log_utils, along with the
+            # refactoring for the log_lib.tail_logs.
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
                     # Stream the logs to the console without reading the whole

@@ -398,7 +398,8 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """
     # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
-        raise ValueError('Cannot specify both name and job_id.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
