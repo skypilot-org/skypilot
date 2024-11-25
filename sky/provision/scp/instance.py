@@ -46,7 +46,7 @@ def cleanup_ports(  # pylint: disable=unused-argument
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    """cleanup_ports is implemented 
+    """cleanup_ports is implemented
        in sky/skylet/providers/scp/node_provider.py$terminate_node
        because it cannot be reached for SCP after terminate_node
     """
