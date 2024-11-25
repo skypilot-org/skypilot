@@ -26,6 +26,7 @@ import textwrap
 import time
 
 import pytest
+from smoke_tests.util import BUMP_UP_SECONDS
 from smoke_tests.util import get_cluster_name
 from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
 from smoke_tests.util import (
@@ -147,7 +148,9 @@ def test_launch_fast_with_autostop(generic_cloud: str):
                 cluster_name=name,
                 cluster_status=[ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
-
+            # Even the cluster is stopped, cloud platform may take a while to
+            # delete the VM.
+            f'sleep {BUMP_UP_SECONDS}',
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',

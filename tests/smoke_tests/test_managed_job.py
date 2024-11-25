@@ -61,15 +61,15 @@ def test_managed_jobs(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
                 job_status=[
-                    ManagedJobStatus.PENDING, ManagedJobStatus.INIT,
-                    ManagedJobStatus.RUNNING
+                    ManagedJobStatus.PENDING, ManagedJobStatus.SUBMITTED,
+                    ManagedJobStatus.STARTING, ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[
-                    ManagedJobStatus.PENDING, ManagedJobStatus.INIT,
-                    ManagedJobStatus.RUNNING
+                    ManagedJobStatus.PENDING, ManagedJobStatus.SUBMITTED,
+                    ManagedJobStatus.STARTING, ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             f'sky jobs cancel -y -n {name}-1',
