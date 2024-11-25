@@ -456,6 +456,21 @@ Available fields and semantics:
     # Reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-account-overview
     storage_account: user-storage-account-name
 
+    # Specify subnet_id to use for instances (optional).
+    # SkyPilot created new vnet and subnet by default but it will reuse exisiting subnet if specified.
+    subnet_id: /subscriptions/subscription-id/resourceGroups/resource-group-name/providers/Microsoft.Network/virtualNetworks/vnet-name/subnets/subnet-name
+
+    # Should instances be assigned private IPs only? (optional)
+    #
+    # Set to true to use private IPs to communicate between the local client and
+    # any SkyPilot nodes. This requires the networking stack be properly set up.
+    #
+    # When set to true, SkyPilot will only use private subnets to launch nodes and won't expose
+    # instances on public IP addresses.
+    # Reference: https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-manage-subnet?tabs=azure-portal
+    # Default: false.
+    use_internal_ips: true
+
   # Advanced Kubernetes configurations (optional).
   kubernetes:
     # The networking mode for accessing SSH jump pod (optional).

@@ -47,6 +47,10 @@ provider:
   # leakage.
   disable_launch_config_check: true
 
+  {%- if subnet_id is not none %}
+  subnet_id: {{subnet_id}}
+  {%- endif %}
+  use_internal_ips: {{use_internal_ips}}
 
 auth:
     ssh_user: azureuser

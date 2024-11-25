@@ -25,6 +25,12 @@
             "metadata": {
                 "description": "Name of the Network Security Group associated with the SkyPilot cluster."
             }
+        },
+        "existingSubnet": {
+            "type": "string",
+            "metadata": {
+            "description": "Existing subnet id to use."
+            }
         }
     },
     "variables": {
@@ -86,6 +92,7 @@
             "apiVersion": "2019-11-01",
             "name": "[variables('vnetName')]",
             "location": "[variables('location')]",
+            "condition": "[equals(parameters('existingSubnet'), '')]",
             "properties": {
                 "addressSpace": {
                     "addressPrefixes": [

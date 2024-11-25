@@ -366,6 +366,14 @@ class Azure(clouds.Cloud):
         if resource_group_name is None:
             resource_group_name = f'{cluster_name.name_on_cloud}-{region_name}'
 
+        # Determine subnet_id if configured
+        subnet_id = skypilot_config.get_nested(('azure', 'subnet_id'), None)
+
+        # Determine if internal IPs should be used
+        use_internal_ips = skypilot_config.get_nested(
+            ('azure', 'use_internal_ips'), False)
+
+
         # Setup commands to eliminate the banner and restart sshd.
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
@@ -423,6 +431,8 @@ class Azure(clouds.Cloud):
             'azure_subscription_id': self.get_project_id(dryrun),
             'resource_group': resource_group_name,
             'use_external_resource_group': use_external_resource_group,
+            'subnet_id': subnet_id,
+            'use_internal_ips': use_internal_ips,
         }
 
         # Setting disk performance tier for high disk tier.
