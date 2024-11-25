@@ -14,7 +14,7 @@ import shutil
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -400,20 +400,18 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             'Waiting for next restart for the failed task'))
                     status_display.start()
 
-                    def is_managed_job_status_updated() -> bool:
-                        """Check if local managed job status reflects remote
-                        job failure.
+                    # Check if local managed job status reflects remote job
+                    # failure.
+                    # Ensures synchronization between remote cluster failure
+                    # detection (JobStatus.FAILED) and controller retry logic.
+                    is_managed_job_status_updated: Callable[
+                        [Optional[managed_job_state.ManagedJobStatus]],
+                        bool] = (lambda status: status != managed_job_state.
+                                 ManagedJobStatus.RUNNING)
 
-                        Ensures synchronization between remote cluster failure
-                        detection (JobStatus.FAILED) and controller retry logic.
-                        """
-                        nonlocal managed_job_status
-                        _, managed_job_status = (
-                            managed_job_state.get_latest_task_id_status(job_id))
-                        return (managed_job_status !=
-                                managed_job_state.ManagedJobStatus.RUNNING)
-
-                    while not is_managed_job_status_updated():
+                    while not is_managed_job_status_updated(
+                            managed_job_status := managed_job_state.get_status(
+                                job_id)):
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                     continue
                 if job_status != job_lib.JobStatus.CANCELLED:
