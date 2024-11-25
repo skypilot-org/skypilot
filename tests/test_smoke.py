@@ -27,6 +27,7 @@
 
 # All files categorized under tests/smoke_tests/*
 # Please add new test cases under that directory.
+
 from smoke_tests.test_basic import *
 from smoke_tests.test_cluster_job import *
 from smoke_tests.test_images import *
