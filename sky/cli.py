@@ -486,7 +486,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -539,7 +539,14 @@ def _parse_override_params(
         else:
             override_params['disk_tier'] = disk_tier
     if ports:
-        override_params['ports'] = ports
+        if any(p.lower() == 'none' for p in ports):
+            if len(ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify both "none" and other '
+                                     'ports.')
+            override_params['ports'] = None
+        else:
+            override_params['ports'] = ports
     return override_params
 
 
@@ -730,7 +737,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
-    ports: Optional[Tuple[str]] = None,
+    ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
@@ -1084,7 +1091,7 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: Tuple[str],
+    ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
