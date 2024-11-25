@@ -386,10 +386,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
 
-                user_code_failure_states = [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-                ]
-                if job_status in user_code_failure_states:
+                if job_status in job_lib.JobStatus.user_code_failure_states():
                     task_specs = managed_job_state.get_task_specs(
                         job_id, task_id)
                     if task_specs.get('max_restarts_on_errors', 0) == 0:
@@ -403,7 +400,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             'Waiting for next restart for the failed task'))
                     status_display.start()
 
-                    def is_managed_job_status_updated():
+                    def is_managed_job_status_updated() -> bool:
                         """Check if local managed job status reflects remote
                         job failure.
 

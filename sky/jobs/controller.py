@@ -236,9 +236,7 @@ class JobsController:
                     task.num_nodes == 1):
                 continue
 
-            if job_status in [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-            ]:
+            if job_status in job_lib.JobStatus.user_code_failure_states():
                 # Add a grace period before the check of preemption to avoid
                 # false alarm for job failure.
                 time.sleep(5)
@@ -268,9 +266,7 @@ class JobsController:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
-                elif job_status in [
-                        job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-                ]:
+                elif job_status in job_lib.JobStatus.user_code_failure_states():
                     # The user code has probably crashed, fail immediately.
                     end_time = managed_job_utils.get_job_timestamp(
                         self._backend, cluster_name, get_end_time=True)
