@@ -137,7 +137,7 @@ def _get_cmd_wait_until_cluster_status_contains(
         cluster_name: str, cluster_status: List[ClusterStatus], timeout: int):
     return _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
         cluster_name=cluster_name,
-        cluster_status=(cluster_status),
+        cluster_status=_statuses_to_str(cluster_status),
         timeout=timeout)
 
 
