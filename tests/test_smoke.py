@@ -3311,7 +3311,7 @@ def test_managed_jobs_retry_logs():
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
             test = Test(
                 'managed_jobs_retry_logs',
-       [
+                [
                     f'sky jobs launch -n {name} {f.name} -y -d',
                     f'sky jobs logs -n {name} | tee {log_file.name}',
                     # First attempt
