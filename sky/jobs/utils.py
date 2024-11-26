@@ -14,7 +14,7 @@ import shutil
 import textwrap
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -391,8 +391,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                         break
 
                     # Logs for retrying failed tasks.
-                    if (job_status in job_lib.JobStatus.user_code_failure_states(
-                    )):
+                    if (job_status
+                            in job_lib.JobStatus.user_code_failure_states()):
                         task_specs = managed_job_state.get_task_specs(
                             job_id, task_id)
                         if task_specs.get('max_restarts_on_errors', 0) == 0:
@@ -406,15 +406,18 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                                 'Waiting for next restart for the failed task'))
                         status_display.start()
 
-                        # Check if local managed job status reflects remote job
-                        # failure.
-                        # Ensures synchronization between remote cluster failure
-                        # detection (JobStatus.FAILED) and controller retry
-                        # logic.
-                        is_managed_job_status_updated: Callable[
-                            [Optional[managed_job_state.ManagedJobStatus]],
-                            bool] = (lambda status: status != managed_job_state.
-                                     ManagedJobStatus.RUNNING)
+                        def is_managed_job_status_updated(
+                            status: Optional[managed_job_state.ManagedJobStatus]
+                        ) -> bool:
+                            """Check if local managed job status reflects remote
+                            job failure.
+
+                            Ensures synchronization between remote cluster
+                            failure detection (JobStatus.FAILED) and controller
+                            retry logic.
+                            """
+                            return (status !=
+                                    managed_job_state.ManagedJobStatus.RUNNING)
 
                         while not is_managed_job_status_updated(
                                 managed_job_status :=
