@@ -460,6 +460,9 @@ Available fields and semantics:
     # SkyPilot created new vnet and subnet by default but it will reuse exisiting subnet if specified.
     subnet_id: /subscriptions/subscription-id/resourceGroups/resource-group-name/providers/Microsoft.Network/virtualNetworks/vnet-name/subnets/subnet-name
 
+    # Set existing managed identity for instances (optional).
+    msi_id: /subscriptions/subscription-id/resourceGroups/resource-group-name/providers/Microsoft.ManagedIdentity/userAssignedIdentities/msi-name
+
     # Should instances be assigned private IPs only? (optional)
     #
     # Set to true to use private IPs to communicate between the local client and

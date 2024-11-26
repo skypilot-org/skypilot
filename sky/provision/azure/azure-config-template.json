@@ -31,7 +31,13 @@
             "metadata": {
             "description": "Existing subnet id to use."
             }
-        }
+        },
+	"existingMSI": {
+	    "type": "string",
+	    "metadata": {
+	    "description": "Existing MSI id to use."
+	    }
+	}
     },
     "variables": {
         "contributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
@@ -46,12 +52,14 @@
     "resources": [
        {
             "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+            "condition": "[equals(parameters('existingMSI'), '')]",
             "apiVersion": "2018-11-30",
             "location": "[variables('location')]",
             "name": "[variables('msiName')]"
         },
         {
             "type": "Microsoft.Authorization/roleAssignments",
+            "condition": "[equals(parameters('existingMSI'), '')]",
             "apiVersion": "2020-08-01-preview",
             "name": "[guid(variables('roleAssignmentName'))]",
             "properties": {

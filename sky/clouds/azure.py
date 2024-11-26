@@ -369,6 +369,9 @@ class Azure(clouds.Cloud):
         # Determine subnet_id if configured
         subnet_id = skypilot_config.get_nested(('azure', 'subnet_id'), None)
 
+        # Detemine if msi_id is configured
+        msi_id = skypilot_config.get_nested(('azure', 'msi_id'), None)
+
         # Determine if internal IPs should be used
         use_internal_ips = skypilot_config.get_nested(
             ('azure', 'use_internal_ips'), False)
@@ -433,6 +436,7 @@ class Azure(clouds.Cloud):
             'use_external_resource_group': use_external_resource_group,
             'subnet_id': subnet_id,
             'use_internal_ips': use_internal_ips,
+            'msi_id': msi_id,
         }
 
         # Setting disk performance tier for high disk tier.

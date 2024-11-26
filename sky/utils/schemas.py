@@ -803,6 +803,9 @@ def get_config_schema():
                 'use_internal_ips': {
                     'type': 'boolean',
                 },
+                'msi_id': {
+                    'type': 'string',
+                },
             }
         },
         'kubernetes': {

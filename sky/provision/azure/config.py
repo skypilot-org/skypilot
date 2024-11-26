@@ -87,6 +87,7 @@ def bootstrap_instances(
     use_external_resource_group = provider_config['use_external_resource_group']
 
     subnet_id = provider_config.get('subnet_id', '')
+    msi_id = provider_config.get('msi_id', '')
 
     if 'tags' in provider_config:
         params['tags'] = provider_config['tags']
@@ -174,6 +175,9 @@ def bootstrap_instances(
                 'existingSubnet': {
                     'value': subnet_id
                 },
+                'existingMSI': {
+                    'value': msi_id
+                }
             },
         }
     }
@@ -221,7 +225,7 @@ def bootstrap_instances(
         ).result().properties.outputs
 
     # append output resource ids to be used with vm creation
-    provider_config['msi'] = outputs['msi']['value']
+    provider_config['msi'] = outputs['msi']['value'] if msi_id == '' else msi_id
     provider_config['nsg'] = outputs['nsg']['value']
     provider_config[
         'subnet'] = outputs['subnet']['value'] if subnet_id == '' else subnet_id

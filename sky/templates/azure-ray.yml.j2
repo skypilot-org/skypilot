@@ -51,6 +51,9 @@ provider:
   subnet_id: {{subnet_id}}
   {%- endif %}
   use_internal_ips: {{use_internal_ips}}
+  {%- if msi_id is not none %}
+  msi_id: {{msi_id}}
+  {%- endif %}
 
 auth:
     ssh_user: azureuser
