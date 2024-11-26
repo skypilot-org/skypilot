@@ -84,7 +84,7 @@ def test_aws_with_ssh_proxy_command():
                 # the job controller is not launched with proxy command.
                 get_cmd_wait_until_cluster_status_contains_wildcard(
                     cluster_name_wildcard='sky-jobs-controller-*',
-                    cluster_status=ClusterStatus.UP.value,
+                    cluster_status=[ClusterStatus.UP],
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
