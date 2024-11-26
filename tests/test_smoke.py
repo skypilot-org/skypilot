@@ -3283,6 +3283,52 @@ def test_managed_jobs_recovery_multi_node_gcp():
     run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+def test_managed_jobs_retry_logs():
+    """Test managed job retry logs are properly displayed when a task fails."""
+    name = _get_cluster_name()
+    # Create a temporary YAML file with two tasks - first one fails, second succeeds
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        yaml_content = textwrap.dedent("""
+            resources:
+              cpus: 2+
+              job_recovery:
+                max_restarts_on_errors: 1
+
+            # Task 1: Always fails
+            run: |
+              echo "Task 1 starting"
+              exit 1
+            ---
+            # Task 2: Never reached due to Task 1 failure
+            run: |
+              echo "Task 2 starting"
+              exit 0
+        """)
+        f.write(yaml_content)
+        f.flush()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
+            test = Test(
+                'managed_jobs_retry_logs',
+       [
+                    f'sky jobs launch -n {name} {f.name} -y -d',
+                    f'sky jobs logs -n {name} | tee {log_file.name}',
+                    # First attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..."',
+                    f'cat {log_file.name} | grep "Job 1 failed"',
+                    # Second attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
+                    f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
+                    # Task 2 is not reached
+                    f'! cat {log_file.name} | grep "Job 2"',
+                ],
+                f'sky jobs cancel -y -n {name}',
+                timeout=7 * 60,  # 5 mins
+            )
+            run_one_test(test)
+
+
 @pytest.mark.aws
 @pytest.mark.managed_jobs
 def test_managed_jobs_cancellation_aws(aws_config_region):
