@@ -3539,10 +3539,12 @@ def test_managed_jobs_inline_env(generic_cloud: str):
         [
             f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "echo "\\$TEST_ENV"; ([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             'sleep 20',
-            f'{_GET_JOB_QUEUE} | grep {name} | grep SUCCEEDED',
-            f'JOB_ID=$(sky jobs queue -n {name} | grep {name} | head -n1 | awk \'{{print $1}}\') && '
+            f'JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
+            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep "SUCCEEDED" && '
+            f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
+            f'echo "JOB_ID=$JOB_ID" && '
             # Test that logs are still available after the job finishes.
-            's=$(sky jobs logs $JOB_ID) && echo "$s" && echo "$s" | grep "hello world" && '
+            'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
             # Make sure we skip the unnecessary logs.
             'echo "$s" | head -n1 | grep "Waiting for"',
         ],
