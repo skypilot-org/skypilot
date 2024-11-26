@@ -72,6 +72,8 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
     'Bucket {bucket_name!r} does not exist. '
     'It may have been deleted externally.')
 
+_STORAGE_LOG_FILE_NAME = 'storage_sync.log'
+
 
 def get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
@@ -1001,25 +1003,7 @@ class Storage(object):
                 else:
                     for source in self.source:
                         warn_for_git_dir(source)
-            # init logger on demand
-            storage_logger = sky_logging.init_logger(
-                sky_logging.STORAGE_LOGGER_NAME)
-            log_path = sky_logging.get_logger_log_file_path(
-                sky_logging.STORAGE_LOGGER_NAME)
-            store_name = (
-                f'{store.__class__.__name__.replace("Store", "").lower()}:'
-                f'{store.name}')
-            sync_message = f'{self.source!r} to {store_name}'
-            # file log of start sync
-            storage_logger.info(f'Starting Storage sync: {sync_message}')
             store.upload()
-            # console log
-            logger.info(
-                ux_utils.finishing_message(f'Storage synced: {sync_message}',
-                                           log_path))
-            # file log of end sync
-            storage_logger.info(
-                f'Storage synced: {sync_message} {os.linesep * 2}')
         except exceptions.StorageUploadError:
             logger.error(f'Could not upload {self.source!r} to store '
                          f'name {store.name!r}.')
@@ -1349,17 +1333,24 @@ class S3Store(AbstractStore):
         else:
             source_message = source_path_list[0]
 
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> s3://{self.name}/'
         with rich_utils.safe_status(
-                ux_utils.spinner_message(f'Syncing {source_message} -> '
-                                         f's3://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
                 get_dir_sync_command,
+                log_path,
                 self.name,
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
 
     def _transfer_to_s3(self) -> None:
         assert isinstance(self.source, str), self.source
@@ -1759,13 +1750,19 @@ class GcsStore(AbstractStore):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
         sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
                         f'cp -e -n -r -I gs://{self.name}')
-
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> gs://{self.name}/'
         with rich_utils.safe_status(
-                ux_utils.spinner_message(f'Syncing {source_message} -> '
-                                         f'gs://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
             data_utils.run_upload_cli(sync_command,
                                       self._ACCESS_DENIED_MESSAGE,
-                                      bucket_name=self.name)
+                                      bucket_name=self.name,
+                                      log_path=log_path)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
 
     def batch_gsutil_rsync(self,
                            source_path_list: List[Path],
@@ -1815,17 +1812,24 @@ class GcsStore(AbstractStore):
         else:
             source_message = source_path_list[0]
 
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> gs://{self.name}/'
         with rich_utils.safe_status(
-                ux_utils.spinner_message(f'Syncing {source_message} -> '
-                                         f'gs://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
                 get_dir_sync_command,
+                log_path,
                 self.name,
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
 
     def _transfer_to_gcs(self) -> None:
         if isinstance(self.source, str) and self.source.startswith('s3://'):
@@ -2553,17 +2557,24 @@ class AzureBlobStore(AbstractStore):
         container_endpoint = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=self.storage_account_name,
             container_name=self.name)
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> {container_endpoint}/'
         with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Syncing {source_message} -> {container_endpoint}/')):
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
                 get_dir_sync_command,
+                log_path,
                 self.name,
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
 
     def _get_bucket(self) -> Tuple[str, bool]:
         """Obtains the AZ Container.
@@ -2956,17 +2967,24 @@ class R2Store(AbstractStore):
         else:
             source_message = source_path_list[0]
 
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> r2://{self.name}/'
         with rich_utils.safe_status(
-                ux_utils.spinner_message(
-                    f'Syncing {source_message} -> r2://{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
                 get_dir_sync_command,
+                log_path,
                 self.name,
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
 
     def _transfer_to_r2(self) -> None:
         assert isinstance(self.source, str), self.source
@@ -3397,17 +3415,24 @@ class IBMCosStore(AbstractStore):
         else:
             source_message = source_path_list[0]
 
+        log_path = sky_logging.generate_tmp_logging_file_path(
+            _STORAGE_LOG_FILE_NAME)
+        sync_path = f'{source_message} -> cos://{self.region}/{self.name}/'
         with rich_utils.safe_status(
-                ux_utils.spinner_message(f'Syncing {source_message} -> '
-                                         f'cos://{self.region}/{self.name}/')):
+                ux_utils.spinner_message(f'Syncing {sync_path}',
+                                         log_path=log_path)):
             data_utils.parallel_upload(
                 source_path_list,
                 get_file_sync_command,
                 get_dir_sync_command,
+                log_path,
                 self.name,
                 self._ACCESS_DENIED_MESSAGE,
                 create_dirs=create_dirs,
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+        logger.info(
+            ux_utils.finishing_message(f'Storage synced: {sync_path}',
+                                       log_path))
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """returns IBM COS bucket object if exists, otherwise creates it.
