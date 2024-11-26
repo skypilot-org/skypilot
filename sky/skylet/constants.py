@@ -213,6 +213,7 @@ RAY_INSTALLATION_COMMANDS = (
     f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
+    f'{SKY_UV_INSTALL_CMD};'
     f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     f'{{ {SKY_UV_PIP_CMD} uninstall skypilot; '
