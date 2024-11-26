@@ -18,10 +18,6 @@ _show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
                         not env_options.Options.MINIMIZE_LOGGING.get())
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
-# Can not be 'sky.data.storage' because it inherits
-# from the root logger which configured the stream handler
-# we only need file logging don't need to print to console
-STORAGE_LOGGER_NAME = 'data.storage'
 
 
 class NewLineFormatter(logging.Formatter):
