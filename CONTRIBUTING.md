@@ -1,7 +1,7 @@
 # Contributing to SkyPilot
 
-Thank you for your interest in contributing to SkyPilot! We welcome and value 
-all contributions to the project, including but not limited to: 
+Thank you for your interest in contributing to SkyPilot! We welcome and value
+all contributions to the project, including but not limited to:
 
 * [Bug reports](https://github.com/skypilot-org/skypilot/issues) and [discussions](https://github.com/skypilot-org/skypilot/discussions)
 * [Pull requests](https://github.com/skypilot-org/skypilot/pulls) for bug fixes and new features
@@ -77,6 +77,7 @@ It has some convenience features which you might find helpful (see [Dockerfile](
 - Fork the SkyPilot repository and create a new branch for your changes.
 - If relevant, add tests for your changes. For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
+- [Optional] Install pre-commit hooks by running `pre-commit install` to automatically format your code on commit.
 - Ensure code is properly formatted by running [`format.sh`](https://github.com/skypilot-org/skypilot/blob/master/format.sh).
 - Push your changes to your fork and open a pull request in the SkyPilot repository.
 - In the PR description, write a `Tested:` section to describe relevant tests performed.
