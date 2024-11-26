@@ -24,13 +24,10 @@ Available fields and semantics:
   #
   # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
   jobs:
-    bucket:
-      # Bucket to store managed jobs mount files and tmp files.
-      # Its optional, if not set, SkyPilot will create a new bucket for each managed jobs .
-      # Support s3, gcs, azure, r2, ibm, default.
-      s3: "bucket-jobs-s3"
-      gcs: "bucket-jobs-gcs"
-      default: "bucket-jobs-default"
+    # Bucket to store managed jobs mount files and tmp files.
+    # Its optional, if not set, SkyPilot will create a new bucket for each managed jobs.
+    # Support s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+    bucket: s3://my-bucket/
     controller:
       resources:  # same spec as 'resources' in a task YAML
         cloud: gcp

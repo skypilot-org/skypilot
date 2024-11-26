@@ -188,6 +188,34 @@ class StoreType(enum.Enum):
             bucket_endpoint_url = f'{store_type.store_prefix()}{path}'
         return bucket_endpoint_url
 
+    @classmethod
+    def from_store_url(cls, store_url: str) -> Tuple['StoreType', str, str]:
+        """Returns the store type, bucket name, and sub path from a store URL.
+
+        Args:
+            store_url: str; The store URL.
+        """
+        for store_type in StoreType:
+            if store_url.startswith(store_type.store_prefix()):
+                if store_type == StoreType.AZURE:
+                    _, container_name, sub_path = data_utils.split_az_path(
+                        store_url)
+                    return store_type, container_name, sub_path
+                elif store_type == StoreType.IBM:
+                    bucket_name, sub_path, _ = data_utils.split_cos_path(
+                        store_url)
+                    return store_type, bucket_name, sub_path
+                elif store_type == StoreType.R2:
+                    bucket_name, sub_path = data_utils.split_r2_path(store_url)
+                    return store_type, bucket_name, sub_path
+                elif store_type == StoreType.GCS:
+                    bucket_name, sub_path = data_utils.split_gcs_path(store_url)
+                    return store_type, bucket_name, sub_path
+                elif store_type == StoreType.S3:
+                    bucket_name, sub_path = data_utils.split_s3_path(store_url)
+                    return store_type, bucket_name, sub_path
+        raise ValueError(f'Unknown store URL: {store_url}')
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'

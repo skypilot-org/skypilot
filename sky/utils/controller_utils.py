@@ -687,9 +687,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     still sync up any storage mounts with local source paths (which do not
     undergo translation).
     """
+
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
+
+    def _sub_path_join(sub_path: Optional[str], path: str) -> str:
+        if sub_path is None:
+            return path
+        return os.path.join(sub_path, path).strip('/')
 
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
@@ -719,10 +725,14 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Get the bucket name for the workdir and file mounts,
     # we stores all these files in same bucket from config.
-    bucket_name, store = task.get_bucket_name_and_store_type_from_job_config()
-    if bucket_name is None:
+    bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    if bucket_wth_prefix is None:
+        store_type = sub_path = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(), id=run_id)
+    else:
+        store_type, bucket_name, sub_path = \
+            storage_lib.StoreType.from_store_url(bucket_wth_prefix)
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -741,9 +751,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'source': workdir,
                 'persistent': False,
                 'mode': 'COPY',
-                'store': store,
-                '_bucket_sub_path':
-                    constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id),
+                'store': store_type,
+                '_bucket_sub_path': _sub_path_join(
+                    sub_path,
+                    constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(
+                        run_id=run_id)),
             })
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -767,17 +779,18 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             'source': src,
             'persistent': False,
             'mode': 'COPY',
-            'store': store,
-            '_bucket_sub_path': constants.FILE_MOUNTS_SUBPATH.format(
-                i=i, run_id=run_id),
+            'store': store_type,
+            '_bucket_sub_path': _sub_path_join(
+                sub_path,
+                constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id)),
         })
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    file_mounts_tmp_subpath = constants.FILE_MOUNTS_TMP_SUBPATH.format(
-        run_id=run_id)
+    file_mounts_tmp_subpath = _sub_path_join(
+        sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
@@ -797,7 +810,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'source': local_fm_path,
                 'persistent': False,
                 'mode': 'MOUNT',
-                'store': store,
+                'store': store_type,
                 '_bucket_sub_path': file_mounts_tmp_subpath,
             })
         if file_mount_remote_tmp_dir in original_storage_mounts:
@@ -811,6 +824,32 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         logger.info(f'  {colorama.Style.DIM}Files (listed below) '
                     f' -> storage: {bucket_name}:'
                     f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+
+    if bucket_wth_prefix is not None and len(new_storage_mounts) > 0:
+        # The full path from the user config of IBM COS contains the region,
+        # and Azure Blob Storage contains the storage account name, we need to
+        # check the region and storage account name is match with the system
+        # configured.
+        if store_type is storage_lib.StoreType.IBM:
+            store: storage_lib.IBMCosStore = list(  # type: ignore
+                new_storage_mounts.values())[0].stores[store_type]
+            _, _, region = data_utils.split_cos_path(bucket_wth_prefix)
+            assert store.region == region, (
+                f'The region from job config {bucket_wth_prefix} does '
+                f'not match the region of the storage sky supports '
+                f'{store.region}')
+        elif store_type is storage_lib.StoreType.AZURE:
+            store: storage_lib.AzureBlobStore = list(  # type: ignore
+                new_storage_mounts.values())[0].stores[store_type]
+            storage_account_name, _, _ = data_utils.split_az_path(
+                bucket_wth_prefix)
+            env_storage_account_name = \
+                store.storage_account_name  # type: ignore
+            assert storage_account_name == env_storage_account_name, (
+                f'The storage_account_name from job config '
+                f'{bucket_wth_prefix} does not match the storage_account_name '
+                f'of the storage sky configured {env_storage_account_name}')
+
     rich_utils.force_update_status(
         ux_utils.spinner_message('Uploading translated local files/folders'))
     task.update_storage_mounts(new_storage_mounts)

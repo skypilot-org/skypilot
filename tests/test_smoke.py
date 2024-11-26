@@ -3232,7 +3232,7 @@ def test_managed_jobs_storage(generic_cloud: str):
     output_storage_name = f'sky-test-output-{timestamp}'
 
     yaml_str_user_config = pathlib.Path(
-        'tests/test_yamls/use_intermediate_bucket.yaml').read_text()
+        'tests/test_yamls/use_intermediate_bucket_config.yaml').read_text()
     intermediate_storage_name = f'bucket-jobs-intermediate-smoke-test-{timestamp}'
 
     # Also perform region testing for bucket creation to validate if buckets are

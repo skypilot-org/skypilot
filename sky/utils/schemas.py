@@ -709,29 +709,9 @@ def get_config_schema():
                 }
             },
             'bucket': {
-                'type': 'object',
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
                 'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    's3': {
-                        'type': 'string',
-                    },
-                    'gcs': {
-                        'type': 'string',
-                    },
-                    'azure': {
-                        'type': 'string',
-                    },
-                    'r2': {
-                        'type': 'string',
-                    },
-                    'ibm': {
-                        'type': 'string',
-                    },
-                    'default': {
-                        'type': 'string',
-                    }
-                }
             }
         }
     }

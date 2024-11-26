@@ -1,5 +1,0 @@
-jobs:
-  bucket:
-    s3: "bucket-jobs-s3"
-    gcs: "bucket-jobs-gcs"
-    default: "bucket-jobs-default"
