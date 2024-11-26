@@ -830,17 +830,19 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # and Azure Blob Storage contains the storage account name, we need to
         # check the region and storage account name is match with the system
         # configured.
-        if store_type is storage_lib.StoreType.IBM:
+        if store_type == storage_lib.StoreType.IBM.value:
             store: storage_lib.IBMCosStore = list(  # type: ignore
-                new_storage_mounts.values())[0].stores[store_type]
+                new_storage_mounts.values())[0].stores[storage_lib.StoreType(
+                    store_type)]
             _, _, region = data_utils.split_cos_path(bucket_wth_prefix)
             assert store.region == region, (
                 f'The region from job config {bucket_wth_prefix} does '
                 f'not match the region of the storage sky supports '
                 f'{store.region}')
-        elif store_type is storage_lib.StoreType.AZURE:
+        elif store_type == storage_lib.StoreType.AZURE.value:
             store: storage_lib.AzureBlobStore = list(  # type: ignore
-                new_storage_mounts.values())[0].stores[store_type]
+                new_storage_mounts.values())[0].stores[storage_lib.StoreType(
+                    store_type)]
             storage_account_name, _, _ = data_utils.split_az_path(
                 bucket_wth_prefix)
             env_storage_account_name = \
