@@ -1047,7 +1047,8 @@ def get_kube_config_context_namespace(
     k8s = kubernetes.kubernetes
     ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
     # If using in-cluster context, get the namespace from the service account
-    # namespace file.
+    # namespace file. Uses the same logic as adaptors.kubernetes._load_config()
+    # to stay consistent with in-cluster config loading.
     if (context_name == kubernetes.in_cluster_context_name() or
             context_name is None):
         if os.path.exists(ns_path):
