@@ -386,60 +386,67 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 assert job_status is not None, 'No job found.'
                 assert task_id is not None, job_id
 
-                if job_status in job_lib.JobStatus.user_code_failure_states():
-                    task_specs = managed_job_state.get_task_specs(
-                        job_id, task_id)
-                    if task_specs.get('max_restarts_on_errors', 0) == 0:
-                        # We don't need to wait for the managed job status
-                        # update, as the job is guaranteed to be in terminal
-                        # state afterwards.
-                        break
-                    print()
-                    status_display.update(
-                        ux_utils.spinner_message(
-                            'Waiting for next restart for the failed task'))
-                    status_display.start()
-
-                    # Check if local managed job status reflects remote job
-                    # failure.
-                    # Ensures synchronization between remote cluster failure
-                    # detection (JobStatus.FAILED) and controller retry logic.
-                    is_managed_job_status_updated: Callable[
-                        [Optional[managed_job_state.ManagedJobStatus]],
-                        bool] = (lambda status: status != managed_job_state.
-                                 ManagedJobStatus.RUNNING)
-
-                    while not is_managed_job_status_updated(
-                            managed_job_status := managed_job_state.get_status(
-                                job_id)):
-                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    continue
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    if task_id < num_tasks - 1 and follow:
-                        # The log for the current job is finished. We need to
-                        # wait until next job to be started.
-                        logger.debug(
-                            f'INFO: Log for the current task ({task_id}) '
-                            'is finished. Waiting for the next task\'s log '
-                            'to be started.')
-                        # Add a newline to avoid the status display below
-                        # removing the last line of the task output.
+                    if not follow:
+                        break
+
+                    # Logs for retrying failed tasks.
+                    if job_status in job_lib.JobStatus.user_code_failure_states(
+                    ):
+                        task_specs = managed_job_state.get_task_specs(
+                            job_id, task_id)
+                        if task_specs.get('max_restarts_on_errors', 0) == 0:
+                            # We don't need to wait for the managed job status
+                            # update, as the job is guaranteed to be in terminal
+                            # state afterwards.
+                            break
                         print()
                         status_display.update(
                             ux_utils.spinner_message(
-                                f'Waiting for the next task: {task_id + 1}'))
+                                'Waiting for next restart for the failed task'))
                         status_display.start()
-                        original_task_id = task_id
-                        while True:
-                            task_id, managed_job_status = (
-                                managed_job_state.get_latest_task_id_status(
-                                    job_id))
-                            if original_task_id != task_id:
-                                break
+
+                        # Check if local managed job status reflects remote job
+                        # failure.
+                        # Ensures synchronization between remote cluster failure
+                        # detection (JobStatus.FAILED) and controller retry
+                        # logic.
+                        is_managed_job_status_updated: Callable[
+                            [Optional[managed_job_state.ManagedJobStatus]],
+                            bool] = (lambda status: status != managed_job_state.
+                                     ManagedJobStatus.RUNNING)
+
+                        while not is_managed_job_status_updated(
+                                managed_job_status :=
+                                managed_job_state.get_status(job_id)):
                             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         continue
-                    else:
+
+                    if task_id == num_tasks - 1:
                         break
+
+                    # The log for the current job is finished. We need to
+                    # wait until next job to be started.
+                    logger.debug(
+                        f'INFO: Log for the current task ({task_id}) '
+                        'is finished. Waiting for the next task\'s log '
+                        'to be started.')
+                    # Add a newline to avoid the status display below
+                    # removing the last line of the task output.
+                    print()
+                    status_display.update(
+                        ux_utils.spinner_message(
+                            f'Waiting for the next task: {task_id + 1}'))
+                    status_display.start()
+                    original_task_id = task_id
+                    while True:
+                        task_id, managed_job_status = (
+                            managed_job_state.get_latest_task_id_status(job_id))
+                        if original_task_id != task_id:
+                            break
+                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+                    continue
+
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
                 logger.debug(
