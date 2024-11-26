@@ -322,6 +322,10 @@ available_node_types:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.labels['ray-node-type']
+            {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
+            - name: {{ key }}
+              value: {{ value }}
+            {% endfor %}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]

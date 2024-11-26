@@ -730,7 +730,12 @@ def write_cluster_config(
                 f'{skypilot_config.loaded_config_path!r} for {cloud}, but it '
                 'is not supported by this cloud. Remove the config or set: '
                 '`remote_identity: LOCAL_CREDENTIALS`.')
-        excluded_clouds.add(cloud)
+        if isinstance(cloud, clouds.Kubernetes):
+            if skypilot_config.get_nested(
+                ('kubernetes', 'allowed_contexts'), None) is None:
+                excluded_clouds.add(cloud)
+        else:
+            excluded_clouds.add(cloud)
 
     for cloud_str, cloud_obj in cloud_registry.CLOUD_REGISTRY.items():
         remote_identity_config = skypilot_config.get_nested(
