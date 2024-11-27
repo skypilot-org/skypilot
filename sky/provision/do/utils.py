@@ -58,7 +58,7 @@ def _init_client():
     if not credentials_found == 1:
         raise DigitalOceanError(
             (f'{credentials_found} credentials '
-             'found, expected == 1, ',
+             'found. Expected 1 credential. Please ',
              'try setting a new API token with `doctl auth init`'))
     if CREDENTIALS_PATH is None:
         raise DigitalOceanError(
