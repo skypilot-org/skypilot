@@ -203,15 +203,14 @@ def _get_cloud_dependencies_installation_commands(
     # All python dependencies will be accumulated and then installed in one
     # command at the end. This is very fast if the packages are already
     # installed, so we don't check that.
-    python_packages: set[str] = set()
+    python_packages: Set[str] = set()
 
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-    commands.append(
-        f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
-        'export PATH="$PATH:$HOME/.local/bin" &&'
-        f'uv -V > /dev/null 2>&1 ||'
-        'curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null |'
-        'UV_INSTALL_DIR="$HOME/.local/bin" sh >/dev/null 2>&1')
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
+                    'export PATH="$PATH:$HOME/.local/bin" &&'
+                    f'uv -V > /dev/null 2>&1 ||'
+                    'curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null |'
+                    'UV_INSTALL_DIR="$HOME/.local/bin" sh >/dev/null 2>&1')
 
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
         cloud_python_dependencies: List[str] = dependencies.extras_require[
