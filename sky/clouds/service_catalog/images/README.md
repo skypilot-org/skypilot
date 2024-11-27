@@ -31,7 +31,7 @@ packer build ${IMAGE}.pkr.hcl
 2. Make the image public
 ```bash
 # Make image public
-export IMAGE_NAME=skypilot-gcp-cpu-ubuntu-20241029144600  # Update this
+export IMAGE_NAME=skypilot-gcp-gpu-ubuntu-241030  # Update this
 export IMAGE_ID=projects/sky-dev-465/global/images/${IMAGE_NAME}
 gcloud compute images add-iam-policy-binding ${IMAGE_NAME} --member='allAuthenticatedUsers' --role='roles/compute.imageUser'
 ```
@@ -46,7 +46,7 @@ packer build ${IMAGE}.pkr.hcl
 2. Copy images to all regions
 ```bash
 export TYPE=gpu  # Update this
-export IMAGE_ID=ami-05e9f5efd844f1a4f   # Update this
+export IMAGE_ID=ami-0989556a89639b1bb   # Update this
 python aws_utils/image_gen.py --image-id ${IMAGE_ID} --processor ${TYPE}
 ```
 3. Add fallback images if any region failed \
@@ -63,6 +63,14 @@ packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-
 packer build --var vm_generation=2 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
 packer build --var vm_generation=1 --var client_secret=${SECRET} skypilot-azure-gpu-ubuntu.pkr.hcl
 packer build  --var vm_generation=2 --var client_secret=${SECRET} --var use_grid_driver=true skypilot-azure-gpu-ubuntu.pkr.hcl
+```
+
+### Kubernetes
+1. Build the image
+```bash
+export REGION=europe  # Update this: us, europe, asia
+./skypilot-k8s-image.sh -p -l -r ${REGION}
+./skypilot-k8s-image.sh -p -l -g -r ${REGION}
 ```
 
 ## Test Images

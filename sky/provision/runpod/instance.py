@@ -232,7 +232,12 @@ def query_ports(
         instances = _filter_instances(cluster_name_on_cloud,
                                       None,
                                       head_only=True)
-        assert len(instances) == 1
+        assert len(instances) <= 1
+        # It is possible that the instance is terminated on console by
+        # the user. In this case, the instance will not be found and we
+        # should return an empty dict.
+        if not instances:
+            return {}
         head_inst = list(instances.values())[0]
         ready_ports: Dict[int, List[common.Endpoint]] = {
             port: [common.SocketEndpoint(**endpoint)]

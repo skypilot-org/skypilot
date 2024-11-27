@@ -742,7 +742,8 @@ def cancel(
 @usage_lib.entrypoint
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
-              follow: bool = True) -> None:
+              follow: bool = True,
+              tail: int = 0) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the logs of a job.
 
@@ -775,7 +776,7 @@ def tail_logs(cluster_name: str,
         f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.tail_logs(handle, job_id, follow=follow)
+    backend.tail_logs(handle, job_id, follow=follow, tail=tail)
 
 
 @usage_lib.entrypoint

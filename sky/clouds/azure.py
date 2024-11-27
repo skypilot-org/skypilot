@@ -175,7 +175,11 @@ class Azure(clouds.Cloud):
 
         # Process user-specified images.
         azure_utils.validate_image_id(image_id)
-        compute_client = azure.get_client('compute', cls.get_project_id())
+        try:
+            compute_client = azure.get_client('compute', cls.get_project_id())
+        except (azure.exceptions().AzureError, RuntimeError):
+            # Fallback to default image size if no credentials are available.
+            return 0.0
 
         # Community gallery image.
         if image_id.startswith(_COMMUNITY_IMAGE_PREFIX):
@@ -298,6 +302,7 @@ class Azure(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 

@@ -44,9 +44,6 @@ SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # We need to add SKY_PYTHON_CMD before ray executable because:
 # The ray executable is a python script with a header like:
 #   #!/opt/conda/bin/python3
-# When we create the skypilot-runtime venv, the previously installed ray
-# executable will be reused (due to --system-site-packages), and that will cause
-# running ray CLI commands to use the wrong python executable.
 SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
@@ -78,11 +75,11 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '8'
+SKYLET_VERSION = '9'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 1
+SKYLET_LIB_VERSION = 2
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related
@@ -152,19 +149,17 @@ CONDA_INSTALLATION_COMMANDS = (
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Create a separate conda environment for SkyPilot dependencies.
-    # We use --system-site-packages to reuse the system site packages to avoid
-    # the overhead of installing the same packages in the new environment.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
-    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV} --system-site-packages;'
+    # Do NOT use --system-site-packages here, because if users upgrade any
+    # packages in the base env, they interfere with skypilot dependencies.
+    # Reference: https://github.com/skypilot-org/skypilot/issues/4097
+    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV};'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
-# Install ray and skypilot on the remote cluster if they are not already
-# installed. {var} will be replaced with the actual value in
-# backend_utils.write_cluster_config.
-RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+RAY_INSTALLATION_COMMANDS = (
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
     # Disable the pip version check to avoid the warning message, which makes
     # the output hard to read.
@@ -204,24 +199,31 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
-    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
-    # END ray package check and installation
+    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+
+SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
     f'{{ {SKY_PIP_CMD} uninstall skypilot -y; '
     f'{SKY_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
-    'exit 1; }; '
-    # END SkyPilot package check and installation
+    'exit 1; }; ')
 
+# Install ray and skypilot on the remote cluster if they are not already
+# installed. {var} will be replaced with the actual value in
+# backend_utils.write_cluster_config.
+RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    f'{RAY_INSTALLATION_COMMANDS} '
+    f'{SKYPILOT_WHEEL_INSTALLATION_COMMANDS} '
     # Only patch ray when the ray version is the same as the expected version.
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
-    f'{SKY_PIP_CMD} list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
-    f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
-    '|| exit 1; };')
+    f'{SKY_PIP_CMD} list | grep "ray " | '
+    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null && '
+    f'{{ {SKY_PYTHON_CMD} -c '
+    '"from sky.skylet.ray_patches import patch; patch()" || exit 1; }; ')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot

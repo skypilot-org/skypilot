@@ -36,6 +36,11 @@ DEFAULT_RECOVERY_STRATEGY = None
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
 MAX_JOB_CHECKING_RETRY = 10
 
+# Minutes to job cluster autodown. This should be significantly larger than
+# managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS, to avoid tearing down the
+# cluster before its status can be updated by the job controller.
+_AUTODOWN_MINUTES = 5
+
 
 def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
     """Terminate the cluster."""
@@ -302,11 +307,17 @@ class StrategyExecutor:
                 usage_lib.messages.usage.set_internal()
                 # Detach setup, so that the setup failure can be detected
                 # by the controller process (job_status -> FAILED_SETUP).
-                sky.launch(self.dag,
-                           cluster_name=self.cluster_name,
-                           detach_setup=True,
-                           detach_run=True,
-                           _is_launched_by_jobs_controller=True)
+                sky.launch(
+                    self.dag,
+                    cluster_name=self.cluster_name,
+                    # We expect to tear down the cluster as soon as the job is
+                    # finished. However, in case the controller dies, set
+                    # autodown to try and avoid a resource leak.
+                    idle_minutes_to_autostop=_AUTODOWN_MINUTES,
+                    down=True,
+                    detach_setup=True,
+                    detach_run=True,
+                    _is_launched_by_jobs_controller=True)
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,
                     exceptions.NoCloudAccessError,

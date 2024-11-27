@@ -5,7 +5,7 @@ resources:
 
 # The setup command.  Will be run under the working directory.
 setup: |
-  git clone https://github.com/google/flax.git --branch v0.8.2
+  git clone https://github.com/google/flax.git --branch v0.10.1
 
   conda activate flax
   if [ $? -eq 0 ]; then
@@ -15,7 +15,7 @@ setup: |
     conda activate flax
     # Make sure to install TPU related packages in a conda env to avoid package conflicts.
     pip install \
-      -f https://storage.googleapis.com/jax-releases/libtpu_releases.html "jax[tpu]==0.4.25" \
+      -f https://storage.googleapis.com/jax-releases/libtpu_releases.html "jax[tpu]==0.4.35" \
       clu \
       tensorflow tensorflow-datasets
     pip install -e flax
