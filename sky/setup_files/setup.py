@@ -36,7 +36,7 @@ _COMMIT_FAILURE_MESSAGE = (
 # setuptools does not include the script dir on the search path, so manually add
 # it so that we can import the dependencies file.
 sys.path.append(SETUP_FILE_DIR)
-import dependencies
+import dependencies  # pylint: disable=wrong-import-position
 
 original_init_content = None
 
