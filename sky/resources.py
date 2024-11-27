@@ -1606,19 +1606,20 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
-        
+
         if version < 20:
             # Pre-0.7.0, we used 'kubernetes' as the default region for
             # Kubernetes clusters. With the introduction of support for
             # multiple contexts, we now set the region to the context name.
-            # Since we do not have information on which context the cluster 
+            # Since we do not have information on which context the cluster
             # was run in, we default it to the current active context.
             legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
             original_cloud = state.get('_cloud', None)
             original_region = state.get('_region', None)
             if (clouds.Kubernetes().is_same_cloud(original_cloud) and
-                original_region == legacy_region):
-                current_context = kubernetes_utils.get_current_kube_config_context_name()
+                    original_region == legacy_region):
+                current_context = (
+                    kubernetes_utils.get_current_kube_config_context_name())
                 state['_region'] = current_context
                 # Also update the image_id dict if it contains the old region
                 if isinstance(state['_image_id'], dict):
