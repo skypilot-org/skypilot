@@ -60,6 +60,7 @@ _ALL_MANAGED_JOB_STATUSES = "|".join(
 
 def _statuses_to_str(statuses: List[enum.Enum]):
     """Convert a list of enums to a string with all the values separated by |."""
+    assert len(statuses) > 0, 'statuses must not be empty'
     if len(statuses) > 1:
         return '(' + '|'.join([status.value for status in statuses]) + ')'
     else:
