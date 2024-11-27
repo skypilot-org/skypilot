@@ -260,7 +260,8 @@ class DO(clouds.Cloud):
             # attempt to make a CURL request for listing instances
             client = do_utils.client()
             if client is None:
-                return False, "no valid credentials found, run `doctl auth init`"
+                return False, ('no valid credentials found, '
+                               'run `doctl auth init`')
             client.droplets.list()
         except do.exceptions().HttpResponseError as err:
             return False, str(err)
