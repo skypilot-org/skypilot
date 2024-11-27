@@ -5,6 +5,8 @@ History:
    migrated from the old provisioning API.
  - Hysun He (hysun.he@oracle.com) @ Oct.18, 2024: Enhancement.
    find_compartment: allow search subtree when find a compartment.
+ - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add methods to
+   Add/remove security rules: create_nsg_rules & remove_nsg
 """
 from datetime import datetime
 import functools
@@ -13,12 +15,15 @@ import re
 import time
 import traceback
 import typing
-from typing import Optional
+from typing import List, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
+from sky.provision import constants
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -81,19 +86,33 @@ class QueryHelper:
         return result_set
 
     @classmethod
+    @debug_enabled(logger)
     def terminate_instances_by_tags(cls, tag_filters, region) -> int:
         logger.debug(f'Terminate instance by tags: {tag_filters}')
+
+        cluster_name = tag_filters[constants.TAG_RAY_CLUSTER_NAME]
+        nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
+            cluster_name=cluster_name)
+        nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=False)
+
+        core_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile())
+
         insts = cls.query_instances_by_tags(tag_filters, region)
         fail_count = 0
         for inst in insts:
             inst_id = inst.identifier
-            logger.debug(f'Got instance(to be terminated): {inst_id}')
+            logger.debug(f'Terminating instance {inst_id}')
 
             try:
-                oci_adaptor.get_core_client(
-                    region,
-                    oci_utils.oci_config.get_profile()).terminate_instance(
-                        inst_id)
+                # Release the NSG reference so that the NSG can be
+                # deleted without waiting the instance being terminated.
+                if nsg_id is not None:
+                    cls.detach_nsg(region, inst, nsg_id)
+
+                # Terminate the instance
+                core_client.terminate_instance(inst_id)
+
             except oci_adaptor.oci.exceptions.ServiceError as e:
                 fail_count += 1
                 logger.error(f'Terminate instance failed: {str(e)}\n: {inst}')
@@ -467,6 +486,193 @@ class QueryHelper:
         except oci_adaptor.oci.exceptions.ServiceError as e:
             logger.error(
                 f'Delete VCN {oci_utils.oci_config.VCN_NAME} Error: {str(e)}')
+
+    @classmethod
+    @debug_enabled(logger)
+    def find_nsg(cls, region: str, nsg_name: str,
+                 create_if_not_exist: bool) -> Optional[str]:
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
+
+        compartment = cls.find_compartment(region)
+
+        list_vcns_resp = net_client.list_vcns(
+            compartment_id=compartment,
+            display_name=oci_utils.oci_config.VCN_NAME,
+            lifecycle_state='AVAILABLE',
+        )
+
+        if not list_vcns_resp:
+            raise exceptions.ResourcesUnavailableError(
+                'The VCN is not available')
+
+        # Get the primary vnic.
+        assert len(list_vcns_resp.data) > 0
+        vcn = list_vcns_resp.data[0]
+
+        list_nsg_resp = net_client.list_network_security_groups(
+            compartment_id=compartment,
+            vcn_id=vcn.id,
+            limit=1,
+            display_name=nsg_name,
+        )
+
+        nsgs = list_nsg_resp.data
+        if nsgs:
+            assert len(nsgs) == 1
+            return nsgs[0].id
+        elif not create_if_not_exist:
+            return None
+
+        # Continue to create new NSG if not exists
+        create_nsg_resp = net_client.create_network_security_group(
+            create_network_security_group_details=oci_adaptor.oci.core.models.
+            CreateNetworkSecurityGroupDetails(
+                compartment_id=compartment,
+                vcn_id=vcn.id,
+                display_name=nsg_name,
+            ))
+        get_nsg_resp = net_client.get_network_security_group(
+            network_security_group_id=create_nsg_resp.data.id)
+        oci_adaptor.oci.wait_until(
+            net_client,
+            get_nsg_resp,
+            'lifecycle_state',
+            'AVAILABLE',
+        )
+
+        return get_nsg_resp.data.id
+
+    @classmethod
+    def get_range_min_max(cls, port_range: str) -> Tuple[int, int]:
+        range_list = port_range.split('-')
+        if len(range_list) == 1:
+            return (int(range_list[0]), int(range_list[0]))
+        from_port, to_port = range_list
+        return (int(from_port), int(to_port))
+
+    @classmethod
+    @debug_enabled(logger)
+    def create_nsg_rules(cls, region: str, cluster_name: str,
+                         ports: List[str]) -> None:
+        """ Create per-cluster NSG with ingress rules """
+        if not ports:
+            return
+
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
+
+        nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
+            cluster_name=cluster_name)
+        nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=True)
+
+        filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name}
+        insts = query_helper.query_instances_by_tags(filters, region)
+        for inst in insts:
+            vnic = cls.get_instance_primary_vnic(
+                region=region,
+                inst_info={
+                    'inst_id': inst.identifier,
+                    'ad': inst.availability_domain,
+                    'compartment': inst.compartment_id,
+                })
+            nsg_ids = vnic.nsg_ids
+            if not nsg_ids:
+                net_client.update_vnic(
+                    vnic_id=vnic.id,
+                    update_vnic_details=oci_adaptor.oci.core.models.
+                    UpdateVnicDetails(nsg_ids=[nsg_id],
+                                      skip_source_dest_check=False),
+                )
+
+        # pylint: disable=line-too-long
+        list_nsg_rules_resp = net_client.list_network_security_group_security_rules(
+            network_security_group_id=nsg_id,
+            direction='INGRESS',
+            sort_by='TIMECREATED',
+            sort_order='DESC',
+        )
+
+        ingress_rules: List = list_nsg_rules_resp.data
+        existing_port_ranges: List[str] = []
+        for r in ingress_rules:
+            if r.tcp_options:
+                options_range = r.tcp_options.destination_port_range
+                rule_port_range = f'{options_range.min}-{options_range.max}'
+                existing_port_ranges.append(rule_port_range)
+
+        new_ports = resources_utils.port_ranges_to_set(ports)
+        existing_ports = resources_utils.port_ranges_to_set(
+            existing_port_ranges)
+        if new_ports.issubset(existing_ports):
+            # ports already contains in the existing rules, nothing to add.
+            return
+
+        # Determine the ports to be added, without overlapping.
+        ports_to_open = new_ports - existing_ports
+        port_ranges_to_open = resources_utils.port_set_to_ranges(ports_to_open)
+
+        new_rules = []
+        for port_range in port_ranges_to_open:
+            port_range_min, port_range_max = cls.get_range_min_max(port_range)
+            new_rules.append(
+                oci_adaptor.oci.core.models.AddSecurityRuleDetails(
+                    direction='INGRESS',
+                    protocol='6',
+                    is_stateless=False,
+                    source=oci_utils.oci_config.VCN_CIDR_INTERNET,
+                    source_type='CIDR_BLOCK',
+                    tcp_options=oci_adaptor.oci.core.models.TcpOptions(
+                        destination_port_range=oci_adaptor.oci.core.models.
+                        PortRange(min=port_range_min, max=port_range_max),),
+                    description=oci_utils.oci_config.SERVICE_PORT_RULE_TAG,
+                ))
+
+        net_client.add_network_security_group_security_rules(
+            network_security_group_id=nsg_id,
+            add_network_security_group_security_rules_details=oci_adaptor.oci.
+            core.models.AddNetworkSecurityGroupSecurityRulesDetails(
+                security_rules=new_rules),
+        )
+
+    @classmethod
+    @debug_enabled(logger)
+    def detach_nsg(cls, region: str, inst, nsg_id: Optional[str]) -> None:
+        if nsg_id is None:
+            return
+
+        vnic = cls.get_instance_primary_vnic(
+            region=region,
+            inst_info={
+                'inst_id': inst.identifier,
+                'ad': inst.availability_domain,
+                'compartment': inst.compartment_id,
+            })
+
+        # Detatch the NSG before removing it.
+        oci_adaptor.get_net_client(region, oci_utils.oci_config.get_profile(
+        )).update_vnic(
+            vnic_id=vnic.id,
+            update_vnic_details=oci_adaptor.oci.core.models.UpdateVnicDetails(
+                nsg_ids=[], skip_source_dest_check=False),
+        )
+
+    @classmethod
+    @debug_enabled(logger)
+    def remove_cluster_nsg(cls, region: str, cluster_name: str) -> None:
+        """ Remove NSG of the cluster """
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
+
+        nsg_name = oci_utils.oci_config.NSG_NAME_TEMPLATE.format(
+            cluster_name=cluster_name)
+        nsg_id = cls.find_nsg(region, nsg_name, create_if_not_exist=False)
+        if nsg_id is None:
+            return
+
+        # Delete the NSG
+        net_client.delete_network_security_group(
+            network_security_group_id=nsg_id)
 
 
 query_helper = QueryHelper()

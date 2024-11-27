@@ -1,7 +1,8 @@
 """Logging utils."""
 import enum
+import time
 import types
-from typing import List, Optional, Type
+from typing import Callable, Iterator, List, Optional, TextIO, Type
 
 import colorama
 import pendulum
@@ -284,3 +285,53 @@ def readable_time_duration(start: Optional[float],
         diff = diff.replace('hour', 'hr')
 
     return diff
+
+
+def follow_logs(
+    file: TextIO,
+    *,
+    should_stop: Callable[[], bool],
+    stop_on_eof: bool = False,
+    process_line: Optional[Callable[[str], Iterator[str]]] = None,
+    idle_timeout_seconds: Optional[int] = None,
+) -> Iterator[str]:
+    """Streams and processes logs line by line from a file.
+
+    Args:
+        file: File object to read logs from.
+        should_stop: Callback that returns True when streaming should stop.
+        stop_on_eof: If True, stop when reaching end of file.
+        process_line: Optional callback to transform/filter each line.
+        idle_timeout_seconds: If set, stop after these many seconds without
+            new content.
+
+    Yields:
+        Log lines, possibly transformed by process_line if provided.
+    """
+    current_line: str = ''
+    seconds_without_content: int = 0
+
+    while True:
+        content = file.readline()
+
+        if not content:
+            if stop_on_eof or should_stop():
+                break
+
+            if idle_timeout_seconds is not None:
+                if seconds_without_content >= idle_timeout_seconds:
+                    break
+                seconds_without_content += 1
+
+            time.sleep(1)
+            continue
+
+        seconds_without_content = 0
+        current_line += content
+
+        if '\n' in current_line or '\r' in current_line:
+            if process_line is not None:
+                yield from process_line(current_line)
+            else:
+                yield current_line
+            current_line = ''

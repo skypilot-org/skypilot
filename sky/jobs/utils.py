@@ -85,7 +85,8 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
-    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
+    FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -866,7 +867,7 @@ class ManagedJobCodeGen:
         code += inspect.getsource(stream_logs)
         code += textwrap.dedent(f"""\
 
-        msg = stream_logs({job_id!r}, {job_name!r}, 
+        msg = stream_logs({job_id!r}, {job_name!r},
                            follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
@@ -883,7 +884,7 @@ class ManagedJobCodeGen:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                managed_job_state.set_pending({job_id}, {task_id}, 
+                managed_job_state.set_pending({job_id}, {task_id},
                                   {task.name!r}, {resources_str!r})
                 """)
         return cls._build(code)

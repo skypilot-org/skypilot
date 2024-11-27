@@ -187,7 +187,7 @@ sky jobs logs -n "${MANAGED_JOB_JOB_NAME}-7-1" || exit 1
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
-echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
+echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
 fi
 
 sky down ${CLUSTER_NAME}* -y

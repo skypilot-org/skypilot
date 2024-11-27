@@ -103,17 +103,3 @@ Table of Contents
    Getting Started <kubernetes-getting-started>
    kubernetes-setup
    kubernetes-troubleshooting
-
-
-Features and Roadmap
---------------------
-
-Kubernetes support is under active development. Some features are in progress and will be released soon:
-
-* CPU and GPU Tasks - ✅ Available
-* Auto-down - ✅ Available
-* Storage mounting - ✅ Available on x86_64 clusters
-* Multi-node tasks - ✅ Available
-* Custom images - ✅ Available
-* Opening ports and exposing services - ✅ Available
-* Multiple Kubernetes Clusters - 🚧 In progress

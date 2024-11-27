@@ -270,6 +270,13 @@ class RayCodeGen:
             import time
             from typing import Dict, List, Optional, Tuple, Union
 
+            # Set the environment variables to avoid deduplicating logs and
+            # scheduler events. This should be set in driver code, since we are
+            # not using `ray job submit` anymore, and the environment variables
+            # from the ray cluster is not inherited.
+            os.environ['RAY_DEDUP_LOGS'] = '0'
+            os.environ['RAY_SCHEDULER_EVENTS'] = '0'
+
             import ray
             import ray.util as ray_util
 
@@ -277,6 +284,7 @@ class RayCodeGen:
             from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
+            from sky.utils import subprocess_utils
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
 
@@ -1528,7 +1536,7 @@ class RetryingVmProvisioner(object):
                             to_provision,
                             resources_utils.ClusterName(
                                 cluster_name, handle.cluster_name_on_cloud),
-                            region, zones))
+                            region, zones, num_nodes))
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
@@ -3086,9 +3094,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{workdir} -> {SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Syncing workdir', log_path)):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+            subprocess_utils.run_in_parallel(_sync_workdir_node, runners,
+                                             num_threads)
         logger.info(ux_utils.finishing_message('Workdir synced.', log_path))
 
     def _sync_file_mounts(
@@ -3276,14 +3287,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         encoded_script = shlex.quote(codegen)
         create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
         job_submit_cmd = (
-            f'RAY_DASHBOARD_PORT=$({constants.SKY_PYTHON_CMD} -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-            f'{cd} && {constants.SKY_RAY_CMD} job submit '
-            '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
-            f'--submission-id {job_id}-$(whoami) --no-wait '
-            f'"{constants.SKY_PYTHON_CMD} -u {script_path} '
+            # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
+            # with pid is the same driver process.
+            f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
+            f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
             # Do not use &>, which is not POSIX and may not work.
             # Note that the order of ">filename 2>&1" matters.
-            f'> {remote_log_path} 2>&1"')
+            f'> {remote_log_path} 2>&1')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
@@ -3331,6 +3341,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       job_submit_cmd,
                                                       stream_logs=False,
                                                       require_outputs=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # running a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         if returncode == 255 and 'too long' in stdout + stderr:
             # If the generated script is too long, we retry it with dumping
             # the script to a file and running it with SSH. We use a general
@@ -3345,10 +3359,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True)
 
-        # Happens when someone calls `sky exec` but remote is outdated
-        # necessitating calling `sky launch`.
-        backend_utils.check_stale_runtime_on_remote(returncode, stdout,
-                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3418,6 +3428,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                           stream_logs=False,
                                                           require_outputs=True,
                                                           separate_stderr=True)
+        # Happens when someone calls `sky exec` but remote is outdated for
+        # adding a job. Necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                    handle.cluster_name)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         subprocess_utils.handle_returncode(returncode, code,
@@ -3555,7 +3569,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
         try:
-            with filelock.FileLock(
+            with timeline.FileLockEvent(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 self.teardown_no_lock(
@@ -4413,6 +4427,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         start = time.time()
         runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
+        num_threads = subprocess_utils.get_max_workers_for_file_mounts(
+            file_mounts, str(handle.launched_resources.cloud))
 
         # Check the files and warn
         for dst, src in file_mounts.items():
@@ -4474,6 +4490,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     action_message='Syncing',
                     log_path=log_path,
                     stream_logs=False,
+                    num_threads=num_threads,
                 )
                 continue
 
@@ -4510,6 +4527,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Need to source bashrc, as the cloud specific CLI or SDK may
                 # require PATH in bashrc.
                 source_bashrc=True,
+                num_threads=num_threads,
             )
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
@@ -4528,7 +4546,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to create symlinks. The target destination '
                     f'may already exist. Log: {log_path}')
 
-            subprocess_utils.run_in_parallel(_symlink_node, runners)
+            subprocess_utils.run_in_parallel(_symlink_node, runners,
+                                             num_threads)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
         logger.info(ux_utils.finishing_message('Files synced.', log_path))
@@ -4557,6 +4576,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         start = time.time()
         runners = handle.get_command_runners()
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         plural = 's' if len(storage_mounts) > 1 else ''
@@ -4595,6 +4616,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # Need to source bashrc, as the cloud specific CLI or SDK
                     # may require PATH in bashrc.
                     source_bashrc=True,
+                    num_threads=num_threads,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:

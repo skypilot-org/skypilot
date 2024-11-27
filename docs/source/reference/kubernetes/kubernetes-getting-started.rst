@@ -261,9 +261,25 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 FAQs
 ----
 
+* **Can I use multiple Kubernetes clusters with SkyPilot?**
+
+  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+
+  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+
 * **Are autoscaling Kubernetes clusters supported?**
 
-  To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
+  To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+
+  If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
+
+  .. code-block:: yaml
+
+      # ~/.sky/config.yaml
+      kubernetes:
+        provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
+        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs in scale-to-zero setting
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
@@ -280,7 +296,7 @@ FAQs
 * **How can I specify custom configuration for the pods created by SkyPilot?**
 
   You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
-  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
+  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_.
 
   For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
 
@@ -308,3 +324,32 @@ FAQs
                   type: Directory
 
   For more details refer to :ref:`config-yaml`.
+
+* **I am using a custom image. How can I speed up the pod startup time?**
+
+  You can pre-install SkyPilot dependencies in your custom image to speed up the pod startup time. Simply add these lines at the end of your Dockerfile:
+
+  .. code-block:: dockerfile
+
+    FROM <your base image>
+
+    # Install system dependencies
+    RUN apt update -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        rm -rf /var/lib/apt/lists/*
+
+    # Install conda and other python dependencies
+    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
+        bash Miniconda3-Linux-x86_64.sh -b && \
+        eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
+        grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
+        rm Miniconda3-Linux-x86_64.sh && \
+        export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+        python3 -m venv ~/skypilot-runtime && \
+        PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+        curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+        sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+        echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+

@@ -79,9 +79,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
 
-    pending_status = [
-        'pending',
-    ]
+    pending_status = ['pending', 'provisioning']
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if len(instances) > config.count:

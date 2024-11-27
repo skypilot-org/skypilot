@@ -7,7 +7,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
@@ -36,6 +36,7 @@ SHELL ["/bin/bash", "-c"]
 
 # Install conda and other dependencies
 # Keep the conda and Ray versions below in sync with the ones in skylet.constants
+# Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
 RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
     bash Miniconda3-Linux-x86_64.sh -b && \
     eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \

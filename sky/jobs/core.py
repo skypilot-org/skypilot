@@ -133,7 +133,6 @@ def launch(
         controller_task.set_resources(controller_resources)
 
         controller_task.managed_job_dag = dag
-        assert len(controller_task.resources) == 1, controller_task
 
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'

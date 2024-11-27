@@ -2,6 +2,8 @@
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Oct.16, 2024: Initial implementation
+ - Hysun He (hysun.he@oracle.com) @ Nov.13, 2024: Implement open_ports
+   and cleanup_ports for supporting SkyServe.
 """
 
 import copy
@@ -121,8 +123,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # Let's create additional new nodes (if neccessary)
     to_start_count = config.count - len(resume_instances)
     created_instances = []
+    node_config = config.node_config
     if to_start_count > 0:
-        node_config = config.node_config
         compartment = query_helper.find_compartment(region)
         vcn = query_helper.find_create_vcn_subnet(region)
 
@@ -240,10 +242,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     assert head_instance_id is not None, head_instance_id
 
+    # Format: TenancyPrefix:AvailabilityDomain, e.g. bxtG:US-SANJOSE-1-AD-1
+    _, ad = str(node_config['AvailabilityDomain']).split(':', maxsplit=1)
     return common.ProvisionRecord(
         provider_name='oci',
         region=region,
-        zone=None,
+        zone=ad,
         cluster_name=cluster_name_on_cloud,
         head_instance_id=head_instance_id,
         created_instance_ids=[n['inst_id'] for n in created_instances],
@@ -292,11 +296,11 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Open ports for inbound traffic."""
-    # OCI ports in security groups are opened while creating the new
-    # VCN (skypilot_vcn). If user configure to use existing VCN, it is
-    # intended to let user to manage the ports instead of automatically
-    # opening ports here.
-    del cluster_name_on_cloud, ports, provider_config
+    assert provider_config is not None, cluster_name_on_cloud
+    region = provider_config['region']
+    query_helper.create_nsg_rules(region=region,
+                                  cluster_name=cluster_name_on_cloud,
+                                  ports=ports)
 
 
 @query_utils.debug_enabled(logger)
@@ -306,12 +310,11 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
-    del cluster_name_on_cloud, ports, provider_config
-    # OCI ports in security groups are opened while creating the new
-    # VCN (skypilot_vcn). The VCN will only be created at the first
-    # time when it is not existed. We'll not automatically delete the
-    # VCN while teardown clusters. it is intended to let user to decide
-    # to delete the VCN or not from OCI console, for example.
+    assert provider_config is not None, cluster_name_on_cloud
+    region = provider_config['region']
+    del ports
+    query_helper.remove_cluster_nsg(region=region,
+                                    cluster_name=cluster_name_on_cloud)
 
 
 @query_utils.debug_enabled(logger)
