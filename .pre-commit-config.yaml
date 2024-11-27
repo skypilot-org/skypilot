@@ -70,4 +70,3 @@ repos:
         args:
             - --rcfile=.pylintrc  # Use your custom pylint configuration
             - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
-        pass_filenames: true
