@@ -12,6 +12,11 @@ DEFAULT_CLOUDS_TO_RUN = ['aws', 'azure']
 # we currently ignore them.
 ALL_CLOUDS_WITH_CREDENTIALS = ['aws', 'azure', 'gcp']
 
+ALL_CLOUDS_IN_SMOKE_TESTS = [
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
+]
+
 
 def _get_full_decorator_path(decorator: ast.AST) -> str:
     """Recursively get the full path of a decorator."""
@@ -56,6 +61,9 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                     if suffix.startswith('no_'):
                         clouds_to_exclude.append(suffix[3:])
                     else:
+                        if suffix not in ALL_CLOUDS_IN_SMOKE_TESTS:
+                            # This mark does not specify a cloud, so we skip it.
+                            continue
                         clouds_to_include.append(suffix)
             clouds_to_include = (clouds_to_include if clouds_to_include else
                                  copy.deepcopy(DEFAULT_CLOUDS_TO_RUN))
