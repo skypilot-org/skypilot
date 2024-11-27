@@ -728,11 +728,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
     store_init_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
-        store_type = sub_path = None
+        store_type_str = sub_path = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(), id=run_id)
     else:
-        store_type, bucket_name, sub_path, store_init_kwargs = \
+        store_type_str, bucket_name, sub_path, store_init_kwargs = \
             storage_lib.StoreType.from_store_url(bucket_wth_prefix)
 
     # Step 1: Translate the workdir to SkyPilot storage.
@@ -753,7 +753,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     'source': workdir,
                     'persistent': False,
                     'mode': 'COPY',
-                    'store': store_type,
+                    'store': store_type_str,
                     '_bucket_sub_path': _sub_path_join(
                         sub_path,
                         constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(
@@ -783,7 +783,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'source': src,
                 'persistent': False,
                 'mode': 'COPY',
-                'store': store_type,
+                'store': store_type_str,
                 '_bucket_sub_path': _sub_path_join(
                     sub_path,
                     constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id)),
@@ -816,7 +816,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     'source': local_fm_path,
                     'persistent': False,
                     'mode': 'MOUNT',
-                    'store': store_type,
+                    'store': store_type_str,
                     '_bucket_sub_path': file_mounts_tmp_subpath,
                 },
                 store_init_kwargs=store_init_kwargs)
