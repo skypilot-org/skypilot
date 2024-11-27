@@ -6,6 +6,7 @@ import collections
 import contextlib
 import os
 import pathlib
+import shutil
 import sys
 import time
 from typing import AsyncGenerator, Deque, List, Optional
@@ -247,9 +248,11 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str):
                 if not filename:  # This is for directories, skip
                     new_path.mkdir(parents=True, exist_ok=True)
                     continue
-                with zipf.open(member) as member_file:
-                    new_path.parent.mkdir(parents=True, exist_ok=True)
-                    new_path.write_bytes(member_file.read())
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                with zipf.open(member) as member_file, new_path.open('wb') as f:
+                    # Use shutil.copyfileobj to copy files in chunks, so it does
+                    # not load the entire file into memory.
+                    shutil.copyfileobj(member_file, f)
 
         # Cleanup the temporary file
         zip_file_path.unlink()
