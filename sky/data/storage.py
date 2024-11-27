@@ -189,32 +189,37 @@ class StoreType(enum.Enum):
         return bucket_endpoint_url
 
     @classmethod
-    def from_store_url(cls, store_url: str) -> Tuple[str, str, str]:
+    def from_store_url(cls,
+                       store_url: str) -> Tuple[str, str, str, Dict[str, Any]]:
         """Returns the store type, bucket name, and sub path from a store URL.
 
         Args:
             store_url: str; The store URL.
         """
+        # The full path from the user config of IBM COS contains the region,
+        # and Azure Blob Storage contains the storage account name, we need to
+        # pass these information to the store constructor.
+        store_init_kwargs = {}
         for store_type in StoreType:
             store_type_value = store_type.value
             if store_url.startswith(store_type.store_prefix()):
                 if store_type == StoreType.AZURE:
-                    _, container_name, sub_path = data_utils.split_az_path(
-                        store_url)
-                    return store_type_value, container_name, sub_path
+                    storage_account_name, bucket_name, sub_path = \
+                        data_utils.split_az_path(store_url)
+                    store_init_kwargs[
+                        'storage_account_name'] = storage_account_name
                 elif store_type == StoreType.IBM:
-                    bucket_name, sub_path, _ = data_utils.split_cos_path(
+                    bucket_name, sub_path, region = data_utils.split_cos_path(
                         store_url)
-                    return store_type_value, bucket_name, sub_path
+                    store_init_kwargs['region'] = region
                 elif store_type == StoreType.R2:
                     bucket_name, sub_path = data_utils.split_r2_path(store_url)
-                    return store_type_value, bucket_name, sub_path
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
-                    return store_type_value, bucket_name, sub_path
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
-                    return store_type_value, bucket_name, sub_path
+                return store_type_value, bucket_name, \
+                    sub_path, store_init_kwargs
         raise ValueError(f'Unknown store URL: {store_url}')
 
 

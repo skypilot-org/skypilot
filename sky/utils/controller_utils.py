@@ -726,26 +726,14 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Get the bucket name for the workdir and file mounts,
     # we stores all these files in same bucket from config.
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
-    store_init_kwargs = {}
+    store_init_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
         store_type = sub_path = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(), id=run_id)
     else:
-        store_type, bucket_name, sub_path = \
+        store_type, bucket_name, sub_path, store_init_kwargs = \
             storage_lib.StoreType.from_store_url(bucket_wth_prefix)
-
-        # The full path from the user config of IBM COS contains the region,
-        # and Azure Blob Storage contains the storage account name, we need to
-        # check the region and storage account name is match with the system
-        # configured.
-        if store_type == storage_lib.StoreType.IBM.value:
-            _, _, region = data_utils.split_cos_path(bucket_wth_prefix)
-            store_init_kwargs['region'] = region
-        elif store_type == storage_lib.StoreType.AZURE.value:
-            storage_account_name, _, _ = data_utils.split_az_path(
-                bucket_wth_prefix)
-            store_init_kwargs['storage_account_name'] = storage_account_name
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
