@@ -4,7 +4,7 @@ This module loads the service catalog file and can be used to
 query instance types and pricing information for digital ocean.
 """
 
-#TODO(asaiacai): add fetchers
+# TODO(asaiacai): add fetchers
 
 import typing
 from typing import Dict, List, Optional, Tuple, Union
