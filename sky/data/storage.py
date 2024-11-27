@@ -919,9 +919,12 @@ class Storage(object):
 
         return storage_obj
 
-    def add_store(self,
-                  store_type: Union[str, StoreType],
-                  region: Optional[str] = None) -> AbstractStore:
+    def add_store(
+            self,
+            store_type: Union[str, StoreType],
+            region: Optional[str] = None,
+            store_init_kwargs: Optional[Dict[str,
+                                             Any]] = None) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
         Invoked by the optimizer after it has selected a store to
@@ -931,6 +934,8 @@ class Storage(object):
           store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
           region: str; Region to place the bucket in. Caller must ensure that
             the region is valid for the chosen store_type.
+          store_init_kwargs: Dict[str, Any]; Additional keyword arguments
+            to pass to the store constructor.ß
         """
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
@@ -970,7 +975,8 @@ class Storage(object):
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
-                _bucket_sub_path=self._bucket_sub_path)
+                _bucket_sub_path=self._bucket_sub_path,
+                **(store_init_kwargs or {}))
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -1114,7 +1120,10 @@ class Storage(object):
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
-    def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
+    def from_yaml_config(
+            cls,
+            config: Dict[str, Any],
+            store_init_kwargs: Optional[Dict[str, Any]] = None) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
 
@@ -1147,7 +1156,8 @@ class Storage(object):
                           mode=mode,
                           _bucket_sub_path=_bucket_sub_path)
         if store is not None:
-            storage_obj.add_store(StoreType(store.upper()))
+            storage_obj.add_store(StoreType(store.upper()),
+                                  store_init_kwargs=store_init_kwargs or {})
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
@@ -2341,6 +2351,17 @@ class AzureBlobStore(AbstractStore):
         """
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
+        self._update_storage_account_name_and_resource()
+
+        self.container_name, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def _update_storage_account_name_and_resource(self):
         self.storage_account_name, self.resource_group_name = (
             self._get_storage_account_and_resource_group())
 
@@ -2351,13 +2372,13 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name, self.resource_group_name,
                 self.storage_client, self.resource_client)
 
-        self.container_name, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+    def update_storage_attributes(self, **kwargs: Dict[str, Any]):
+        assert 'storage_account_name' in kwargs, (
+            'only storage_account_name supported')
+        assert isinstance(kwargs['storage_account_name'],
+                          str), ('storage_account_name must be a string')
+        self.storage_account_name = kwargs['storage_account_name']
+        self._update_storage_account_name_and_resource()
 
     @staticmethod
     def get_default_storage_account_name(region: Optional[str]) -> str:

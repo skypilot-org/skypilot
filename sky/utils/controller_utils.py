@@ -726,6 +726,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Get the bucket name for the workdir and file mounts,
     # we stores all these files in same bucket from config.
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    store_init_kwargs = {}
     if bucket_wth_prefix is None:
         store_type = sub_path = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
@@ -733,6 +734,18 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     else:
         store_type, bucket_name, sub_path = \
             storage_lib.StoreType.from_store_url(bucket_wth_prefix)
+
+        # The full path from the user config of IBM COS contains the region,
+        # and Azure Blob Storage contains the storage account name, we need to
+        # check the region and storage account name is match with the system
+        # configured.
+        if store_type == storage_lib.StoreType.IBM.value:
+            _, _, region = data_utils.split_cos_path(bucket_wth_prefix)
+            store_init_kwargs['region'] = region
+        elif store_type == storage_lib.StoreType.AZURE.value:
+            storage_account_name, _, _ = data_utils.split_az_path(
+                bucket_wth_prefix)
+            store_init_kwargs['storage_account_name'] = storage_account_name
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -746,17 +759,19 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'workdir and file_mounts contains it as the target.')
         new_storage_mounts[
             constants.
-            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': workdir,
-                'persistent': False,
-                'mode': 'COPY',
-                'store': store_type,
-                '_bucket_sub_path': _sub_path_join(
-                    sub_path,
-                    constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(
-                        run_id=run_id)),
-            })
+            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config(
+                {
+                    'name': bucket_name,
+                    'source': workdir,
+                    'persistent': False,
+                    'mode': 'COPY',
+                    'store': store_type,
+                    '_bucket_sub_path': _sub_path_join(
+                        sub_path,
+                        constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(
+                            run_id=run_id)),
+                },
+                store_init_kwargs=store_init_kwargs)
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
         logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
@@ -774,16 +789,18 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
-            'name': bucket_name,
-            'source': src,
-            'persistent': False,
-            'mode': 'COPY',
-            'store': store_type,
-            '_bucket_sub_path': _sub_path_join(
-                sub_path,
-                constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id)),
-        })
+        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config(
+            {
+                'name': bucket_name,
+                'source': src,
+                'persistent': False,
+                'mode': 'COPY',
+                'store': store_type,
+                '_bucket_sub_path': _sub_path_join(
+                    sub_path,
+                    constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id)),
+            },
+            store_init_kwargs=store_init_kwargs)
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
@@ -805,14 +822,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                     os.path.join(local_fm_path, f'file-{i}'))
 
         new_storage_mounts[
-            file_mount_remote_tmp_dir] = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': local_fm_path,
-                'persistent': False,
-                'mode': 'MOUNT',
-                'store': store_type,
-                '_bucket_sub_path': file_mounts_tmp_subpath,
-            })
+            file_mount_remote_tmp_dir] = storage_lib.Storage.from_yaml_config(
+                {
+                    'name': bucket_name,
+                    'source': local_fm_path,
+                    'persistent': False,
+                    'mode': 'MOUNT',
+                    'store': store_type,
+                    '_bucket_sub_path': file_mounts_tmp_subpath,
+                },
+                store_init_kwargs=store_init_kwargs)
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -824,33 +843,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         logger.info(f'  {colorama.Style.DIM}Files (listed below) '
                     f' -> storage: {bucket_name}:'
                     f'\n    {sources_str}{colorama.Style.RESET_ALL}')
-
-    if bucket_wth_prefix is not None and len(new_storage_mounts) > 0:
-        # The full path from the user config of IBM COS contains the region,
-        # and Azure Blob Storage contains the storage account name, we need to
-        # check the region and storage account name is match with the system
-        # configured.
-        if store_type == storage_lib.StoreType.IBM.value:
-            store: storage_lib.IBMCosStore = list(  # type: ignore
-                new_storage_mounts.values())[0].stores[storage_lib.StoreType(
-                    store_type)]
-            _, _, region = data_utils.split_cos_path(bucket_wth_prefix)
-            assert store.region == region, (
-                f'The region from job config {bucket_wth_prefix} does '
-                f'not match the region of the storage sky supports '
-                f'{store.region}')
-        elif store_type == storage_lib.StoreType.AZURE.value:
-            store: storage_lib.AzureBlobStore = list(  # type: ignore
-                new_storage_mounts.values())[0].stores[storage_lib.StoreType(
-                    store_type)]
-            storage_account_name, _, _ = data_utils.split_az_path(
-                bucket_wth_prefix)
-            env_storage_account_name = \
-                store.storage_account_name  # type: ignore
-            assert storage_account_name == env_storage_account_name, (
-                f'The storage_account_name from job config '
-                f'{bucket_wth_prefix} does not match the storage_account_name '
-                f'of the storage sky configured {env_storage_account_name}')
 
     rich_utils.force_update_status(
         ux_utils.spinner_message('Uploading translated local files/folders'))
