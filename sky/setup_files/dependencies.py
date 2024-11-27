@@ -35,7 +35,8 @@ install_requires = [
     'packaging',
     'psutil',
     'pulp',
-    # Cython 3.0 release breaks PyYAML 5.4.* (https://github.com/yaml/pyyaml/issues/601)
+    # Cython 3.0 release breaks PyYAML 5.4.*
+    # (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
@@ -50,27 +51,30 @@ local_ray = [
 ]
 
 remote = [
-    # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
-    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
-    # ray start is called (#2054).
+    # Adopted from ray's setup.py:
+    # https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
+    # fails to start when ray start is called (#2054).
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
-    "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    'grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < \'3.10\' and sys_platform == \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
+    'grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= \'3.10\' and sys_platform == \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
     # Original issue: https://github.com/ray-project/ray/issues/33833
-    "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
-    "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    'grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < \'3.10\' and sys_platform != \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
+    'grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= \'3.10\' and sys_platform != \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
-    # setup.py: https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
+    # setup.py:
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
     'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, according to https://github.com/boto/botocore/issues/2926
+    # botocore does not work with urllib3>=2.0.0, according to
+    # https://github.com/boto/botocore/issues/2926
     # We have to explicitly pin the version to optimize the time for
     # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
     'urllib3<2',
@@ -106,8 +110,8 @@ extras_require: Dict[str, List[str]] = {
         'msgraph-sdk',
     ] + local_ray,
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
-    # parameter for stopping instances.
-    # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
+    # parameter for stopping instances. Reference:
+    # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
     'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
@@ -130,7 +134,7 @@ extras_require: Dict[str, List[str]] = {
         # https://peps.python.org/pep-0440/#direct-references
         # We have the instruction for its installation in our
         # docs instead.
-        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0'
+        # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
 }
 
