@@ -1673,7 +1673,7 @@ def test_scp_job_queue():
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
-    accelerator = acccelerator.get(generic_cloud, 'T4')
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = Test(
