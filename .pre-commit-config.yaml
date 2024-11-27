@@ -70,3 +70,5 @@ repos:
         args:
             - --rcfile=.pylintrc  # Use your custom pylint configuration
             - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
+        files: ^sky/  # Only include files from the 'sky/' directory
+        exclude: ^sky/skylet/providers/ibm/
