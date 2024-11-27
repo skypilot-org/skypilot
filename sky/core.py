@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
-import sky  # TODO(zongheng): import speed?
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
@@ -18,6 +17,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import task
+import sky  # TODO(zongheng): import speed?
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.jobs.api import core as managed_jobs_core

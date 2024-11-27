@@ -3,7 +3,9 @@ import glob
 import os
 import shlex
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+import warnings
+import zipfile
 
 import colorama
 
@@ -223,3 +225,29 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
                 f'{constants.GIT_IGNORE_FILE}.'
                 f'{colorama.Style.RESET_ALL}')
     return get_excluded_files_from_gitignore(src_dir_path)
+
+
+def zip_files_and_folders(items: List[str],
+                          output_file,
+                          log_file: Optional[str] = None):
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore',
+                                category=UserWarning,
+                                message='Duplicate name:')
+        with zipfile.ZipFile(output_file, 'w') as zipf:
+            for item in items:
+                item = os.path.expanduser(item)
+                if not os.path.isfile(item) and not os.path.isdir(item):
+                    raise ValueError(f'{item} does not exist.')
+                excluded_files = set(
+                    [os.path.join(item, f) for f in get_excluded_files(item)])
+                if os.path.isfile(item) and item not in excluded_files:
+                    zipf.write(item)
+                elif os.path.isdir(item):
+                    for root, _, files in os.walk(item):
+                        for file in files:
+                            if os.path.join(root, file) not in excluded_files:
+                                zipf.write(os.path.join(root, file))
+                if log_file is not None:
+                    with open(log_file, 'a', encoding='utf-8') as f:
+                        f.write(f'Zipped {item}\n')

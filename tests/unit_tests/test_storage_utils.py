@@ -1,16 +1,14 @@
 import os
 import tempfile
+import zipfile
+import pytest
 
 from sky.data import storage_utils
 from sky.skylet import constants
 
 
-def test_get_excluded_files_from_skyignore_no_file():
-    excluded_files = storage_utils.get_excluded_files_from_skyignore('.')
-    assert len(excluded_files) == 0
-
-
-def test_get_excluded_files_from_skyignore():
+@pytest.fixture
+def skyignore_dir():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create workdir
         dirs = ['remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir']
@@ -38,18 +36,48 @@ def test_get_excluded_files_from_skyignore():
         remove.a
         """
         skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
-        with open(skyignore_path, 'w') as f:
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
             f.write(skyignore_content)
 
-        # Test function
-        excluded_files = storage_utils.get_excluded_files_from_skyignore(
-            temp_dir)
+        yield temp_dir
 
-        # Validate results
-        expected_excluded_files = [
-            'remove.py', 'remove_dir', 'remove.sh', 'remove.a', 'dir/remove.sh',
-            'dir/remove.b', 'remove.a', 'dir/remove.a'
+
+def test_get_excluded_files_from_skyignore_no_file():
+    excluded_files = storage_utils.get_excluded_files_from_skyignore('.')
+    assert len(excluded_files) == 0
+
+
+def test_get_excluded_files_from_skyignore(skyignore_dir):
+    # Test function
+    excluded_files = storage_utils.get_excluded_files_from_skyignore(
+        skyignore_dir)
+
+    # Validate results
+    expected_excluded_files = [
+        'remove.py', 'remove_dir', 'remove.sh', 'remove.a', 'dir/remove.sh',
+        'dir/remove.b', 'remove.a', 'dir/remove.a'
+    ]
+    for file_path in expected_excluded_files:
+        assert file_path in excluded_files
+    assert len(excluded_files) == len(expected_excluded_files)
+
+
+def test_zip_files_and_folders(skyignore_dir):
+    with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
+        storage_utils.zip_files_and_folders([skyignore_dir], f)
+        # Print out all files in the zip
+        f.seek(0)
+        with zipfile.ZipFile(f, 'r') as zipf:
+            actual_zipped_files = zipf.namelist()
+
+        expected_zipped_files = [
+            constants.SKY_IGNORE_FILE, 'dir/subdir/remove.py', 'keep.py',
+            'dir/keep.txt', 'dir/keep.a', 'dir/subdir/keep.b'
         ]
-        for file_path in expected_excluded_files:
-            assert file_path in excluded_files
-        assert len(excluded_files) == len(expected_excluded_files)
+        expected_zipped_files = [
+            os.path.join(skyignore_dir, f_name).lstrip('/')
+            for f_name in expected_zipped_files
+        ]
+        for file in actual_zipped_files:
+            assert file in expected_zipped_files
+        assert len(actual_zipped_files) == len(expected_zipped_files)

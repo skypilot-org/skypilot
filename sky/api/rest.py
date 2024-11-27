@@ -29,6 +29,7 @@ from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import requests as requests_lib
 from sky.clouds import service_catalog
+from sky.data import storage_utils
 from sky.jobs.api import rest as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.api import rest as serve_rest
@@ -284,7 +285,7 @@ async def download(download_body: payloads.DownloadBody):
             str(folder_path.expanduser().resolve())
             for folder_path in folder_paths
         ]
-        common_utils.zip_files_and_folders(folders, zip_path)
+        storage_utils.zip_files_and_folders(folders, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.

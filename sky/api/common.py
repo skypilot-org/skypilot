@@ -17,6 +17,7 @@ import requests
 from sky import sky_logging
 from sky import skypilot_config
 from sky.data import data_utils
+from sky.data import storage_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -152,8 +153,6 @@ def check_health(func):
 def upload_mounts_to_api_server(dag: 'sky.Dag',
                                 workdir_only: bool = False) -> 'dag_lib.Dag':
     # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
-    # TODO(zhwu): Handle .skyignore file.
-
     if is_api_server_local():
         return dag
 
@@ -212,8 +211,8 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                 f_log.write('Start zipping files to prepare for upload...\n')
                 f_log.flush()
                 start = time.time()
-                common_utils.zip_files_and_folders(upload_list, f,
-                                                   os.path.expanduser(log_file))
+                storage_utils.zip_files_and_folders(
+                    upload_list, f, os.path.expanduser(log_file))
                 f_log.write(
                     f'Finished zipping files in {time.time() - start}s. '
                     'Start uploading zipped files via HTTP...\n')
