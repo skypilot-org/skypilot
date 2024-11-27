@@ -56,15 +56,13 @@ def _init_client():
             credentials_found += 1
             logger.debug(f'Digital Ocean credential path found at {path}')
     if not credentials_found == 1:
-        logger.debug(
-            (f'{credentials_found} credentials '
-             'found. Expected 1 credential. Please ',
-             'try setting a new API token with `doctl auth init`'))
+        logger.debug((f'{credentials_found} credentials '
+                      'found. Expected 1 credential. Please ',
+                      'try setting a new API token with `doctl auth init`'))
         return None
     if CREDENTIALS_PATH is None:
-        logger.debug(
-            'no credentials file found from '
-            f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
+        logger.debug('no credentials file found from '
+                     f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
         return None
 
     # attempt default context
@@ -92,9 +90,8 @@ def _init_client():
             except do.exceptions().HttpResponseError:
                 continue
         else:
-            logger.debug(
-                'no valid api tokens found try '
-                'setting a new API token with `doctl auth init`')
+            logger.debug('no valid api tokens found try '
+                         'setting a new API token with `doctl auth init`')
     return _client
 
 
