@@ -66,15 +66,9 @@ repos:
     -   id: pylint
         additional_dependencies:
             - pylint-quotes==0.2.3  # Match the version from requirements
-        name: pylint-only-changed-files
-        entry: >
-            bash -c '
-            MERGEBASE=$(git merge-base origin/main HEAD);
-            changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- "sky/*.py" "sky/*.pyi");
-            if [[ -n "$changed_files" ]]; then
-                echo "$changed_files" | tr "\n" "\0" | xargs -0 pylint --load-plugins=pylint_quotes --rcfile=.pylintrc;
-            else
-                echo "Pylint skipped: no files changed in sky/.";
-            fi'
-        pass_filenames: false
-        always_run: true
+        name: pylint
+        args:
+            - --rcfile=.pylintrc  # Use your custom pylint configuration
+            - --load-plugins=pylint_quotes  # Load the pylint-quotes plugin
+        files: ^sky/  # Only include files from the 'sky/' directory
+        exclude: ^sky/skylet/providers/ibm/
