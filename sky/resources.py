@@ -45,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -1606,5 +1606,18 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+        
+        if version < 20:
+            # Pre-0.7.0, we used 'kubernetes' as the default region for
+            # Kubernetes clusters. With the introduction of support for
+            # multiple contexts, we now set the region to the context name.
+            # Since we do not have information on which context the cluster 
+            # was run in, we default it to the current active context.
+            original_cloud = state.get('_cloud', None)
+            original_region = state.get('_region', None)
+            if (original_cloud == clouds.Kubernetes() and 
+                original_region == 'kubernetes'):
+                state['_region'] = (
+                    kubernetes_utils.get_current_kube_config_context_name())
 
         self.__dict__.update(state)
