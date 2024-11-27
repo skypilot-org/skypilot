@@ -147,11 +147,16 @@ class SkyServeLoadBalancer:
                 content=await request.body(),
                 timeout=constants.LB_STREAM_TIMEOUT)
             proxy_response = await client.send(proxy_request, stream=True)
+
+            async def background_func():
+                await proxy_response.aclose()
+                self._load_balancing_policy.post_execute_hook(url, request)
+
             return fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
                 headers=proxy_response.headers,
-                background=background.BackgroundTask(proxy_response.aclose))
+                background=background.BackgroundTask(background_func))
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}')
@@ -180,6 +185,8 @@ class SkyServeLoadBalancer:
                     'Use "sky serve status [SERVICE_NAME]" '
                     'to check the replica status.')
             else:
+                self._load_balancing_policy.pre_execute_hook(
+                    ready_replica_url, request)
                 response_or_exception = await self._proxy_request_to(
                     ready_replica_url, request)
             if not isinstance(response_or_exception, Exception):
