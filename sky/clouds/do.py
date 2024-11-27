@@ -258,20 +258,22 @@ class DO(clouds.Cloud):
         """Verify that the user has valid credentials for DO."""
         try:
             # attempt to make a CURL request for listing instances
-            do_utils.client().droplets.list()
+            client = do_utils.client()
+            if client is None:
+                return False, "no valid credentials found, run `doctl auth init`"
+            client.droplets.list()
         except do.exceptions().HttpResponseError as err:
             return False, str(err)
 
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        try:
-            do_utils.client()  # to initialize `do_utils.CREDENTIALS_PATH`
+        client = do_utils.client()  # to initialize `do_utils.CREDENTIALS_PATH`
+        if client is not None:
             return {
                 f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
             }
-        except do_utils.DigitalOceanError as err:
-            logger.debug(err)
+        else:
             return {}
 
     @classmethod
