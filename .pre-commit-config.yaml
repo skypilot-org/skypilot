@@ -39,7 +39,7 @@ repos:
     hooks:
     -   id: mypy
         args:
-            # from tests/mypy_files.txt
+            # From tests/mypy_files.txt
             - "sky"
             - "--exclude"
             - "sky/benchmark|sky/callbacks|sky/skylet/providers/azure|sky/resources.py|sky/backends/monkey_patches"
