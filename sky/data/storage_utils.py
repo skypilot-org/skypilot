@@ -1,9 +1,10 @@
 """Utility functions for the storage module."""
 import glob
 import os
+import pathlib
 import shlex
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, IO, List, Optional, TextIO, Union
 import warnings
 import zipfile
 
@@ -228,8 +229,8 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 
 
 def zip_files_and_folders(items: List[str],
-                          output_file,
-                          log_file: Optional[str] = None):
+                          output_file: Union[str, pathlib.Path, IO[bytes]],
+                          log_file: Optional[TextIO] = None):
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
@@ -249,5 +250,4 @@ def zip_files_and_folders(items: List[str],
                             if os.path.join(root, file) not in excluded_files:
                                 zipf.write(os.path.join(root, file))
                 if log_file is not None:
-                    with open(log_file, 'a', encoding='utf-8') as f:
-                        f.write(f'Zipped {item}\n')
+                    log_file.write(f'Zipped {item}\n')

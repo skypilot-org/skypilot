@@ -211,8 +211,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                 f_log.write('Start zipping files to prepare for upload...\n')
                 f_log.flush()
                 start = time.time()
-                storage_utils.zip_files_and_folders(
-                    upload_list, f, os.path.expanduser(log_file))
+                storage_utils.zip_files_and_folders(upload_list, f, f_log)
                 f_log.write(
                     f'Finished zipping files in {time.time() - start}s. '
                     'Start uploading zipped files via HTTP...\n')

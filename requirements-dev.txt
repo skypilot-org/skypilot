@@ -18,6 +18,7 @@ types-setuptools
 types-cachetools
 types-pyvmomi
 types-aiofiles
+types-redis
 
 # testing
 pytest

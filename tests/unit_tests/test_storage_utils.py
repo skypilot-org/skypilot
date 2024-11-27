@@ -1,6 +1,8 @@
+import io
 import os
 import tempfile
 import zipfile
+
 import pytest
 
 from sky.data import storage_utils
@@ -63,8 +65,9 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
 
 
 def test_zip_files_and_folders(skyignore_dir):
+    log_file = io.StringIO()
     with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-        storage_utils.zip_files_and_folders([skyignore_dir], f)
+        storage_utils.zip_files_and_folders([skyignore_dir], f, log_file)
         # Print out all files in the zip
         f.seek(0)
         with zipfile.ZipFile(f, 'r') as zipf:
@@ -81,3 +84,7 @@ def test_zip_files_and_folders(skyignore_dir):
         for file in actual_zipped_files:
             assert file in expected_zipped_files
         assert len(actual_zipped_files) == len(expected_zipped_files)
+        # Check the log file correctly logs the zipped files
+        log_file.seek(0)
+        log_file_content = log_file.read()
+        assert f'Zipped {skyignore_dir}' in log_file_content

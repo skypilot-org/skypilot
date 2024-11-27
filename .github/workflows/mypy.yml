@@ -11,6 +11,7 @@ on:
     branches:
       - master
       - 'releases/**'
+      - restapi
 jobs:
   mypy:
     runs-on: ubuntu-latest

@@ -213,7 +213,6 @@ def up(
             _disable_controller_check=True,
         )
 
-
         style = colorama.Style
         fore = colorama.Fore
 
