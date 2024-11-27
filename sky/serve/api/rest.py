@@ -4,6 +4,7 @@ import fastapi
 
 from sky.api.requests import executor
 from sky.api.requests import payloads
+from sky.api.requests import requests
 from sky.serve.api import core
 
 router = fastapi.APIRouter()
@@ -19,7 +20,7 @@ async def up(
         request_name='serve/up',
         request_body=up_body,
         func=core.up,
-        schedule_type=executor.ScheduleType.BLOCKING,
+        schedule_type=requests.ScheduleType.BLOCKING,
     )
 
 
@@ -33,7 +34,7 @@ async def update(
         request_name='serve/update',
         request_body=update_body,
         func=core.update,
-        schedule_type=executor.ScheduleType.NON_BLOCKING,
+        schedule_type=requests.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -47,7 +48,7 @@ async def down(
         request_name='serve/down',
         request_body=down_body,
         func=core.down,
-        schedule_type=executor.ScheduleType.NON_BLOCKING,
+        schedule_type=requests.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -61,7 +62,7 @@ async def terminate_replica(
         request_name='serve/terminate-replica',
         request_body=terminate_replica_body,
         func=core.terminate_replica,
-        schedule_type=executor.ScheduleType.NON_BLOCKING,
+        schedule_type=requests.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -75,7 +76,7 @@ async def status(
         request_name='serve/status',
         request_body=status_body,
         func=core.status,
-        schedule_type=executor.ScheduleType.NON_BLOCKING,
+        schedule_type=requests.ScheduleType.NON_BLOCKING,
     )
 
 
@@ -89,5 +90,5 @@ async def tail_logs(
         request_name='serve/logs',
         request_body=log_body,
         func=core.tail_logs,
-        schedule_type=executor.ScheduleType.NON_BLOCKING,
+        schedule_type=requests.ScheduleType.NON_BLOCKING,
     )

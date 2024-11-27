@@ -59,11 +59,21 @@ REQUEST_COLUMNS = [
     'pid',
     'created_at',
     COL_CLUSTER_NAME,
+    'schedule_type',
 ]
+
+
+class ScheduleType(enum.Enum):
+    """The schedule type for the requests."""
+    BLOCKING = 'blocking'
+    # Queue for requests that should be executed in non-blocking manner.
+    NON_BLOCKING = 'non_blocking'
 
 
 @dataclasses.dataclass
 class RequestPayload:
+    """The payload for the requests."""
+
     request_id: str
     name: str
     entrypoint: str
@@ -73,6 +83,7 @@ class RequestPayload:
     return_value: str
     error: str
     pid: Optional[int]
+    schedule_type: str
 
 
 @dataclasses.dataclass
@@ -88,6 +99,7 @@ class Request:
     return_value: Any = None
     error: Optional[Dict[str, Any]] = None
     pid: Optional[int] = None
+    schedule_type: ScheduleType = ScheduleType.BLOCKING
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -130,8 +142,10 @@ class Request:
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
-        return cls.decode(
-            RequestPayload(**dict(zip(REQUEST_COLUMNS, row[:-1]))))
+        content = dict(zip(REQUEST_COLUMNS, row))
+        # Pop the cluster name as it is not a part of Request.
+        content.pop(COL_CLUSTER_NAME, None)
+        return cls.decode(RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
@@ -161,6 +175,7 @@ class Request:
             error=json.dumps(None),
             pid=None,
             created_at=self.created_at,
+            schedule_type=self.schedule_type.value,
         )
 
     def encode(self) -> RequestPayload:
@@ -178,6 +193,7 @@ class Request:
                 error=json.dumps(self.error),
                 pid=self.pid,
                 created_at=self.created_at,
+                schedule_type=self.schedule_type.value,
             )
         except TypeError as e:
             print(f'Error encoding: {e}\n'
@@ -191,7 +207,6 @@ class Request:
     @classmethod
     def decode(cls, payload: RequestPayload) -> 'Request':
         """Deserialize the request task."""
-
         return cls(
             request_id=payload.request_id,
             name=payload.name,
@@ -202,6 +217,7 @@ class Request:
             error=json.loads(payload.error),
             pid=payload.pid,
             created_at=payload.created_at,
+            schedule_type=ScheduleType(payload.schedule_type),
         )
 
 
@@ -270,7 +286,8 @@ def create_table(cursor, conn):
         return_value TEXT,
         error BLOB,
         pid INTEGER,
-        {COL_CLUSTER_NAME} TEXT)""")
+        {COL_CLUSTER_NAME} TEXT,
+        schedule_type TEXT)""")
 
 
 _DB = None
@@ -311,10 +328,12 @@ def update_request(request_id: str):
 def _get_request_no_lock(request_id: str) -> Optional[Request]:
     """Get a REST task."""
     assert _DB is not None
+    columns_str = ', '.join(REQUEST_COLUMNS)
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(f'SELECT * FROM {REQUEST_TABLE} WHERE request_id LIKE ?',
-                       (request_id + '%',))
+        cursor.execute(
+            f'SELECT {columns_str} FROM {REQUEST_TABLE} '
+            'WHERE request_id LIKE ?', (request_id + '%',))
         row = cursor.fetchone()
         if row is None:
             return None
@@ -394,9 +413,11 @@ def get_request_tasks(
 def _dump_request_no_lock(request: Request):
     """Dump a REST request."""
     row = request.to_row()
+    key_str = ', '.join(REQUEST_COLUMNS)
     fill_str = ', '.join(['?'] * len(row))
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(
-            f'INSERT OR REPLACE INTO {REQUEST_TABLE} VALUES ({fill_str})', row)
+            f'INSERT OR REPLACE INTO {REQUEST_TABLE} ({key_str}) '
+            f'VALUES ({fill_str})', row)

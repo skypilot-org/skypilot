@@ -52,21 +52,6 @@ logger = sky_logging.init_logger(__name__)
 multiprocessing.set_start_method('spawn', force=True)
 
 
-class ScheduleType(enum.Enum):
-    """The schedule type for the requests."""
-    BLOCKING = 'blocking'
-    # Queue for requests that should be executed in non-blocking manner.
-    NON_BLOCKING = 'non_blocking'
-
-    @classmethod
-    def blocking_queues(cls) -> List['ScheduleType']:
-        return [cls.BLOCKING]
-
-    @classmethod
-    def non_blocking_queues(cls) -> List['ScheduleType']:
-        return [cls.NON_BLOCKING]
-
-
 class QueueBackend(enum.Enum):
     REDIS = 'redis'
     MULTIPROCESSING = 'multiprocessing'
@@ -93,7 +78,7 @@ class RequestQueue:
     """The queue for the requests, either redis or multiprocessing."""
 
     def __init__(self,
-                 schedule_type: ScheduleType,
+                 schedule_type: requests.ScheduleType,
                  backend: Optional[QueueBackend] = None):
         self.name = schedule_type.value
         self.backend = backend
@@ -136,7 +121,7 @@ queue_backend = get_queue_backend()
 
 
 @functools.lru_cache(maxsize=None)
-def _get_queue(schedule_type: ScheduleType) -> RequestQueue:
+def _get_queue(schedule_type: requests.ScheduleType) -> RequestQueue:
     return RequestQueue(schedule_type, backend=queue_backend)
 
 
@@ -211,19 +196,21 @@ def _wrapper(request_id: str, ignore_return_value: bool):
         return return_value
 
 
-def schedule_request(request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     ignore_return_value: bool = False,
-                     schedule_type: ScheduleType = ScheduleType.BLOCKING):
+def schedule_request(
+        request_id: str,
+        request_name: str,
+        request_body: payloads.RequestBody,
+        func: Callable[P, Any],
+        ignore_return_value: bool = False,
+        schedule_type: requests.ScheduleType = requests.ScheduleType.BLOCKING):
     """Enqueue a request to the request queue."""
     request = requests.Request(request_id=request_id,
                                name=request_name,
                                entrypoint=func,
                                request_body=request_body,
                                status=requests.RequestStatus.PENDING,
-                               created_at=time.time())
+                               created_at=time.time(),
+                               schedule_type=schedule_type)
 
     if not requests.create_if_not_exists(request):
         logger.debug(f'Request {request_id} already exists.')
@@ -234,21 +221,15 @@ def schedule_request(request_id: str,
     _get_queue(schedule_type).put(input_tuple)
 
 
-def request_worker(worker_id: int, non_blocking: bool = False):
+def request_worker(worker_id: int, schedule_type: requests.ScheduleType):
     """Worker for the requests."""
     logger.info(f'Request worker {worker_id} -- started with pid '
                 f'{multiprocessing.current_process().pid}')
-    if non_blocking:
-        queue_types = ScheduleType.non_blocking_queues()
-    else:
-        queue_types = ScheduleType.blocking_queues()
+    queue = _get_queue(schedule_type)
     while True:
-        for queue_type in queue_types:
-            request = _get_queue(queue_type).get()
-            if request is not None:
-                break
+        request = queue.get()
         if request is None:
-            time.sleep(.1)
+            time.sleep(0.1)
             continue
         request_id, ignore_return_value = request
         request = requests.get_request(request_id)
@@ -263,7 +244,7 @@ def request_worker(worker_id: int, non_blocking: bool = False):
                                                 ignore_return_value))
         process.start()
 
-        if queue_type == ScheduleType.BLOCKING:
+        if schedule_type == requests.ScheduleType.BLOCKING:
             # Wait for the request to finish.
             try:
                 process.join()
@@ -285,7 +266,7 @@ def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
         mp_queue.create_mp_queues(
-            [schedule_type.value for schedule_type in ScheduleType])
+            [schedule_type.value for schedule_type in requests.ScheduleType])
     logger.info('Request queues created')
 
     # Wait for the queues to be created. This is necessary to avoid request
@@ -295,13 +276,16 @@ def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:
     workers = []
     for worker_id in range(num_queue_workers):
         worker = multiprocessing.Process(target=request_worker,
-                                         args=(worker_id,))
+                                         args=(worker_id,
+                                               requests.ScheduleType.BLOCKING))
         logger.info(f'Starting request worker: {worker_id}')
         worker.start()
         workers.append(worker)
 
     # Start a non-blocking worker.
-    worker = multiprocessing.Process(target=request_worker, args=(-1, True))
+    worker = multiprocessing.Process(target=request_worker,
+                                     args=(-1,
+                                           requests.ScheduleType.NON_BLOCKING))
     logger.info('Starting non-blocking request worker')
     worker.start()
     workers.append(worker)
