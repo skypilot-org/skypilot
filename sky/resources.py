@@ -1613,11 +1613,18 @@ class Resources:
             # multiple contexts, we now set the region to the context name.
             # Since we do not have information on which context the cluster 
             # was run in, we default it to the current active context.
+            legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
             original_cloud = state.get('_cloud', None)
             original_region = state.get('_region', None)
-            if (original_cloud == clouds.Kubernetes() and 
-                original_region == 'kubernetes'):
-                state['_region'] = (
-                    kubernetes_utils.get_current_kube_config_context_name())
+            if (clouds.Kubernetes().is_same_cloud(original_cloud) and
+                original_region == legacy_region):
+                current_context = kubernetes_utils.get_current_kube_config_context_name()
+                state['_region'] = current_context
+                # Also update the image_id dict if it contains the old region
+                if isinstance(state['_image_id'], dict):
+                    if legacy_region in state['_image_id']:
+                        state['_image_id'][current_context] = (
+                            state['_image_id'][legacy_region])
+                        del state['_image_id'][legacy_region]
 
         self.__dict__.update(state)
