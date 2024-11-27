@@ -218,18 +218,12 @@ def _get_cloud_dependencies_installation_commands(
         if isinstance(cloud, clouds.Azure):
             # azure-cli cannot be normally installed by uv.
             # See comments in sky/skylet/constants.py.
-            azure_cli_dep = [
-                dep for dep in cloud_python_dependencies
-                if dep.startswith('azure-cli')
-            ]
-            assert len(azure_cli_dep) == 1, cloud_python_dependencies
-            azure_cli_dep = azure_cli_dep[0]
-            cloud_python_dependencies.remove(azure_cli_dep)
+            cloud_python_dependencies.remove(dependencies.AZURE_CLI)
 
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
-                f'uv pip install --prerelease=allow "{azure_cli_dep}" '
+                f'uv pip install --prerelease=allow "{dependencies.AZURE_CLI}" '
                 '> /dev/null 2>&1')
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))

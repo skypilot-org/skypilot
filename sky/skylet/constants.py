@@ -4,6 +4,7 @@ from typing import List, Tuple
 from packaging import version
 
 import sky
+from sky.setup_files import dependencies
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -226,7 +227,8 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     # cause uv to use pre-releases for some other packages that have sufficient
     # stable releases.
     'if [ "{cloud}" = "azure" ]; then '
-    f'{SKY_UV_PIP_CMD} install --prerelease=allow "azure-cli>=2.65.0"; fi;'
+    f'{SKY_UV_PIP_CMD} install --prerelease=allow "{dependencies.AZURE_CLI}";'
+    'fi;'
     # Install skypilot from wheel
     f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
