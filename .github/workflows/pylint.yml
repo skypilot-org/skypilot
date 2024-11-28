@@ -33,4 +33,4 @@ jobs:
         pip install pylint-quotes==0.2.3
     - name: Analysing the code with pylint
       run: |
-        pylint --load-plugins pylint_quotes sky
+        pylint "${PYLINT_FLAGS[@]}" $(git ls-files 'sky/*.py' 'sky/*.pyi'| grep -v -E "sky\/skylet\/providers\/|sky\/skylet\/ray_patches\/|sky\/setup_files\/setup.py|sky\/clouds\/service_catalog\/|sky\/callbacks\/|sky\/backends\/monkey_patches\/|sky\/jobs\/dashboard\/")

@@ -64,6 +64,27 @@ PYLINT_FLAGS=(
     '--load-plugins'  'pylint_quotes'
 )
 
+
+# File / Directory to be ignored when `--all` option is used
+EXCLUDE_PATHS=(
+    "sky/skylet/providers/"
+    "sky/skylet/ray_patches/"
+    "sky/setup_files/setup.py"
+    "sky/clouds/service_catalog/"
+    "sky/callbacks/"
+    "sky/backends/monkey_patches/"
+    "sky/jobs/dashboard/"
+)
+
+GREP_PATTERN=""
+for path in "${EXCLUDE_PATHS[@]}"; do
+    if [[ -z "$GREP_PATTERN" ]]; then
+        GREP_PATTERN="$path"
+    else
+        GREP_PATTERN="$GREP_PATTERN|$path"
+    fi
+done
+
 # Format specified files
 format() {
     yapf --in-place "${YAPF_FLAGS[@]}" "$@"
@@ -104,6 +125,8 @@ if [[ "$1" == '--files' ]]; then
    # entire python directory is formatted.
 elif [[ "$1" == '--all' ]]; then
    format_all
+elif [[ "$1" == '--legacy' ]]; then
+   format_all
 else
    # Format only the files that changed in last commit.
    format_changed
@@ -129,6 +152,13 @@ if [[ "$1" == '--files' ]]; then
     pylint "${PYLINT_FLAGS[@]}" "${@:2}"
 elif [[ "$1" == '--all' ]]; then
     # Pylint entire sky directory.
+    # Equals to: `pylint "${PYLINT_FLAGS[@]}" $(git ls-files 'sky/*.py' 'sky/*.pyi'| 
+    # grep -v -E "sky\/skylet\/providers\/|sky\/skylet\/ray_patches\/|
+    # sky\/setup_files\/setup.py|sky\/clouds\/service_catalog\/|sky\/callbacks\/|
+    # sky\/backends\/monkey_patches\/|sky\/jobs\/dashboard\/")``
+    pylint "${PYLINT_FLAGS[@]}" $(git ls-files 'sky/*.py' 'sky/*.pyi' | grep -v -E "$GREP_PATTERN")
+elif [[ "$1" == '--legacy' ]]; then
+    # Pylint entire sky directory, ignoring all dirs without a __init__.py file.
     pylint "${PYLINT_FLAGS[@]}" sky
 else
     # Pylint only files in sky/ that have changed in last commit.
