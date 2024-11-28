@@ -1,9 +1,12 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
+import asyncio
 import collections
 import random
 import threading
 import typing
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+import aiohttp
 
 from sky import sky_logging
 
@@ -67,6 +70,9 @@ class LoadBalancingPolicy:
     def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         raise NotImplementedError
 
+    def probe_replicas(self) -> None:
+        pass
+
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
         pass
@@ -102,7 +108,7 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
         return ready_replica_url
 
 
-class LeastLoadPolicy(LoadBalancingPolicy, name='least_load'):
+class LeastLoadPolicy(LoadBalancingPolicy, name='lpr'):
     """Least load load balancing policy."""
 
     def __init__(self) -> None:
@@ -143,3 +149,73 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load'):
         del request  # Unused.
         with self.lock:
             self.load_map[replica_url] -= 1
+
+
+async def get_metric(session: aiohttp.ClientSession,
+                     replica_url: str) -> Optional[Dict[str, Any]]:
+    try:
+        async with session.get(f'{replica_url}/metrics') as response:
+            return await response.json()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to get metric from {replica_url}: {e}')
+        return None
+
+
+async def fetch_all_metrics(
+        replica_urls: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            get_metric(session, replica_url) for replica_url in replica_urls
+        ]
+        results = await asyncio.gather(*tasks)
+        return dict(zip(replica_urls, results))
+
+
+class LeastMemoryUsagePolicy(LoadBalancingPolicy, name='lmu'):
+    """Least memory usage load balancing policy."""
+    MEMORY_USAGE_METRIC_KEY = 'gauge_gpu_cache_usage'
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.memory_usage_map: Dict[str, float] = collections.defaultdict(float)
+        self.lock = threading.Lock()
+
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        with self.lock:
+            self.ready_replicas = ready_replicas
+            for r in self.ready_replicas:
+                if r not in ready_replicas:
+                    del self.memory_usage_map[r]
+            for replica in ready_replicas:
+                self.memory_usage_map[replica] = self.memory_usage_map.get(
+                    replica, 0)
+
+    def probe_replicas(self) -> None:
+        replica2metric = asyncio.run(fetch_all_metrics(self.ready_replicas))
+        with self.lock:
+            for replica, metric in replica2metric.items():
+                if metric is not None:
+                    if self.MEMORY_USAGE_METRIC_KEY not in metric:
+                        logger.warning(
+                            f'{self.MEMORY_USAGE_METRIC_KEY} not found in '
+                            f'metric from {replica}: {metric}')
+                    memory_usage: float = metric.get(
+                        self.MEMORY_USAGE_METRIC_KEY, 0.5)
+                else:
+                    memory_usage = 0.5
+                self.memory_usage_map[replica] = memory_usage
+        logger.info(f'Updated memory usage map: {self.memory_usage_map}')
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        del request  # Unused.
+        if not self.ready_replicas:
+            return None
+        with self.lock:
+            result = min(
+                self.ready_replicas,
+                key=lambda replica: self.memory_usage_map.get(replica, 0))
+        logger.info(f'Selected replica {result} with memory usage '
+                    f'{self.memory_usage_map[result]}')
+        return result

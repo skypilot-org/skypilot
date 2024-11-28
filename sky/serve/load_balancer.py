@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import threading
+import time
 from typing import Dict, Optional, Union
 
 import aiohttp
@@ -60,6 +61,12 @@ class SkyServeLoadBalancer:
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
         self._client_pool_lock: threading.Lock = threading.Lock()
+
+    def _probe(self) -> None:
+        while True:
+            self._load_balancing_policy.probe_replicas()
+            # TODO(tian): Finetune the interval.
+            time.sleep(0.5)
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -229,6 +236,8 @@ class SkyServeLoadBalancer:
 
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
+
+        threading.Thread(target=self._probe, daemon=True).start()
 
         logger.info('SkyServe Load Balancer started on '
                     f'http://0.0.0.0:{self._load_balancer_port}')
