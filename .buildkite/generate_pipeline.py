@@ -15,7 +15,7 @@ ALL_CLOUDS_WITH_CREDENTIALS = ['aws', 'azure', 'gcp', 'kubernetes']
 
 ALL_CLOUDS_IN_SMOKE_TESTS = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
 ]
 
 

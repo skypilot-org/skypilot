@@ -222,12 +222,6 @@ steps:
       LOG_TO_STDOUT: '1'
       PYTHONPATH: ${PYTHONPATH}:$(pwd)
     label: test_kubernetes_http_server_with_custom_ports on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_runpod_http_server_with_custom_ports
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_runpod_http_server_with_custom_ports on aws
   - command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_aws --aws
     env:
       LOG_TO_STDOUT: '1'
