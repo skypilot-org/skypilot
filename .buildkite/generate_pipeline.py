@@ -1,5 +1,6 @@
 """This script generates a Buildkite pipeline from test files."""
 import ast
+from collections import defaultdict
 import copy
 import os
 from typing import Any, Dict, List
@@ -10,7 +11,7 @@ DEFAULT_CLOUDS_TO_RUN = ['aws', 'azure']
 # We only have credentials for aws, azure, and gcp.
 # For those test cases that run on other clouds,
 # we currently ignore them.
-ALL_CLOUDS_WITH_CREDENTIALS = ['aws', 'azure', 'gcp']
+ALL_CLOUDS_WITH_CREDENTIALS = ['aws', 'azure', 'gcp', 'kubernetes']
 
 ALL_CLOUDS_IN_SMOKE_TESTS = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
@@ -97,7 +98,8 @@ def _generate_pipeline(test_file: str) -> Dict[str, Any]:
                 'label': f'{test_function} on {cloud}',
                 'command': f'pytest {test_file}::{test_function} --{cloud}',
                 'env': {
-                    'LOG_TO_STDOUT': '1'
+                    'LOG_TO_STDOUT': '1',
+                    'PYTHONPATH': '${PYTHONPATH}:$(pwd)'
                 }
             }
             steps.append(step)
@@ -109,20 +111,30 @@ def _generate_pipeline(test_file: str) -> Dict[str, Any]:
 def main():
     # List of test files to include in the pipeline
     test_files = os.listdir('tests/smoke_tests')
+    output_file_pipelines_map = defaultdict(list)
 
     for test_file in test_files:
         if not test_file.startswith('test_'):
             continue
         test_file_path = os.path.join('tests/smoke_tests', test_file)
+        if test_file == 'test_required_before_merge.py':
+            yaml_file_path = '.buildkite/pipeline_smoke_tests_pre_merge.yaml'
+        else:
+            yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
+        print(f'Converting {test_file_path} to {yaml_file_path}')
         pipeline = _generate_pipeline(test_file_path)
-        yaml_file_path = '.buildkite/pipeline_smoke_' + \
-            f'{test_file.split(".")[0]}.yaml'
+        output_file_pipelines_map[yaml_file_path].append(pipeline)
+        print(f'Converted {test_file_path} to {yaml_file_path}\n\n')
+
+    for yaml_file_path, pipelines in output_file_pipelines_map.items():
         with open(yaml_file_path, 'w', encoding='utf-8') as file:
             file.write('# This is an auto-generated Buildkite pipeline by '
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
-            yaml.dump(pipeline, file, default_flow_style=False)
-        print(f'Convert {test_file_path} to {yaml_file_path}\n\n')
+            final_pipeline = {
+                'steps': [pipeline['steps'] for pipeline in pipelines]
+            }
+            yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
 if __name__ == '__main__':
