@@ -806,10 +806,15 @@ async def kubernetes_pod_ssh_proxy(
     namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
     pod_name = handle.cluster_name_on_cloud + '-head'
 
+    kubernetes_args = []
+    if namespace is not None:
+        kubernetes_args.append(f'--namespace={namespace}')
+    if context is not None:
+        kubernetes_args.append(f'--context={context}')
+
     kubectl_cmd = [
         'kubectl',
-        f'--namespace={namespace}',
-        f'--context={context}',
+        *kubernetes_args,
         'port-forward',
         f'pod/{pod_name}',
         ':22',

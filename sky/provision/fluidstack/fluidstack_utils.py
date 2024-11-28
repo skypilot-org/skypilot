@@ -30,7 +30,7 @@ class FluidstackAPIError(Exception):
         super().__init__(message)
 
 
-def raise_fluidstack_error(response: requests.Response) -> None:
+def raise_fluidstack_error(response: 'requests.Response') -> None:
     """Raise FluidstackAPIError if appropriate."""
     status_code = response.status_code
     if response.ok:
