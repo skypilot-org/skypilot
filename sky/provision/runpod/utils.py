@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import runpod
+from sky.provision import docker_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -100,7 +101,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, ports: Optional[List[int]], public_key: str) -> str:
+           image_name: str, ports: Optional[List[int]], public_key: str,
+           docker_login_config: Optional[Dict[str, str]]) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -142,6 +144,27 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
 
+    template_id = None
+    if docker_login_config is not None:
+        login_config = docker_utils.DockerLoginConfig(**docker_login_config)
+        # TODO(tian): The `name` argument seems only for display purpose but
+        # not specifying the registry server. Double check if that works for
+        # registries other than Docker Hub.
+        # TODO(tian): Delete the registry auth and template after the instance
+        # is terminated.
+        create_auth_resp = runpod.runpod.create_container_registry_auth(
+            name=f'{name}-registry-auth',
+            username=login_config.username,
+            password=login_config.password,
+        )
+        registry_auth_id = create_auth_resp['id']
+        create_template_resp = runpod.runpod.create_template(
+            name=f'{name}-template',
+            image_name=image_name,
+            registry_auth_id=registry_auth_id,
+        )
+        template_id = create_template_resp['id']
+
     new_instance = runpod.runpod.create_pod(
         name=name,
         image_name=image_name,
@@ -157,6 +180,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
+        template_id=template_id,
         docker_args=
         f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'')
 

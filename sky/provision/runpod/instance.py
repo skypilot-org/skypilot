@@ -89,7 +89,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 disk_size=config.node_config['DiskSize'],
                 image_name=config.node_config['ImageId'],
                 ports=config.ports_to_open_on_launch,
-                public_key=config.node_config['PublicKey'])
+                public_key=config.node_config['PublicKey'],
+                docker_login_config=config.provider_config.get(
+                    'docker_login_config'))
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
