@@ -66,7 +66,7 @@ async def terminate_replica(
     )
 
 
-@router.get('/status')
+@router.post('/status')
 async def status(
     request: fastapi.Request,
     status_body: payloads.ServeStatusBody,
@@ -80,7 +80,7 @@ async def status(
     )
 
 
-@router.get('/logs')
+@router.post('/logs')
 async def tail_logs(
     request: fastapi.Request,
     log_body: payloads.ServeLogsBody,

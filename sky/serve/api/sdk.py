@@ -128,7 +128,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
 def status(service_names: Optional[Union[str, List[str]]]) -> str:
     """Get the status of a service."""
     body = payloads.ServeStatusBody(service_names=service_names,)
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/serve/status',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
@@ -149,7 +149,7 @@ def tail_logs(service_name: str,
         replica_id=replica_id,
         follow=follow,
     )
-    response = requests.get(
+    response = requests.post(
         f'{api_common.get_server_url()}/serve/logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
