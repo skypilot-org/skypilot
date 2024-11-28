@@ -1616,7 +1616,7 @@ class Resources:
             legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
             original_cloud = state.get('_cloud', None)
             original_region = state.get('_region', None)
-            if (clouds.Kubernetes().is_same_cloud(original_cloud) and
+            if (isinstance(original_cloud, clouds.Kubernetes) and
                     original_region == legacy_region):
                 current_context = (
                     kubernetes_utils.get_current_kube_config_context_name())
