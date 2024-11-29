@@ -710,6 +710,8 @@ def test_managed_jobs_storage(generic_cloud: str):
                     job_name=name,
                     job_status=[ManagedJobStatus.SUCCEEDED],
                     timeout=60 + BUMP_UP_SECONDS),
+                # Wait for s3 backend refresh
+                f'sleep {BUMP_UP_SECONDS}',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
