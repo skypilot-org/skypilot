@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
+from sky import global_user_state
+from sky import status_lib
 from sky.serve import constants
 from sky.utils import db_utils
 
@@ -58,6 +60,14 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS external_load_balancers (
+        lb_id INTEGER, 
+        service_name TEXT,
+        cluster_name TEXT,
+        region TEXT,
+        port INTEGER,
+        PRIMARY KEY (service_name, lb_id))""")
     conn.commit()
 
 
@@ -76,6 +86,8 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'active_versions',
                              f'TEXT DEFAULT {json.dumps([])!r}')
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'dns_endpoint',
+                             'TEXT DEFAULT NULL')
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -321,10 +333,19 @@ def set_service_load_balancer_port(service_name: str,
             (load_balancer_port, service_name))
 
 
+def set_service_dns_endpoint(service_name: str, dns_endpoint: str) -> None:
+    """Sets the dns endpoint of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            dns_endpoint=(?) WHERE name=(?)""", (dns_endpoint, service_name))
+
+
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions) = row[:13]
+     _, active_versions, dns_endpoint) = row[:14]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -341,6 +362,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         # integers in json format. This is mainly for display purpose.
         'active_versions': json.loads(active_versions),
         'requested_resources_str': requested_resources_str,
+        'dns_endpoint': dns_endpoint,
     }
 
 
@@ -538,3 +560,63 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+
+# === External Load Balancer functions ===
+# TODO(tian): Add a status column.
+def add_external_load_balancer(service_name: str, lb_id: int, cluster_name: str,
+                               region: str, port: int) -> None:
+    """Adds an external load balancer to the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT INTO external_load_balancers
+            (service_name, lb_id, cluster_name, region, port)
+            VALUES (?, ?, ?, ?, ?)""",
+            (service_name, lb_id, cluster_name, region, port))
+
+
+def _get_external_load_balancer_from_row(row) -> Dict[str, Any]:
+    lb_id, cluster_name, region, port = row[:4]
+    lb_cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+    if (lb_cluster_record is None or
+            lb_cluster_record['status'] != status_lib.ClusterStatus.UP):
+        # TODO(tian): We should implement a status for external lbs as well
+        # and returns a '-' when it is still provisioning.
+        lb_ip = '-'
+    else:
+        lb_ip = lb_cluster_record['handle'].head_ip
+        if lb_ip is None:
+            lb_ip = '-'
+    return {
+        'lb_id': lb_id,
+        'cluster_name': cluster_name,
+        'region': region,
+        'ip': lb_ip,
+        'port': port,
+    }
+
+
+def get_external_load_balancers(service_name: str) -> List[Dict[str, Any]]:
+    """Gets all external load balancers of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT lb_id, cluster_name, region, port
+            FROM external_load_balancers
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+    external_load_balancers = []
+    for row in rows:
+        external_load_balancers.append(
+            _get_external_load_balancer_from_row(row))
+    return external_load_balancers
+
+
+def remove_external_load_balancer(service_name: str, lb_id: int) -> None:
+    """Removes an external load balancer from the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM external_load_balancers
+            WHERE service_name=(?)
+            AND lb_id=(?)""", (service_name, lb_id))

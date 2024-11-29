@@ -12,7 +12,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -62,6 +62,8 @@ _FAILED_TO_FIND_REPLICA_MSG = (
 # Max number of replicas to show in `sky serve status` by default.
 # If user wants to see all replicas, use `sky serve status --all`.
 _REPLICA_TRUNC_NUM = 10
+# Similar to _REPLICA_TRUNC_NUM, but for external load balancers.
+_EXTERNAL_LB_TRUNC_NUM = 10
 
 
 class ServiceComponent(enum.Enum):
@@ -230,6 +232,13 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'load_balancer.log')
 
 
+def generate_remote_external_load_balancer_log_file_name(
+        service_name: str, lb_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, f'external_load_balancer_{lb_id}.log')
+
+
 def generate_replica_launch_log_file_name(service_name: str,
                                           replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
@@ -360,7 +369,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
 
 def _get_service_status(
         service_name: str,
-        with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
+        with_replica_info: bool = True,
+        with_external_lb_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
     Args:
@@ -379,6 +389,9 @@ def _get_service_status(
             info.to_info_dict(with_handle=True)
             for info in serve_state.get_replica_infos(service_name)
         ]
+    if with_external_lb_info:
+        record['external_lb_info'] = serve_state.get_external_load_balancers(
+            service_name)
     return record
 
 
@@ -463,7 +476,8 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     messages = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
-                                             with_replica_info=False)
+                                             with_replica_info=False,
+                                             with_external_lb_info=False)
         if (service_status is not None and service_status['status']
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
@@ -531,6 +545,10 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    # TODO(tian): Add a field in service record to indicate whether it has
+    # external load balancer or not. And change this timeout accordingly.
+    # timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS
+    timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB
     while True:
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
@@ -543,6 +561,9 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
+                if record['dns_endpoint'] is not None:
+                    endpoint = f'{record["dns_endpoint"]}:{lb_port}'
+                    return common_utils.encode_payload(endpoint)
                 return common_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
@@ -550,7 +571,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                                    'To spin up more services, please '
                                    'tear down some existing services.')
         elapsed = time.time() - start_time
-        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+        if elapsed > timeout:
             # Print the controller log to help user debug.
             controller_log_path = (
                 generate_remote_controller_log_file_name(service_name))
@@ -565,7 +586,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         time.sleep(1)
 
 
-def load_service_initialization_result(payload: str) -> int:
+def load_service_initialization_result(payload: str) -> Union[int, str]:
     return common_utils.decode_payload(payload)
 
 
@@ -781,6 +802,10 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
+    if service_record['dns_endpoint'] is not None:
+        dns = service_record['dns_endpoint']
+        lb_port = service_record['load_balancer_port']
+        return f'{dns}:{lb_port}'
     # Don't use backend_utils.is_controller_accessible since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
@@ -815,10 +840,14 @@ def format_service_table(service_records: List[Dict[str, Any]],
     service_table = log_utils.create_table(service_columns)
 
     replica_infos = []
+    external_lb_infos = []
     for record in service_records:
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
             replica_infos.append(replica)
+        for external_lb in record['external_lb_info']:
+            external_lb['service_name'] = record['name']
+            external_lb_infos.append(external_lb)
 
         service_name = record['name']
         version = ','.join(
@@ -846,10 +875,20 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
-    return (f'{service_table}\n'
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
-            f'{replica_table}')
+
+    final_table = (f'{service_table}\n'
+                   f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Service Replicas{colorama.Style.RESET_ALL}\n'
+                   f'{replica_table}')
+
+    if external_lb_infos:
+        external_lb_table = _format_external_lb_table(external_lb_infos,
+                                                      show_all)
+        final_table += (f'\n\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'External Load Balancers{colorama.Style.RESET_ALL}\n'
+                        f'{external_lb_table}')
+
+    return final_table
 
 
 def _format_replica_table(replica_records: List[Dict[str, Any]],
@@ -908,6 +947,43 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         replica_table.add_row(replica_values)
 
     return f'{replica_table}{truncate_hint}'
+
+
+def _format_external_lb_table(external_lb_records: List[Dict[str, Any]],
+                              show_all: bool) -> str:
+    if not external_lb_records:
+        return 'No existing external load balancers.'
+
+    external_lb_columns = ['SERVICE_NAME', 'ID', 'ENDPOINT']
+    if show_all:
+        external_lb_columns.extend(['IP', 'PORT', 'CLUSTER_NAME'])
+    external_lb_table = log_utils.create_table(external_lb_columns)
+
+    truncate_hint = ''
+    if not show_all:
+        if len(external_lb_records) > _EXTERNAL_LB_TRUNC_NUM:
+            truncate_hint = (
+                '\n... (use --all to show all external load balancers)')
+        external_lb_records = external_lb_records[:_EXTERNAL_LB_TRUNC_NUM]
+
+    for record in external_lb_records:
+        service_name = record['service_name']
+        external_lb_id = record['lb_id']
+        lb_ip = record['ip']
+        port = record['port']
+        endpoint = f'{lb_ip}:{port}'
+        cluster_name = record['cluster_name']
+
+        external_lb_values = [
+            service_name,
+            external_lb_id,
+            endpoint,
+        ]
+        if show_all:
+            external_lb_values.extend([lb_ip, port, cluster_name])
+        external_lb_table.add_row(external_lb_values)
+
+    return f'{external_lb_table}{truncate_hint}'
 
 
 # =========================== CodeGen for Sky Serve ===========================
