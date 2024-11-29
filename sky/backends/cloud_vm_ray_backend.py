@@ -153,8 +153,7 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 
 _RESOURCES_UNAVAILABLE_LOG = (
-    'The reasons for the infeasibility of each resource are summarized below. '
-    'For detailed explanations, please refer to the log above.')
+    'Reasons for provision failures (for details, please check the log above):')
 
 
 def _is_command_length_over_limit(command: str) -> bool:
