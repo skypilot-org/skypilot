@@ -6,12 +6,12 @@ steps:
 - agents:
     queue: generic_cloud
   command: pytest tests/smoke_tests/test_required_before_merge.py::test_yaml_launch_and_mount
-    --azure
-  if: build.env.azure == '1'
-  label: test_yaml_launch_and_mount on azure
+    --aws
+  if: build.env("aws") == "1"
+  label: test_yaml_launch_and_mount on aws
 - agents:
     queue: generic_cloud
   command: pytest tests/smoke_tests/test_required_before_merge.py::test_yaml_launch_and_mount
-    --aws
-  if: build.env.aws == '1'
-  label: test_yaml_launch_and_mount on aws
+    --azure
+  if: build.env("azure") == "1"
+  label: test_yaml_launch_and_mount on azure

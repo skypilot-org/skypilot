@@ -115,7 +115,7 @@ def _generate_pipeline(test_file: str, one_cloud_per_test_function: bool) -> Dic
                     # Since some are more costly
                     'queue': CLOUD_QUEUE_MAP[cloud]
                 },
-                'if': f'build.env.{cloud} == \'1\''
+                'if': f'build.env("{cloud}") == "1"'
             }
             steps.append(step)
             if one_cloud_per_test_function:
