@@ -101,7 +101,7 @@ def label():
         # Get the list of nodes with GPUs
         gpu_nodes = []
         for node in nodes:
-            if kubernetes_utils.GPU_RESOURCE_KEY in node.status.capacity:
+            if kubernetes_utils.get_gpu_resource_key() in node.status.capacity:
                 gpu_nodes.append(node)
 
         print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
@@ -142,7 +142,7 @@ def label():
     if len(gpu_nodes) == 0:
         print('No GPU nodes found in the cluster. If you have GPU nodes, '
               'please ensure that they have the label '
-              f'`{kubernetes_utils.GPU_RESOURCE_KEY}: <number of GPUs>`')
+              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>`')
     else:
         print('GPU labeling started - this may take 10 min or more to complete.'
               '\nTo check the status of GPU labeling jobs, run '
