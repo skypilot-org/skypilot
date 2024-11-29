@@ -3,6 +3,7 @@ import ast
 from collections import defaultdict
 import copy
 import os
+import random
 from typing import Any, Dict, List
 
 import yaml
@@ -131,8 +132,12 @@ def main():
             file.write('# This is an auto-generated Buildkite pipeline by '
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
+            all_steps = [pipeline['steps'] for pipeline in pipelines]
+            # Shuffle the steps to avoid flakyness, consecutive runs of the same
+            # kind of test may fail for requiring locks on the same resources.
+            random.shuffle(all_steps)
             final_pipeline = {
-                'steps': [pipeline['steps'] for pipeline in pipelines]
+                'steps': all_steps
             }
             yaml.dump(final_pipeline, file, default_flow_style=False)
 
