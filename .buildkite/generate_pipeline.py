@@ -12,7 +12,8 @@ DEFAULT_CLOUDS_TO_RUN = ['aws', 'azure']
 
 ALL_CLOUDS_IN_SMOKE_TESTS = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
+    'lambda_cloud'
 ]
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_KUBERNETES = 'kubernetes'
