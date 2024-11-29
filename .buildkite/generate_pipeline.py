@@ -136,7 +136,9 @@ def _dump_pipeline_to_file(
     for yaml_file_path, pipelines in output_file_pipelines_map.items():
         with open(yaml_file_path, 'w', encoding='utf-8') as file:
             file.write(GENERATED_FILE_HEAD)
-            all_steps = [pipeline['steps'] for pipeline in pipelines]
+            all_steps = []
+            for pipeline in pipelines:
+                all_steps.extend(pipeline['steps'])
             # Shuffle the steps to avoid flakyness, consecutive runs of the same
             # kind of test may fail for requiring locks on the same resources.
             random.shuffle(all_steps)
