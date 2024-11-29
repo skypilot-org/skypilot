@@ -1,868 +1,875 @@
 # This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+env:
+  LOG_TO_STDOUT: '1'
+  PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  aws: '1'
+  azure: '1'
+  gcp: '1'
+  kubernetes: '1'
 steps:
-- - command: pytest tests/smoke_tests/test_images.py::test_aws_images --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_images on aws
-  - command: pytest tests/smoke_tests/test_images.py::test_gcp_images --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_images on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_azure_images --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_images on azure
-  - command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_image_id_dict on aws
-  - command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_image_id_dict on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_region
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_file_mounts
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_image_id_dict_region on aws
-  - command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict_region
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_image_id_dict_region on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_zone
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_image_id_dict_zone on aws
-  - command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict_zone
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_image_id_dict_zone on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_clone_disk_aws --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_clone_disk_aws on aws
-  - command: pytest tests/smoke_tests/test_images.py::test_clone_disk_gcp --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_clone_disk_gcp on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_gcp_mig --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_mig on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_gcp_force_enable_external_ips
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_force_enable_external_ips on gcp
-  - command: pytest tests/smoke_tests/test_images.py::test_image_no_conda --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_image_no_conda on aws
-  - command: pytest tests/smoke_tests/test_images.py::test_custom_default_conda_env
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_custom_default_conda_env on aws
-- - command: pytest tests/smoke_tests/test_basic.py::test_example_app --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_example_app on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_minimal --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_minimal on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_launch_fast --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_launch_fast on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_launch_fast_with_autostop
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_launch_fast_with_autostop on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_stale_job --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_stale_job on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_aws_stale_job_manual_restart
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_stale_job_manual_restart on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_gcp_stale_job_manual_restart
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_stale_job_manual_restart on gcp
-  - command: pytest tests/smoke_tests/test_basic.py::test_env_check --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_env_check on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_cli_logs --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_cli_logs on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_exec
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_core_api_sky_launch_exec on gcp
-  - command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_fast
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_core_api_sky_launch_fast on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multiple_accelerators_ordered on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered_with_default
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multiple_accelerators_ordered_with_default on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multiple_accelerators_unordered on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered_with_default
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multiple_accelerators_unordered_with_default on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_multiple_resources --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multiple_resources on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_sky_bench --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_sky_bench on aws
-  - command: pytest tests/smoke_tests/test_basic.py::test_kubernetes_context_failover
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_kubernetes_context_failover on kubernetes
-  - command: pytest tests/smoke_tests/test_basic.py::TestYamlSpecs::test_load_dump_yaml_config_equivalent
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: TestYamlSpecs::test_load_dump_yaml_config_equivalent on aws
-- - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_job_pipeline --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_job_pipeline on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_failed_setup
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_failed_setup on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_failed_setup
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_pipeline_failed_setup on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_aws
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_recovery_aws on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_gcp
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_recovery_gcp on gcp
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_aws
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_pipeline_recovery_aws on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_gcp
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_pipeline_recovery_gcp on gcp
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_default_resources
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_recovery_default_resources on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_aws
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_recovery_multi_node_aws on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_gcp
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_recovery_multi_node_gcp on gcp
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_aws
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_cancellation_aws on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_gcp
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_cancellation_gcp on gcp
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_storage
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_storage on aws
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_tpu --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_tpu on gcp
-  - command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_inline_env
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_managed_jobs_inline_env on aws
-- - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_file_mounts
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_file_mounts on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_using_file_mounts_with_env_vars
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_using_file_mounts_with_env_vars
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_using_file_mounts_with_env_vars on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_aws_storage_mounts_with_stop
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_aws_storage_mounts_with_stop
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_aws_storage_mounts_with_stop on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_gcp_storage_mounts_with_stop
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_gcp_storage_mounts_with_stop
       --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.gcp == '1'
     label: test_gcp_storage_mounts_with_stop on gcp
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_azure_storage_mounts_with_stop
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_azure_storage_mounts_with_stop
       --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.azure == '1'
     label: test_azure_storage_mounts_with_stop on azure
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_storage_mounts
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_storage_mounts
       --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.kubernetes == '1'
     label: test_kubernetes_storage_mounts on kubernetes
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_context_switch
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_kubernetes_context_switch
       --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.kubernetes == '1'
     label: test_kubernetes_context_switch on kubernetes
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::test_docker_storage_mounts
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::test_docker_storage_mounts
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_docker_storage_mounts on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_new_bucket_creation_and_deletion
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_new_bucket_creation_and_deletion
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_new_bucket_creation_and_deletion on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion
       on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_source_with_spaces
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_source_with_spaces
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_upload_source_with_spaces on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_external_deletion
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_external_deletion
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_bucket_external_deletion on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_bulk_deletion
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_bulk_deletion
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_bucket_bulk_deletion on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_public_bucket
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_public_bucket
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_public_bucket on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_nonexistent_bucket
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_nonexistent_bucket
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_nonexistent_bucket on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_private_bucket
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_private_bucket
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_private_bucket on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_to_existing_bucket
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_to_existing_bucket
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_upload_to_existing_bucket on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_copy_mount_existing_storage
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_copy_mount_existing_storage
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_copy_mount_existing_storage on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_list_source
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_list_source
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_list_source on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_invalid_names
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_invalid_names
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_invalid_names on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
       on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
       on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_aws_regions
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_aws_regions
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_aws_regions on aws
-  - command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_gcs_regions
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_gcs_regions
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: TestStorageWithCredentials::test_gcs_regions on aws
-- - command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_region --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_region on aws
-  - command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_with_ssh_proxy_command
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_with_ssh_proxy_command on aws
-  - command: pytest tests/smoke_tests/test_region_and_zone.py::test_gcp_region_and_service_account
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_region_and_service_account on gcp
-  - command: pytest tests/smoke_tests/test_region_and_zone.py::test_azure_region --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_region on azure
-  - command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_zone --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_zone on aws
-  - command: pytest tests/smoke_tests/test_region_and_zone.py::test_gcp_zone --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_zone on gcp
-- - command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_job_queue on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_with_docker
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_job_queue_with_docker on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_lambda_job_queue --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_lambda_job_queue on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_multinode
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_job_queue_multinode on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_large_job_queue --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_large_job_queue on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_fast_large_job_queue
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_fast_large_job_queue on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_docker_preinstalled_package
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_docker_preinstalled_package on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_echo --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multi_echo on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_huggingface --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_huggingface on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_lambda_huggingface
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_lambda_huggingface on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_inferentia --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_inferentia on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_tpu on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_vm --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_tpu_vm on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_vm_pod --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_tpu_vm_pod on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_pod_slice_gke
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_tpu_pod_slice_gke on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_hostname --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multi_hostname on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_node_failure
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_multi_node_failure on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_http_server_with_custom_ports
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_http_server_with_custom_ports on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_http_server_with_custom_ports
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_http_server_with_custom_ports on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_http_server_with_custom_ports
-      --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_http_server_with_custom_ports on azure
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_kubernetes_http_server_with_custom_ports
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_kubernetes_http_server_with_custom_ports on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_aws --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_task_labels_aws on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_gcp --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_task_labels_gcp on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_kubernetes
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_task_labels_kubernetes on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_add_pod_annotations_for_autodown_with_launch
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_add_pod_annotations_for_autodown_with_launch on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_add_and_remove_pod_annotations_with_autostop
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_add_and_remove_pod_annotations_with_autostop on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_multinode_kubernetes
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_container_logs_multinode_kubernetes on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_two_jobs_kubernetes
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_container_logs_two_jobs_kubernetes on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_two_simultaneous_jobs_kubernetes
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_container_logs_two_simultaneous_jobs_kubernetes on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_distributed_tf --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_distributed_tf on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_start_stop --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_start_stop on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_start_stop on azure
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_autostop --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_autostop on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_autodown --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_autodown on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_aws --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_cancel_aws on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_gcp --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_cancel_gcp on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_azure --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_cancel_azure on azure
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_pytorch --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_cancel_pytorch on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_use_spot --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_use_spot on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_stop_gcp_spot --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_stop_gcp_spot on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_inline_env on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env_file --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_inline_env_file on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_custom_image --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_custom_image on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_kubernetes_custom_image
-      --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_kubernetes_custom_image on kubernetes
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop_two_nodes
-      --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_start_stop_two_nodes on azure
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_disk_tier --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_disk_tier on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_disk_tier --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_disk_tier on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_disk_tier --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_disk_tier on azure
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_best_tier_failover
-      --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_azure_best_tier_failover on azure
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_zero_quota_failover
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_aws_zero_quota_failover on aws
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_zero_quota_failover
-      --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_gcp_zero_quota_failover on gcp
-  - command: pytest tests/smoke_tests/test_cluster_job.py::test_long_setup_run_script
-      --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
-    label: test_long_setup_run_script on aws
-- - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_gcp_http --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_gcp_http --gcp
+    if: build.env.gcp == '1'
     label: test_skyserve_gcp_http on gcp
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_aws_http --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_aws_http --aws
+    if: build.env.aws == '1'
     label: test_skyserve_aws_http on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_azure_http
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_azure_http
       --azure
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.azure == '1'
     label: test_skyserve_azure_http on azure
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_kubernetes_http
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_kubernetes_http
       --kubernetes
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.kubernetes == '1'
     label: test_skyserve_kubernetes_http on kubernetes
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_llm --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_llm --aws
+    if: build.env.aws == '1'
     label: test_skyserve_llm on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_spot_recovery
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_spot_recovery
       --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.gcp == '1'
     label: test_skyserve_spot_recovery on gcp
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_base_ondemand_fallback
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_base_ondemand_fallback
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_base_ondemand_fallback on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_dynamic_ondemand_fallback
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_dynamic_ondemand_fallback
       --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.gcp == '1'
     label: test_skyserve_dynamic_ondemand_fallback on gcp
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_user_bug_restart
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_user_bug_restart
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_user_bug_restart on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_load_balancer
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_load_balancer
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_load_balancer on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_auto_restart
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_auto_restart
       --gcp
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.gcp == '1'
     label: test_skyserve_auto_restart on gcp
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_cancel --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_cancel --aws
+    if: build.env.aws == '1'
     label: test_skyserve_cancel on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_streaming --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_streaming --aws
+    if: build.env.aws == '1'
     label: test_skyserve_streaming on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_readiness_timeout_fail
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_readiness_timeout_fail
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_readiness_timeout_fail on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_large_readiness_timeout
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_large_readiness_timeout
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_large_readiness_timeout on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update --aws
+    if: build.env.aws == '1'
     label: test_skyserve_update on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_rolling_update
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_rolling_update
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_rolling_update on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_fast_update
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_fast_update
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_fast_update on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update_autoscale
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update_autoscale
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_update_autoscale on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
       --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+    if: build.env.aws == '1'
     label: test_skyserve_new_autoscaler_update on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_failures --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_failures --aws
+    if: build.env.aws == '1'
     label: test_skyserve_failures on aws
-  - command: pytest tests/smoke_tests/test_sky_serve.py::test_user_dependencies --aws
-    env:
-      LOG_TO_STDOUT: '1'
-      PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_sky_serve.py::test_user_dependencies --aws
+    if: build.env.aws == '1'
     label: test_user_dependencies on aws
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_aws_images --aws
+    if: build.env.aws == '1'
+    label: test_aws_images on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_gcp_images --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_images on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_azure_images --azure
+    if: build.env.azure == '1'
+    label: test_azure_images on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict --aws
+    if: build.env.aws == '1'
+    label: test_aws_image_id_dict on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_image_id_dict on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_region
+      --aws
+    if: build.env.aws == '1'
+    label: test_aws_image_id_dict_region on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict_region
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_image_id_dict_region on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_zone
+      --aws
+    if: build.env.aws == '1'
+    label: test_aws_image_id_dict_zone on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_gcp_image_id_dict_zone
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_image_id_dict_zone on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_clone_disk_aws --aws
+    if: build.env.aws == '1'
+    label: test_clone_disk_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_clone_disk_gcp --gcp
+    if: build.env.gcp == '1'
+    label: test_clone_disk_gcp on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_gcp_mig --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_mig on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_gcp_force_enable_external_ips
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_force_enable_external_ips on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_image_no_conda --aws
+    if: build.env.aws == '1'
+    label: test_image_no_conda on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_images.py::test_custom_default_conda_env
+      --aws
+    if: build.env.aws == '1'
+    label: test_custom_default_conda_env on aws
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_example_app --aws
+    if: build.env.aws == '1'
+    label: test_example_app on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_minimal --aws
+    if: build.env.aws == '1'
+    label: test_minimal on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_launch_fast --aws
+    if: build.env.aws == '1'
+    label: test_launch_fast on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_launch_fast_with_autostop
+      --aws
+    if: build.env.aws == '1'
+    label: test_launch_fast_with_autostop on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_stale_job --aws
+    if: build.env.aws == '1'
+    label: test_stale_job on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_aws_stale_job_manual_restart
+      --aws
+    if: build.env.aws == '1'
+    label: test_aws_stale_job_manual_restart on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_gcp_stale_job_manual_restart
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_stale_job_manual_restart on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_env_check --aws
+    if: build.env.aws == '1'
+    label: test_env_check on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_cli_logs --aws
+    if: build.env.aws == '1'
+    label: test_cli_logs on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_exec
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_core_api_sky_launch_exec on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_fast
+      --aws
+    if: build.env.aws == '1'
+    label: test_core_api_sky_launch_fast on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered
+      --aws
+    if: build.env.aws == '1'
+    label: test_multiple_accelerators_ordered on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered_with_default
+      --aws
+    if: build.env.aws == '1'
+    label: test_multiple_accelerators_ordered_with_default on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered
+      --aws
+    if: build.env.aws == '1'
+    label: test_multiple_accelerators_unordered on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered_with_default
+      --aws
+    if: build.env.aws == '1'
+    label: test_multiple_accelerators_unordered_with_default on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_multiple_resources --aws
+    if: build.env.aws == '1'
+    label: test_multiple_resources on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::test_sky_bench --aws
+    if: build.env.aws == '1'
+    label: test_sky_bench on aws
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_basic.py::test_kubernetes_context_failover
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_kubernetes_context_failover on kubernetes
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_basic.py::TestYamlSpecs::test_load_dump_yaml_config_equivalent
+      --aws
+    if: build.env.aws == '1'
+    label: TestYamlSpecs::test_load_dump_yaml_config_equivalent on aws
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_region --aws
+    if: build.env.aws == '1'
+    label: test_aws_region on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_with_ssh_proxy_command
+      --aws
+    if: build.env.aws == '1'
+    label: test_aws_with_ssh_proxy_command on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_region_and_zone.py::test_gcp_region_and_service_account
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_region_and_service_account on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_region_and_zone.py::test_azure_region --azure
+    if: build.env.azure == '1'
+    label: test_azure_region on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_zone --aws
+    if: build.env.aws == '1'
+    label: test_aws_zone on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_region_and_zone.py::test_gcp_zone --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_zone on gcp
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_job_pipeline --aws
+    if: build.env.aws == '1'
+    label: test_job_pipeline on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_failed_setup
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_failed_setup on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_failed_setup
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_pipeline_failed_setup on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_aws
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_recovery_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_gcp
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_managed_jobs_recovery_gcp on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_aws
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_pipeline_recovery_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_gcp
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_managed_jobs_pipeline_recovery_gcp on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_default_resources
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_recovery_default_resources on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_aws
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_recovery_multi_node_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_gcp
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_managed_jobs_recovery_multi_node_gcp on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_aws
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_cancellation_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_gcp
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_managed_jobs_cancellation_gcp on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_storage
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_storage on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_tpu --gcp
+    if: build.env.gcp == '1'
+    label: test_managed_jobs_tpu on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_inline_env
+      --aws
+    if: build.env.aws == '1'
+    label: test_managed_jobs_inline_env on aws
+- - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue --aws
+    if: build.env.aws == '1'
+    label: test_job_queue on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_with_docker
+      --aws
+    if: build.env.aws == '1'
+    label: test_job_queue_with_docker on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_lambda_job_queue --aws
+    if: build.env.aws == '1'
+    label: test_lambda_job_queue on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_multinode
+      --aws
+    if: build.env.aws == '1'
+    label: test_job_queue_multinode on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_large_job_queue --aws
+    if: build.env.aws == '1'
+    label: test_large_job_queue on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_fast_large_job_queue
+      --aws
+    if: build.env.aws == '1'
+    label: test_fast_large_job_queue on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_docker_preinstalled_package
+      --aws
+    if: build.env.aws == '1'
+    label: test_docker_preinstalled_package on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_echo --aws
+    if: build.env.aws == '1'
+    label: test_multi_echo on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_huggingface --aws
+    if: build.env.aws == '1'
+    label: test_huggingface on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_lambda_huggingface
+      --aws
+    if: build.env.aws == '1'
+    label: test_lambda_huggingface on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_inferentia --aws
+    if: build.env.aws == '1'
+    label: test_inferentia on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu --gcp
+    if: build.env.gcp == '1'
+    label: test_tpu on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_vm --gcp
+    if: build.env.gcp == '1'
+    label: test_tpu_vm on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_vm_pod --gcp
+    if: build.env.gcp == '1'
+    label: test_tpu_vm_pod on gcp
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_tpu_pod_slice_gke
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_tpu_pod_slice_gke on kubernetes
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_hostname --aws
+    if: build.env.aws == '1'
+    label: test_multi_hostname on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_node_failure
+      --aws
+    if: build.env.aws == '1'
+    label: test_multi_node_failure on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_http_server_with_custom_ports
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_http_server_with_custom_ports on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_http_server_with_custom_ports
+      --aws
+    if: build.env.aws == '1'
+    label: test_aws_http_server_with_custom_ports on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_http_server_with_custom_ports
+      --azure
+    if: build.env.azure == '1'
+    label: test_azure_http_server_with_custom_ports on azure
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_kubernetes_http_server_with_custom_ports
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_kubernetes_http_server_with_custom_ports on kubernetes
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_aws --aws
+    if: build.env.aws == '1'
+    label: test_task_labels_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_gcp --gcp
+    if: build.env.gcp == '1'
+    label: test_task_labels_gcp on gcp
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_kubernetes
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_task_labels_kubernetes on kubernetes
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_add_pod_annotations_for_autodown_with_launch
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_add_pod_annotations_for_autodown_with_launch on kubernetes
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_add_and_remove_pod_annotations_with_autostop
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_add_and_remove_pod_annotations_with_autostop on kubernetes
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_multinode_kubernetes
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_container_logs_multinode_kubernetes on kubernetes
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_two_jobs_kubernetes
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_container_logs_two_jobs_kubernetes on kubernetes
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_container_logs_two_simultaneous_jobs_kubernetes
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_container_logs_two_simultaneous_jobs_kubernetes on kubernetes
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_distributed_tf --aws
+    if: build.env.aws == '1'
+    label: test_distributed_tf on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_start_stop --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_start_stop on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop --azure
+    if: build.env.azure == '1'
+    label: test_azure_start_stop on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_autostop --aws
+    if: build.env.aws == '1'
+    label: test_autostop on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_autodown --aws
+    if: build.env.aws == '1'
+    label: test_autodown on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_aws --aws
+    if: build.env.aws == '1'
+    label: test_cancel_aws on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_gcp --gcp
+    if: build.env.gcp == '1'
+    label: test_cancel_gcp on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_azure --azure
+    if: build.env.azure == '1'
+    label: test_cancel_azure on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_pytorch --aws
+    if: build.env.aws == '1'
+    label: test_cancel_pytorch on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_use_spot --aws
+    if: build.env.aws == '1'
+    label: test_use_spot on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_stop_gcp_spot --gcp
+    if: build.env.gcp == '1'
+    label: test_stop_gcp_spot on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env --aws
+    if: build.env.aws == '1'
+    label: test_inline_env on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env_file --aws
+    if: build.env.aws == '1'
+    label: test_inline_env_file on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_custom_image --aws
+    if: build.env.aws == '1'
+    label: test_aws_custom_image on aws
+  - agents:
+      queue: kubernetes
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_kubernetes_custom_image
+      --kubernetes
+    if: build.env.kubernetes == '1'
+    label: test_kubernetes_custom_image on kubernetes
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop_two_nodes
+      --azure
+    if: build.env.azure == '1'
+    label: test_azure_start_stop_two_nodes on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_disk_tier --aws
+    if: build.env.aws == '1'
+    label: test_aws_disk_tier on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_disk_tier --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_disk_tier on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_disk_tier --azure
+    if: build.env.azure == '1'
+    label: test_azure_disk_tier on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_best_tier_failover
+      --azure
+    if: build.env.azure == '1'
+    label: test_azure_best_tier_failover on azure
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_zero_quota_failover
+      --aws
+    if: build.env.aws == '1'
+    label: test_aws_zero_quota_failover on aws
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_gcp_zero_quota_failover
+      --gcp
+    if: build.env.gcp == '1'
+    label: test_gcp_zero_quota_failover on gcp
+  - agents:
+      queue: generic_cloud
+    command: pytest tests/smoke_tests/test_cluster_job.py::test_long_setup_run_script
+      --aws
+    if: build.env.aws == '1'
+    label: test_long_setup_run_script on aws

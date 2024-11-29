@@ -4,22 +4,34 @@ from collections import defaultdict
 import copy
 import os
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
 DEFAULT_CLOUDS_TO_RUN = ['aws', 'azure']
-# We only have credentials for aws, azure, and gcp.
-# For those test cases that run on other clouds,
-# we currently ignore them.
-ALL_CLOUDS_WITH_CREDENTIALS = ['aws', 'azure', 'gcp', 'kubernetes']
 
 ALL_CLOUDS_IN_SMOKE_TESTS = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
 ]
+QUEUE_GENERIC_CLOUD = 'generic_cloud'
+QUEUE_KUBERNETES = 'kubernetes'
+# Only aws, gcp, azure, and kubernetes are supported for now.
+# Other clouds do not have credentials.
+CLOUD_QUEUE_MAP = {
+    'aws': QUEUE_GENERIC_CLOUD,
+    'gcp': QUEUE_GENERIC_CLOUD,
+    'azure': QUEUE_GENERIC_CLOUD,
+    'kubernetes': QUEUE_KUBERNETES
+}
 
+GENERATED_FILE_HEAD = (
+    '# This is an auto-generated Buildkite pipeline by '
+    '.buildkite/generate_pipeline.py, Please do not '
+    'edit directly.\n'
+)
 
+    
 def _get_full_decorator_path(decorator: ast.AST) -> str:
     """Recursively get the full path of a decorator."""
     if isinstance(decorator, ast.Attribute):
@@ -75,7 +87,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
             ]
             final_clouds_to_include = [
                 cloud for cloud in clouds_to_include
-                if cloud in ALL_CLOUDS_WITH_CREDENTIALS
+                if cloud in CLOUD_QUEUE_MAP
             ]
             if clouds_to_include and not final_clouds_to_include:
                 print(f'Warning: {file_path}:{node.name} '
@@ -89,7 +101,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str, one_cloud_per_test_function: bool) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file)
@@ -98,48 +110,85 @@ def _generate_pipeline(test_file: str) -> Dict[str, Any]:
             step = {
                 'label': f'{test_function} on {cloud}',
                 'command': f'pytest {test_file}::{test_function} --{cloud}',
-                'env': {
-                    'LOG_TO_STDOUT': '1',
-                    'PYTHONPATH': '${PYTHONPATH}:$(pwd)'
-                }
+                'agents': {
+                    # Separate agent pool for each cloud.
+                    # Since some are more costly
+                    'queue': CLOUD_QUEUE_MAP[cloud]
+                },
+                'if': f'build.env.{cloud} == \'1\''
             }
             steps.append(step)
-            # we only run one cloud per test function for now
-            break
+            if one_cloud_per_test_function:
+                break
     return {'steps': steps}
 
 
-def main():
-    # List of test files to include in the pipeline
-    test_files = os.listdir('tests/smoke_tests')
-    output_file_pipelines_map = defaultdict(list)
-
-    for test_file in test_files:
-        if not test_file.startswith('test_'):
-            continue
-        test_file_path = os.path.join('tests/smoke_tests', test_file)
-        if test_file == 'test_required_before_merge.py':
-            yaml_file_path = '.buildkite/pipeline_smoke_tests_pre_merge.yaml'
-        else:
-            yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
-        print(f'Converting {test_file_path} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file_path)
-        output_file_pipelines_map[yaml_file_path].append(pipeline)
-        print(f'Converted {test_file_path} to {yaml_file_path}\n\n')
+def _dump_pipeline_to_file(
+        output_file_pipelines_map: Dict[str, List[Dict[str, Any]]],
+        extra_env: Optional[Dict[str, str]] = None):
+    default_env = {
+        'LOG_TO_STDOUT': '1',
+        'PYTHONPATH': '${PYTHONPATH}:$(pwd)'
+    }
+    if extra_env:
+        default_env.update(extra_env)
 
     for yaml_file_path, pipelines in output_file_pipelines_map.items():
         with open(yaml_file_path, 'w', encoding='utf-8') as file:
-            file.write('# This is an auto-generated Buildkite pipeline by '
-                       '.buildkite/generate_pipeline.py, Please do not '
-                       'edit directly.\n')
+            file.write(GENERATED_FILE_HEAD)
             all_steps = [pipeline['steps'] for pipeline in pipelines]
             # Shuffle the steps to avoid flakyness, consecutive runs of the same
             # kind of test may fail for requiring locks on the same resources.
             random.shuffle(all_steps)
             final_pipeline = {
-                'steps': all_steps
+                'steps': all_steps,
+                'env': default_env
             }
             yaml.dump(final_pipeline, file, default_flow_style=False)
+
+def _convert_release(test_files: List[str]):
+    yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
+    output_file_pipelines_map = defaultdict(list)
+    for test_file in test_files:
+        print(f'Converting {test_file} to {yaml_file_path}')
+        # We only need to run one cloud per test function.
+        pipeline = _generate_pipeline(test_file, True)
+        output_file_pipelines_map[yaml_file_path].append(pipeline)
+        print(f'Converted {test_file} to {yaml_file_path}\n\n')
+    # Enable all clouds by default for release pipeline.
+    _dump_pipeline_to_file(output_file_pipelines_map, extra_env={
+        cloud: '1' for cloud in CLOUD_QUEUE_MAP
+    })
+
+
+def _convert_pre_merge(test_files: List[str]):
+    yaml_file_path = '.buildkite/pipeline_smoke_tests_pre_merge.yaml'
+    output_file_pipelines_map = defaultdict(list)
+    for test_file in test_files:
+        print(f'Converting {test_file} to {yaml_file_path}')
+        # We want enable all clouds by default for each test function 
+        # for pre-merge. And let the author controls which clouds 
+        # to run by parameter.
+        pipeline = _generate_pipeline(test_file, False)
+        output_file_pipelines_map[yaml_file_path].append(pipeline)
+        print(f'Converted {test_file} to {yaml_file_path}\n\n')
+    _dump_pipeline_to_file(output_file_pipelines_map)
+
+def main():
+    test_files = os.listdir('tests/smoke_tests')
+    release_files = []
+    pre_merge_files = []
+    for test_file in test_files:
+        if not test_file.startswith('test_'):
+            continue
+        test_file_path = os.path.join('tests/smoke_tests', test_file)
+        if "required_before_merge" in test_file:
+            pre_merge_files.append(test_file_path)
+        else:
+            release_files.append(test_file_path)
+
+    _convert_release(release_files)
+    _convert_pre_merge(pre_merge_files)
 
 
 if __name__ == '__main__':
