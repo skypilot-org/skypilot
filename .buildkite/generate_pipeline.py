@@ -24,6 +24,7 @@ from collections import defaultdict
 import copy
 import os
 import random
+
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -46,11 +47,9 @@ CLOUD_QUEUE_MAP = {
     'kubernetes': QUEUE_KUBERNETES
 }
 
-GENERATED_FILE_HEAD = (
-    '# This is an auto-generated Buildkite pipeline by '
-    '.buildkite/generate_pipeline.py, Please do not '
-    'edit directly.\n'
-)
+GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
+                       '.buildkite/generate_pipeline.py, Please do not '
+                       'edit directly.\n')
 
 
 def _get_full_decorator_path(decorator: ast.AST) -> str:
@@ -107,8 +106,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                 if cloud not in clouds_to_exclude
             ]
             final_clouds_to_include = [
-                cloud for cloud in clouds_to_include
-                if cloud in CLOUD_QUEUE_MAP
+                cloud for cloud in clouds_to_include if cloud in CLOUD_QUEUE_MAP
             ]
             if clouds_to_include and not final_clouds_to_include:
                 print(f'Warning: {file_path}:{node.name} '
@@ -122,7 +120,8 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str, one_cloud_per_test_function: bool) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str,
+                       one_cloud_per_test_function: bool) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file)
@@ -144,13 +143,11 @@ def _generate_pipeline(test_file: str, one_cloud_per_test_function: bool) -> Dic
     return {'steps': steps}
 
 
-def _dump_pipeline_to_file(
-        output_file_pipelines_map: Dict[str, List[Dict[str, Any]]],
-        extra_env: Optional[Dict[str, str]] = None):
-    default_env = {
-        'LOG_TO_STDOUT': '1',
-        'PYTHONPATH': '${PYTHONPATH}:$(pwd)'
-    }
+def _dump_pipeline_to_file(output_file_pipelines_map: Dict[str,
+                                                           List[Dict[str,
+                                                                     Any]]],
+                           extra_env: Optional[Dict[str, str]] = None):
+    default_env = {'LOG_TO_STDOUT': '1', 'PYTHONPATH': '${PYTHONPATH}:$(pwd)'}
     if extra_env:
         default_env.update(extra_env)
 
@@ -163,11 +160,9 @@ def _dump_pipeline_to_file(
             # Shuffle the steps to avoid flakyness, consecutive runs of the same
             # kind of test may fail for requiring locks on the same resources.
             random.shuffle(all_steps)
-            final_pipeline = {
-                'steps': all_steps,
-                'env': default_env
-            }
+            final_pipeline = {'steps': all_steps, 'env': default_env}
             yaml.dump(final_pipeline, file, default_flow_style=False)
+
 
 def _convert_release(test_files: List[str]):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
@@ -179,9 +174,8 @@ def _convert_release(test_files: List[str]):
         output_file_pipelines_map[yaml_file_path].append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(output_file_pipelines_map, extra_env={
-        cloud: '1' for cloud in CLOUD_QUEUE_MAP
-    })
+    _dump_pipeline_to_file(output_file_pipelines_map,
+                           extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP})
 
 
 def _convert_pre_merge(test_files: List[str]):
@@ -196,6 +190,7 @@ def _convert_pre_merge(test_files: List[str]):
         output_file_pipelines_map[yaml_file_path].append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(output_file_pipelines_map)
+
 
 def main():
     test_files = os.listdir('tests/smoke_tests')

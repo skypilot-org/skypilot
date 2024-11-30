@@ -57,7 +57,7 @@ repos:
     -   id: yapf
         name: yapf
         exclude: (sky/skylet/providers/ibm/.*)  # Matches exclusions from the script
-        args: ['--recursive', '--parallel']  # Only necessary flags
+        args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
         additional_dependencies: [toml==0.10.2]
 
 -   repo: https://github.com/pylint-dev/pylint
