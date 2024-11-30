@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from sky import resources as resource_lib
 from sky import sky_logging
 from sky.provision import common
 from sky.utils import common_utils
@@ -283,3 +284,17 @@ def check_vpn_unchanged(new_config: Optional[VPNConfig],
         return None
     return (f'with VPN config\n{pprint.pformat(old_config_dict)}, '
             f'but current config is\n{pprint.pformat(new_config_dict)}')
+
+
+def check_open_ports(vpn_config: Optional[VPNConfig],
+                     to_provision: resource_lib.Resources) -> None:
+    """Check if the ports are not needed to be opened.
+    Args:
+        task: The task.
+        to_provision: The resources to provision.
+    """
+    if vpn_config is None:
+        return
+    if not vpn_config.use_vpn_ip:
+        return
+    to_provision.remove_open_ports()

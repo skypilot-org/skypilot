@@ -489,8 +489,6 @@ class Task:
                 'experimental.config_overrides')
             resources_config[
                 '_cluster_config_overrides'] = cluster_config_override
-        if task.vpn_config is not None:
-            resources_config.pop('ports', None)
         task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)

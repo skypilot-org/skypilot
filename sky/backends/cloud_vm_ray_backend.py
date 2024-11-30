@@ -2645,6 +2645,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if record is not None:
             usage_lib.messages.usage.update_cluster_status(record['status'])
 
+        if task.vpn_config is not None and task.vpn_config.use_vpn_ip:
+            # If VPN is enabled, we don't need to check the ports.
+            check_ports = False
+
         assert launched_resources.region is not None, handle
 
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
@@ -2768,6 +2772,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
         backend_utils.check_owner_identity(cluster_name)
+        vpn_utils.check_open_ports(task.vpn_config, to_provision)
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):

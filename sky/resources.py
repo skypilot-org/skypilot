@@ -863,6 +863,11 @@ class Resources:
                 return image_id[len('docker:'):]
         return None
 
+    def remove_open_ports(self) -> None:
+        """Remove the unnecessary opened ports. This is used when user uses VPN
+        to connect to the cluster."""
+        self._ports = None
+
     def _try_validate_image_id(self) -> None:
         """Try to validate the image_id attribute.
 
