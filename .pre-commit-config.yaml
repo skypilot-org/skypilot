@@ -24,7 +24,6 @@ repos:
         args:
           - "--sg=build/**"  # Matches "${ISORT_YAPF_EXCLUDES[@]}"
           - "--sg=sky/skylet/providers/ibm/**"
-        files: "^(sky|tests|examples|llm|docs)/.*"  # Only match these directories
     # Second isort command
     -   id: isort
         name: isort (IBM specific)
