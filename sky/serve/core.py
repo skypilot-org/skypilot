@@ -84,8 +84,8 @@ def _validate_service_task(task: 'sky.Task') -> None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Must only specify one port in resources. Each replica '
-                        'will use the port specified as application ingress port.'
-                    )
+                        'will use the port specified as application ingress '
+                        'port.')
             service_port = requested_ports[0]
             if replica_ingress_port is None:
                 replica_ingress_port = service_port
