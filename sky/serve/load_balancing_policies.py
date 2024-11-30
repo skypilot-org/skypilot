@@ -155,7 +155,16 @@ async def get_metric(session: aiohttp.ClientSession,
                      replica_url: str) -> Optional[Dict[str, Any]]:
     try:
         async with session.get(f'{replica_url}/metrics') as response:
-            return await response.json()
+            text = await response.text()
+            metrics = {}
+            for line in text.splitlines():
+                if line.startswith('vllm:'):
+                    key, value = line.split()
+                    # change vllm:gpu_cache_usage_perc{model_name="meta-llama/Meta-Llama-3.1-8B-Instruct"} to gpu_cache_usage_perc  # pylint: disable=line-too-long
+                    key = key[len('vllm:'):]
+                    key = key.split('{')[0]
+                    metrics[key] = float(value)
+            return metrics
     except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to get metric from {replica_url}: {e}')
         return None
@@ -173,7 +182,7 @@ async def fetch_all_metrics(
 
 class LeastMemoryUsagePolicy(LoadBalancingPolicy, name='lmu'):
     """Least memory usage load balancing policy."""
-    MEMORY_USAGE_METRIC_KEY = 'gauge_gpu_cache_usage'
+    MEMORY_USAGE_METRIC_KEY = 'gpu_cache_usage_perc'
 
     def __init__(self) -> None:
         super().__init__()

@@ -4,7 +4,7 @@ import openai
 import requests
 
 stream = True
-model = 'Llama-2-7b-chat-hf'
+model = 'meta-llama/Meta-Llama-3.1-8B-Instruct'
 init_prompt = 'You are a helpful assistant.'
 history = [{'role': 'system', 'content': init_prompt}]
 endpoint = input('Endpoint: ')
