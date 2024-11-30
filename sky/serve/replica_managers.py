@@ -171,8 +171,13 @@ def terminate_cluster(cluster_name: str,
 def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
-    # Already checked all ports are the same in sky.serve.core.up
-    assert task.resources, task
+    # Already checked all ports are valid in sky.serve.core.up
+    assert len(task.resources) >= 1, task
+    assert task.service is not None, task
+    # If the service has a specified main port
+    task_service_port = task.service.port
+    if task_service_port is not None:
+        return str(task_service_port)
     task_resources: 'resources.Resources' = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.

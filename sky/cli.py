@@ -4078,33 +4078,51 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    service_port: Optional[int] = None
-    for requested_resources in list(task.resources):
-        if requested_resources.ports is None:
+    service_port: Optional[int] = task.service.port
+    if service_port is None:
+        for requested_resources in list(task.resources):
+            if requested_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Must specify at least one ports in resources. Each '
+                        'replica will use the port specified as application '
+                        'ingress port.')
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple ports specified in resources. Please '
+                        'specify the main port in the service section.')
+            # We request all the replicas using the same port for now, but it
+            # should be fine to allow different replicas to use different ports
+            # in the future.
+            resource_port = requested_ports[0]
+            if service_port is None:
+                service_port = resource_port
+            if service_port != resource_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Got multiple ports: {service_port} and '
+                                     f'{resource_port} in different resources. '
+                                     'Please specify single port instead.')
+    else:
+        port_set = set()
+        for requested_resources in list(task.resources):
+            if requested_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Must specify at least one ports in resources. Each '
+                        'replica will use the port specified as application '
+                        'ingress port.')
+            port_set.update(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+        if service_port not in port_set:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Must specify at least one ports in resources. Each '
-                    'replica will use the port specified as application '
-                    'ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            # in the first ports entry (i.e. the main port).
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {service_port_str!r} is not a valid '
-                                 'port number. Please specify a single port '
-                                 f'as the main port. Got: {service_port_str!r}')
-        # We request all the replicas using the same port for now, but it
-        # should be fine to allow different replicas to use different ports
-        # in the future.
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Got multiple ports: {service_port} and '
-                                 f'{resource_port} in different resources. '
-                                 'Please specify single port instead.')
+                    f'Service port {service_port} is not found in the '
+                    'ports specified in resources. Please re-specify '
+                    'the main port in the service section.')
+
     return task
 
 
