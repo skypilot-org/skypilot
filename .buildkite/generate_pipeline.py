@@ -1,4 +1,24 @@
-"""This script generates a Buildkite pipeline from test files."""
+"""
+This script generates a Buildkite pipeline from test files.
+
+The script will generate two pipelines:
+
+tests/smoke_tests
+├── test_*.py -> release pipeline
+├── test_required_before_merge.py -> pre-merge pipeline
+
+1. release pipeline, which runs all smoke tests by default, some function
+   support tests by multiple clouds, but we only generate one cloud per test
+   function to save cost.
+2. pre-merge pipeline, which generates all clouds supported by the test
+   function, author should specify which clouds to run by setting env in the
+   step.
+
+We only have credentials for aws/azure/gcp/kubernetes(CLOUD_QUEUE_MAP) now,
+smoke tests for those clouds are generated, other clouds are not supported
+yet, smoke tests for those clouds are not generated.
+"""
+
 import ast
 from collections import defaultdict
 import copy
@@ -32,7 +52,7 @@ GENERATED_FILE_HEAD = (
     'edit directly.\n'
 )
 
-    
+
 def _get_full_decorator_path(decorator: ast.AST) -> str:
     """Recursively get the full path of a decorator."""
     if isinstance(decorator, ast.Attribute):
@@ -169,8 +189,8 @@ def _convert_pre_merge(test_files: List[str]):
     output_file_pipelines_map = defaultdict(list)
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        # We want enable all clouds by default for each test function 
-        # for pre-merge. And let the author controls which clouds 
+        # We want enable all clouds by default for each test function
+        # for pre-merge. And let the author controls which clouds
         # to run by parameter.
         pipeline = _generate_pipeline(test_file, False)
         output_file_pipelines_map[yaml_file_path].append(pipeline)
