@@ -1,6 +1,7 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
 import logging
+import random
 import threading
 import time
 from typing import Dict, Optional, Union
@@ -191,6 +192,10 @@ class SkyServeLoadBalancer:
                     detail='No ready replicas. '
                     'Use "sky serve status [SERVICE_NAME]" '
                     'to check the replica status.')
+            elif ready_replica_url == lb_policies.DELAYED_KW:
+                retry_cnt -= 1
+                await asyncio.sleep(random.uniform(0.5, 1))
+                continue
             else:
                 self._load_balancing_policy.pre_execute_hook(
                     ready_replica_url, request)

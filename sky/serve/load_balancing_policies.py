@@ -18,6 +18,7 @@ logger = sky_logging.init_logger(__name__)
 # Define a registry for load balancing policies
 LB_POLICIES = {}
 DEFAULT_LB_POLICY = None
+DELAYED_KW = '__DELAYED__'
 
 
 def _request_repr(request: 'fastapi.Request') -> str:
@@ -33,6 +34,8 @@ class LoadBalancingPolicy:
 
     def __init__(self) -> None:
         self.ready_replicas: List[str] = []
+        self.replica2metric: Dict[str, Optional[Dict[str, Any]]] = {}
+        self.delay_scheduling = False
 
     def __init_subclass__(cls, name: str, default: bool = False):
         LB_POLICIES[name] = cls
@@ -55,22 +58,43 @@ class LoadBalancingPolicy:
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
+    def _replica_can_fit(self, replica_url: str) -> bool:
+        if not self.delay_scheduling:
+            return True
+
+        def _get_metric(key):
+            return (self.replica2metric.get(replica_url, {}) or {}).get(key, 0)
+
+        return (_get_metric('num_requests_swapped') +
+                _get_metric('num_requests_waiting') == 0)
+
     def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
-        replica = self._select_replica(request)
-        if replica is not None:
-            logger.info(f'Selected replica {replica} '
-                        f'for request {_request_repr(request)}')
-        else:
-            logger.warning('No replica selected for request '
-                           f'{_request_repr(request)}')
-        return replica
+        blocked_list: List[str] = []
+        replica = self._select_replica(request, blocked_list)
+        if replica is None:
+            return None
+        while True:
+            if self._replica_can_fit(replica):
+                return replica
+            blocked_list.append(replica)
+            if len(blocked_list) == len(self.ready_replicas):
+                return DELAYED_KW
+            replica = self._select_replica(request, blocked_list)
+            if replica is None:
+                return None
 
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        blocked_list: List[str]) -> Optional[str]:
         raise NotImplementedError
 
     def probe_replicas(self) -> None:
+        self.replica2metric = asyncio.run(fetch_all_metrics(
+            self.ready_replicas))
+        self._probe_replicas_callback()
+
+    def _probe_replicas_callback(self) -> None:
         pass
 
     def pre_execute_hook(self, replica_url: str,
@@ -99,13 +123,19 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
         self.ready_replicas = ready_replicas
         self.index = 0
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        blocked_list: List[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
-        self.index = (self.index + 1) % len(self.ready_replicas)
-        return ready_replica_url
+        while True:
+            replica_url = self.ready_replicas[self.index]
+            if replica_url not in blocked_list:
+                return replica_url
+            self.index = (self.index + 1) % len(self.ready_replicas)
+        # ready_replica_url = self.ready_replicas[self.index]
+        # self.index = (self.index + 1) % len(self.ready_replicas)
+        # return ready_replica_url
 
 
 class LeastLoadPolicy(LoadBalancingPolicy, name='lpr'):
@@ -127,13 +157,20 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='lpr'):
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        blocked_list: List[str]) -> Optional[str]:
         print('_select_replica', self.load_map)
         del request  # Unused.
         if not self.ready_replicas:
             return None
+        candidate_replicas = [
+            replica for replica in self.ready_replicas
+            if replica not in blocked_list
+        ]
         with self.lock:
-            return min(self.ready_replicas,
+            if not candidate_replicas:
+                return None
+            return min(candidate_replicas,
                        key=lambda replica: self.load_map.get(replica, 0))
 
     def pre_execute_hook(self, replica_url: str,
@@ -201,10 +238,9 @@ class LeastMemoryUsagePolicy(LoadBalancingPolicy, name='lmu'):
                 self.memory_usage_map[replica] = self.memory_usage_map.get(
                     replica, 0)
 
-    def probe_replicas(self) -> None:
-        replica2metric = asyncio.run(fetch_all_metrics(self.ready_replicas))
+    def _probe_replicas_callback(self) -> None:
         with self.lock:
-            for replica, metric in replica2metric.items():
+            for replica, metric in self.replica2metric.items():
                 if metric is not None:
                     if self.MEMORY_USAGE_METRIC_KEY not in metric:
                         logger.warning(
@@ -217,14 +253,29 @@ class LeastMemoryUsagePolicy(LoadBalancingPolicy, name='lmu'):
                 self.memory_usage_map[replica] = memory_usage
         logger.info(f'Updated memory usage map: {self.memory_usage_map}')
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        blocked_list: List[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
+        candidate_replicas = [
+            replica for replica in self.ready_replicas
+            if replica not in blocked_list
+        ]
         with self.lock:
+            if not candidate_replicas:
+                return None
             result = min(
-                self.ready_replicas,
+                candidate_replicas,
                 key=lambda replica: self.memory_usage_map.get(replica, 0))
         logger.info(f'Selected replica {result} with memory usage '
                     f'{self.memory_usage_map[result]}')
         return result
+
+
+class DelayedLeastMemoryUsagePolicy(LeastMemoryUsagePolicy, name='lmu_delay'):
+    """Least memory usage load balancing policy with delay."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.delay_scheduling = True
