@@ -668,8 +668,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(replica_id, self._task_yaml_path, cluster_name, resoruces_idx,
-                  resources_override),
+            args=(replica_id, self._task_yaml_path, cluster_name,
+                  resources_override, resoruces_idx),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
