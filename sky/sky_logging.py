@@ -148,9 +148,13 @@ def is_silent():
     return _logging_config.is_silent
 
 
+def get_run_timestamp() -> str:
+    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+
+
 def generate_tmp_logging_file_path(file_name: str) -> str:
     """Generate an absolute path of a tmp file for logging."""
-    run_timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+    run_timestamp = get_run_timestamp()
     log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
     log_path = os.path.expanduser(os.path.join(log_dir, file_name))
 
