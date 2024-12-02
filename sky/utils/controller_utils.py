@@ -734,6 +734,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     else:
         store_type_str, bucket_name, sub_path, store_init_kwargs = \
             storage_lib.StoreType.from_store_url(bucket_wth_prefix)
+        store_init_kwargs['_allow_bucket_creation'] = False
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
