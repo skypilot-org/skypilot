@@ -35,27 +35,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Install Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
         with:
+          version: "latest"
           python-version: ${{ matrix.python-version }}
-
-      - name: Cache dependencies
-        uses: actions/cache@v3
-        if: startsWith(runner.os, 'Linux')
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          # Include examples in the package, so that the tests can access them.
+          uv venv --seed ~/test-env
+          export VIRTUAL_ENV=~/test-env
+          uv pip install --upgrade pip
+          # Include examples in the package, so that the tests 
           echo "include examples/*" >> MANIFEST.in
-          pip install ".[all]"
-          pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
-
+          uv pip install ".[all]"
+          uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
       - name: Run tests with pytest
-        run: SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+        run: |
+          source ~/test-env/bin/activate
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
