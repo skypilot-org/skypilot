@@ -36,6 +36,5 @@ jobs:
         uv pip install pylint-quotes==0.2.3
     - name: Analysing the code with pylint
       run: |
-        uv run pylint --load-plugins pylint_quotes sky
-      env:
-        VIRTUAL_ENV: ~/test-env
+        source ~/test-env/bin/activate
+        pylint --load-plugins pylint_quotes sky
