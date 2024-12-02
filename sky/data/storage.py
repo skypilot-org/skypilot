@@ -189,9 +189,11 @@ class StoreType(enum.Enum):
         return bucket_endpoint_url
 
     @classmethod
-    def from_store_url(cls,
-                       store_url: str) -> Tuple[str, str, str, Dict[str, Any]]:
-        """Returns the store type, bucket name, and sub path from a store URL.
+    def from_store_url(
+        cls, store_url: str
+    ) -> Tuple['StoreType', str, str, Optional[str], Optional[str]]:
+        """Returns the store type, bucket name, and sub path from a store URL,
+        and the storage account name and region if applicable.
 
         Args:
             store_url: str; The store URL.
@@ -199,27 +201,57 @@ class StoreType(enum.Enum):
         # The full path from the user config of IBM COS contains the region,
         # and Azure Blob Storage contains the storage account name, we need to
         # pass these information to the store constructor.
-        store_init_kwargs = {}
+        storage_account_name = None
+        region = None
         for store_type in StoreType:
-            store_type_value = store_type.value
             if store_url.startswith(store_type.store_prefix()):
                 if store_type == StoreType.AZURE:
                     storage_account_name, bucket_name, sub_path = \
                         data_utils.split_az_path(store_url)
-                    store_init_kwargs[
-                        'storage_account_name'] = storage_account_name
                 elif store_type == StoreType.IBM:
                     bucket_name, sub_path, region = data_utils.split_cos_path(
                         store_url)
-                    store_init_kwargs['region'] = region
                 elif store_type == StoreType.R2:
                     bucket_name, sub_path = data_utils.split_r2_path(store_url)
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
-                return store_type_value, bucket_name, \
-                    sub_path, store_init_kwargs
+                return store_type, bucket_name, \
+                    sub_path, storage_account_name, region
+        raise ValueError(f'Unknown store URL: {store_url}')
+
+    @classmethod
+    def get_fields_from_store_url(
+        cls, store_url: str
+    ) -> Tuple['StoreType', str, str, Optional[str], Optional[str]]:
+        """Returns the store type, bucket name, and sub path from a store URL,
+        and the storage account name and region if applicable.
+
+        Args:
+            store_url: str; The store URL.
+        """
+        # The full path from the user config of IBM COS contains the region,
+        # and Azure Blob Storage contains the storage account name, we need to
+        # pass these information to the store constructor.
+        storage_account_name = None
+        region = None
+        for store_type in StoreType:
+            if store_url.startswith(store_type.store_prefix()):
+                if store_type == StoreType.AZURE:
+                    storage_account_name, bucket_name, sub_path = \
+                        data_utils.split_az_path(store_url)
+                elif store_type == StoreType.IBM:
+                    bucket_name, sub_path, region = data_utils.split_cos_path(
+                        store_url)
+                elif store_type == StoreType.R2:
+                    bucket_name, sub_path = data_utils.split_r2_path(store_url)
+                elif store_type == StoreType.GCS:
+                    bucket_name, sub_path = data_utils.split_gcs_path(store_url)
+                elif store_type == StoreType.S3:
+                    bucket_name, sub_path = data_utils.split_s3_path(store_url)
+                return store_type, bucket_name, \
+                    sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
 
 
@@ -930,39 +962,14 @@ class Storage(object):
 
         return storage_obj
 
-    def add_store(
-            self,
-            store_type: Union[str, StoreType],
-            region: Optional[str] = None,
-            store_init_kwargs: Optional[Dict[str,
-                                             Any]] = None) -> AbstractStore:
-        """Initializes and adds a new store to the storage.
-
-        Invoked by the optimizer after it has selected a store to
-        add it to Storage.
-
-        Args:
-          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
-          region: str; Region to place the bucket in. Caller must ensure that
-            the region is valid for the chosen store_type.
-          store_init_kwargs: Dict[str, Any]; Additional keyword arguments
-            to pass to the store constructor.ß
-        """
-        if isinstance(store_type, str):
-            store_type = StoreType(store_type)
-
-        if store_type in self.stores:
-            if store_type == StoreType.AZURE:
-                azure_store_obj = self.stores[store_type]
-                assert isinstance(azure_store_obj, AzureBlobStore)
-                storage_account_name = azure_store_obj.storage_account_name
-                logger.info(f'Storage type {store_type} already exists under '
-                            f'storage account {storage_account_name!r}.')
-            else:
-                logger.info(f'Storage type {store_type} already exists.')
-
-            return self.stores[store_type]
-
+    def construct_store(
+        self,
+        store_type: StoreType,
+        region: Optional[str] = None,
+        storage_account_name: Optional[str] = None,
+        _allow_bucket_creation: bool = True  # pylint: disable=invalid-name
+    ) -> AbstractStore:
+        """Initialize store object and get/create bucket."""
         store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:
             store_cls = S3Store
@@ -978,16 +985,18 @@ class Storage(object):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
-
-        # Initialize store object and get/create bucket
         try:
+            kwargs: Dict[str, Any] = {}
+            if storage_account_name is not None:
+                kwargs['storage_account_name'] = storage_account_name
             store = store_cls(
                 name=self.name,
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
                 _bucket_sub_path=self._bucket_sub_path,
-                **(store_init_kwargs or {}))
+                _allow_bucket_creation=_allow_bucket_creation,
+                **kwargs)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -1018,6 +1027,38 @@ class Storage(object):
 
         return store
 
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
+        """Initializes and adds a new store to the storage.
+
+        Invoked by the optimizer after it has selected a store to
+        add it to Storage.
+
+        Args:
+          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
+          region: str; Region to place the bucket in. Caller must ensure that
+            the region is valid for the chosen store_type.
+        """
+        if isinstance(store_type, str):
+            store_type = StoreType(store_type)
+
+        if store_type in self.stores:
+            if store_type == StoreType.AZURE:
+                azure_store_obj = self.stores[store_type]
+                assert isinstance(azure_store_obj, AzureBlobStore)
+                storage_account_name = azure_store_obj.storage_account_name
+                logger.info(f'Storage type {store_type} already exists under '
+                            f'storage account {storage_account_name!r}.')
+            else:
+                logger.info(f'Storage type {store_type} already exists.')
+
+            return self.stores[store_type]
+
+        store = self.construct_store(store_type, region)
+
+        return store
+
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
         store_type = StoreType.from_store(store)
@@ -1038,9 +1079,8 @@ class Storage(object):
         if bucket_wth_prefix is None:
             return False
 
-        store_type_str, bucket_name, _, _ = StoreType.from_store_url(
+        store_type, bucket_name, _, _, _ = StoreType.get_fields_from_store_url(
             bucket_wth_prefix)
-        store_type = StoreType(store_type_str)
         if StoreType.from_store(store) != store_type:
             return False
         return store.name == bucket_name and store.bucket_sub_path is not None
@@ -1130,10 +1170,7 @@ class Storage(object):
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
-    def from_yaml_config(
-            cls,
-            config: Dict[str, Any],
-            store_init_kwargs: Optional[Dict[str, Any]] = None) -> 'Storage':
+    def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
 
@@ -1166,8 +1203,7 @@ class Storage(object):
                           mode=mode,
                           _bucket_sub_path=_bucket_sub_path)
         if store is not None:
-            storage_obj.add_store(StoreType(store.upper()),
-                                  store_init_kwargs=store_init_kwargs or {})
+            storage_obj.add_store(StoreType(store.upper()))
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
