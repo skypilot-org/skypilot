@@ -324,3 +324,32 @@ FAQs
                   type: Directory
 
   For more details refer to :ref:`config-yaml`.
+
+* **I am using a custom image. How can I speed up the pod startup time?**
+
+  You can pre-install SkyPilot dependencies in your custom image to speed up the pod startup time. Simply add these lines at the end of your Dockerfile:
+
+  .. code-block:: dockerfile
+
+    FROM <your base image>
+
+    # Install system dependencies
+    RUN apt update -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        rm -rf /var/lib/apt/lists/*
+
+    # Install conda and other python dependencies
+    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
+        bash Miniconda3-Linux-x86_64.sh -b && \
+        eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
+        grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
+        rm Miniconda3-Linux-x86_64.sh && \
+        export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+        python3 -m venv ~/skypilot-runtime && \
+        PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+        curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+        sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+        echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
