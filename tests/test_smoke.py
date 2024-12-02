@@ -49,6 +49,7 @@ import sky
 from sky import global_user_state
 from sky import jobs
 from sky import serve
+from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
@@ -67,6 +68,8 @@ from sky.status_lib import ClusterStatus
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
@@ -5272,16 +5275,34 @@ class TestStorageWithCredentials:
             yield from self.yield_storage_object(name=tmp_bucket_name,
                                                  source=tmpdir)
 
+    import shutil
+    import tempfile
+
     @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
         # Creates a copy mount storage which reuses an existing storage object.
-        tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
+        new_store = tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
+        new_store.sync_bucket()
+        tmp_scratch_storage_obj.initialize_and_sync_store(new_store)
         storage_name = tmp_scratch_storage_obj.name
 
-        # Try to initialize another storage with the storage object created
-        # above, but now in COPY mode. This should succeed.
-        yield from self.yield_storage_object(name=storage_name,
-                                             mode=storage_lib.StorageMode.COPY)
+        # Create a temporary directory manually and don't clean it up immediately
+        temp_source = tempfile.mkdtemp()
+
+        try:
+            # Create a test file in the temporary directory
+            with open(os.path.join(temp_source, 'test_file.txt'), 'w') as f:
+                f.write('This is a test file.')
+
+            # Try to initialize another storage with the storage object created
+            # above, but now in COPY mode. This should succeed.
+            yield from self.yield_storage_object(
+                name=storage_name,
+                source=temp_source,
+                mode=storage_lib.StorageMode.COPY)
+        finally:
+            # Cleanup the temporary directory after the test finishes
+            shutil.rmtree(temp_source)
 
     @pytest.fixture
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
@@ -5393,7 +5414,9 @@ class TestStorageWithCredentials:
                                               store_type):
         # Creates a new bucket with a local source, uploads files to it
         # and deletes it.
-        tmp_local_storage_obj.add_store(store_type)
+        new_store = tmp_local_storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        tmp_local_storage_obj.initialize_and_sync_store(new_store)
 
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -5421,7 +5444,9 @@ class TestStorageWithCredentials:
         # and deletes them.
         storage_obj_name = []
         for store_obj in tmp_multiple_scratch_storage_obj:
-            store_obj.add_store(store_type)
+            new_store = store_obj.add_store(store_type)
+            new_store.sync_bucket()
+            store_obj.initialize_and_sync_store(new_store)
             storage_obj_name.append(store_obj.name)
 
         # Run sky storage ls to check if all storage objects exists in the
@@ -5462,7 +5487,9 @@ class TestStorageWithCredentials:
         # with spaces in the name
         storage_obj_names = []
         for storage_obj in tmp_multiple_custom_source_storage_obj:
-            storage_obj.add_store(store_type)
+            new_store = storage_obj.add_store(store_type)
+            new_store.sync_bucket()
+            storage_obj.initialize_and_sync_store(new_store)
             storage_obj_names.append(storage_obj.name)
 
         # Run sky storage ls to check if all storage objects exists in the
@@ -5486,7 +5513,9 @@ class TestStorageWithCredentials:
                                       store_type):
         # Creates a bucket, deletes it externally using cloud cli commands
         # and then tries to delete it using sky storage delete.
-        tmp_scratch_storage_obj.add_store(store_type)
+        new_store = tmp_scratch_storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        tmp_scratch_storage_obj.initialize_and_sync_store(new_store)
 
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -5516,7 +5545,9 @@ class TestStorageWithCredentials:
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
         # Creates a temp folder with over 256 files and folders, upload
         # files and folders to a new bucket, then delete bucket.
-        tmp_bulk_del_storage_obj.add_store(store_type)
+        new_store = tmp_bulk_del_storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        tmp_bulk_del_storage_obj.initialize_and_sync_store(new_store)
 
         subprocess.check_output([
             'sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'
@@ -5539,7 +5570,9 @@ class TestStorageWithCredentials:
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
         # added to global_user_state.
-        tmp_public_storage_obj.add_store(store_type)
+        new_store = tmp_public_storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        tmp_public_storage_obj.initialize_and_sync_store(new_store)
 
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -5623,10 +5656,34 @@ class TestStorageWithCredentials:
                     source=nonexist_bucket_url.format(
                         account_name=storage_account_name,
                         random_name=nonexist_bucket_name))
+                new_store = storage_obj.add_store(storage_lib.StoreType.AZURE)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
             else:
                 storage_obj = storage_lib.Storage(
                     source=nonexist_bucket_url.format(
                         random_name=nonexist_bucket_name))
+                if nonexist_bucket_url.startswith('s3://'):
+                    new_store = storage_obj.add_store(storage_lib.StoreType.S3)
+                    new_store.sync_bucket()
+                    storage_obj.initialize_and_sync_store(new_store)
+                elif nonexist_bucket_url.startswith('gs://'):
+                    new_store = storage_obj.add_store(storage_lib.StoreType.GCS)
+                    new_store.sync_bucket()
+                    storage_obj.initialize_and_sync_store(new_store)
+                elif data_utils.is_az_container_endpoint(nonexist_bucket_url):
+                    new_store = storage_obj.add_store(
+                        storage_lib.StoreType.AZURE)
+                    new_store.sync_bucket()
+                    storage_obj.initialize_and_sync_store(new_store)
+                elif nonexist_bucket_url.startswith('r2://'):
+                    new_store = storage_obj.add_store(storage_lib.StoreType.R2)
+                    new_store.sync_bucket()
+                    storage_obj.initialize_and_sync_store(new_store)
+                elif nonexist_bucket_url.startswith('cos://'):
+                    new_store = storage_obj.add_store(storage_lib.StoreType.IBM)
+                    new_store.sync_bucket()
+                    storage_obj.initialize_and_sync_store(new_store)
 
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
@@ -5653,6 +5710,26 @@ class TestStorageWithCredentials:
                 match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
+            if private_bucket.startswith('s3://'):
+                new_store = storage_obj.add_store(storage_lib.StoreType.S3)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
+            elif private_bucket.startswith('gs://'):
+                new_store = storage_obj.add_store(storage_lib.StoreType.GCS)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
+            elif data_utils.is_az_container_endpoint(private_bucket):
+                new_store = storage_obj.add_store(storage_lib.StoreType.AZURE)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
+            elif private_bucket.startswith('r2://'):
+                new_store = storage_obj.add_store(storage_lib.StoreType.R2)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
+            elif private_bucket.startswith('cos://'):
+                new_store = storage_obj.add_store(storage_lib.StoreType.IBM)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
 
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
@@ -5673,7 +5750,9 @@ class TestStorageWithCredentials:
         # sky) and verifies that files are written.
         bucket_name, _ = request.getfixturevalue(ext_bucket_fixture)
         storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
-        storage_obj.add_store(store_type)
+        new_store = storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        storage_obj.initialize_and_sync_store(new_store)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
         out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
@@ -5700,10 +5779,11 @@ class TestStorageWithCredentials:
                                          tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and
         # then tries to load the same storage in COPY mode.
-        tmp_copy_mnt_existing_storage_obj.add_store(storage_lib.StoreType.S3)
+        new_store = tmp_copy_mnt_existing_storage_obj.add_store(
+            storage_lib.StoreType.S3)
+        new_store.sync_bucket()
+        tmp_copy_mnt_existing_storage_obj.initialize_and_sync_store(new_store)
         storage_name = tmp_copy_mnt_existing_storage_obj.name
-
-        # Check `sky storage ls` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
@@ -5717,7 +5797,9 @@ class TestStorageWithCredentials:
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
-        tmp_local_list_storage_obj.add_store(store_type)
+        new_store = tmp_local_list_storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        tmp_local_list_storage_obj.initialize_and_sync_store(new_store)
 
         # Check if tmp-file exists in the bucket root using cli
         out = subprocess.check_output(self.cli_ls_cmd(
@@ -5754,7 +5836,9 @@ class TestStorageWithCredentials:
         for name in invalid_name_list:
             with pytest.raises(sky.exceptions.StorageNameError):
                 storage_obj = storage_lib.Storage(name=name)
-                storage_obj.add_store(store_type)
+                new_store = storage_obj.add_store(store_type)
+                new_store.sync_bucket()
+                storage_obj.initialize_and_sync_store(new_store)
 
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
@@ -5771,7 +5855,9 @@ class TestStorageWithCredentials:
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
 
-        tmp_gitignore_storage_obj.add_store(store_type)
+        new_store = tmp_gitignore_storage_obj.add_store(store_type)
+        new_store.sync_bucket()
+        tmp_gitignore_storage_obj.initialize_and_sync_store(new_store)
 
         upload_file_name = 'included'
         # Count the number of files with the given file name
@@ -5822,7 +5908,9 @@ class TestStorageWithCredentials:
         with pytest.raises(sky.exceptions.StorageSpecError) as e:
             storage_obj = storage_lib.Storage(
                 name=ext_bucket_name, mode=storage_lib.StorageMode.MOUNT)
-            storage_obj.add_store(store_type)
+            new_store = storage_obj.add_store(store_type)
+            new_store.sync_bucket()
+            storage_obj.initialize_and_sync_store(new_store)
 
         assert 'Attempted to mount a non-sky managed bucket' in str(e)
 
@@ -5845,7 +5933,9 @@ class TestStorageWithCredentials:
         # This tests creation and upload to bucket in all AWS s3 regions
         # To test full functionality, use test_managed_jobs_storage above.
         store_type = storage_lib.StoreType.S3
-        tmp_local_storage_obj.add_store(store_type, region=region)
+        new_store = tmp_local_storage_obj.add_store(store_type, region=region)
+        new_store.sync_bucket()
+        tmp_local_storage_obj.initialize_and_sync_store(new_store)
         bucket_name = tmp_local_storage_obj.name
 
         # Confirm that the bucket was created in the correct region
@@ -5883,7 +5973,9 @@ class TestStorageWithCredentials:
         # This tests creation and upload to bucket in all GCS regions
         # To test full functionality, use test_managed_jobs_storage above.
         store_type = storage_lib.StoreType.GCS
-        tmp_local_storage_obj.add_store(store_type, region=region)
+        new_store = tmp_local_storage_obj.add_store(store_type, region=region)
+        new_store.sync_bucket()
+        tmp_local_storage_obj.initialize_and_sync_store(new_store)
         bucket_name = tmp_local_storage_obj.name
 
         # Confirm that the bucket was created in the correct region
