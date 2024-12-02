@@ -14,7 +14,7 @@ on:
   merge_group:
 
 jobs:
-  format:
+  doc-build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
