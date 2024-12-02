@@ -26,7 +26,7 @@ Available fields and semantics:
   jobs:
     # Bucket to store managed jobs mount files and tmp files.
     # Optional. If not set, SkyPilot will create a new bucket for each managed job launch.
-    # Support s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+    # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
     bucket: s3://my-bucket/
     controller:
       resources:  # same spec as 'resources' in a task YAML
