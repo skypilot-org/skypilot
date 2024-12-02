@@ -975,6 +975,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     common_utils.dump_yaml(cluster_config_file, config)
 
 
+# Reuse the sky_logging for consistency and avoid circular import.
 get_run_timestamp = sky_logging.get_run_timestamp
 
 
