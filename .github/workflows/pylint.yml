@@ -30,6 +30,7 @@ jobs:
         cache-suffix: ${{ runner.os }}-${{ matrix.python-version }}
     - name: Install dependencies
       run: |
+        uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install ".[all]"
         uv pip install pylint==2.14.5
         uv pip install pylint-quotes==0.2.3
