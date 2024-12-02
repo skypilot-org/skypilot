@@ -37,7 +37,7 @@ LB_MAX_RETRY = 3
 # We set the timeout to 120s to be safe. For reference, FastChat uses 100s:
 # https://github.com/lm-sys/FastChat/blob/f2e6ca964af7ad0585cadcf16ab98e57297e2133/fastchat/constants.py#L39 # pylint: disable=line-too-long
 # TODO(tian): Expose this option to users in yaml file.
-LB_STREAM_TIMEOUT = 120
+LB_STREAM_TIMEOUT = 1200
 
 # Interval in seconds to probe replica endpoint.
 ENDPOINT_PROBE_INTERVAL_SECONDS = 10
