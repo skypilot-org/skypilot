@@ -966,8 +966,8 @@ class Task:
             else:
                 # We will download the first store that is added to remote.
                 for store_type, store in storage.stores.items():
-                    if store_type == storage_lib.StoreType.AZURE:
-                        continue
+                    # if store_type == storage_lib.StoreType.AZURE:
+                    #     continue
 
                     s_type, s_region = self._get_preferred_store()
                     if store_type == s_type:

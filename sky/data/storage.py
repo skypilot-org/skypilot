@@ -10,6 +10,10 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
+from azure.core.exceptions import ResourceExistsError
+from azure.core.exceptions import ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import ContainerClient
 import colorama
 
 from sky import check as sky_check
@@ -925,7 +929,7 @@ class Storage(object):
                          f'store with name {self.name!r}.')
             raise
 
-        self._add_store(store)
+        # self._add_store(store)
 
         return store
 
@@ -2180,6 +2184,38 @@ class AzureBlobStore(AbstractStore):
         else:
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
+
+    def sync_bucket(self, region: Optional[str] = None):
+        """
+        Ensures the Azure Blob Storage container exists.
+        If not, creates it. The 'bucket' is an alias to 'container' in Azure.
+        """
+        if region:
+            self.region = region
+
+        if not hasattr(self, 'container_name') or not self.container_name:
+            raise ValueError("Container name must be specified before syncing.")
+
+        if not hasattr(self, 'storage_client') or self.storage_client is None:
+            self.storage_client = BlobServiceClient(
+                account_url=
+                f"https://{self.storage_account_name}.blob.core.windows.net",
+                credential=self.storage_account_key)
+
+        try:
+            container_client: ContainerClient = self.storage_client.get_container_client(
+                self.container_name)
+            container_client.get_container_properties()
+            is_new_container = False
+        except ResourceNotFoundError:
+            try:
+                container_client.create_container()
+                is_new_container = True
+            except ResourceExistsError:
+                is_new_container = False
+
+        if self.is_sky_managed is None:
+            self.is_sky_managed = is_new_container
 
     def initialize(self):
         """Initializes the AZ Container object on the cloud.
