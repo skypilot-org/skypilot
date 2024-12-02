@@ -538,7 +538,7 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
             logger.error(stderr)
             raise exceptions.StorageUploadError(
                 f'Upload to bucket failed for store {bucket_name}. '
-                'Please check the logs.')
+                f'Please check the logs: {log_path}')
     if not stdout:
         logger.debug('No file uploaded. This could be due to an error or '
                      'because all files already exist on the cloud.')
