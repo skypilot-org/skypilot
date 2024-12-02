@@ -2,6 +2,7 @@
 
 import time
 from typing import Any, Dict, List, Optional
+import uuid
 
 from sky import sky_logging
 from sky import status_lib
@@ -17,16 +18,13 @@ logger = sky_logging.init_logger(__name__)
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
     instances = cudo_wrapper.list_instances()
-    possible_names = [
-        f'{cluster_name_on_cloud}-head', f'{cluster_name_on_cloud}-worker'
-    ]
 
     filtered_nodes = {}
     for instance_id, instance in instances.items():
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name') in possible_names:
+        if instance.get('name').startswith(cluster_name_on_cloud):
             filtered_nodes[instance_id] = instance
     return filtered_nodes
 
@@ -81,19 +79,23 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     gpu_count = int(float(spec['gpu_count']))
     vcpu_count = int(spec['vcpu_count'])
     memory_gib = int(spec['mem_gb'])
-    gpu_model = spec['gpu_model']
+    gpu_model_id = spec['gpu_model_id']
     try:
-        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model, region,
-                                  memory_gib, vcpu_count)
+        cudo_wrapper.vm_available(to_start_count, gpu_count, gpu_model_id,
+                                  region, memory_gib, vcpu_count)
     except Exception as e:
         logger.warning(f'run_instances: {e}')
         raise
     for _ in range(to_start_count):
-
         node_type = 'head' if head_instance_id is None else 'worker'
+
+        if node_type == 'head':
+            node_name = f'{cluster_name_on_cloud}-head'
+        else:
+            node_name = f'{cluster_name_on_cloud}-worker-{uuid.uuid4().hex[:4]}'
         try:
             instance_id = cudo_wrapper.launch(
-                name=f'{cluster_name_on_cloud}-{node_type}',
+                name=node_name,
                 ssh_key=public_key,
                 data_center_id=region,
                 machine_type=spec['machine_type'],
@@ -101,7 +103,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 vcpu_count=vcpu_count,
                 gpu_count=gpu_count,
                 tags={},
-                disk_size=config.node_config['DiskSize'])
+                disk_size=config.node_config['DiskSize'],
+                net_name=cluster_name_on_cloud)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -162,6 +165,13 @@ def terminate_instances(
         logger.debug(f'Terminating Cudo instance {inst_id}.'
                      f'{inst}')
         cudo_wrapper.remove(inst_id)
+
+    if not worker_only:
+        try:
+            cudo_wrapper.delete_network(cluster_name_on_cloud)
+        except IndexError:
+            logger.warning(f'Network {cluster_name_on_cloud}'
+                           'already deleted')
 
 
 def get_cluster_info(
