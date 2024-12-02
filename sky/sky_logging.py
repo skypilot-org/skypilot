@@ -77,16 +77,21 @@ def _setup_logger():
     # being propagated to the parent logger.
     _root_logger.propagate = False
     if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
-        # If the sensitive log is enabled, we force set the level to INFO
-        # to suppress the debug logs for certain loggers.
-        # Do not propagate to the parent logger to avoid parent
-        # logger printing the logs.
+        # If the sensitive log is enabled, we re init a new handler
+        # and force set the level to INFO to suppress the debug logs
+        # for certain loggers.
         for logger_name in _SENSITIVE_LOGGER:
             logger = logging.getLogger(logger_name)
             handler_to_logger = RichSafeStreamHandler(sys.stdout)
             handler_to_logger.flush = sys.stdout.flush  # type: ignore
             logger.addHandler(handler_to_logger)
             logger.setLevel(logging.INFO)
+            if _show_logging_prefix:
+                handler_to_logger.setFormatter(FORMATTER)
+            else:
+                handler_to_logger.setFormatter(NO_PREFIX_FORMATTER)
+            # Do not propagate to the parent logger to avoid parent
+            # logger printing the logs.
             logger.propagate = False
 
 
