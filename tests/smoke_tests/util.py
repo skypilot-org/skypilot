@@ -59,15 +59,6 @@ _ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
 _ALL_MANAGED_JOB_STATUSES = "|".join(
     [status.value for status in ManagedJobStatus])
 
-# Suppress the sensitive log in smoke tests.
-SUPPRESS_SENSITIVE_LOG = os.environ.get('SUPPRESS_SENSITIVE_LOG', None)
-if SUPPRESS_SENSITIVE_LOG:
-    provisioner_logger = sky_logging.init_logger('sky.provisioner')
-    optimizer_logger = sky_logging.init_logger('sky.optimizer')
-    # Do not print the debug logs.
-    provisioner_logger.setLevel(logging.INFO)
-    optimizer_logger.setLevel(logging.INFO)
-
 
 def _statuses_to_str(statuses: List[enum.Enum]):
     """Convert a list of enums to a string with all the values separated by |."""

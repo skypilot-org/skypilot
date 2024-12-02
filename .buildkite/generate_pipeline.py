@@ -212,7 +212,7 @@ def _convert_pre_merge(test_files: List[str]):
         output_file_pipelines_map[yaml_file_path].append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(output_file_pipelines_map,
-                           extra_env={'SUPPRESS_SENSITIVE_LOG': '1'})
+                           extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
 def main():

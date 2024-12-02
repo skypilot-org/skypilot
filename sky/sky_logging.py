@@ -15,6 +15,7 @@ _show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
                         not env_options.Options.MINIMIZE_LOGGING.get())
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
+_SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
 
 class NewLineFormatter(logging.Formatter):
@@ -75,6 +76,18 @@ def _setup_logger():
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
+    if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
+        # If the sensitive log is enabled, we force set the level to INFO
+        # to suppress the debug logs for certain loggers.
+        # Do not propagate to the parent logger to avoid parent
+        # logger printing the logs.
+        for logger_name in _SENSITIVE_LOGGER:
+            logger = logging.getLogger(logger_name)
+            handler_to_logger = RichSafeStreamHandler(sys.stdout)
+            handler_to_logger.flush = sys.stdout.flush  # type: ignore
+            logger.addHandler(handler_to_logger)
+            logger.setLevel(logging.INFO)
+            logger.propagate = False
 
 
 def reload_logger():
