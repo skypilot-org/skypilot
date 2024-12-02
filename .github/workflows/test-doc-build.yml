@@ -30,6 +30,7 @@ jobs:
       run: |
         uv venv --seed ~/test-env
         export VIRTUAL_ENV=~/test-env
+        uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install ".[all]"
         cd docs
         uv pip install -r ./requirements-docs.txt

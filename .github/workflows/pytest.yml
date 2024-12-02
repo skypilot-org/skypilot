@@ -48,6 +48,7 @@ jobs:
           uv pip install --upgrade pip
           # Include examples in the package, so that the tests 
           echo "include examples/*" >> MANIFEST.in
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
           uv pip install ".[all]"
           uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
       - name: Run tests with pytest
