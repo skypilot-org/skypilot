@@ -7,6 +7,10 @@ tests/smoke_tests
 ├── test_*.py -> release pipeline
 ├── test_required_before_merge.py -> pre-merge pipeline
 
+run `python .buildkite/generate_pipeline.py` to generate the pipeline for
+testing. The CI will run this script as a pre-step, and use the generated
+pipeline to run the tests.
+
 1. release pipeline, which runs all smoke tests by default, some function
    support tests by multiple clouds, but we only generate one cloud per test
    function to save cost.
@@ -36,7 +40,9 @@ ALL_CLOUDS_IN_SMOKE_TESTS = [
     'lambda_cloud'
 ]
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
+QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'
+QUEUE_KUBERNETES_SERVE = 'kubernetes_serve'
 # Only aws, gcp, azure, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
@@ -44,6 +50,15 @@ CLOUD_QUEUE_MAP = {
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
     'kubernetes': QUEUE_KUBERNETES
+}
+# Serve tests runs long, and different test steps usually requires locks.
+# Its highly likely to fail if multiple serve tests are running concurrently.
+# So we use a different queue that runs only one concurrent test at a time.
+SERVE_CLOUD_QUEUE_MAP = {
+    'aws': QUEUE_GENERIC_CLOUD_SERVE,
+    'gcp': QUEUE_GENERIC_CLOUD_SERVE,
+    'azure': QUEUE_GENERIC_CLOUD_SERVE,
+    'kubernetes': QUEUE_KUBERNETES_SERVE
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
@@ -82,6 +97,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
 
             clouds_to_include = []
             clouds_to_exclude = []
+            is_serve_test = False
             for decorator in node.decorator_list:
                 if isinstance(decorator, ast.Call):
                     # We only need to consider the decorator with no arguments
@@ -94,6 +110,9 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                     if suffix.startswith('no_'):
                         clouds_to_exclude.append(suffix[3:])
                     else:
+                        if suffix == 'serve':
+                            is_serve_test = True
+                            continue
                         if suffix not in ALL_CLOUDS_IN_SMOKE_TESTS:
                             # This mark does not specify a cloud, so we skip it.
                             continue
@@ -104,8 +123,9 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                 cloud for cloud in clouds_to_include
                 if cloud not in clouds_to_exclude
             ]
+            cloud_queue_map = SERVE_CLOUD_QUEUE_MAP if is_serve_test else CLOUD_QUEUE_MAP
             final_clouds_to_include = [
-                cloud for cloud in clouds_to_include if cloud in CLOUD_QUEUE_MAP
+                cloud for cloud in clouds_to_include if cloud in cloud_queue_map
             ]
             if clouds_to_include and not final_clouds_to_include:
                 print(f'Warning: {file_path}:{node.name} '
@@ -115,7 +135,9 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                 continue
             function_name = (f'{class_name}::{node.name}'
                              if class_name else node.name)
-            function_cloud_map[function_name] = (clouds_to_include)
+            function_cloud_map[function_name] = (final_clouds_to_include, [
+                cloud_queue_map[cloud] for cloud in final_clouds_to_include
+            ])
     return function_cloud_map
 
 
@@ -124,15 +146,16 @@ def _generate_pipeline(test_file: str,
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file)
-    for test_function, clouds in function_cloud_map.items():
-        for cloud in clouds:
+    for test_function, clouds_and_queues in function_cloud_map.items():
+        for cloud, queue in zip(*clouds_and_queues):
             step = {
                 'label': f'{test_function} on {cloud}',
                 'command': f'pytest {test_file}::{test_function} --{cloud}',
                 'agents': {
                     # Separate agent pool for each cloud.
-                    # Since some are more costly
-                    'queue': CLOUD_QUEUE_MAP[cloud]
+                    # Since they require different amount of resources and
+                    # concurrency control.
+                    'queue': queue
                 },
                 'if': f'build.env("{cloud}") == "1"'
             }
@@ -188,7 +211,8 @@ def _convert_pre_merge(test_files: List[str]):
         pipeline = _generate_pipeline(test_file, False)
         output_file_pipelines_map[yaml_file_path].append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
-    _dump_pipeline_to_file(output_file_pipelines_map)
+    _dump_pipeline_to_file(output_file_pipelines_map,
+                           extra_env={'SUPPRESS_SENSITIVE_LOG': '1'})
 
 
 def main():

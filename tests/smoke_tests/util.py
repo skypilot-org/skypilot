@@ -1,5 +1,6 @@
 import enum
 import inspect
+import logging
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import pytest
 
 import sky
 from sky import serve
+from sky import sky_logging
 from sky.clouds import AWS
 from sky.clouds import GCP
 from sky.jobs.state import ManagedJobStatus
@@ -56,6 +58,15 @@ _ALL_JOB_STATUSES = "|".join([status.value for status in JobStatus])
 _ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
 _ALL_MANAGED_JOB_STATUSES = "|".join(
     [status.value for status in ManagedJobStatus])
+
+# Suppress the sensitive log in smoke tests.
+SUPPRESS_SENSITIVE_LOG = os.environ.get('SUPPRESS_SENSITIVE_LOG', None)
+if SUPPRESS_SENSITIVE_LOG:
+    provisioner_logger = sky_logging.init_logger('sky.provisioner')
+    optimizer_logger = sky_logging.init_logger('sky.optimizer')
+    # Do not print the debug logs.
+    provisioner_logger.setLevel(logging.INFO)
+    optimizer_logger.setLevel(logging.INFO)
 
 
 def _statuses_to_str(statuses: List[enum.Enum]):
