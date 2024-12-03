@@ -86,11 +86,11 @@ from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
-# from sky.api.sdk import download_logs
 from sky.api.sdk import autostop
 from sky.api.sdk import cancel
 from sky.api.sdk import cost_report
 from sky.api.sdk import down
+from sky.api.sdk import download_logs
 from sky.api.sdk import exec  # pylint: disable=redefined-builtin
 from sky.api.sdk import get
 from sky.api.sdk import job_status
@@ -109,6 +109,7 @@ from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
+from sky.jobs import ManagedJobStatus
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
 # should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
 from sky.jobs.api.sdk import spot_cancel
@@ -166,6 +167,7 @@ __all__ = [
     'StoreType',
     'ClusterStatus',
     'JobStatus',
+    'ManagedJobStatus',
     # APIs
     'Dag',
     'Task',
@@ -185,7 +187,7 @@ __all__ = [
     'cancel',
     'tail_logs',
     'spot_tail_logs',
-    # 'download_logs',
+    'download_logs',
     'job_status',
     # core APIs Spot Job Management
     'spot_queue',

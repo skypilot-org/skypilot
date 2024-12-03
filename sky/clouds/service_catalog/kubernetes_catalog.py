@@ -65,9 +65,14 @@ def list_accelerators(
     # TODO(romilb): We should consider putting a lru_cache() with TTL to
     #   avoid multiple calls to kubernetes API in a short period of time (e.g.,
     #   from the optimizer).
-    return list_accelerators_realtime(gpus_only, name_filter, region_filter,
-                                      quantity_filter, case_sensitive,
-                                      all_regions, require_price)[0]
+    return _list_accelerators(gpus_only,
+                              name_filter,
+                              region_filter,
+                              quantity_filter,
+                              case_sensitive,
+                              all_regions,
+                              require_price,
+                              realtime=False)[0]
 
 
 def list_accelerators_realtime(
@@ -80,7 +85,33 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
+    return _list_accelerators(gpus_only,
+                              name_filter,
+                              region_filter,
+                              quantity_filter,
+                              case_sensitive,
+                              all_regions,
+                              require_price,
+                              realtime=True)
+
+
+def _list_accelerators(
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True,
+    realtime: bool = False
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
+                                                                          int]]:
     """List accelerators in the Kubernetes cluster.
+
+    If realtime is True, the function will query the cluster to fetch real-time
+    GPU usage, which is returned in total_accelerators_available. Note that
+    this may require an expensive list_pod_for_all_namespaces call, which
+    requires cluster-wide pod read permissions.
 
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
@@ -115,18 +146,20 @@ def list_accelerators_realtime(
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes(context)
-    # Get the pods to get the real-time GPU usage
-    try:
-        pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
-    except kubernetes.api_exception() as e:
-        if e.status == 403:
-            logger.warning('Failed to get pods in the Kubernetes cluster '
-                           '(forbidden). Please check if your account has '
-                           'necessary permissions to list pods. Realtime GPU '
-                           'availability information may be incorrect.')
-            pods = None
-        else:
-            raise
+    pods = None
+    if realtime:
+        # Get the pods to get the real-time GPU usage
+        try:
+            pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+        except kubernetes.api_exception() as e:
+            if e.status == 403:
+                logger.warning(
+                    'Failed to get pods in the Kubernetes cluster '
+                    '(forbidden). Please check if your account has '
+                    'necessary permissions to list pods. Realtime GPU '
+                    'availability information may be incorrect.')
+            else:
+                raise
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
@@ -206,13 +239,12 @@ def list_accelerators_realtime(
 
                 accelerators_available = accelerator_count - allocated_qty
 
-                if accelerator_name not in total_accelerators_available:
-                    total_accelerators_available[accelerator_name] = 0
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
-                    total_accelerators_available[
-                        accelerator_name] += quantized_availability
+                    total_accelerators_available[accelerator_name] = (
+                        total_accelerators_available.get(accelerator_name, 0) +
+                        quantized_availability)
 
     result = []
 

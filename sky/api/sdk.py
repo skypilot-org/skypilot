@@ -567,7 +567,7 @@ def status(
     Args:
         cluster_names: names of clusters to get status for. If None, get status
             for all clusters. The cluster names specified can be in glob pattern
-            (e.g., 'my-cluster-*').
+            (e.g., ``my-cluster-*``).
         refresh: whether to refresh the status of the clusters.
     """
     # TODO(zhwu): this does not stream the logs output by logger back to the

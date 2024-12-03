@@ -272,6 +272,13 @@ class RayCodeGen:
             import time
             from typing import Dict, List, Optional, Tuple, Union
 
+            # Set the environment variables to avoid deduplicating logs and
+            # scheduler events. This should be set in driver code, since we are
+            # not using `ray job submit` anymore, and the environment variables
+            # from the ray cluster is not inherited.
+            os.environ['RAY_DEDUP_LOGS'] = '0'
+            os.environ['RAY_SCHEDULER_EVENTS'] = '0'
+
             import ray
             import ray.util as ray_util
 
@@ -297,6 +304,8 @@ class RayCodeGen:
             )
             def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
+                if not futures:
+                    return []
                 returncodes = [1] * len(futures)
                 # Wait for 1 task to be ready.
                 ready = []
@@ -1531,7 +1540,7 @@ class RetryingVmProvisioner(object):
                             to_provision,
                             resources_utils.ClusterName(
                                 cluster_name, handle.cluster_name_on_cloud),
-                            region, zones))
+                            region, zones, num_nodes))
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
@@ -3092,9 +3101,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'{workdir} -> {SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         os.makedirs(os.path.expanduser(self.log_dir), exist_ok=True)
         os.system(f'touch {log_path}')
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Syncing workdir', log_path)):
-            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
+            subprocess_utils.run_in_parallel(_sync_workdir_node, runners,
+                                             num_threads)
         logger.info(ux_utils.finishing_message('Workdir synced.', log_path))
 
     def _sync_file_mounts(
@@ -3417,15 +3429,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
-        if task.run is None:
+        if task.run is None and self._setup_cmd is None:
+            # This message is fine without mentioning setup, as there are three
+            # cases when run section is empty:
+            # 1. setup specified, no --detach-setup: setup is executed and this
+            #    message is fine for saying no run command specified.
+            # 2. setup specified, with --detach-setup: setup is executed in
+            #    detached mode and this message will not be shown.
+            # 3. no setup specified: this message is fine as a user is likely
+            #    creating a cluster only, and ok with the empty run command.
             logger.info('Run commands not specified or empty.')
             return None
-        # Check the task resources vs the cluster resources. Since `sky exec`
-        # will not run the provision and _check_existing_cluster
-        # We need to check ports here since sky.exec shouldn't change resources
-        valid_resource = self.check_resources_fit_cluster(handle,
-                                                          task,
-                                                          check_ports=True)
+        if task.run is None:
+            # If the task has no run command, we still need to execute the
+            # generated ray driver program to run the setup command in detached
+            # mode.
+            # In this case, we reset the resources for the task, so that the
+            # detached setup does not need to wait for the task resources to be
+            # ready (which is not used for setup anyway).
+            valid_resource = sky.Resources()
+        else:
+            # Check the task resources vs the cluster resources. Since
+            # `sky exec` will not run the provision and _check_existing_cluster
+            # We need to check ports here since sky.exec shouldn't change
+            # resources.
+            valid_resource = self.check_resources_fit_cluster(handle,
+                                                              task,
+                                                              check_ports=True)
         task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
@@ -3534,11 +3564,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if terminate:
                     common_utils.remove_file_if_exists(lock_path)
                 break
-            except filelock.Timeout:
+            except filelock.Timeout as e:
                 logger.debug(f'Failed to acquire lock for {cluster_name}, '
                              f'retrying...')
                 if n_attempts <= 0:
-                    raise
+                    raise RuntimeError(
+                        f'Cluster {cluster_name!r} is locked by {lock_path}. '
+                        'Check to see if it is still being launched') from e
 
     # --- CloudVMRayBackend Specific APIs ---
 
@@ -4379,6 +4411,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         start = time.time()
         runners = handle.get_command_runners()
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
+        num_threads = subprocess_utils.get_max_workers_for_file_mounts(
+            file_mounts, str(handle.launched_resources.cloud))
 
         # Check the files and warn
         for dst, src in file_mounts.items():
@@ -4441,6 +4475,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     action_message='Syncing',
                     log_path=log_path,
                     stream_logs=False,
+                    num_threads=num_threads,
                 )
                 continue
 
@@ -4477,6 +4512,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Need to source bashrc, as the cloud specific CLI or SDK may
                 # require PATH in bashrc.
                 source_bashrc=True,
+                num_threads=num_threads,
             )
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
@@ -4495,7 +4531,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'Failed to create symlinks. The target destination '
                     f'may already exist. Log: {log_path}')
 
-            subprocess_utils.run_in_parallel(_symlink_node, runners)
+            subprocess_utils.run_in_parallel(_symlink_node, runners,
+                                             num_threads)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
         logger.info(ux_utils.finishing_message('Files synced.', log_path))
@@ -4524,6 +4561,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         start = time.time()
         runners = handle.get_command_runners()
+        num_threads = subprocess_utils.get_parallel_threads(
+            str(handle.launched_resources.cloud))
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         plural = 's' if len(storage_mounts) > 1 else ''
@@ -4564,6 +4603,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # Need to source bashrc, as the cloud specific CLI or SDK
                     # may require PATH in bashrc.
                     source_bashrc=True,
+                    num_threads=num_threads,
                 )
             except exceptions.CommandError as e:
                 if e.returncode == exceptions.MOUNT_PATH_NON_EMPTY_CODE:

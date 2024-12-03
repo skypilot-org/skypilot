@@ -276,6 +276,12 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
+                    controller = controller_utils.Controllers.from_name(
+                        cluster_name)
+                    if controller is not None:
+                        logger.info(
+                            f'Choosing resources for {controller.value.name}...'
+                        )
                     dag = optimizer.Optimizer.optimize(dag,
                                                        minimize=optimize_target,
                                                        quiet=_quiet_optimizer)
@@ -309,7 +315,8 @@ def _execute(
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
         do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
-                          task.file_mounts is not None)
+                          (task.file_mounts is not None or
+                           task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
             logger.info(ux_utils.starting_message('Mounting files.'))
 
@@ -576,8 +583,9 @@ def exec(  # pylint: disable=redefined-builtin
             (CloudVMRayBackend).
 
     Raises:
-        ValueError: if the specified cluster does not exist or is not in UP
-            status.
+        ValueError: if the specified cluster is not in UP status.
+        sky.exceptions.ClusterDoesNotExist: if the specified cluster does not
+            exist.
         sky.exceptions.NotSupportedError: if the specified cluster is a
             controller that does not support this operation.
 

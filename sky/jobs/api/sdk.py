@@ -94,14 +94,18 @@ def cancel(
 
 @usage_lib.entrypoint
 @api_common.check_health
-def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool) -> str:
+def tail_logs(name: Optional[str],
+              job_id: Optional[int],
+              follow: bool,
+              controller: bool,
+              refresh: bool = False) -> str:
     """Tail logs of managed jobs."""
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
         follow=follow,
         controller=controller,
+        refresh=refresh,
     )
     response = requests.post(
         f'{api_common.get_server_url()}/jobs/logs',

@@ -34,6 +34,8 @@ PEEK_HEAD_LINES_FOR_START_STREAM = 20
 
 logger = sky_logging.init_logger(__name__)
 
+LOG_FILE_START_STREAMING_AT = 'Waiting for task resources on '
+
 
 class _ProcessingArgs:
     """Arguments for processing logs."""
@@ -435,7 +437,7 @@ def tail_logs(job_id: Optional[int],
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
-    start_stream_at = 'Waiting for task resources on '
+    start_stream_at = LOG_FILE_START_STREAMING_AT
     # Explicitly declare the type to avoid mypy warning.
     lines: Iterable[str] = []
     if follow and status in [

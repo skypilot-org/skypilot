@@ -379,9 +379,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add the user's public key to the SkyPilot cluster.
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
-    context = kubernetes_utils.get_context_from_config(config['provider'])
-    if context == kubernetes_utils.IN_CLUSTER_REGION:
-        # If the context is set to IN_CLUSTER_REGION, we are running in a pod
+    context = config['provider'].get(
+        'context', kubernetes_utils.get_current_kube_config_context_name())
+    if context == kubernetes.in_cluster_context_name():
+        # If the context is an in-cluster context name, we are running in a pod
         # with in-cluster configuration. We need to set the context to None
         # to use the mounted service account.
         context = None
