@@ -6,7 +6,7 @@ import pathlib
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import Optional, Tuple
 
 import filelock
 
@@ -87,18 +87,28 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-            self,
-            handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
-        """Downloads and streams the logs of the latest job.
+        self, task_id: Optional[int],
+        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
+    ) -> None:
+        """Downloads and streams the logs of the current job with given task ID.
 
         We do not stream the logs from the cluster directly, as the
         donwload and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
         """
+        if handle is None:
+            logger.info(f'Cluster for job {self._job_id} is not found. '
+                        'Skipping downloading and streaming the logs.')
+            return
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs')
-        controller_utils.download_and_stream_latest_job_log(
+        log_file = controller_utils.download_and_stream_latest_job_log(
             self._backend, handle, managed_job_logs_dir)
+        if log_file is not None:
+            # Set the path of the log file for the current task, so it can be
+            # accessed even after the job is finished
+            managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                 log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
@@ -213,7 +223,8 @@ class JobsController:
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 end_time = managed_job_utils.get_job_timestamp(
                     self._backend, cluster_name, get_end_time=True)
-                # The job is done.
+                # The job is done. Set the job to SUCCEEDED first before start
+                # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
                                                 task_id,
                                                 end_time=end_time,
@@ -221,12 +232,21 @@ class JobsController:
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
+                clusters = backend_utils.get_clusters(
+                    cluster_names=[cluster_name],
+                    refresh=False,
+                    include_controller=False)
+                if clusters:
+                    assert len(clusters) == 1, (clusters, cluster_name)
+                    handle = clusters[0].get('handle')
+                    # Best effort to download and stream the logs.
+                    self._download_log_and_stream(task_id, handle)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
-            # For single-node jobs, nonterminated job_status indicates a
+            # For single-node jobs, non-terminated job_status indicates a
             # healthy cluster. We can safely continue monitoring.
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
@@ -278,7 +298,7 @@ class JobsController:
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(handle)
+                    self._download_log_and_stream(task_id, handle)
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:

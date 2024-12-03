@@ -3651,6 +3651,8 @@ def test_managed_jobs_storage(generic_cloud: str):
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=60 + _BUMP_UP_SECONDS),
+                # Wait for the job to be cleaned up.
+                'sleep 20',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
@@ -3701,11 +3703,19 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     test = Test(
         'test-managed-jobs-inline-env',
         [
-            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
+            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "echo "\\$TEST_ENV"; ([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
             _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=20 + _BUMP_UP_SECONDS),
+            f'JOB_ROW=$(sky jobs queue | grep {name} | head -n1) && '
+            f'echo "$JOB_ROW" && echo "$JOB_ROW" | grep "SUCCEEDED" && '
+            f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
+            f'echo "JOB_ID=$JOB_ID" && '
+            # Test that logs are still available after the job finishes.
+            'unset SKYPILOT_DEBUG; s=$(sky jobs logs $JOB_ID --refresh) && echo "$s" && echo "$s" | grep "hello world" && '
+            # Make sure we skip the unnecessary logs.
+            'echo "$s" | head -n1 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
