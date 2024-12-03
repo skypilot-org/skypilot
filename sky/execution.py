@@ -581,8 +581,9 @@ def exec(  # pylint: disable=redefined-builtin
             submitted.
 
     Raises:
-        ValueError: if the specified cluster does not exist or is not in UP
-            status.
+        ValueError: if the specified cluster is not in UP status.
+        sky.exceptions.ClusterDoesNotExist: if the specified cluster does not
+            exist.
         sky.exceptions.NotSupportedError: if the specified cluster is a
             controller that does not support this operation.
 

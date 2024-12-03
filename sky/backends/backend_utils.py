@@ -1612,14 +1612,14 @@ def check_can_clone_disk_and_override_task(
         The task to use and the resource handle of the source cluster.
 
     Raises:
-        ValueError: If the source cluster does not exist.
+        exceptions.ClusterDoesNotExist: If the source cluster does not exist.
         exceptions.NotSupportedError: If the source cluster is not valid or the
             task is not compatible to clone disk from the source cluster.
     """
     source_cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     if source_cluster_status is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.ClusterDoesNotExist(
                 f'Cannot find cluster {cluster_name!r} to clone disk from.')
 
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
@@ -2136,7 +2136,7 @@ def check_cluster_available(
     """Check if the cluster is available.
 
     Raises:
-        ValueError: if the cluster does not exist.
+        exceptions.ClusterDoesNotExist: if the cluster does not exist.
         exceptions.ClusterNotUpError: if the cluster is not UP.
         exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -2201,7 +2201,8 @@ def check_cluster_available(
             error_msg += message
 
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
+            raise exceptions.ClusterDoesNotExist(
+                f'{colorama.Fore.YELLOW}{error_msg}{reset}')
     assert cluster_status is not None, 'handle is not None but status is None'
     backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
