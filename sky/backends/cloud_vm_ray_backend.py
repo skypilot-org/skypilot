@@ -2890,8 +2890,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle = config_dict['handle']
                 provision_record = config_dict['provision_record']
                 resources_vars = config_dict['resources_vars']
-                config_hash = config_dict[
-                    'config_hash'] if 'config_hash' in config_dict else None
+                config_hash = config_dict.get('config_hash', None)
 
                 # Setup SkyPilot runtime after the cluster is provisioned
                 # 1. Wait for SSH to be ready.
