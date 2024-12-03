@@ -1963,7 +1963,7 @@ class RetryingVmProvisioner(object):
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
-        skip_if_config_hash_matches: Optional[str],
+        skip_unnecessary_provisioning: bool,
     ) -> Dict[str, Any]:
         """Provision with retries for all launchable resources.
 
@@ -1978,6 +1978,8 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
+        skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
+                                       skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
 
@@ -2726,7 +2728,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stream_logs: bool,
         cluster_name: str,
         retry_until_up: bool = False,
-        skip_if_no_cluster_updates: bool = False,
+        skip_unnecessary_provisioning: bool = False,
     ) -> Optional[CloudVmRayResourceHandle]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
@@ -2775,11 +2777,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision_config.num_nodes, to_provision_config.resources)
             usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
 
-            skip_if_config_hash_matches = None
-            if skip_if_no_cluster_updates:
-                skip_if_config_hash_matches = (
-                    to_provision_config.prev_config_hash)
-
             # TODO(suquark): once we have sky on PyPI, we should directly
             # install sky from PyPI.
             # NOTE: can take ~2s.
@@ -2824,7 +2821,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         ux_utils.spinner_message('Launching', log_path))
                     config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs,
-                        skip_if_config_hash_matches)
+                        skip_unnecessary_provisioning)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state

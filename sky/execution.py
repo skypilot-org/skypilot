@@ -305,7 +305,7 @@ def _execute(
                 stream_logs=stream_logs,
                 cluster_name=cluster_name,
                 retry_until_up=retry_until_up,
-                skip_if_no_cluster_updates=skip_unnecessary_provisioning)
+                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
