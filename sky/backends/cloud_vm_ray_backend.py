@@ -3463,7 +3463,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             Job id if the task is submitted to the cluster, None otherwise.
         """
         if task.run is None and self._setup_cmd is None:
-            logger.info('Run commands not specified or empty.')
+            logger.info('Both run and setup commands not specified or empty.')
             return None
         if task.run is None:
             # If the task has no run command, we still need to execute the
