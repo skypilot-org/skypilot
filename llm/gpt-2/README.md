@@ -13,7 +13,7 @@ pip install "skypilot-nightly[aws,gcp,azure,kubernetes,lambda,fluidstack]" # Cho
 ```bash
 sky check
 ```
-Please check the instructions for enabling clouds at [SkyPilot doc](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
+Please check the instructions for enabling clouds at [SkyPilot doc](https://docs.skypilot.co/en/latest/getting-started/installation.html).
 
 3. Download the YAML for starting the training:
 ```bash

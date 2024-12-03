@@ -42,7 +42,7 @@ Prerequisites
 **Local machine (typically your laptop):**
 
 * `kubectl <https://kubernetes.io/docs/tasks/tools/install-kubectl/>`_
-* `SkyPilot <https://skypilot.readthedocs.io/en/latest/getting-started/installation.html>`_
+* `SkyPilot <https://docs.skypilot.co/en/latest/getting-started/installation.html>`_
 
 **Remote machines (your cluster, optionally with GPUs):**
 

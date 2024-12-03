@@ -17,12 +17,12 @@ It will automatically perform the following:
 [**LLaMA**](https://github.com/facebookresearch/llama) is a set of Large Language Models (LLMs) recently released by Meta. Trained on more than 1 trillion tokens from public datasets, LLaMA achieves high quality and is space-efficient. You can [fill out a form to request access from Meta](https://docs.google.com/forms/d/e/1FAIpQLSfqNECQnMkycAp2jP4Z9TFX0cGR4uf7b_fBxjY_OjhJILlKGA/viewform) to download the open model weights. 
 In the steps below we assume either (1) you have an unexpired download URL, or (2) the weights have been downloaded and stored on the local machine.
 
-[**SkyPilot**](https://github.com/skypilot-org/skypilot) is an open-source framework from UC Berkeley for seamlessly running machine learning on any cloud. With a simple CLI, users can easily launch many clusters and jobs, while substantially lowering their cloud bills. Currently, [Lambda Labs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#lambda-cloud) (low-cost GPU cloud), [AWS](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#aws), [GCP](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#gcp), and [Azure](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#azure) are supported. See [docs](https://skypilot.readthedocs.io/en/latest/) to learn more.
+[**SkyPilot**](https://github.com/skypilot-org/skypilot) is an open-source framework from UC Berkeley for seamlessly running machine learning on any cloud. With a simple CLI, users can easily launch many clusters and jobs, while substantially lowering their cloud bills. Currently, [Lambda Labs](https://docs.skypilot.co/en/latest/getting-started/installation.html#lambda-cloud) (low-cost GPU cloud), [AWS](https://docs.skypilot.co/en/latest/getting-started/installation.html#aws), [GCP](https://docs.skypilot.co/en/latest/getting-started/installation.html#gcp), and [Azure](https://docs.skypilot.co/en/latest/getting-started/installation.html#azure) are supported. See [docs](https://docs.skypilot.co/en/latest/) to learn more.
 
 ## Steps
 All YAML files used below live in [the SkyPilot repo](https://github.com/skypilot-org/skypilot/tree/master/llm/llama-chatbots), and the chatbot code is [here](https://github.com/skypilot-org/sky-llama).
 
-0. Install SkyPilot and [check that cloud credentials exist](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloud-account-setup):
+0. Install SkyPilot and [check that cloud credentials exist](https://docs.skypilot.co/en/latest/getting-started/installation.html#cloud-account-setup):
     ```bash
     pip install "skypilot[aws,gcp,azure,lambda]"  # pick your clouds
     sky check
@@ -120,7 +120,7 @@ sky launch llama-30b.yaml -c llama-30b -s --env LLAMA_URL=$LLAMA_URL
 sky launch llama-65b.yaml -c llama-65b -s --env LLAMA_URL=$LLAMA_URL
 ```
 
-To see details about these flags, see [CLI docs](https://skypilot.readthedocs.io/en/latest/reference/cli.html) or run `sky launch -h`.
+To see details about these flags, see [CLI docs](https://docs.skypilot.co/en/latest/reference/cli.html) or run `sky launch -h`.
 
 ## Cleaning up
 When you are done, you can stop or tear down the cluster:
@@ -140,7 +140,7 @@ When you are done, you can stop or tear down the cluster:
     ```
 **To see your clusters**, run `sky status`, which is a single pane of glass for all your clusters across regions/clouds.
 
-To learn more about various SkyPilot commands, see [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html).
+To learn more about various SkyPilot commands, see [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html).
 
 
 ## Why SkyPilot?
@@ -166,12 +166,12 @@ SkyPilot's `sky launch` command makes this entirely automatic. It performs *auto
 - low-cost GPU cloud (Lambda; >3x cheaper than AWS/Azure/GCP) 
 - spot instances (>3x cheaper than on-demand)
 - automatically choosing the cheapest cloud/region/zone
-- auto-stopping & auto-termination of instances ([docs](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html))
+- auto-stopping & auto-termination of instances ([docs](https://docs.skypilot.co/en/latest/reference/auto-stop.html))
 
 ## Recap
 
 Congratulations! You have used SkyPilot to launch a LLaMA-based chatbot on the cloud with just one command. The system automatically handles setting up instances and it offers cloud portability, higher GPU availability, and cost reduction.
 
-LLaMA chatbots are just one example app. To leverage these benefits for your own ML projects on the cloud, we recommend the [Quickstart guide](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html).
+LLaMA chatbots are just one example app. To leverage these benefits for your own ML projects on the cloud, we recommend the [Quickstart guide](https://docs.skypilot.co/en/latest/getting-started/quickstart.html).
 
 *Feedback or questions? Want to run other LLM models?* Feel free to drop a note to the SkyPilot team on [GitHub](https://github.com/skypilot-org/skypilot/) or [Slack](http://slack.skypilot.co/) and we're happy to chat!

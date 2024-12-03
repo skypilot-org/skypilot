@@ -19,7 +19,7 @@
 
 ## Running Yi model with SkyPilot
 
-After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Yi model on vLLM with SkyPilot in 1-click:
+After [installing SkyPilot](https://docs.skypilot.co/en/latest/getting-started/installation.html), run your own Yi model on vLLM with SkyPilot in 1-click:
 
 1. Start serving Yi-1.5 34B on a single instance with any available GPU in the list specified in [yi15-34b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/yi/yi15-34b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [yicoder-9b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/yi/yicoder-9b.yaml) or [other model](https://github.com/skypilot-org/skypilot/tree/master/llm/yi) for a smaller model):
 

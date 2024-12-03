@@ -17,7 +17,7 @@ To get started, install the latest version of SkyPilot:
 pip install "skypilot-nightly[all]"
 ```
 
-For detailed installation instructions, please refer to the [installation guide](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
+For detailed installation instructions, please refer to the [installation guide](https://docs.skypilot.co/en/latest/getting-started/installation.html).
 
 Once installed, run `sky check` to verify you have cloud access.
 
@@ -296,4 +296,4 @@ To shut down all resources:
 sky serve down ollama
 ```
 
-See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
+See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).

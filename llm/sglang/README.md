@@ -21,7 +21,7 @@ sky check
 ```
 
 ## Serving vision-language model LLaVA with SGLang for more traffic using SkyServe
-1. Create a [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html) with a  `service` section:
+1. Create a [`SkyServe Service YAML`](https://docs.skypilot.co/en/latest/serving/service-yaml-spec.html) with a  `service` section:
 
 ```yaml
 service:
@@ -33,7 +33,7 @@ service:
 
 The entire Service YAML can be found here: [llava.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/sglang/llava.yaml).
 
-2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
 sky serve up -n sglang-llava llava.yaml
 ```
@@ -117,7 +117,7 @@ You should get a similar response as the following:
 ## Serving Llama-2 with SGLang for more traffic using SkyServe
 1. The process is the same as serving LLaVA, but with the model path changed to Llama-2. Below are example commands for reference.
 
-2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
 sky serve up -n sglang-llama2 llama2.yaml --env HF_TOKEN=<your-huggingface-token>
 ```

@@ -15,7 +15,7 @@ SkyPilot can help you serve Mixtral by automatically finding available resources
 sky launch -c mixtral ./serve.yaml
 ```
 
-Note that we specify the following resources, so that SkyPilot will automatically find any of the available GPUs specified by automatically [failover](https://skypilot.readthedocs.io/en/latest/examples/auto-failover.html) through all the candidates (in the order of the prices):
+Note that we specify the following resources, so that SkyPilot will automatically find any of the available GPUs specified by automatically [failover](https://docs.skypilot.co/en/latest/examples/auto-failover.html) through all the candidates (in the order of the prices):
 
 ```yaml
 resources:
@@ -82,7 +82,7 @@ curl http://$IP:8000/v1/chat/completions \
 
 ## 2. Serve with multiple instances
 
-When scaling up is required, [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
+When scaling up is required, [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
 
 ```bash
 sky serve up -n mixtral ./serve.yaml

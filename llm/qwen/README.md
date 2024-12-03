@@ -27,7 +27,7 @@ As of Jun 2024, Qwen1.5-110B-Chat is ranked higher than GPT-4-0613 on the [LMSYS
 
 ## Running your own Qwen with SkyPilot
 
-After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Qwen model on vLLM with SkyPilot in 1-click:
+After [installing SkyPilot](https://docs.skypilot.co/en/latest/getting-started/installation.html), run your own Qwen model on vLLM with SkyPilot in 1-click:
 
 1. Start serving Qwen 110B on a single instance with any available GPU in the list specified in [qwen15-110b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen15-110b.yaml) with a vLLM powered OpenAI-compatible endpoint (You can also switch to [qwen25-72b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen25-72b.yaml) or [qwen25-7b.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/qwen/qwen25-7b.yaml) for a smaller model):
 
@@ -98,7 +98,7 @@ curl http://$ENDPOINT/v1/chat/completions \
 
 ## Scale up the service with SkyServe
 
-1. With [SkyPilot Serving](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html), a serving library built on top of SkyPilot, scaling up the Qwen service is as simple as running:
+1. With [SkyPilot Serving](https://docs.skypilot.co/en/latest/serving/sky-serve.html), a serving library built on top of SkyPilot, scaling up the Qwen service is as simple as running:
 ```bash
 sky serve up -n qwen ./qwen25-72b.yaml
 ```

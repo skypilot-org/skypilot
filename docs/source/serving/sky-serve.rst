@@ -515,7 +515,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Specify the disk_size in GB of the SkyServe controller.
         disk_size: 1024
 
-The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://docs.skypilot.co/en/latest/reference/yaml-spec.html>`__.
 
 .. note::
   These settings will not take effect if you have an existing controller (either

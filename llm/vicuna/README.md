@@ -4,7 +4,7 @@
     <img src="https://i.imgur.com/z3AOYLV.png" alt="Vicuna LLM"/>
 </p>
 
-This README contains instructions to run and train Vicuna, an open-source LLM chatbot with quality comparable to ChatGPT. The Vicuna release was trained using SkyPilot on [cloud spot instances](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html), with a cost of ~$300.
+This README contains instructions to run and train Vicuna, an open-source LLM chatbot with quality comparable to ChatGPT. The Vicuna release was trained using SkyPilot on [cloud spot instances](https://docs.skypilot.co/en/latest/examples/spot-jobs.html), with a cost of ~$300.
 
 * [Blog post](https://lmsys.org/blog/2023-03-30-vicuna/)
 * [Demo](https://chat.lmsys.org/)

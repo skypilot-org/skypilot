@@ -238,7 +238,7 @@ def _try_load_config() -> None:
                 _dict,
                 schemas.get_config_schema(),
                 f'Invalid config YAML ({config_path}). See: '
-                'https://skypilot.readthedocs.io/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
                 'Error: ',
                 skip_none=False)
 

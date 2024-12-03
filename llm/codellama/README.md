@@ -38,7 +38,7 @@ The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka Sky
 
 ## Running your own Code Llama with SkyPilot
 
-After [installing SkyPilot](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html), run your own Code Llama on vLLM with SkyPilot in 1-click:
+After [installing SkyPilot](https://docs.skypilot.co/en/latest/getting-started/installation.html), run your own Code Llama on vLLM with SkyPilot in 1-click:
 
 1. Start serving Code Llama 70B on a single instance with any available GPU in the list specified in [endpoint.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/endpoint.yaml) with a vLLM powered OpenAI-compatible endpoint:
 ```console
@@ -100,7 +100,7 @@ This returns the following completion:
 
 ## Scale up the service with SkyServe
 
-1. With [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html), a serving library built on top of SkyPilot, scaling up the Code Llama service is as simple as running:
+1. With [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html), a serving library built on top of SkyPilot, scaling up the Code Llama service is as simple as running:
 ```bash
 sky serve up -n code-llama ./endpoint.yaml
 ```

@@ -11,7 +11,7 @@ In this recipe, you will serve `databricks/dbrx-instruct` on your own infra  -- 
 ## Prerequisites
 
 - Go to the [HuggingFace model page](https://huggingface.co/databricks/dbrx-instruct) and request access to the model `databricks/dbrx-instruct`.
-- Check that you have installed SkyPilot ([docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)).
+- Check that you have installed SkyPilot ([docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
 ## SkyPilot YAML
@@ -278,6 +278,6 @@ To shut down all resources:
 sky serve down dbrx
 ```
 
-See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
+See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
 
 

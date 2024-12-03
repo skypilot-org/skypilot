@@ -17,13 +17,13 @@ This post shows how to use SkyPilot to host an ai coding assistant with just one
 - OpenAPI interface, easy to integrate with existing infrastructure (e.g Cloud IDE).
 - Supports consumer-grade GPUs.
 
-[**SkyPilot**](https://github.com/skypilot-org/skypilot) is an open-source framework from UC Berkeley for seamlessly running machine learning on any cloud. With a simple CLI, users can easily launch many clusters and jobs, while substantially lowering their cloud bills. Currently, [AWS](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#aws), [GCP](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#gcp), [Azure](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#azure), [Lambda Cloud](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#lambda-cloud), [IBM](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#ibm), [Oracle Cloud Infrastructure (OCI)](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci), [Cloudflare R2](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2) and [Samsung Cloud Platform (SCP)](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#samsung-cloud-platform-scp) are supported. See [docs](https://skypilot.readthedocs.io/en/latest/) to learn more.
+[**SkyPilot**](https://github.com/skypilot-org/skypilot) is an open-source framework from UC Berkeley for seamlessly running machine learning on any cloud. With a simple CLI, users can easily launch many clusters and jobs, while substantially lowering their cloud bills. Currently, [AWS](https://docs.skypilot.co/en/latest/getting-started/installation.html#aws), [GCP](https://docs.skypilot.co/en/latest/getting-started/installation.html#gcp), [Azure](https://docs.skypilot.co/en/latest/getting-started/installation.html#azure), [Lambda Cloud](https://docs.skypilot.co/en/latest/getting-started/installation.html#lambda-cloud), [IBM](https://docs.skypilot.co/en/latest/getting-started/installation.html#ibm), [Oracle Cloud Infrastructure (OCI)](https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci), [Cloudflare R2](https://docs.skypilot.co/en/latest/getting-started/installation.html#cloudflare-r2) and [Samsung Cloud Platform (SCP)](https://docs.skypilot.co/en/latest/getting-started/installation.html#samsung-cloud-platform-scp) are supported. See [docs](https://docs.skypilot.co/en/latest/) to learn more.
 
 ## Steps
 
 All YAML files used below live in [the SkyPilot repo](https://github.com/skypilot-org/skypilot/tree/master/llm/tabby).
 
-1. Install SkyPilot and [check that cloud credentials exist](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloud-account-setup):
+1. Install SkyPilot and [check that cloud credentials exist](https://docs.skypilot.co/en/latest/getting-started/installation.html#cloud-account-setup):
 
     ```bash
     # pip install skypilot
@@ -94,4 +94,4 @@ When you are done, you can stop or tear down the cluster:
     ```
 **To see your clusters**, run `sky status`, which is a single pane of glass for all your clusters across regions/clouds.
 
-To learn more about various SkyPilot commands, see [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html).
+To learn more about various SkyPilot commands, see [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html).

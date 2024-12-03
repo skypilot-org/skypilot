@@ -57,7 +57,7 @@ This guide shows how to use run and deploy this multimodal model on your own clo
 pip install 'skypilot[all]'
 sky check
 ```
-Detailed instructions for installation and cloud setup [here](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
+Detailed instructions for installation and cloud setup [here](https://docs.skypilot.co/en/latest/getting-started/installation.html).
 
 2. Launch the model on any cloud or Kubernetes:
 ```bash
@@ -150,7 +150,7 @@ These descriptions should give you a clear picture of the scenes depicted in the
 
 ## Scale Up Pixtral Endpoint as a Service
 
-1. Start a service with [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html):
+1. Start a service with [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html):
 ```bash
 sky serve up -n pixtral pixtral.yaml
 ```
