@@ -29,7 +29,7 @@ jobs:
     - name: Install dependencies
       run: |
         uv venv --seed ~/test-env
-        export VIRTUAL_ENV=~/test-env
+        source ~/test-env/bin/activate
         uv pip install yapf==0.32.0
         uv pip install toml==0.10.2
         uv pip install black==22.10.0
