@@ -398,7 +398,8 @@ def get_request_tasks(
         filter_str = ' AND '.join(filters)
         if filter_str:
             filter_str = f' WHERE {filter_str}'
-        cursor.execute(f'SELECT * FROM {REQUEST_TABLE}{filter_str} '
+        columns_str = ', '.join(REQUEST_COLUMNS)
+        cursor.execute(f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
                        'ORDER BY created_at DESC')
         rows = cursor.fetchall()
         if rows is None:
