@@ -111,6 +111,7 @@ from sky.jobs.core import spot_cancel
 from sky.jobs.core import spot_launch
 from sky.jobs.core import spot_queue
 from sky.jobs.core import spot_tail_logs
+from sky.jobs.state import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
@@ -163,6 +164,7 @@ __all__ = [
     'StoreType',
     'ClusterStatus',
     'JobStatus',
+    'ManagedJobStatus',
     # APIs
     'Dag',
     'Task',
