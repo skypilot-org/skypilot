@@ -29,7 +29,7 @@ jobs:
     - name: Install dependencies
       run: |
         uv venv --seed ~/test-env
-        export VIRTUAL_ENV=~/test-env
+        source ~/test-env/bin/activate
         uv pip install --prerelease=allow "azure-cli>=2.65.0"
         uv pip install ".[all]"
         uv pip install pylint==2.14.5
