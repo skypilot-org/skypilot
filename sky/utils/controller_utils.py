@@ -266,7 +266,7 @@ def _get_cloud_dependencies_installation_commands(
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(
-        f'echo -en "\\r{step_prefix}python dependencies{empty_str}" && '
+        f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
         f'{constants.SKY_UV_PIP_CMD} install {packages_string} > /dev/null 2>&1'
     )
 
