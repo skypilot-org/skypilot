@@ -35,7 +35,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v4
         with:
@@ -44,8 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv venv --seed ~/test-env
-        source ~/test-env/bin/activate
-          uv pip install --upgrade pip
+          source ~/test-env/bin/activate
           uv pip install --prerelease=allow "azure-cli>=2.65.0"
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
