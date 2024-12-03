@@ -1253,6 +1253,10 @@ def test_env_check(generic_cloud: str):
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            # Test --detach-setup with only setup.
+            f'sky launch -y -c {name} --detach-setup tests/test_yamls/test_only_setup.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 | grep "hello world"',
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
