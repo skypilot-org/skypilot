@@ -28,6 +28,7 @@
         },
         "existingSubnet": {
             "type": "string",
+            "defaultValue": "",
             "metadata": {
                 "description": "Existing subnet id to use."
             }
@@ -92,7 +93,7 @@
             "apiVersion": "2019-11-01",
             "name": "[variables('vnetName')]",
             "location": "[variables('location')]",
-            "condition": "[equals(parameters('existingSubnet'), '')]",
+            "condition": "[empty(parameters('existingSubnet'))]",
             "properties": {
                 "addressSpace": {
                     "addressPrefixes": [
