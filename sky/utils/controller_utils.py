@@ -18,6 +18,7 @@ from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
@@ -206,10 +207,7 @@ def _get_cloud_dependencies_installation_commands(
 
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
-                    'export PATH="$PATH:$HOME/.local/bin" &&'
-                    f'uv -V > /dev/null 2>&1 ||'
-                    'curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null |'
-                    'UV_INSTALL_DIR="$HOME/.local/bin" sh >/dev/null 2>&1')
+                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
         cloud_python_dependencies: List[str] = dependencies.extras_require[
@@ -223,8 +221,13 @@ def _get_cloud_dependencies_installation_commands(
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
-                f'uv pip install --prerelease=allow "{dependencies.AZURE_CLI}" '
-                '> /dev/null 2>&1')
+                f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
+                f'"{dependencies.AZURE_CLI}" > /dev/null 2>&1')
+        elif isinstance(cloud, clouds.GCP):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(
+                f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
+                f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
@@ -265,7 +268,8 @@ def _get_cloud_dependencies_installation_commands(
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(
         f'echo -en "\\r{step_prefix}python dependencies{empty_str}" && '
-        f'uv pip install {packages_string} > /dev/null 2>&1')
+        f'{constants.SKY_UV_PIP_CMD} install {packages_string} > /dev/null 2>&1'
+    )
 
     total_commands = len(commands)
     finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
