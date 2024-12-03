@@ -3463,13 +3463,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             Job id if the task is submitted to the cluster, None otherwise.
         """
         if task.run is None and self._setup_cmd is None:
-            logger.info('Both run and setup commands not specified or empty.')
+            # This message is fine without mentioning setup, as there are three
+            # cases when run section is empty:
+            # 1. setup specified, no --detach-setup: setup is executed and this
+            #    message is fine for saying no run command specified.
+            # 2. setup specified, with --detach-setup: setup is executed in
+            #    detached mode and this message will not be shown.
+            # 3. no setup specified: this message is fine as a user is likely
+            #    creating a cluster only, and ok with the empty run command.
+            logger.info('Run commands not specified or empty.')
             return None
         if task.run is None:
             # If the task has no run command, we still need to execute the
             # generated ray driver program to run the setup command in detached
             # mode.
-            # In this case, we don't need to check the resources.
+            # In this case, we reset the resources for the task, so that the
+            # detached setup does not need to wait for the task resources to be
+            # ready (which is not used for setup anyway).
             valid_resource = sky.Resources()
         else:
             # Check the task resources vs the cluster resources. Since
