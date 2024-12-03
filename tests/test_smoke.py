@@ -132,7 +132,8 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
 
 
 def _get_cmd_wait_until_cluster_status_contains(
-        cluster_name: str, cluster_status: List[sky.ClusterStatus], timeout: int):
+        cluster_name: str, cluster_status: List[sky.ClusterStatus],
+        timeout: int):
     return _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
         cluster_name=cluster_name,
         cluster_status=_statuses_to_str(cluster_status),
@@ -641,7 +642,8 @@ def test_aws_with_ssh_proxy_command():
                 _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[
-                        sky.ManagedJobStatus.SUCCEEDED, sky.ManagedJobStatus.RUNNING,
+                        sky.ManagedJobStatus.SUCCEEDED,
+                        sky.ManagedJobStatus.RUNNING,
                         sky.ManagedJobStatus.STARTING
                     ],
                     timeout=300),
@@ -2639,7 +2641,9 @@ def test_gcp_start_stop():
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
             _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT],
+                cluster_status=[
+                    sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT
+                ],
                 timeout=200),
         ],
         f'sky down -y {name}',
@@ -2665,7 +2669,9 @@ def test_azure_start_stop():
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT],
+                cluster_status=[
+                    sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT
+                ],
                 timeout=280) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}',
         ],
@@ -2989,14 +2995,16 @@ def test_managed_jobs(generic_cloud: str):
             _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
                 job_status=[
-                    sky.ManagedJobStatus.PENDING, sky.ManagedJobStatus.SUBMITTED,
+                    sky.ManagedJobStatus.PENDING,
+                    sky.ManagedJobStatus.SUBMITTED,
                     sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[
-                    sky.ManagedJobStatus.PENDING, sky.ManagedJobStatus.SUBMITTED,
+                    sky.ManagedJobStatus.PENDING,
+                    sky.ManagedJobStatus.SUBMITTED,
                     sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
@@ -3318,7 +3326,8 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
             _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[
-                    sky.ManagedJobStatus.RUNNING, sky.ManagedJobStatus.RECOVERING
+                    sky.ManagedJobStatus.RUNNING,
+                    sky.ManagedJobStatus.RECOVERING
                 ],
                 timeout=360),
         ],
@@ -3801,7 +3810,9 @@ def test_azure_start_stop_two_nodes():
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             _get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED],
+                cluster_status=[
+                    sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED
+                ],
                 timeout=200 + _BUMP_UP_SECONDS) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
