@@ -63,15 +63,16 @@ class SSHConfigHelper(object):
         # always return an empty file for known hosts, making the ssh think
         # this is a first-time connection, and thus skipping the host key
         # check.
+        # Not adding SSH agent forwarding by default here to avoid implicitly
+        # using users' SSH keys in their local agent. Plus on sky launch side we
+        # are not default adding SSH agent forwarding either.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
               HostName {ip}
               User {username}
               IdentityFile {ssh_key_path}
-              AddKeysToAgent yes
               IdentitiesOnly yes
-              ForwardAgent yes
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null

@@ -69,10 +69,6 @@ setup: |
     sudo apt-get -y install pdsh ninja-build
   fi
 
-file_mounts:
-  # Required for DeepSpeed's passwordless SSH (run commands on nodes).
-  ~/.ssh/id_rsa: ~/.ssh/sky-key
-
 run: |
   cd DeepSpeedExamples
   conda activate deepspeed

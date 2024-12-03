@@ -11,38 +11,25 @@ Frequently Asked Questions
 Git and GitHub
 --------------
 
-How to clone private GitHub repositories in a task's ``setup`` commands?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+How to clone private GitHub repositories in a job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This is possible provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_ and you are not using a remote SkyPilot server.
-For example, run the following on your laptop:
-
-.. code-block:: bash
-
-   eval $(ssh-agent -s)
-   ssh-add ~/.ssh/id_rsa
-
-Then, any SkyPilot clusters launched from this machine would be able to clone private GitHub repositories. For example:
+Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
+You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
 
 .. code-block:: yaml
 
-    # your_task.yaml
-    setup: |
-      git clone git@github.com:your-proj/your-repo.git
+  # your_task.yaml
+  file_mounts:
+    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
 
-.. note::
-  If you have a remote SkyPilot server, you can use `file_mounts` to sync your Github SSH private key to your sky cluster.
-
-  .. code-block:: yaml
-
-    # your_task.yaml
-    file_mounts:
-      ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key-path
-
-    setup: |
-      # Github only recognizes protected private keys.
-      chmod 600 ~/.ssh/id_rsa
-      git clone git@github.com:your-proj/your-repo.git
+  setup: |
+    chmod 600 ~/.ssh/id_rsa
+    git clone git@github.com:your-proj/your-repo.git
+  
+  run: |
+    cd your-repo
+    git pull
 
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?

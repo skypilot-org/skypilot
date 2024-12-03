@@ -70,6 +70,9 @@ def ssh_options_list(
         connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
+    # Do not allow agent forwarding because SkyPilot server has access to all
+    # user cluster private keys, which should not be all forwarded to individual
+    # user clusters.
     arg_dict = {
         # SSH port
         'Port': port,
@@ -87,10 +90,6 @@ def ssh_options_list(
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
         'IdentitiesOnly': 'yes',
-        # Add the current private key used for this SSH connection to the
-        # SSH agent, so that forward agent parameter will then make SSH
-        # agent forward it.
-        'AddKeysToAgent': 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
         'ExitOnForwardFailure': 'yes',
@@ -100,8 +99,6 @@ def ssh_options_list(
         'ServerAliveCountMax': 3,
         # ConnectTimeout.
         'ConnectTimeout': f'{connect_timeout}s',
-        # Agent forwarding for git.
-        'ForwardAgent': 'yes',
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.

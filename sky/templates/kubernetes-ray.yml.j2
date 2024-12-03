@@ -462,7 +462,7 @@ setup_commands:
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
-    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
   {% if tpu_requested %}
   # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
@@ -484,6 +484,7 @@ file_mounts: {
   "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
 {%- for remote_path, local_path in credentials.items() %}
   "{{remote_path}}": "{{local_path}}",
+  "~/.ssh/sky-cluster-key": "{{ssh_private_key}}",
 {%- endfor %}
 }
 
