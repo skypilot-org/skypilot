@@ -243,7 +243,7 @@ def _list_accelerators(
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
                     total_accelerators_available[accelerator_name] = (
-                        total_accelerators_available.get(accelerator_name, 0) + 
+                        total_accelerators_available.get(accelerator_name, 0) +
                         quantized_availability)
 
     result = []
