@@ -687,9 +687,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     still sync up any storage mounts with local source paths (which do not
     undergo translation).
     """
+
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
+
+    def _sub_path_join(sub_path: Optional[str], path: str) -> str:
+        if sub_path is None:
+            return path
+        return os.path.join(sub_path, path).strip('/')
 
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
@@ -717,11 +723,23 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             ux_utils.spinner_message(
                 f'Translating {msg} to SkyPilot Storage...'))
 
+    # Get the bucket name for the workdir and file mounts,
+    # we stores all these files in same bucket from config.
+    bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    if bucket_wth_prefix is None:
+        store_type = sub_path = None
+        storage_account_name = region = None
+        allow_bucket_creation = True
+        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
+            username=common_utils.get_cleaned_username(), id=run_id)
+    else:
+        store_type, bucket_name, sub_path, storage_account_name, region = \
+            storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix)
+        allow_bucket_creation = False
+
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
     if task.workdir is not None:
-        bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(), id=run_id)
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
@@ -729,14 +747,19 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             raise ValueError(
                 f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
                 'workdir and file_mounts contains it as the target.')
-        new_storage_mounts[
-            constants.
-            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': workdir,
-                'persistent': False,
-                'mode': 'COPY',
-            })
+        storage_obj = storage_lib.Storage(
+            name=bucket_name,
+            source=workdir,
+            persistent=False,
+            mode=storage_lib.StorageMode.COPY,
+            _bucket_sub_path=_sub_path_join(
+                sub_path,
+                constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id)))
+        if store_type is not None:
+            storage_obj.construct_store(store_type, region,
+                                        storage_account_name,
+                                        allow_bucket_creation)
+        new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
         logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
@@ -754,27 +777,30 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(),
-            id=f'{run_id}-{i}',
-        )
-        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
-            'name': bucket_name,
-            'source': src,
-            'persistent': False,
-            'mode': 'COPY',
-        })
+        storage_obj = storage_lib.Storage(
+            name=bucket_name,
+            source=src,
+            persistent=False,
+            mode=storage_lib.StorageMode.COPY,
+            _bucket_sub_path=_sub_path_join(
+                sub_path,
+                constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id)))
+        if store_type is not None:
+            storage_obj.construct_store(store_type, region,
+                                        storage_account_name,
+                                        allow_bucket_creation)
+        new_storage_mounts[dst] = storage_obj
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
+    file_mounts_tmp_subpath = _sub_path_join(
+        sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
-    file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
-        username=common_utils.get_cleaned_username(), id=run_id)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
         path)
     if copy_mounts_with_file_in_src:
@@ -783,14 +809,17 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             src_to_file_id[src] = i
             os.link(os.path.abspath(os.path.expanduser(src)),
                     os.path.join(local_fm_path, f'file-{i}'))
-
-        new_storage_mounts[
-            file_mount_remote_tmp_dir] = storage_lib.Storage.from_yaml_config({
-                'name': file_bucket_name,
-                'source': local_fm_path,
-                'persistent': False,
-                'mode': 'MOUNT',
-            })
+        storage_obj = storage_lib.Storage(
+            name=bucket_name,
+            source=local_fm_path,
+            persistent=False,
+            mode=storage_lib.StorageMode.MOUNT,
+            _bucket_sub_path=file_mounts_tmp_subpath)
+        if store_type is not None:
+            storage_obj.construct_store(store_type, region,
+                                        storage_account_name,
+                                        allow_bucket_creation)
+        new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -800,8 +829,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         sources = list(src_to_file_id.keys())
         sources_str = '\n    '.join(sources)
         logger.info(f'  {colorama.Style.DIM}Files (listed below) '
-                    f' -> storage: {file_bucket_name}:'
+                    f' -> storage: {bucket_name}:'
                     f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+
     rich_utils.force_update_status(
         ux_utils.spinner_message('Uploading translated local files/folders'))
     task.update_storage_mounts(new_storage_mounts)
@@ -847,10 +877,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage_obj.stores.keys())[0]
-        store_object = storage_obj.stores[store_type]
+        curr_store_type = list(storage_obj.stores.keys())[0]
+        store_object = storage_obj.stores[curr_store_type]
         bucket_url = storage_lib.StoreType.get_endpoint_url(
-            store_object, file_bucket_name)
+            store_object, bucket_name)
+        bucket_url += f'/{file_mounts_tmp_subpath}'
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -867,8 +898,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            store_object = storage_obj.stores[store_type]
+            curr_store_type = store_types[0]
+            store_object = storage_obj.stores[curr_store_type]
             storage_obj.source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             storage_obj.force_delete = True
@@ -885,8 +916,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            store_object = storage_obj.stores[store_type]
+            curr_store_type = store_types[0]
+            store_object = storage_obj.stores[curr_store_type]
             source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({

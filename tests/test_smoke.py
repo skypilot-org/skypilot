@@ -30,6 +30,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -3573,6 +3574,10 @@ def test_managed_jobs_storage(generic_cloud: str):
     storage_name = f'sky-test-{timestamp}'
     output_storage_name = f'sky-test-output-{timestamp}'
 
+    yaml_str_user_config = pathlib.Path(
+        'tests/test_yamls/use_intermediate_bucket_config.yaml').read_text()
+    intermediate_storage_name = f'bucket-jobs-intermediate-smoke-test-{timestamp}'
+
     # Also perform region testing for bucket creation to validate if buckets are
     # created in the correct region and correctly mounted in managed jobs.
     # However, we inject this testing only for AWS and GCP since they are the
@@ -3627,30 +3632,41 @@ def test_managed_jobs_storage(generic_cloud: str):
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(yaml_str)
-        f.flush()
-        file_path = f.name
-        test = Test(
-            'managed_jobs_storage',
-            [
-                *STORAGE_SETUP_COMMANDS,
-                f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
-                region_validation_cmd,  # Check if the bucket is created in the correct region
-                _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=name,
-                    job_status=[ManagedJobStatus.SUCCEEDED],
-                    timeout=60 + _BUMP_UP_SECONDS),
-                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
-                # Check if file was written to the mounted output bucket
-                output_check_cmd
-            ],
-            (f'sky jobs cancel -y -n {name}',
-             f'; sky storage delete {output_storage_name} || true'),
-            # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
-            timeout=20 * 60,
-        )
-        run_one_test(test)
+    yaml_str_user_config = re.sub(r'bucket-jobs-[\w\d]+',
+                                  intermediate_storage_name,
+                                  yaml_str_user_config)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f_user_config:
+        f_user_config.write(yaml_str_user_config)
+        f_user_config.flush()
+        user_config_path = f_user_config.name
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f_task:
+            f_task.write(yaml_str)
+            f_task.flush()
+            file_path = f_task.name
+            test = Test(
+                'managed_jobs_storage',
+                [
+                    *STORAGE_SETUP_COMMANDS,
+                    f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y',
+                    region_validation_cmd,  # Check if the bucket is created in the correct region
+                    _get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                        job_name=name,
+                        job_status=[ManagedJobStatus.SUCCEEDED],
+                        timeout=60 + _BUMP_UP_SECONDS),
+                    f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
+                    # check intermediate bucket exists, it won't be deletd if its user specific
+                    f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{intermediate_storage_name}\')].Name" --output text | wc -l) -eq 1 ]',
+                    # Check if file was written to the mounted output bucket
+                    output_check_cmd
+                ],
+                (f'sky jobs cancel -y -n {name}',
+                 f'; sky storage delete {intermediate_storage_name}',
+                 f'; sky storage delete {output_storage_name} || true'),
+                env={'SKYPILOT_CONFIG': user_config_path},
+                # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
+                timeout=20 * 60,
+            )
+            run_one_test(test)
 
 
 # ---------- Testing spot TPU ----------
@@ -5157,6 +5173,12 @@ class TestStorageWithCredentials:
         circle_link.symlink_to(tmp_dir, target_is_directory=True)
         yield str(tmp_dir)
 
+    @pytest.fixture
+    def tmp_sub_path(self):
+        tmp_dir1 = uuid.uuid4().hex[:8]
+        tmp_dir2 = uuid.uuid4().hex[:8]
+        yield "/".join([tmp_dir1, tmp_dir2])
+
     @staticmethod
     def generate_bucket_name():
         # Creates a temporary bucket name
@@ -5176,13 +5198,15 @@ class TestStorageWithCredentials:
             stores: Optional[Dict[storage_lib.StoreType,
                                   storage_lib.AbstractStore]] = None,
             persistent: Optional[bool] = True,
-            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
+            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT,
+            _bucket_sub_path: Optional[str] = None):
         # Creates a temporary storage object. Stores must be added in the test.
         storage_obj = storage_lib.Storage(name=name,
                                           source=source,
                                           stores=stores,
                                           persistent=persistent,
-                                          mode=mode)
+                                          mode=mode,
+                                          _bucket_sub_path=_bucket_sub_path)
         yield storage_obj
         handle = global_user_state.get_handle_from_storage_name(
             storage_obj.name)
@@ -5248,6 +5272,15 @@ class TestStorageWithCredentials:
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
                                              source=tmp_source)
+
+    @pytest.fixture
+    def tmp_local_storage_obj_with_sub_path(self, tmp_bucket_name, tmp_source,
+                                            tmp_sub_path):
+        # Creates a temporary storage object with sub. Stores must be added in the test.
+        list_source = [tmp_source, tmp_source + '/tmp-file']
+        yield from self.yield_storage_object(name=tmp_bucket_name,
+                                             source=list_source,
+                                             _bucket_sub_path=tmp_sub_path)
 
     @pytest.fixture
     def tmp_local_list_storage_obj(self, tmp_bucket_name, tmp_source):
@@ -5406,6 +5439,109 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.no_fluidstack
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3,
+        pytest.param(storage_lib.StoreType.GCS, marks=pytest.mark.gcp),
+        pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_bucket_sub_path(self, tmp_local_storage_obj_with_sub_path,
+                             store_type):
+
+        def _list_all_files():
+            if store_type == storage_lib.StoreType.S3:
+                # aws s3 ls command, list all files in bucket
+                cmd = f'aws s3 ls s3://{tmp_local_storage_obj_with_sub_path.name}/ --recursive'
+                out = subprocess.check_output(cmd, shell=True)
+                files = [
+                    line.split()[-1]
+                    for line in out.decode('utf-8').splitlines()
+                ]
+            elif store_type == storage_lib.StoreType.GCS:
+                # gsutil ls command, list all files in bucket
+                cmd = f'gsutil ls "gs://{tmp_local_storage_obj_with_sub_path.name}/**"'
+                try:
+                    out = subprocess.check_output(cmd,
+                                                  shell=True,
+                                                  stderr=subprocess.PIPE)
+                    files = [
+                        line[5:] for line in out.decode('utf-8').splitlines()
+                    ]
+                except subprocess.CalledProcessError as e:
+                    error_output = e.stderr.decode('utf-8')
+                    if "One or more URLs matched no objects" in error_output:
+                        files = []
+                    else:
+                        raise
+            elif store_type == storage_lib.StoreType.AZURE:
+                # az storage file list command, list all files in container
+                store = tmp_local_storage_obj_with_sub_path.stores[store_type]
+                container_url = data_utils.AZURE_CONTAINER_URL.format(
+                    storage_account_name=store.storage_account_name,
+                    container_name=store.name)
+                container_client = data_utils.create_az_client(
+                    client_type='container',
+                    container_url=container_url,
+                    storage_account_name=store.storage_account_name,
+                    resource_group_name=store.resource_group_name)
+                # List and delete blobs in the specified directory
+                blobs = container_client.list_blobs()
+                files = [blob.name for blob in blobs]
+            elif store_type == storage_lib.StoreType.IBM:
+                # ibm cos ls command, list all files in bucket
+                store = tmp_local_storage_obj_with_sub_path.stores[store_type]
+                bucket = store.s3_resource.Bucket(store.name)
+                files = [obj.key for obj in bucket.objects.all()]
+            elif store_type == storage_lib.StoreType.R2:
+                # r2 ls command, list all files in bucket
+                cmd = (
+                    f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{tmp_local_storage_obj_with_sub_path.name}/ '
+                    f'--recursive --endpoint {cloudflare.create_endpoint()} --profile=r2'
+                )
+                out = subprocess.check_output(cmd, shell=True)
+                files = [
+                    line.split()[-1]
+                    for line in out.decode('utf-8').splitlines()
+                ]
+            return files
+
+        # Creates a new bucket with a local source, uploads files to it
+        # and deletes it.
+        tmp_local_storage_obj_with_sub_path.add_store(store_type)
+
+        # Check files under bucket and filter by prefix
+        files = _list_all_files()
+        assert len(files) > 0
+        if store_type == storage_lib.StoreType.GCS:
+            assert all([
+                file.startswith(
+                    tmp_local_storage_obj_with_sub_path.name + '/' +
+                    tmp_local_storage_obj_with_sub_path._bucket_sub_path)
+                for file in files
+            ])
+        else:
+            assert all([
+                file.startswith(
+                    tmp_local_storage_obj_with_sub_path._bucket_sub_path)
+                for file in files
+            ])
+
+        # Check bucket is empty, all files under sub directory should be deleted
+        tmp_local_storage_obj_with_sub_path.delete(
+            only_delete_sub_path_if_exists=True)
+        files = _list_all_files()
+        assert len(files) == 0
+
+        # Now, delete the entire bucket
+        tmp_local_storage_obj_with_sub_path.delete()
+
+        # Run sky storage ls to check if storage object is deleted
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_local_storage_obj_with_sub_path.name not in out.decode(
+            'utf-8')
 
     @pytest.mark.no_fluidstack
     @pytest.mark.xdist_group('multiple_bucket_deletion')

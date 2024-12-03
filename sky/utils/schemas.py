@@ -299,6 +299,9 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            '_bucket_sub_path': {
+                'type': 'string',
+            },
             '_force_delete': {
                 'type': 'boolean',
             }
@@ -721,6 +724,11 @@ def get_config_schema():
                     'resources': resources_schema,
                 }
             },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            }
         }
     }
     cloud_configs = {
