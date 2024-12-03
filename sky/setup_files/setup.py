@@ -18,6 +18,7 @@ import io
 import os
 import platform
 import re
+import runpy
 import subprocess
 import sys
 
@@ -26,17 +27,17 @@ import setuptools
 # __file__ is setup.py at the root of the repo. We shouldn't assume it's a
 # symlink - e.g. in the sdist it's resolved to a normal file.
 ROOT_DIR = os.path.dirname(__file__)
-SETUP_FILE_DIR = os.path.join(ROOT_DIR, 'sky', 'setup_files')
+DEPENDENCIES_FILE_PATH = os.path.join(ROOT_DIR, 'sky', 'setup_files', 'dependencies.py')
 INIT_FILE_PATH = os.path.join(ROOT_DIR, 'sky', '__init__.py')
 _COMMIT_FAILURE_MESSAGE = (
     'WARNING: SkyPilot fail to {verb} the commit hash in '
     f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): '
     '{error}')
 
-# setuptools does not include the script dir on the search path, so manually add
-# it so that we can import the dependencies file.
-sys.path.append(SETUP_FILE_DIR)
-import dependencies  # pylint: disable=wrong-import-position
+# setuptools does not include the script dir on the search path, so we can't
+# just do `import dependencies`. Instead, use runpy to manually load it. Note:
+# dependencies here is a dict, not a module, so we access it by subscripting.
+dependencies = runpy.run_path(DEPENDENCIES_FILE_PATH)
 
 original_init_content = None
 
@@ -163,8 +164,8 @@ setuptools.setup(
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
     requires_python='>=3.7',
-    install_requires=dependencies.install_requires,
-    extras_require=dependencies.extras_require,
+    install_requires=dependencies['install_requires'],
+    extras_require=dependencies['extras_require'],
     entry_points={
         'console_scripts': ['sky = sky.cli:cli'],
     },
