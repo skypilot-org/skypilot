@@ -301,6 +301,8 @@ class RayCodeGen:
             )
             def get_or_fail(futures, pg) -> List[int]:
                 \"\"\"Wait for tasks, if any fails, cancel all unready.\"\"\"
+                if not futures:
+                    return []
                 returncodes = [1] * len(futures)
                 # Wait for 1 task to be ready.
                 ready = []
@@ -3460,15 +3462,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             Job id if the task is submitted to the cluster, None otherwise.
         """
-        if task.run is None:
+        if task.run is None and self._setup_cmd is None:
+            # This message is fine without mentioning setup, as there are three
+            # cases when run section is empty:
+            # 1. setup specified, no --detach-setup: setup is executed and this
+            #    message is fine for saying no run command specified.
+            # 2. setup specified, with --detach-setup: setup is executed in
+            #    detached mode and this message will not be shown.
+            # 3. no setup specified: this message is fine as a user is likely
+            #    creating a cluster only, and ok with the empty run command.
             logger.info('Run commands not specified or empty.')
             return None
-        # Check the task resources vs the cluster resources. Since `sky exec`
-        # will not run the provision and _check_existing_cluster
-        # We need to check ports here since sky.exec shouldn't change resources
-        valid_resource = self.check_resources_fit_cluster(handle,
-                                                          task,
-                                                          check_ports=True)
+        if task.run is None:
+            # If the task has no run command, we still need to execute the
+            # generated ray driver program to run the setup command in detached
+            # mode.
+            # In this case, we reset the resources for the task, so that the
+            # detached setup does not need to wait for the task resources to be
+            # ready (which is not used for setup anyway).
+            valid_resource = sky.Resources()
+        else:
+            # Check the task resources vs the cluster resources. Since
+            # `sky exec` will not run the provision and _check_existing_cluster
+            # We need to check ports here since sky.exec shouldn't change
+            # resources.
+            valid_resource = self.check_resources_fit_cluster(handle,
+                                                              task,
+                                                              check_ports=True)
         task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
