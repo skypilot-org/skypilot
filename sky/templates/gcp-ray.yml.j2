@@ -181,8 +181,8 @@ file_mounts: {
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1  (+1 if tpu_vm)
 setup_commands:
+  # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
-  # Line 'mkdir -p ..': Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
   # commands.
