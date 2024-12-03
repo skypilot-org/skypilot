@@ -27,7 +27,8 @@ import setuptools
 # __file__ is setup.py at the root of the repo. We shouldn't assume it's a
 # symlink - e.g. in the sdist it's resolved to a normal file.
 ROOT_DIR = os.path.dirname(__file__)
-DEPENDENCIES_FILE_PATH = os.path.join(ROOT_DIR, 'sky', 'setup_files', 'dependencies.py')
+DEPENDENCIES_FILE_PATH = os.path.join(ROOT_DIR, 'sky', 'setup_files',
+                                      'dependencies.py')
 INIT_FILE_PATH = os.path.join(ROOT_DIR, 'sky', '__init__.py')
 _COMMIT_FAILURE_MESSAGE = (
     'WARNING: SkyPilot fail to {verb} the commit hash in '
