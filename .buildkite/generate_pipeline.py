@@ -209,6 +209,14 @@ def _convert_pre_merge(test_files: List[str]):
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
         pipeline = _generate_pipeline(test_file, False)
+        pipeline['steps'].append({
+            'label': 'Backward compatibility test',
+            'command': 'bash tests/backward_compatibility_tests.sh',
+            'agents': {
+                'queue': 'back_compat'
+            },
+            'if': 'build.env("aws") == "1"'
+        })
         output_file_pipelines_map[yaml_file_path].append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(output_file_pipelines_map,
