@@ -4,6 +4,7 @@ from typing import List, Tuple
 from packaging import version
 
 import sky
+from sky.setup_files import dependencies
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -39,6 +40,8 @@ SKY_GET_PYTHON_PATH_CMD = (f'[ -s {SKY_PYTHON_PATH_FILE} ] && '
                            'which python3')
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f'$({SKY_GET_PYTHON_PATH_CMD})'
+# Prefer SKY_UV_PIP_CMD, which is faster.
+# TODO(cooperc): remove remaining usage (GCP TPU setup).
 SKY_PIP_CMD = f'{SKY_PYTHON_CMD} -m pip'
 # Ray executable, e.g., /opt/conda/bin/ray
 # We need to add SKY_PYTHON_CMD before ray executable because:
@@ -50,6 +53,14 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# uv is used for venv and pip, much faster than python implementations.
+SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
+SKY_UV_CMD = f'{SKY_UV_INSTALL_DIR}/uv'
+# This won't reinstall uv if it's already installed, so it's safe to re-run.
+SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
+                      'curl -LsSf https://astral.sh/uv/install.sh '
+                      f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
+SKY_UV_PIP_CMD = f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
 # environment. `deactivate` command does not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
@@ -75,7 +86,7 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '8'
+SKYLET_VERSION = '9'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -148,31 +159,30 @@ CONDA_INSTALLATION_COMMANDS = (
     'echo "Creating conda env with Python 3.10" && '
     f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
     f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
+    # Install uv for venv management and pip installation.
+    f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.
     f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
     # Do NOT use --system-site-packages here, because if users upgrade any
     # packages in the base env, they interfere with skypilot dependencies.
     # Reference: https://github.com/skypilot-org/skypilot/issues/4097
-    f'{SKY_PYTHON_CMD} -m venv {SKY_REMOTE_PYTHON_ENV};'
+    # --seed will include pip and setuptools, which are present in venvs created
+    # with python -m venv.
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV};'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
 _sky_version = str(version.parse(sky.__version__))
 RAY_STATUS = f'RAY_ADDRESS=127.0.0.1:{SKY_REMOTE_RAY_PORT} {SKY_RAY_CMD} status'
-# Install ray and skypilot on the remote cluster if they are not already
-# installed. {var} will be replaced with the actual value in
-# backend_utils.write_cluster_config.
-RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+RAY_INSTALLATION_COMMANDS = (
+    f'{SKY_UV_INSTALL_CMD};'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;'
-    # Disable the pip version check to avoid the warning message, which makes
-    # the output hard to read.
-    'export PIP_DISABLE_PIP_VERSION_CHECK=1;'
     # Print the PATH in provision.log to help debug PATH issues.
     'echo PATH=$PATH; '
     # Install setuptools<=69.5.1 to avoid the issue with the latest setuptools
     # causing the error:
     #   ImportError: cannot import name 'packaging' from 'pkg_resources'"
-    f'{SKY_PIP_CMD} install "setuptools<70"; '
+    f'{SKY_UV_PIP_CMD} install "setuptools<70"; '
     # Backward compatibility for ray upgrade (#3248): do not upgrade ray if the
     # ray cluster is already running, to avoid the ray cluster being restarted.
     #
@@ -186,10 +196,10 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # latest ray port 6380, but those existing cluster launched before #1790
     # that has ray cluster on the default port 6379 will be upgraded and
     # restarted.
-    f'{SKY_PIP_CMD} list | grep "ray " | '
+    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
     f'|| {RAY_STATUS} || '
-    f'{SKY_PIP_CMD} install --exists-action w -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
+    f'{SKY_UV_PIP_CMD} install -U ray[default]=={SKY_REMOTE_RAY_VERSION}; '  # pylint: disable=line-too-long
     # In some envs, e.g. pip does not have permission to write under /opt/conda
     # ray package will be installed under ~/.local/bin. If the user's PATH does
     # not include ~/.local/bin (the pip install will have the output: `WARNING:
@@ -202,24 +212,43 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     # Writes ray path to file if it does not exist or the file is empty.
     f'[ -s {SKY_RAY_PATH_FILE} ] || '
     f'{{ {ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
-    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; '
-    # END ray package check and installation
-    f'{{ {SKY_PIP_CMD} list | grep "skypilot " && '
+    f'which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ')
+
+SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
+    f'{SKY_UV_INSTALL_CMD};'
+    f'{{ {SKY_UV_PIP_CMD} list | grep "skypilot " && '
     '[ "$(cat ~/.sky/wheels/current_sky_wheel_hash)" == "{sky_wheel_hash}" ]; } || '  # pylint: disable=line-too-long
-    f'{{ {SKY_PIP_CMD} uninstall skypilot -y; '
-    f'{SKY_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
+    f'{{ {SKY_UV_PIP_CMD} uninstall skypilot; '
+    # uv cannot install azure-cli normally, since it depends on pre-release
+    # packages. Manually install azure-cli with the --prerelease=allow flag
+    # first. This will allow skypilot to successfully install. See
+    # https://docs.astral.sh/uv/pip/compatibility/#pre-release-compatibility.
+    # We don't want to use --prerelease=allow for all packages, because it will
+    # cause uv to use pre-releases for some other packages that have sufficient
+    # stable releases.
+    'if [ "{cloud}" = "azure" ]; then '
+    f'{SKY_UV_PIP_CMD} install --prerelease=allow "{dependencies.AZURE_CLI}";'
+    'fi;'
+    # Install skypilot from wheel
+    f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
-    'exit 1; }; '
-    # END SkyPilot package check and installation
+    'exit 1; }; ')
 
+# Install ray and skypilot on the remote cluster if they are not already
+# installed. {var} will be replaced with the actual value in
+# backend_utils.write_cluster_config.
+RAY_SKYPILOT_INSTALLATION_COMMANDS = (
+    f'{RAY_INSTALLATION_COMMANDS} '
+    f'{SKYPILOT_WHEEL_INSTALLATION_COMMANDS} '
     # Only patch ray when the ray version is the same as the expected version.
     # The ray installation above can be skipped due to the existing ray cluster
     # for backward compatibility. In this case, we should not patch the ray
     # files.
-    f'{SKY_PIP_CMD} list | grep "ray " | grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null '
-    f'&& {{ {SKY_PYTHON_CMD} -c "from sky.skylet.ray_patches import patch; patch()" '
-    '|| exit 1; };')
+    f'{SKY_UV_PIP_CMD} list | grep "ray " | '
+    f'grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null && '
+    f'{{ {SKY_PYTHON_CMD} -c '
+    '"from sky.skylet.ray_patches import patch; patch()" || exit 1; }; ')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot

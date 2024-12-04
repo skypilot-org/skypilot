@@ -4,6 +4,8 @@ History:
  - Zhanghao Wu @ Oct 2023: Formatting and refactoring
  - Hysun He (hysun.he@oracle.com) @ Oct, 2024: Add default image OS
    configuration.
+ - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add the constant
+   SERVICE_PORT_RULE_TAG
 """
 import os
 
@@ -42,6 +44,9 @@ class OCIConfig:
     VCN_CIDR_INTERNET = '0.0.0.0/0'
     VCN_CIDR = '192.168.0.0/16'
     VCN_SUBNET_CIDR = '192.168.0.0/18'
+    SERVICE_PORT_RULE_TAG = 'SkyServe-Service-Port'
+    # NSG name template
+    NSG_NAME_TEMPLATE = 'nsg_{cluster_name}'
 
     MAX_RETRY_COUNT = 3
     RETRY_INTERVAL_BASE_SECONDS = 5

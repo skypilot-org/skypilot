@@ -20,12 +20,13 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
 _MAX_RETRIES = 3
-NUM_THREADS = subprocess_utils.get_parallel_threads() * 2
+_NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
@@ -120,6 +121,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
     are recorded as events. This function retrieves those events and raises
     descriptive errors for better debugging and user feedback.
     """
+    timeout_err_msg = ('Timed out while waiting for nodes to start. '
+                       'Cluster may be out of resources or '
+                       'may be too slow to autoscale.')
     for new_node in new_nodes:
         pod = kubernetes.core_api(context).read_namespaced_pod(
             new_node.metadata.name, namespace)
@@ -148,9 +152,6 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
             if event.reason == 'FailedScheduling':
                 event_message = event.message
                 break
-        timeout_err_msg = ('Timed out while waiting for nodes to start. '
-                           'Cluster may be out of resources or '
-                           'may be too slow to autoscale.')
         if event_message is not None:
             if pod_status == 'Pending':
                 logger.info(event_message)
@@ -219,6 +220,7 @@ def _raise_command_running_error(message: str, command: str, pod_name: str,
         f'code {rc}: {command!r}\nOutput: {stdout}.')
 
 
+@timeline.event
 def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
     """Wait for all pods to be scheduled.
 
@@ -229,6 +231,10 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
 
     If timeout is set to a negative value, this method will wait indefinitely.
     """
+    # Create a set of pod names we're waiting for
+    if not new_nodes:
+        return
+    expected_pod_names = {node.metadata.name for node in new_nodes}
     start_time = time.time()
 
     def _evaluate_timeout() -> bool:
@@ -238,19 +244,34 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
         return time.time() - start_time < timeout
 
     while _evaluate_timeout():
-        all_pods_scheduled = True
-        for node in new_nodes:
-            # Iterate over each pod to check their status
-            pod = kubernetes.core_api(context).read_namespaced_pod(
-                node.metadata.name, namespace)
-            if pod.status.phase == 'Pending':
+        # Get all pods in a single API call using the cluster name label
+        # which all pods in new_nodes should share
+        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
+
+        # Get the set of found pod names and check if we have all expected pods
+        found_pod_names = {pod.metadata.name for pod in pods}
+        missing_pods = expected_pod_names - found_pod_names
+        if missing_pods:
+            logger.info('Retrying waiting for pods: '
+                        f'Missing pods: {missing_pods}')
+            time.sleep(0.5)
+            continue
+
+        # Check if all pods are scheduled
+        all_scheduled = True
+        for pod in pods:
+            if (pod.metadata.name in expected_pod_names and
+                    pod.status.phase == 'Pending'):
                 # If container_statuses is None, then the pod hasn't
                 # been scheduled yet.
                 if pod.status.container_statuses is None:
-                    all_pods_scheduled = False
+                    all_scheduled = False
                     break
 
-        if all_pods_scheduled:
+        if all_scheduled:
             return
         time.sleep(1)
 
@@ -266,12 +287,18 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int):
             f'Error: {common_utils.format_exception(e)}') from None
 
 
+@timeline.event
 def _wait_for_pods_to_run(namespace, context, new_nodes):
     """Wait for pods and their containers to be ready.
 
     Pods may be pulling images or may be in the process of container
     creation.
     """
+    if not new_nodes:
+        return
+
+    # Create a set of pod names we're waiting for
+    expected_pod_names = {node.metadata.name for node in new_nodes}
 
     def _check_init_containers(pod):
         # Check if any of the init containers failed
@@ -299,12 +326,25 @@ def _wait_for_pods_to_run(namespace, context, new_nodes):
                     f'{pod.metadata.name}. Error details: {msg}.')
 
     while True:
-        all_pods_running = True
-        # Iterate over each pod to check their status
-        for node in new_nodes:
-            pod = kubernetes.core_api(context).read_namespaced_pod(
-                node.metadata.name, namespace)
+        # Get all pods in a single API call
+        cluster_name = new_nodes[0].metadata.labels[TAG_SKYPILOT_CLUSTER_NAME]
+        all_pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace,
+            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}').items
 
+        # Get the set of found pod names and check if we have all expected pods
+        found_pod_names = {pod.metadata.name for pod in all_pods}
+        missing_pods = expected_pod_names - found_pod_names
+        if missing_pods:
+            logger.info('Retrying running pods check: '
+                        f'Missing pods: {missing_pods}')
+            time.sleep(0.5)
+            continue
+
+        all_pods_running = True
+        for pod in all_pods:
+            if pod.metadata.name not in expected_pod_names:
+                continue
             # Continue if pod and all the containers within the
             # pod are successfully created and running.
             if pod.status.phase == 'Running' and all(
@@ -367,6 +407,7 @@ def _run_function_with_retries(func: Callable,
                 raise
 
 
+@timeline.event
 def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
     """Pre-initialization step for SkyPilot pods.
 
@@ -430,7 +471,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         'start_time=$(date +%s); '
         'while ! grep -q "Fetched" /tmp/apt-update.log 2>/dev/null; do '
         '  echo "apt update still running. Logs:"; '
-        '  cat /tmp/apt-update.log; '
+        '  cat /tmp/apt-update.log || true; '
         '  current_time=$(date +%s); '
         '  elapsed=$((current_time - start_time)); '
         '  if [ $elapsed -ge $timeout_secs ]; then '
@@ -514,7 +555,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         logger.info(f'{"-"*20}End: Pre-init in pod {pod_name!r} {"-"*20}')
 
     # Run pre_init in parallel across all new_nodes
-    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, NUM_THREADS)
+    subprocess_utils.run_in_parallel(_pre_init_thread, new_nodes, _NUM_THREADS)
 
 
 def _label_pod(namespace: str, context: Optional[str], pod_name: str,
@@ -528,6 +569,7 @@ def _label_pod(namespace: str, context: Optional[str], pod_name: str,
         _request_timeout=kubernetes.API_TIMEOUT)
 
 
+@timeline.event
 def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                         context: Optional[str]) -> Any:
     """Attempts to create a Kubernetes Pod and handle any errors.
@@ -606,6 +648,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             raise e
 
 
+@timeline.event
 def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Create pods based on the config."""
@@ -627,7 +670,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
-    while (len(terminating_pods) > 0 and
+    while (terminating_pods and
            time.time() - start_time < _TIMEOUT_FOR_POD_TERMINATION):
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods. Waiting them to finish: '
@@ -636,7 +679,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         terminating_pods = kubernetes_utils.filter_pods(namespace, context,
                                                         tags, ['Terminating'])
 
-    if len(terminating_pods) > 0:
+    if terminating_pods:
         # If there are still terminating pods, we force delete them.
         logger.debug(f'run_instances: Found {len(terminating_pods)} '
                      'terminating pods still in terminating state after '
@@ -695,24 +738,29 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
-    for _ in range(to_start_count):
-        if head_pod_name is None:
-            pod_spec['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
+
+    def _create_pod_thread(i: int):
+        pod_spec_copy = copy.deepcopy(pod_spec)
+        if head_pod_name is None and i == 0:
+            # First pod should be head if no head exists
+            pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
             head_selector = head_service_selector(cluster_name_on_cloud)
-            pod_spec['metadata']['labels'].update(head_selector)
-            pod_spec['metadata']['name'] = f'{cluster_name_on_cloud}-head'
+            pod_spec_copy['metadata']['labels'].update(head_selector)
+            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
-            pod_spec['metadata']['labels'].update(constants.WORKER_NODE_TAGS)
-            pod_uuid = str(uuid.uuid4())[:4]
+            # Worker pods
+            pod_spec_copy['metadata']['labels'].update(
+                constants.WORKER_NODE_TAGS)
+            pod_uuid = str(uuid.uuid4())[:6]
             pod_name = f'{cluster_name_on_cloud}-{pod_uuid}'
-            pod_spec['metadata']['name'] = f'{pod_name}-worker'
+            pod_spec_copy['metadata']['name'] = f'{pod_name}-worker'
             # For multi-node support, we put a soft-constraint to schedule
             # worker pods on different nodes than the head pod.
             # This is not set as a hard constraint because if different nodes
             # are not available, we still want to be able to schedule worker
             # pods on larger nodes which may be able to fit multiple SkyPilot
             # "nodes".
-            pod_spec['spec']['affinity'] = {
+            pod_spec_copy['spec']['affinity'] = {
                 'podAntiAffinity': {
                     # Set as a soft constraint
                     'preferredDuringSchedulingIgnoredDuringExecution': [{
@@ -747,16 +795,21 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'value': 'present',
                 'effect': 'NoSchedule'
             }
-            pod_spec['spec']['tolerations'] = [tpu_toleration]
+            pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
 
-        pod = _create_namespaced_pod_with_retries(namespace, pod_spec, context)
+        return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
+                                                   context)
+
+    # Create pods in parallel
+    pods = subprocess_utils.run_in_parallel(_create_pod_thread,
+                                            range(to_start_count), _NUM_THREADS)
+
+    # Process created pods
+    for pod in pods:
         created_pods[pod.metadata.name] = pod
-        if head_pod_name is None:
+        if head_pod_name is None and pod.metadata.labels.get(
+                constants.TAG_RAY_NODE_KIND) == 'head':
             head_pod_name = pod.metadata.name
-
-    wait_pods_dict = kubernetes_utils.filter_pods(namespace, context, tags,
-                                                  ['Pending'])
-    wait_pods = list(wait_pods_dict.values())
 
     networking_mode = network_utils.get_networking_mode(
         config.provider_config.get('networking_mode'))
@@ -766,52 +819,24 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         ssh_jump_pod_name = pod_spec['metadata']['labels']['skypilot-ssh-jump']
         jump_pod = kubernetes.core_api(context).read_namespaced_pod(
             ssh_jump_pod_name, namespace)
-        wait_pods.append(jump_pod)
+        pods.append(jump_pod)
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'
                 if provision_timeout < 0 else f'for {provision_timeout}s')
     logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
-                 f'run: {list(wait_pods_dict.keys())}')
+                 f'run: {[pod.metadata.name for pod in pods]}')
 
     # Wait until the pods are scheduled and surface cause for error
     # if there is one
-    _wait_for_pods_to_schedule(namespace, context, wait_pods, provision_timeout)
+    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout)
     # Wait until the pods and their containers are up and running, and
     # fail early if there is an error
     logger.debug(f'run_instances: waiting for pods to be running (pulling '
-                 f'images): {list(wait_pods_dict.keys())}')
-    _wait_for_pods_to_run(namespace, context, wait_pods)
+                 f'images): {[pod.metadata.name for pod in pods]}')
+    _wait_for_pods_to_run(namespace, context, pods)
     logger.debug(f'run_instances: all pods are scheduled and running: '
-                 f'{list(wait_pods_dict.keys())}')
-
-    running_pods = kubernetes_utils.filter_pods(namespace, context, tags,
-                                                ['Running'])
-    initialized_pods = kubernetes_utils.filter_pods(namespace, context, {
-        TAG_POD_INITIALIZED: 'true',
-        **tags
-    }, ['Running'])
-    uninitialized_pods = {
-        pod_name: pod
-        for pod_name, pod in running_pods.items()
-        if pod_name not in initialized_pods
-    }
-    if len(uninitialized_pods) > 0:
-        logger.debug(f'run_instances: Initializing {len(uninitialized_pods)} '
-                     f'pods: {list(uninitialized_pods.keys())}')
-        uninitialized_pods_list = list(uninitialized_pods.values())
-
-        # Run pre-init steps in the pod.
-        pre_init(namespace, context, uninitialized_pods_list)
-
-        for pod in uninitialized_pods.values():
-            _label_pod(namespace,
-                       context,
-                       pod.metadata.name,
-                       label={
-                           TAG_POD_INITIALIZED: 'true',
-                           **pod.metadata.labels
-                       })
+                 f'{[pod.metadata.name for pod in pods]}')
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
@@ -855,11 +880,6 @@ def _terminate_node(namespace: str, context: Optional[str],
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
     try:
-        kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, context, pod_name)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning('terminate_instances: Error occurred when analyzing '
-                       f'SSH Jump pod: {e}')
-    try:
         kubernetes.core_api(context).delete_namespaced_service(
             pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT)
         kubernetes.core_api(context).delete_namespaced_service(
@@ -895,6 +915,18 @@ def terminate_instances(
     }
     pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
 
+    # Clean up the SSH jump pod if in use
+    networking_mode = network_utils.get_networking_mode(
+        provider_config.get('networking_mode'))
+    if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        pod_name = list(pods.keys())[0]
+        try:
+            kubernetes_utils.clean_zombie_ssh_jump_pod(namespace, context,
+                                                       pod_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('terminate_instances: Error occurred when analyzing '
+                           f'SSH Jump pod: {e}')
+
     def _is_head(pod) -> bool:
         return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
 
@@ -907,7 +939,7 @@ def terminate_instances(
 
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(),
-                                     NUM_THREADS)
+                                     _NUM_THREADS)
 
 
 def get_cluster_info(

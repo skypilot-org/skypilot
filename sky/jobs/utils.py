@@ -85,7 +85,8 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
 
-    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_DRIVER,
+    FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -326,10 +327,24 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             if managed_job_status.is_failed():
                 job_msg = ('\nFailure reason: '
                            f'{managed_job_state.get_failure_reason(job_id)}')
+            log_file = managed_job_state.get_local_log_file(job_id, None)
+            if log_file is not None:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    # Stream the logs to the console without reading the whole
+                    # file into memory.
+                    start_streaming = False
+                    for line in f:
+                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
+                return ''
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
-                    f'{managed_job_status.value}. Logs will not be shown.'
-                    f'{colorama.Style.RESET_ALL}{job_msg}')
+                    f'{managed_job_status.value}. For more details, run: '
+                    f'sky jobs logs --controller {job_id}'
+                    f'{colorama.Style.RESET_ALL}'
+                    f'{job_msg}')
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -866,7 +881,7 @@ class ManagedJobCodeGen:
         code += inspect.getsource(stream_logs)
         code += textwrap.dedent(f"""\
 
-        msg = stream_logs({job_id!r}, {job_name!r}, 
+        msg = stream_logs({job_id!r}, {job_name!r},
                            follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
@@ -883,7 +898,7 @@ class ManagedJobCodeGen:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
-                managed_job_state.set_pending({job_id}, {task_id}, 
+                managed_job_state.set_pending({job_id}, {task_id},
                                   {task.name!r}, {resources_str!r})
                 """)
         return cls._build(code)

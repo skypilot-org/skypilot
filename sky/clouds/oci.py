@@ -75,8 +75,6 @@ class OCI(clouds.Cloud):
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -210,6 +208,7 @@ class OCI(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources

@@ -244,6 +244,10 @@ Available fields and semantics:
     # instances. SkyPilot will auto-create and reuse a service account (IAM
     # role) for AWS instances.
     #
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
+    #
     # Customized service account (IAM role): <string> or <list of single-element dict>
     # - <string>: apply the service account with the specified name to all instances.
     #    Example:
@@ -263,7 +267,8 @@ Available fields and semantics:
     #
     # - This only affects AWS instances. Local AWS credentials will still be
     #   uploaded to non-AWS instances (since those instances may need to access
-    #   AWS resources).
+    #   AWS resources). To fully disable credential upload, set
+    #   `remote_identity: NO_UPLOAD`.
     # - If the SkyPilot jobs/serve controller is on AWS, this setting will make
     #   non-AWS managed jobs / non-AWS service replicas fail to access any
     #   resources on AWS (since the controllers don't have AWS credential
@@ -406,11 +411,16 @@ Available fields and semantics:
     # instances. SkyPilot will auto-create and reuse a service account for GCP
     # instances.
     #
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
+    #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
     # - This only affects GCP instances. Local GCP credentials will still be
     #   uploaded to non-GCP instances (since those instances may need to access
-    #   GCP resources).
+    #   GCP resources). To fully disable credential uploads, set
+    #   `remote_identity: NO_UPLOAD`.
     # - If the SkyPilot jobs/serve controller is on GCP, this setting will make
     #   non-GCP managed jobs / non-GCP service replicas fail to access any
     #   resources on GCP (since the controllers don't have GCP credential
@@ -497,6 +507,10 @@ Available fields and semantics:
     # SkyPilot will auto-create and reuse a service account with necessary roles
     # in the user's namespace.
     #
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
+    #
     # <string>: The name of a service account to use for all Kubernetes pods.
     # This service account must exist in the user's namespace and have all
     # necessary permissions. Refer to https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/kubernetes.html
@@ -505,7 +519,8 @@ Available fields and semantics:
     # Using SERVICE_ACCOUNT or a custom service account only affects Kubernetes
     # instances. Local ~/.kube/config will still be uploaded to non-Kubernetes
     # instances (e.g., a serve controller on GCP or AWS may need to provision
-    # Kubernetes resources).
+    # Kubernetes resources). To fully disable credential uploads, set
+    # `remote_identity: NO_UPLOAD`.
     #
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account

@@ -34,6 +34,8 @@ PEEK_HEAD_LINES_FOR_START_STREAM = 20
 
 logger = sky_logging.init_logger(__name__)
 
+LOG_FILE_START_STREAMING_AT = 'Waiting for task resources on '
+
 
 class _ProcessingArgs:
     """Arguments for processing logs."""
@@ -183,40 +185,7 @@ def run_with_log(
                           shell=shell,
                           **kwargs) as proc:
         try:
-            # The proc can be defunct if the python program is killed. Here we
-            # open a new subprocess to gracefully kill the proc, SIGTERM
-            # and then SIGKILL the process group.
-            # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-            parent_pid = os.getpid()
-            daemon_script = os.path.join(
-                os.path.dirname(os.path.abspath(job_lib.__file__)),
-                'subprocess_daemon.py')
-            python_path = subprocess.check_output(
-                constants.SKY_GET_PYTHON_PATH_CMD,
-                shell=True,
-                stderr=subprocess.DEVNULL,
-                encoding='utf-8').strip()
-            daemon_cmd = [
-                python_path,
-                daemon_script,
-                '--parent-pid',
-                str(parent_pid),
-                '--proc-pid',
-                str(proc.pid),
-            ]
-
-            # We do not need to set `start_new_session=True` here, as the
-            # daemon script will detach itself from the parent process with
-            # fork to avoid being killed by ray job. See the reason we
-            # daemonize the process in `sky/skylet/subprocess_daemon.py`.
-            subprocess.Popen(
-                daemon_cmd,
-                # Suppress output
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                # Disable input
-                stdin=subprocess.DEVNULL,
-            )
+            subprocess_utils.kill_process_daemon(proc.pid)
             stdout = ''
             stderr = ''
 
@@ -468,7 +437,7 @@ def tail_logs(job_id: Optional[int],
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
-    start_stream_at = 'Waiting for task resources on '
+    start_stream_at = LOG_FILE_START_STREAMING_AT
     # Explicitly declare the type to avoid mypy warning.
     lines: Iterable[str] = []
     if follow and status in [
