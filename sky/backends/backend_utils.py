@@ -651,9 +651,10 @@ def write_cluster_config(
         - 'cluster_name': Name of the cluster
         - 'cluster_name_on_cloud': Name of the cluster as it appears in the
           cloud provider
-        - 'config_hash': Hash of the cluster config and file mounts
-          contents. Can be missing if we failed to calculate the hash for some
-          reason
+        - 'config_hash': Hash of the cluster config and file mounts contents.
+          Can be missing if we unexpectedly failed to calculate the hash for
+          some reason. In that case we will continue without the optimization to
+          skip provisioning.
 
     Raises:
         exceptions.ResourcesUnavailableError: if the region/zones requested does
