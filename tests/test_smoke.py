@@ -195,7 +195,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     '  fi; '
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
-    'echo "Waiting for job status to contains {job_status}, current status: $current_status"; '
+    'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
     'sleep 10; '
     'done')
 
