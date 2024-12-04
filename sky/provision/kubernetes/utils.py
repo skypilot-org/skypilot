@@ -25,6 +25,7 @@ from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
@@ -1675,50 +1676,6 @@ def get_endpoint_debug_message() -> str:
                                           debug_cmd=debug_cmd)
 
 
-def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
-    """Merge two dictionaries into the destination dictionary.
-
-    Updates nested dictionaries instead of replacing them.
-    If a list is encountered, it will be appended to the destination list.
-
-    An exception is when the key is 'containers', in which case the
-    first container in the list will be fetched and merge_dict will be
-    called on it with the first container in the destination list.
-    """
-    for key, value in source.items():
-        if isinstance(value, dict) and key in destination:
-            merge_dicts(value, destination[key])
-        elif isinstance(value, list) and key in destination:
-            assert isinstance(destination[key], list), \
-                f'Expected {key} to be a list, found {destination[key]}'
-            if key in ['containers', 'imagePullSecrets']:
-                # If the key is 'containers' or 'imagePullSecrets, we take the
-                # first and only container/secret in the list and merge it, as
-                # we only support one container per pod.
-                assert len(value) == 1, \
-                    f'Expected only one container, found {value}'
-                merge_dicts(value[0], destination[key][0])
-            elif key in ['volumes', 'volumeMounts']:
-                # If the key is 'volumes' or 'volumeMounts', we search for
-                # item with the same name and merge it.
-                for new_volume in value:
-                    new_volume_name = new_volume.get('name')
-                    if new_volume_name is not None:
-                        destination_volume = next(
-                            (v for v in destination[key]
-                             if v.get('name') == new_volume_name), None)
-                        if destination_volume is not None:
-                            merge_dicts(new_volume, destination_volume)
-                        else:
-                            destination[key].append(new_volume)
-            else:
-                destination[key].extend(value)
-        else:
-            if destination is None:
-                destination = {}
-            destination[key] = value
-
-
 def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
@@ -1771,12 +1728,12 @@ def combine_pod_config_fields(
                                                    override_configs={})
     override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
         'pod_config', {}))
-    merge_dicts(override_pod_config, kubernetes_config)
+    config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
-    merge_dicts(
-        kubernetes_config,
-        yaml_obj['available_node_types']['ray_head_default']['node_config'])
+    config_utils.merge_k8s_configs(
+        yaml_obj['available_node_types']['ray_head_default']['node_config'],
+        kubernetes_config)
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
@@ -1810,7 +1767,7 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     ]
 
     for destination in combination_destinations:
-        merge_dicts(custom_metadata, destination)
+        config_utils.merge_k8s_configs(destination, custom_metadata)
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
@@ -1823,7 +1780,7 @@ def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
     """
     custom_metadata = skypilot_config.get_nested(
         ('kubernetes', 'custom_metadata'), {})
-    merge_dicts(custom_metadata, original_metadata)
+    config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
 def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:

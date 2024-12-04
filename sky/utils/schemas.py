@@ -448,8 +448,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
-    config_override_schema = _filter_schema(get_config_schema(),
-                                            constants.OVERRIDEABLE_CONFIG_KEYS)
+    config_override_schema = _filter_schema(
+        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
         'experimental': {
             'type': 'object',

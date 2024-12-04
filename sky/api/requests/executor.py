@@ -13,6 +13,7 @@ from typing import Any, Callable, List, Optional, Union
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky import skypilot_config
 from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.api.requests.queues import mp_queue
@@ -163,6 +164,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
         try:
+
             os.environ.update(request_body.env_vars)
             user = models.User(
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
@@ -172,7 +174,9 @@ def _wrapper(request_id: str, ignore_return_value: bool):
             # Force color to be enabled.
             os.environ['CLICOLOR_FORCE'] = '1'
             common.reload()
-            return_value = func(**request_body.to_kwargs())
+            with skypilot_config.override_skypilot_config(
+                    request_body.override_skypilot_config):
+                return_value = func(**request_body.to_kwargs())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
                 stacktrace = traceback.format_exc()

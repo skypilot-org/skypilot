@@ -46,6 +46,7 @@ from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -402,7 +403,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         }
         custom_metadata = skypilot_config.get_nested(
             ('kubernetes', 'custom_metadata'), {})
-        kubernetes_utils.merge_dicts(custom_metadata, secret_metadata)
+        config_utils.merge_k8s_configs(secret_metadata, custom_metadata)
 
         secret = k8s.client.V1Secret(
             metadata=k8s.client.V1ObjectMeta(**secret_metadata),

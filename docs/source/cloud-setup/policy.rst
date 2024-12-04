@@ -102,10 +102,10 @@ a request should be rejected, the policy should raise an exception.
 
 The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
 
-.. literalinclude:: ../../../sky/skypilot_config.py
+.. literalinclude:: ../../../sky/utils/config_utils.py
     :language: python
     :pyobject: Config
-    :caption: `Config Class <https://github.com/skypilot-org/skypilot/blob/master/sky/skypilot_config.py>`_
+    :caption: `Config Class <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/config_utils.py>`_
 
 
 .. literalinclude:: ../../../sky/admin_policy.py

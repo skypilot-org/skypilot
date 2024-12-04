@@ -119,9 +119,9 @@ from sky.jobs.api.sdk import spot_tail_logs
 from sky.optimizer import Optimizer
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
-from sky.skypilot_config import Config
 from sky.task import Task
 from sky.utils.common import OptimizeTarget
+from sky.utils.config_utils import Config
 from sky.utils.status_lib import ClusterStatus
 
 # Aliases.

@@ -27,6 +27,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -607,7 +608,7 @@ def get_controller_resources(
 
 def _setup_proxy_command_on_controller(
         controller_launched_cloud: 'clouds.Cloud',
-        user_config: Dict[str, Any]) -> skypilot_config.Config:
+        user_config: Dict[str, Any]) -> config_utils.Config:
     """Sets up proxy command on the controller.
 
     This function should be called on the controller (remote cluster), which
@@ -641,7 +642,7 @@ def _setup_proxy_command_on_controller(
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    config = skypilot_config.Config.from_dict(user_config)
+    config = config_utils.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
     ssh_proxy_command = config.get_nested(proxy_command_key, None)

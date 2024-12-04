@@ -9,6 +9,7 @@ import sky
 from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 
 DISK_ENCRYPTED = True
@@ -22,7 +23,7 @@ PROVISION_TIMEOUT = 600
 
 
 def _reload_config() -> None:
-    skypilot_config._dict = skypilot_config.Config()
+    skypilot_config._dict = config_utils.Config()
     skypilot_config._loaded_config_path = None
     skypilot_config._try_load_config()
 
@@ -101,7 +102,7 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
 
 def test_nested_config(monkeypatch) -> None:
     """Test that the nested config works."""
-    config = skypilot_config.Config()
+    config = config_utils.Config()
     config.set_nested(('aws', 'ssh_proxy_command'), 'value')
     assert config == {'aws': {'ssh_proxy_command': 'value'}}
 

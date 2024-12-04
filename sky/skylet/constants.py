@@ -56,17 +56,20 @@ DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
     f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
 
+# Prefix for SkyPilot environment variables
+SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
+
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same managed task.
-TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
+TASK_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_ID'
 # This environment variable stores a '\n'-separated list of task IDs that
 # are within the same managed job (DAG). This can be used by the user to
 # retrieve the task IDs of any tasks that are within the same managed job.
 # This environment variable is pre-assigned before any task starts
 # running within the same job, and will remain constant throughout the
 # lifetime of the job.
-TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
+TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
@@ -90,9 +93,9 @@ SPOT_DASHBOARD_REMOTE_PORT = 5000
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 DEFAULT_DOCKER_PORT = 10022
-DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_DOCKER_USERNAME'
-DOCKER_PASSWORD_ENV_VAR = 'SKYPILOT_DOCKER_PASSWORD'
-DOCKER_SERVER_ENV_VAR = 'SKYPILOT_DOCKER_SERVER'
+DOCKER_USERNAME_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}DOCKER_USERNAME'
+DOCKER_PASSWORD_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}DOCKER_PASSWORD'
+DOCKER_SERVER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}DOCKER_SERVER'
 DOCKER_LOGIN_ENV_VARS = {
     DOCKER_USERNAME_ENV_VAR,
     DOCKER_PASSWORD_ENV_VAR,
@@ -229,12 +232,12 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
 # will be recognized as the same user (e.g., jobs controller or sky serve
 # controller).
-USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 
 # The name for the environment variable that stores SkyPilot user name.
 # Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
 # runs on a VM launched by SkyPilot will be recognized as the same user.
-USER_ENV_VAR = 'SKYPILOT_USER'
+USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
@@ -269,13 +272,13 @@ API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
 
 # The name for the environment variable that stores the URL of the SkyPilot
 # API server.
-SKY_API_SERVER_URL_ENV_VAR = 'SKYPILOT_API_SERVER_ENDPOINT'
+SKY_API_SERVER_URL_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_ENDPOINT'
 
 # SkyPilot environment variables
-SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'
-SKYPILOT_NODE_IPS = 'SKYPILOT_NODE_IPS'
-SKYPILOT_NUM_GPUS_PER_NODE = 'SKYPILOT_NUM_GPUS_PER_NODE'
-SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
+SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
+SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
+SKYPILOT_NUM_GPUS_PER_NODE = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_GPUS_PER_NODE'
+SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.
@@ -283,12 +286,16 @@ SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
-OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
+OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
     ('gcp', 'managed_instance_group'),
+]
+DISALLOWED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
+    ('admin_policy',),
+    ('api_server',),
 ]
 
 # Constants for Azure blob storage

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import pydantic
 
 from sky import serve
+from sky import skypilot_config
 from sky.api import common
 from sky.skylet import constants
 from sky.utils import common as common_lib
@@ -19,17 +20,31 @@ from sky.utils import registry
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
-        if env_var.startswith('SKYPILOT_'):
+        if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = getpass.getuser()
+    # Remove the path to config file, as the config content is included in the
+    # request body and will be merged with the config on the server side.
+    env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
     return env_vars
+
+
+def get_override_skypilot_config_from_client() -> Dict[str, Any]:
+    """Returns the override configs from the client."""
+    config = skypilot_config.to_dict()
+    # Remove the API server config, as we should not specify the SkyPilot
+    # server endpoint on the server side.
+    config.pop('api_server', None)
+    return config
 
 
 class RequestBody(pydantic.BaseModel):
     """The request body for the SkyPilot API."""
     env_vars: Dict[str, str] = request_body_env_vars()
     entrypoint_command: str = common_utils.get_pretty_entry_point()
+    override_skypilot_config: Optional[Dict[
+        str, Any]] = get_override_skypilot_config_from_client()
 
     def to_kwargs(self) -> Dict[str, Any]:
         """Convert the request body to a kwargs dictionary on API server.
@@ -40,6 +55,7 @@ class RequestBody(pydantic.BaseModel):
         kwargs = self.model_dump()
         kwargs.pop('env_vars')
         kwargs.pop('entrypoint_command')
+        kwargs.pop('override_skypilot_config')
         return kwargs
 
 
