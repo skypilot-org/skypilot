@@ -155,7 +155,7 @@ SkyPilot then performs the heavy-lifting for you, including:
 Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
 ## More Information
-To learn more, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html), [SkyPilot docs](https://skypilot.readthedocs.io/en/latest/), and [blog](https://blog.skypilot.co/).
+To learn more, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html), [SkyPilot docs](https://skypilot.readthedocs.io/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
 
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
