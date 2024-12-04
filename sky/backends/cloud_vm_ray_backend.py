@@ -1158,6 +1158,7 @@ class RetryingVmProvisioner(object):
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             prev_handle: Optional['CloudVmRayResourceHandle'],
             prev_cluster_ever_up: bool,
+            prev_config_hash: Optional[str],
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
@@ -1166,6 +1167,7 @@ class RetryingVmProvisioner(object):
             self.prev_cluster_status = prev_cluster_status
             self.prev_handle = prev_handle
             self.prev_cluster_ever_up = prev_cluster_ever_up
+            self.prev_config_hash = prev_config_hash
 
     def __init__(self,
                  log_dir: str,
@@ -1327,8 +1329,21 @@ class RetryingVmProvisioner(object):
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
         prev_cluster_ever_up: bool,
+        skip_if_config_hash_matches: Optional[str],
     ) -> Dict[str, Any]:
-        """The provision retry loop."""
+        """The provision retry loop.
+
+        Returns a config_dict with the following fields:
+        All fields from backend_utils.write_cluster_config(). See its
+          docstring.
+        - 'provisioning_skipped': True if provisioning was short-circuited
+          by skip_if_config_hash_matches, False otherwise.
+        - 'handle': The provisioned cluster handle.
+        - 'provision_record': (Only if using the new skypilot provisioner) The
+          record returned by provisioner.bulk_provision().
+        - 'resources_vars': (Only if using the new skypilot provisioner) The
+          resources variables given by make_deploy_resources_variables().
+        """
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1437,8 +1452,18 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
+
+            if ('config_hash' in config_dict and
+                    skip_if_config_hash_matches == config_dict['config_hash']):
+                logger.debug('Skipping provisioning of cluster with matching '
+                             'config hash.')
+                config_dict['provisioning_skipped'] = True
+                return config_dict
+            config_dict['provisioning_skipped'] = False
+
             if dryrun:
                 return config_dict
+
             cluster_config_file = config_dict['ray']
 
             launched_resources = to_provision.copy(region=region.name)
@@ -1953,8 +1978,13 @@ class RetryingVmProvisioner(object):
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
+        skip_unnecessary_provisioning: bool,
     ) -> Dict[str, Any]:
-        """Provision with retries for all launchable resources."""
+        """Provision with retries for all launchable resources.
+
+        Returns the config_dict from _retry_zones() - see its docstring for
+        details.
+        """
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
@@ -1963,6 +1993,8 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
+        skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
+                                       skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
 
@@ -2002,7 +2034,8 @@ class RetryingVmProvisioner(object):
                     cloud_user_identity=cloud_user,
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle,
-                    prev_cluster_ever_up=prev_cluster_ever_up)
+                    prev_cluster_ever_up=prev_cluster_ever_up,
+                    skip_if_config_hash_matches=skip_if_config_hash_matches)
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -2704,14 +2737,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return valid_resource
 
     def _provision(
-            self,
-            task: task_lib.Task,
-            to_provision: Optional[resources_lib.Resources],
-            dryrun: bool,
-            stream_logs: bool,
-            cluster_name: str,
-            retry_until_up: bool = False) -> Optional[CloudVmRayResourceHandle]:
-        """Provisions using 'ray up'.
+        self,
+        task: task_lib.Task,
+        to_provision: Optional[resources_lib.Resources],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        retry_until_up: bool = False,
+        skip_unnecessary_provisioning: bool = False,
+    ) -> Optional[CloudVmRayResourceHandle]:
+        """Provisions the cluster, or re-provisions an existing cluster.
+
+        Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
+        use 'ray up'.
+
+        See also docstring for Backend.provision().
 
         Raises:
             exceptions.ClusterOwnerIdentityMismatchError: if the cluster
@@ -2796,7 +2836,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     rich_utils.force_update_status(
                         ux_utils.spinner_message('Launching', log_path))
                     config_dict = retry_provisioner.provision_with_retries(
-                        task, to_provision_config, dryrun, stream_logs)
+                        task, to_provision_config, dryrun, stream_logs,
+                        skip_unnecessary_provisioning)
                     break
                 except exceptions.ResourcesUnavailableError as e:
                     log_path = retry_provisioner.log_dir + '/provision.log'
@@ -2846,11 +2887,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 return record['handle'] if record is not None else None
 
+            if config_dict['provisioning_skipped']:
+                # Skip further provisioning.
+                # In this case, we won't have certain fields in the config_dict
+                # ('handle', 'provision_record', 'resources_vars')
+                # We need to return the handle - but it should be the existing
+                # handle for the cluster.
+                record = global_user_state.get_cluster_from_name(cluster_name)
+                assert record is not None and record['handle'] is not None, (
+                    cluster_name, record)
+                return record['handle']
+
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
                 handle = config_dict['handle']
                 provision_record = config_dict['provision_record']
                 resources_vars = config_dict['resources_vars']
+                config_hash = config_dict.get('config_hash', None)
 
                 # Setup SkyPilot runtime after the cluster is provisioned
                 # 1. Wait for SSH to be ready.
@@ -2884,7 +2937,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
-                    prev_cluster_status, lock_path)
+                    prev_cluster_status, lock_path, config_hash)
                 return handle
 
             cluster_config_file = config_dict['ray']
@@ -2956,7 +3009,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
-                prev_cluster_status, lock_path)
+                prev_cluster_status, lock_path, config_hash)
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -2974,7 +3027,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_handle: Optional[CloudVmRayResourceHandle],
             task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            lock_path: str) -> None:
+            lock_path: str, config_hash: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -3034,6 +3087,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle,
                 set(task.resources),
                 ready=True,
+                config_hash=config_hash,
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
@@ -4313,6 +4367,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # cluster is terminated (through console or auto-dwon), the record will
         # become None and the cluster_ever_up should be considered as False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
+        prev_config_hash = record['config_hash'] if record is not None else None
         logger.debug(f'cluster_ever_up: {cluster_ever_up}')
         logger.debug(f'record: {record}')
 
@@ -4351,7 +4406,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.launched_nodes,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle,
-                prev_cluster_ever_up=cluster_ever_up)
+                prev_cluster_ever_up=cluster_ever_up,
+                prev_config_hash=prev_config_hash)
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
@@ -4392,7 +4448,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             task.num_nodes,
             prev_cluster_status=None,
             prev_handle=None,
-            prev_cluster_ever_up=False)
+            prev_cluster_ever_up=False,
+            prev_config_hash=prev_config_hash)
 
     def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
                              file_mounts: Optional[Dict[Path, Path]]):
