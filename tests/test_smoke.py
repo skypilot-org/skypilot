@@ -611,12 +611,6 @@ def test_aws_region():
 
 
 @pytest.mark.aws
-@pytest.mark.skip(
-    reason='Do not run this test for remote API server because this test creates '
-    'new skypilot config file that cannot be accessed by the remote API server '
-    'and will interfere with other smoke tests running with remote API server. '
-    'If you are running all smoke tests for local API server you can unskip this.'
-)
 def test_aws_with_ssh_proxy_command():
     name = _get_cluster_name()
     with tempfile.NamedTemporaryFile(
