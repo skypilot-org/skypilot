@@ -906,7 +906,8 @@ def write_cluster_config(
         config_dict['config_hash'] = _deterministic_cluster_yaml_hash(
             tmp_yaml_path)
     except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to calculate config_hash: {e}')
+        logger.warning('Failed to calculate config_hash: '
+                       f'{common_utils.format_exception(e)}')
         logger.debug('Full exception:', exc_info=e)
 
     # Optimization: copy the contents of source files in file_mounts to a
