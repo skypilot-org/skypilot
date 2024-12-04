@@ -1710,8 +1710,6 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
             else:
                 destination[key].extend(value)
         else:
-            if destination is None:
-                destination = {}
             destination[key] = value
 
 
