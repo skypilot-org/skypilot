@@ -119,6 +119,7 @@ def launch(
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -255,7 +256,19 @@ def _maybe_restart_controller(
     rich_utils.force_update_status(
         ux_utils.spinner_message(f'{spinner_message} - restarting '
                                  'controller'))
-    handle = sky.start(jobs_controller_type.value.cluster_name)
+    # Make sure the dashboard is running when the controller is restarted.
+    task = task_lib.Task(
+        setup=managed_job_constants.DASHBOARD_SETUP_CMD,
+        envs={
+            skylet_constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
+        })
+    _, handle = sky.launch(
+        task=task,
+        cluster_name=jobs_controller_type.value.cluster_name,
+        idle_minutes_to_autostop=(
+            skylet_constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP),
+        retry_until_up=True,
+        _disable_controller_check=True)
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
 
