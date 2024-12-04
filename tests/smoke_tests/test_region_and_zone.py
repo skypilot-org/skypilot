@@ -30,9 +30,8 @@ from smoke_tests.util import (
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
 
-from sky.jobs.state import ManagedJobStatus
+import sky
 from sky.skylet import constants
-from sky.status_lib import ClusterStatus
 
 
 # ---------- Test region ----------
@@ -84,14 +83,15 @@ def test_aws_with_ssh_proxy_command():
                 # the job controller is not launched with proxy command.
                 get_cmd_wait_until_cluster_status_contains_wildcard(
                     cluster_name_wildcard='sky-jobs-controller-*',
-                    cluster_status=[ClusterStatus.UP],
+                    cluster_status=[sky.ClusterStatus.UP],
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[
-                        ManagedJobStatus.SUCCEEDED, ManagedJobStatus.RUNNING,
-                        ManagedJobStatus.STARTING
+                        sky.ManagedJobStatus.SUCCEEDED,
+                        sky.ManagedJobStatus.RUNNING,
+                        sky.ManagedJobStatus.STARTING
                     ],
                     timeout=300),
             ],

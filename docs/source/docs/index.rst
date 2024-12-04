@@ -74,9 +74,13 @@ You can chat with the SkyPilot team and community on the `SkyPilot Slack <http:/
 Learn more
 --------------------------
 
+To learn more, see :ref:`Concept: Sky Computing <sky-computing>` and `SkyPilot blog <https://blog.skypilot.co/>`_.
+
 Runnable examples:
 
 .. Keep this section in sync with README.md in SkyPilot repo
+
+* :ref:`AI Gallery <ai-gallery>`
 
 * **LLMs on SkyPilot**
 

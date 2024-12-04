@@ -26,7 +26,7 @@ from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
 
-from sky.status_lib import ClusterStatus
+import sky
 
 
 # ---------- Test the image ----------
@@ -281,7 +281,7 @@ def test_clone_disk_aws():
             f'sky stop {name} -y',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=60),
             # Wait for EC2 instance to be in stopped state.
             # TODO: event based wait.
@@ -401,7 +401,7 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky autostop -y -i 0 {name}',
         get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
-            cluster_status=[ClusterStatus.STOPPED],
+            cluster_status=[sky.ClusterStatus.STOPPED],
             timeout=80),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',

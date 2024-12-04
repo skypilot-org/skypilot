@@ -39,8 +39,6 @@ from smoke_tests.util import VALIDATE_LAUNCH_OUTPUT
 
 import sky
 from sky.skylet import events
-from sky.skylet.job_lib import JobStatus
-from sky.status_lib import ClusterStatus
 from sky.utils import common_utils
 
 
@@ -146,7 +144,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             # Ensure cluster is stopped
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
             # Even the cluster is stopped, cloud platform may take a while to
             # delete the VM.
@@ -176,7 +174,7 @@ def test_stale_job(generic_cloud: str):
             f'sky stop {name} -y',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=100),
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
@@ -207,7 +205,7 @@ def test_aws_stale_job_manual_restart():
             '--instance-ids $id',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=40),
             f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
@@ -215,7 +213,7 @@ def test_aws_stale_job_manual_restart():
             # Ensure the skylet updated the stale job status.
             get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=[JobStatus.FAILED_DRIVER],
+                job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
         f'sky down -y {name}',
@@ -248,7 +246,7 @@ def test_gcp_stale_job_manual_restart():
             # Ensure the skylet updated the stale job status.
             get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=[JobStatus.FAILED_DRIVER],
+                job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
         f'sky down -y {name}',
@@ -360,7 +358,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
         # Sleep to let the cluster autostop
         get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
-            cluster_status=[ClusterStatus.STOPPED],
+            cluster_status=[sky.ClusterStatus.STOPPED],
             timeout=120)
         # Run it again - should work with fast=True
         sky.launch(task,

@@ -44,8 +44,6 @@ from sky import AWS
 from sky import Azure
 from sky import GCP
 from sky.skylet import constants
-from sky.skylet.job_lib import JobStatus
-from sky.status_lib import ClusterStatus
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
@@ -423,7 +421,7 @@ def test_multi_echo(generic_cloud: str):
             get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id=i + 1,
-                job_status=[JobStatus.SUCCEEDED],
+                job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=120) for i in range(32)
         ] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not
@@ -999,14 +997,16 @@ def test_gcp_start_stop():
             f'sky stop -y {name}',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=40),
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED, ClusterStatus.INIT],
+                cluster_status=[
+                    sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT
+                ],
                 timeout=200),
         ],
         f'sky down -y {name}',
@@ -1032,7 +1032,9 @@ def test_azure_start_stop():
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED, ClusterStatus.INIT],
+                cluster_status=[
+                    sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT
+                ],
                 timeout=280) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}',
         ],
@@ -1072,7 +1074,7 @@ def test_autostop(generic_cloud: str):
             # Ensure the cluster is STOPPED.
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
@@ -1091,7 +1093,7 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
 
             # Test restarting the idleness timer via exec:
@@ -1103,7 +1105,7 @@ def test_autostop(generic_cloud: str):
             'sleep 45',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout + BUMP_UP_SECONDS),
         ],
         f'sky down -y {name}',
@@ -1323,7 +1325,7 @@ def test_stop_gcp_spot():
             f'sky autostop {name} -i0 -y',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=90),
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
@@ -1332,7 +1334,7 @@ def test_stop_gcp_spot():
             f'sky launch -c {name} -i0 -y',
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.STOPPED],
+                cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=120),
         ],
         f'sky down -y {name}',
@@ -1440,7 +1442,9 @@ def test_azure_start_stop_two_nodes():
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
-                cluster_status=[ClusterStatus.INIT, ClusterStatus.STOPPED],
+                cluster_status=[
+                    sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED
+                ],
                 timeout=200 + BUMP_UP_SECONDS) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],

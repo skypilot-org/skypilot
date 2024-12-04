@@ -155,10 +155,11 @@ SkyPilot then performs the heavy-lifting for you, including:
 Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
 ## More Information
-To learn more, see our [documentation](https://skypilot.readthedocs.io/en/latest/), [blog](https://blog.skypilot.co/), and [community integrations](https://blog.skypilot.co/community/).
+To learn more, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html), [SkyPilot docs](https://skypilot.readthedocs.io/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
 
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
+- [**AI Gallery**](https://docs.skypilot.co/en/latest/gallery/index.html)
 - LLMs on SkyPilot
   - [Llama 3.2: lightweight and vision models](./llm/llama-3_2/)
   - [Pixtral](./llm/pixtral/)

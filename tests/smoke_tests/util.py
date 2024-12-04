@@ -1,6 +1,5 @@
 import enum
 import inspect
-import logging
 import os
 import subprocess
 import sys
@@ -13,12 +12,8 @@ import pytest
 
 import sky
 from sky import serve
-from sky import sky_logging
 from sky.clouds import AWS
 from sky.clouds import GCP
-from sky.jobs.state import ManagedJobStatus
-from sky.skylet.job_lib import JobStatus
-from sky.status_lib import ClusterStatus
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -54,10 +49,10 @@ JOB_WAIT_NOT_RUNNING = (
     'echo "Waiting for job to stop RUNNING"; echo "$s"; done')
 
 # Cluster functions
-_ALL_JOB_STATUSES = "|".join([status.value for status in JobStatus])
-_ALL_CLUSTER_STATUSES = "|".join([status.value for status in ClusterStatus])
+_ALL_JOB_STATUSES = "|".join([status.value for status in sky.JobStatus])
+_ALL_CLUSTER_STATUSES = "|".join([status.value for status in sky.ClusterStatus])
 _ALL_MANAGED_JOB_STATUSES = "|".join(
-    [status.value for status in ManagedJobStatus])
+    [status.value for status in sky.ManagedJobStatus])
 
 
 def _statuses_to_str(statuses: List[enum.Enum]):
@@ -89,7 +84,8 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
 
 
 def get_cmd_wait_until_cluster_status_contains(
-        cluster_name: str, cluster_status: List[ClusterStatus], timeout: int):
+        cluster_name: str, cluster_status: List[sky.ClusterStatus],
+        timeout: int):
     return _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.format(
         cluster_name=cluster_name,
         cluster_status=_statuses_to_str(cluster_status),
@@ -97,7 +93,7 @@ def get_cmd_wait_until_cluster_status_contains(
 
 
 def get_cmd_wait_until_cluster_status_contains_wildcard(
-        cluster_name_wildcard: str, cluster_status: List[ClusterStatus],
+        cluster_name_wildcard: str, cluster_status: List[sky.ClusterStatus],
         timeout: int):
     wait_cmd = _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS.replace(
         'sky status {cluster_name}',
@@ -151,7 +147,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     '  fi; '
     'done <<< "$current_status"; '
     'if [ "$found" -eq 1 ]; then break; fi; '  # Break outer loop if match found
-    'echo "Waiting for job status to contains {job_status}, current status: $current_status"; '
+    'echo "Waiting for job status to contain {job_status}, current status: $current_status"; '
     'sleep 10; '
     'done')
 
@@ -163,7 +159,7 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STATUS_CONTA
 
 
 def get_cmd_wait_until_job_status_contains_matching_job_id(
-        cluster_name: str, job_id: str, job_status: List[JobStatus],
+        cluster_name: str, job_id: str, job_status: List[sky.JobStatus],
         timeout: int):
     return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID.format(
         cluster_name=cluster_name,
@@ -173,7 +169,7 @@ def get_cmd_wait_until_job_status_contains_matching_job_id(
 
 
 def get_cmd_wait_until_job_status_contains_without_matching_job(
-        cluster_name: str, job_status: List[JobStatus], timeout: int):
+        cluster_name: str, job_status: List[sky.JobStatus], timeout: int):
     return _WAIT_UNTIL_JOB_STATUS_CONTAINS_WITHOUT_MATCHING_JOB.format(
         cluster_name=cluster_name,
         job_status=_statuses_to_str(job_status),
@@ -181,7 +177,7 @@ def get_cmd_wait_until_job_status_contains_without_matching_job(
 
 
 def get_cmd_wait_until_job_status_contains_matching_job_name(
-        cluster_name: str, job_name: str, job_status: List[JobStatus],
+        cluster_name: str, job_name: str, job_status: List[sky.JobStatus],
         timeout: int):
     return _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         cluster_name=cluster_name,
@@ -200,7 +196,7 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: List[JobStatus], timeout: int):
+        job_name: str, job_status: List[sky.JobStatus], timeout: int):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),

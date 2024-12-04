@@ -25,8 +25,7 @@ from smoke_tests.util import (
 from smoke_tests.util import run_one_test
 from smoke_tests.util import Test
 
-from sky.skylet import events
-from sky.skylet.job_lib import JobStatus
+import sky
 
 
 def test_yaml_launch_and_mount(generic_cloud: str):
@@ -38,7 +37,7 @@ def test_yaml_launch_and_mount(generic_cloud: str):
             get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id=1,
-                job_status=[JobStatus.SUCCEEDED],
+                job_status=[sky.JobStatus.SUCCEEDED],
                 timeout=2 * 60),
         ],
         f'sky down -y {name}',
