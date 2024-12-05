@@ -2802,9 +2802,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     if e.no_failover:
                         error_message = str(e)
                     else:
-                        # Clean up the cluster's entry in `sky status`.
-                        global_user_state.remove_cluster(cluster_name,
-                                                         terminate=True)
                         usage_lib.messages.usage.update_final_cluster_status(
                             None)
                         error_message = (
@@ -3977,7 +3974,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 limit=1000).get_result()['items']
             vpc_id = None
             try:
-                # pylint: disable=line-too-long
                 vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(
                     ':', 1)[-1]
                 vpc_found = True
@@ -3986,7 +3982,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode = -1
 
             if vpc_found:
-                # pylint: disable=line-too-long E1136
                 # Delete VPC and it's associated resources
                 vpc_provider = IBMVPCProvider(
                     config_provider['resource_group_id'], region,
