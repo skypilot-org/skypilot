@@ -269,8 +269,12 @@ def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:
     # Setup the queues.
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
-        mp_queue.create_mp_queues(
-            [schedule_type.value for schedule_type in requests.ScheduleType])
+        queue_server = multiprocessing.Process(
+            target=mp_queue.start_queue_manager,
+            args=([
+                schedule_type.value for schedule_type in requests.ScheduleType
+            ],))
+        queue_server.start()
     logger.info('Request queues created')
 
     # Wait for the queues to be created. This is necessary to avoid request
