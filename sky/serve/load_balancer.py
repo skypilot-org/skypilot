@@ -135,7 +135,7 @@ class SkyServeLoadBalancer:
             The response from the endpoint replica. Return the exception
             encountered if anything goes wrong.
         """
-        logger.info(f'Proxy request to {url}')
+        logger.info(f'Proxy request from {request.client} to {url}')
         try:
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
