@@ -24,8 +24,6 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as runpod API does not implement spot.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
@@ -70,11 +68,8 @@ class RunPod(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'RunPod does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'runpod')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
