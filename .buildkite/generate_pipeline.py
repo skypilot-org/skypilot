@@ -141,8 +141,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str,
-                       one_cloud_per_test_function: bool) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file)
@@ -160,8 +159,6 @@ def _generate_pipeline(test_file: str,
                 'if': f'build.env("{cloud}") == "1"'
             }
             steps.append(step)
-            if one_cloud_per_test_function:
-                break
     return {'steps': steps}
 
 
@@ -191,8 +188,7 @@ def _convert_release(test_files: List[str]):
     output_file_pipelines_map = defaultdict(list)
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        # We only need to run one cloud per test function.
-        pipeline = _generate_pipeline(test_file, True)
+        pipeline = _generate_pipeline(test_file)
         output_file_pipelines_map[yaml_file_path].append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
@@ -208,7 +204,7 @@ def _convert_pre_merge(test_files: List[str]):
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        pipeline = _generate_pipeline(test_file, False)
+        pipeline = _generate_pipeline(test_file)
         pipeline['steps'].append({
             'label': 'Backward compatibility test',
             'command': 'bash tests/backward_compatibility_tests.sh',
