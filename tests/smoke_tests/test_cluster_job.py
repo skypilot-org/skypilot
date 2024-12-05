@@ -25,19 +25,7 @@ import textwrap
 
 import jinja2
 import pytest
-from smoke_tests.util import BUMP_UP_SECONDS
-from smoke_tests.util import get_aws_region_for_quota_failover
-from smoke_tests.util import get_cluster_name
-from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
-from smoke_tests.util import (
-    get_cmd_wait_until_job_status_contains_matching_job_id)
-from smoke_tests.util import get_gcp_region_for_quota_failover
-from smoke_tests.util import get_timeout
-from smoke_tests.util import LAMBDA_TYPE
-from smoke_tests.util import run_one_test
-from smoke_tests.util import SCP_GPU_V100
-from smoke_tests.util import SCP_TYPE
-from smoke_tests.util import Test
+from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import AWS
@@ -56,8 +44,8 @@ from sky.utils import resources_utils
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
 def test_job_queue(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'job_queue',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster.yaml',
@@ -78,7 +66,7 @@ def test_job_queue(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Job Queue with Docker. ----------
@@ -106,10 +94,10 @@ def test_job_queue(generic_cloud: str):
         'docker:winglian/axolotl:main-latest'
     ])
 def test_job_queue_with_docker(generic_cloud: str, image_id: str):
-    name = get_cluster_name() + image_id[len('docker:'):][:4]
+    name = smoke_tests_utils.get_cluster_name() + image_id[len('docker:'):][:4]
     total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
     time_to_sleep = 300 if generic_cloud == 'azure' else 180
-    test = Test(
+    test = smoke_tests_utils.Test(
         'job_queue_with_docker',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
@@ -145,16 +133,16 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.lambda_cloud
 def test_lambda_job_queue():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'lambda_job_queue',
         [
-            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/job_queue/cluster.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LAMBDA_TYPE} examples/job_queue/cluster.yaml',
             f'sky exec {name} -n {name}-1 --gpus A10:0.5 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-2 --gpus A10:0.5 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-3 --gpus A10:0.5 -d examples/job_queue/job.yaml',
@@ -168,13 +156,13 @@ def test_lambda_job_queue():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
 def test_ibm_job_queue():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'ibm_job_queue',
         [
             f'sky launch -y -c {name} --cloud ibm --gpus v100',
@@ -191,21 +179,21 @@ def test_ibm_job_queue():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.scp
 def test_scp_job_queue():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     num_of_gpu_launch = 1
     num_of_gpu_exec = 0.5
-    test = Test(
+    test = smoke_tests_utils.Test(
         'SCP_job_queue',
         [
-            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 {SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.SCP_TYPE} {smoke_tests_utils.SCP_GPU_V100}:{num_of_gpu_launch} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 {smoke_tests_utils.SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 {smoke_tests_utils.SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 {smoke_tests_utils.SCP_GPU_V100}:{num_of_gpu_exec} -d examples/job_queue/job.yaml',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
@@ -216,7 +204,7 @@ def test_scp_job_queue():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
@@ -227,9 +215,9 @@ def test_scp_job_queue():
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 def test_job_queue_multinode(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
-    test = Test(
+    test = smoke_tests_utils.Test(
         'job_queue_multinode',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_multinode.yaml',
@@ -261,14 +249,14 @@ def test_job_queue_multinode(generic_cloud: str):
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_large_job_queue(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'large_job_queue',
         [
             f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
@@ -306,15 +294,15 @@ def test_large_job_queue(generic_cloud: str):
         f'sky down -y {name}',
         timeout=25 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'fast_large_job_queue',
         [
             f'sky launch -y -c {name} --cpus 8 --cloud {generic_cloud}',
@@ -325,14 +313,14 @@ def test_fast_large_job_queue(generic_cloud: str):
         f'sky down -y {name}',
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
 def test_ibm_job_queue_multinode():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     task_file = 'examples/job_queue/job_multinode_ibm.yaml'
-    test = Test(
+    test = smoke_tests_utils.Test(
         'ibm_job_queue_multinode',
         [
             f'sky launch -y -c {name} --cloud ibm --gpus v100 --num-nodes 2',
@@ -364,7 +352,7 @@ def test_ibm_job_queue_multinode():
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Docker with preinstalled package. ----------
@@ -376,8 +364,8 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'docker_with_preinstalled_package',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id docker:nginx',
@@ -387,7 +375,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
@@ -398,8 +386,8 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 def test_multi_echo(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multi_echo',
         [
             f'python examples/multi_echo.py {name} {generic_cloud}',
@@ -418,6 +406,7 @@ def test_multi_echo(generic_cloud: str):
         ] +
         # Ensure jobs succeeded.
         [
+            smoke_tests_utils.
             get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id=i + 1,
@@ -430,7 +419,7 @@ def test_multi_echo(generic_cloud: str):
         f'sky down -y {name}',
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Task: 1 node training. ----------
@@ -439,8 +428,8 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
 def test_huggingface(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'huggingface_glue_imdb_app',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/huggingface_glue_imdb_app.yaml',
@@ -450,47 +439,47 @@ def test_huggingface(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.lambda_cloud
 def test_lambda_huggingface(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'lambda_huggingface_glue_imdb_app',
         [
-            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
+            f'sky exec {name} {smoke_tests_utils.LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.scp
 def test_scp_huggingface(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     num_of_gpu_launch = 1
-    test = Test(
+    test = smoke_tests_utils.Test(
         'SCP_huggingface_glue_imdb_app',
         [
-            f'sky launch -y -c {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.SCP_TYPE} {smoke_tests_utils.SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} {SCP_TYPE} {SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
+            f'sky exec {name} {smoke_tests_utils.SCP_TYPE} {smoke_tests_utils.SCP_GPU_V100}:{num_of_gpu_launch} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Inferentia. ----------
 @pytest.mark.aws
 def test_inferentia():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'test_inferentia',
         [
             f'sky launch -y -c {name} -t inf2.xlarge -- echo hi',
@@ -500,15 +489,15 @@ def test_inferentia():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- TPU. ----------
 @pytest.mark.gcp
 @pytest.mark.tpu
 def test_tpu():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'tpu_app',
         [
             f'sky launch -y -c {name} examples/tpu/tpu_app.yaml',
@@ -519,15 +508,15 @@ def test_tpu():
         f'sky down -y {name}',
         timeout=30 * 60,  # can take >20 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- TPU VM. ----------
 @pytest.mark.gcp
 @pytest.mark.tpu
 def test_tpu_vm():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'tpu_vm_app',
         [
             f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml',
@@ -545,15 +534,15 @@ def test_tpu_vm():
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- TPU VM Pod. ----------
 @pytest.mark.gcp
 @pytest.mark.tpu
 def test_tpu_vm_pod():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'tpu_pod',
         [
             f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32 --use-spot --zone europe-west4-a',
@@ -563,14 +552,14 @@ def test_tpu_vm_pod():
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- TPU Pod Slice on GKE. ----------
 @pytest.mark.kubernetes
 def test_tpu_pod_slice_gke():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'tpu_pod_slice_gke',
         [
             f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --cloud kubernetes --gpus tpu-v5-lite-podslice',
@@ -582,15 +571,15 @@ def test_tpu_pod_slice_gke():
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Simple apps. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
-    test = Test(
+    test = smoke_tests_utils.Test(
         'multi_hostname',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/multi_hostname.yaml',
@@ -600,15 +589,16 @@ def test_multi_hostname(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        timeout=get_timeout(generic_cloud, total_timeout_minutes * 60),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud,
+                                              total_timeout_minutes * 60),
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multi_node_failure',
         [
             # TODO(zhwu): we use multi-thread to run the commands in setup
@@ -626,14 +616,14 @@ def test_multi_node_failure(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Web apps with custom ports on GCP. ----------
 @pytest.mark.gcp
 def test_gcp_http_server_with_custom_ports():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud gcp examples/http_server_with_custom_ports/task.yaml',
@@ -643,14 +633,14 @@ def test_gcp_http_server_with_custom_ports():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Web apps with custom ports on AWS. ----------
 @pytest.mark.aws
 def test_aws_http_server_with_custom_ports():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
@@ -660,14 +650,14 @@ def test_aws_http_server_with_custom_ports():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Web apps with custom ports on Azure. ----------
 @pytest.mark.azure
 def test_azure_http_server_with_custom_ports():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'azure_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud azure examples/http_server_with_custom_ports/task.yaml',
@@ -677,14 +667,14 @@ def test_azure_http_server_with_custom_ports():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Web apps with custom ports on Kubernetes. ----------
 @pytest.mark.kubernetes
 def test_kubernetes_http_server_with_custom_ports():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'kubernetes_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud kubernetes examples/http_server_with_custom_ports/task.yaml',
@@ -694,14 +684,14 @@ def test_kubernetes_http_server_with_custom_ports():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Web apps with custom ports on Paperspace. ----------
 @pytest.mark.paperspace
 def test_paperspace_http_server_with_custom_ports():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'paperspace_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud paperspace examples/http_server_with_custom_ports/task.yaml',
@@ -711,14 +701,14 @@ def test_paperspace_http_server_with_custom_ports():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Web apps with custom ports on RunPod. ----------
 @pytest.mark.runpod
 def test_runpod_http_server_with_custom_ports():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'runpod_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud runpod examples/http_server_with_custom_ports/task.yaml',
@@ -728,13 +718,13 @@ def test_runpod_http_server_with_custom_ports():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Labels from task on AWS (instance_tags) ----------
 @pytest.mark.aws
 def test_task_labels_aws():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     template_str = pathlib.Path(
         'tests/test_yamls/test_labels.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -743,7 +733,7 @@ def test_task_labels_aws():
         f.write(content)
         f.flush()
         file_path = f.name
-        test = Test(
+        test = smoke_tests_utils.Test(
             'task_labels_aws',
             [
                 f'sky launch -y -c {name} {file_path}',
@@ -758,13 +748,13 @@ def test_task_labels_aws():
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Labels from task on GCP (labels) ----------
 @pytest.mark.gcp
 def test_task_labels_gcp():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     template_str = pathlib.Path(
         'tests/test_yamls/test_labels.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -773,7 +763,7 @@ def test_task_labels_gcp():
         f.write(content)
         f.flush()
         file_path = f.name
-        test = Test(
+        test = smoke_tests_utils.Test(
             'task_labels_gcp',
             [
                 f'sky launch -y -c {name} {file_path}',
@@ -785,13 +775,13 @@ def test_task_labels_gcp():
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Labels from task on Kubernetes (labels) ----------
 @pytest.mark.kubernetes
 def test_task_labels_kubernetes():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     template_str = pathlib.Path(
         'tests/test_yamls/test_labels.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -800,7 +790,7 @@ def test_task_labels_kubernetes():
         f.write(content)
         f.flush()
         file_path = f.name
-        test = Test(
+        test = smoke_tests_utils.Test(
             'task_labels_kubernetes',
             [
                 f'sky launch -y -c {name} {file_path}',
@@ -813,14 +803,14 @@ def test_task_labels_kubernetes():
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Pod Annotations on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_add_pod_annotations_for_autodown_with_launch():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'add_pod_annotations_for_autodown_with_launch',
         [
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
@@ -838,13 +828,13 @@ def test_add_pod_annotations_for_autodown_with_launch():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
 def test_add_and_remove_pod_annotations_with_autostop():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'add_and_remove_pod_annotations_with_autostop',
         [
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
@@ -871,13 +861,13 @@ def test_add_and_remove_pod_annotations_with_autostop():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
     head_logs = ('kubectl get pods '
                  f' | grep {name} |  grep head | '
@@ -886,7 +876,7 @@ def test_container_logs_multinode_kubernetes():
                    f' | grep {name} |  grep worker |'
                    " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test = Test(
+        test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
             [
                 f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
@@ -895,18 +885,18 @@ def test_container_logs_multinode_kubernetes():
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
 def test_container_logs_two_jobs_kubernetes():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
     pod_logs = ('kubectl get pods '
                 f' | grep {name} |  grep head |'
                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test = Test(
+        test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
             [
                 f'sky launch -y -c {name} {task_yaml}',
@@ -925,18 +915,18 @@ def test_container_logs_two_jobs_kubernetes():
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
 def test_container_logs_two_simultaneous_jobs_kubernetes():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
     pod_logs = ('kubectl get pods '
                 f' | grep {name} |  grep head |'
                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test = Test(
+        test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
             [
                 f'sky launch -y -c {name}',
@@ -956,7 +946,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Task: n=2 nodes with setups. ----------
@@ -967,8 +957,8 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
 def test_distributed_tf(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'resnet_distributed_tf_app',
         [
             # NOTE: running it twice will hang (sometimes?) - an app-level bug.
@@ -978,14 +968,14 @@ def test_distributed_tf(generic_cloud: str):
         f'sky down -y {name}',
         timeout=25 * 60,  # 25 mins (it takes around ~19 mins)
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing GCP start and stop instances ----------
 @pytest.mark.gcp
 def test_gcp_start_stop():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp-start-stop',
         [
             f'sky launch -y -c {name} examples/gcp_start_stop.yaml',
@@ -995,14 +985,14 @@ def test_gcp_start_stop():
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=40),
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 4 --status',  # Ensure the job succeeded.
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[
                     sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT
@@ -1011,14 +1001,14 @@ def test_gcp_start_stop():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing Azure start and stop instances ----------
 @pytest.mark.azure
 def test_azure_start_stop():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'azure-start-stop',
         [
             f'sky launch -y -c {name} examples/azure_start_stop.yaml',
@@ -1030,7 +1020,7 @@ def test_azure_start_stop():
             f'sky start -y {name} -i 1',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[
                     sky.ClusterStatus.STOPPED, sky.ClusterStatus.INIT
@@ -1041,7 +1031,7 @@ def test_azure_start_stop():
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing Autostopping ----------
@@ -1051,14 +1041,14 @@ def test_azure_start_stop():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 def test_autostop(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
     # the VM is stopped.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
     # Launching and starting Azure clusters can take a long time too. e.g., restart
     # a stopped Azure cluster can take 7m. So we set the total timeout to 70m.
     total_timeout_minutes = 70 if generic_cloud == 'azure' else 20
-    test = Test(
+    test = smoke_tests_utils.Test(
         'autostop',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
@@ -1072,7 +1062,7 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
@@ -1091,7 +1081,7 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
@@ -1103,27 +1093,27 @@ def test_autostop(generic_cloud: str):
             'sleep 45',  # Almost reached the threshold.
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout + BUMP_UP_SECONDS),
+                timeout=autostop_timeout + smoke_tests_utils.BUMP_UP_SECONDS),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 def test_autodown(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
     autodown_timeout = 900 if generic_cloud == 'azure' else 240
     total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
-    test = Test(
+    test = smoke_tests_utils.Test(
         'autodown',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
@@ -1152,16 +1142,16 @@ def test_autodown(generic_cloud: str):
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.scp
 def test_scp_autodown():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'SCP_autodown',
         [
-            f'sky launch -y -d -c {name} {SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
@@ -1171,14 +1161,14 @@ def test_scp_autodown():
             # Ensure the cluster is terminated.
             'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} {SCP_TYPE} tests/test_yamls/minimal.yaml',
+            f'sky exec {name} {smoke_tests_utils.SCP_TYPE} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 200',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {SCP_TYPE} --down tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} {smoke_tests_utils.SCP_TYPE} --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 200',
             # Ensure the cluster is still UP.
@@ -1187,11 +1177,11 @@ def test_scp_autodown():
         f'sky down -y {name}',
         timeout=25 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'{cloud}-cancel-task',
         [
             f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} -y -d',
@@ -1214,23 +1204,23 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 # ---------- Testing `sky cancel` ----------
 @pytest.mark.aws
 def test_cancel_aws():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_cancel_gcp():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
 def test_cancel_azure():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support V100 gpus for now
@@ -1239,8 +1229,8 @@ def test_cancel_azure():
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'cancel-pytorch',
         [
             f'sky launch -c {name} --cloud {generic_cloud} examples/resnet_distributed_torch.yaml -y -d',
@@ -1262,15 +1252,15 @@ def test_cancel_pytorch(generic_cloud: str):
         f'sky down -y {name}',
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # can't use `_get_cancel_task_with_cloud()`, as command `nvidia-smi`
 # requires a CUDA public image, which IBM doesn't offer
 @pytest.mark.ibm
 def test_cancel_ibm():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'ibm-cancel-task',
         [
             f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml',
@@ -1283,7 +1273,7 @@ def test_cancel_ibm():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing use-spot option ----------
@@ -1295,8 +1285,8 @@ def test_cancel_ibm():
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'use-spot',
         [
             f'sky launch -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml --use-spot -y',
@@ -1306,14 +1296,14 @@ def test_use_spot(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_stop_gcp_spot():
     """Test GCP spot can be stopped, autostopped, restarted."""
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'stop_gcp_spot',
         [
             f'sky launch -c {name} --cloud gcp --use-spot --cpus 2+ -y -- touch myfile',
@@ -1323,7 +1313,7 @@ def test_stop_gcp_spot():
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 2 --status',
             f'sky autostop {name} -i0 -y',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=90),
@@ -1332,21 +1322,21 @@ def test_stop_gcp_spot():
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=120),
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing env ----------
 def test_inline_env(generic_cloud: str):
     """Test env"""
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'test-inline-env',
         [
             f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
@@ -1356,16 +1346,16 @@ def test_inline_env(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        get_timeout(generic_cloud),
+        smoke_tests_utils.get_timeout(generic_cloud),
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing env file ----------
 def test_inline_env_file(generic_cloud: str):
     """Test env"""
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'test-inline-env-file',
         [
             f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
@@ -1374,17 +1364,17 @@ def test_inline_env_file(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        get_timeout(generic_cloud),
+        smoke_tests_utils.get_timeout(generic_cloud),
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing custom image ----------
 @pytest.mark.aws
 def test_aws_custom_image():
     """Test AWS custom image"""
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'test-aws-custom-image',
         [
             f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud aws --region us-east-2 --image-id ami-062ddd90fb6f8267a',  # Nvidia image
@@ -1393,7 +1383,7 @@ def test_aws_custom_image():
         f'sky down -y {name}',
         timeout=30 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
@@ -1410,8 +1400,8 @@ def test_aws_custom_image():
     ])
 def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
             f'sky launch -c {name} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --cloud kubernetes --image-id {image_id} --region None --gpus T4:1',
@@ -1424,13 +1414,13 @@ def test_kubernetes_custom_image(image_id):
         f'sky down -y {name}',
         timeout=30 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
 def test_azure_start_stop_two_nodes():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'azure-start-stop-two-nodes',
         [
             f'sky launch --num-nodes=2 -y -c {name} examples/azure_start_stop.yaml',
@@ -1440,18 +1430,18 @@ def test_azure_start_stop_two_nodes():
             f'sky start -y {name} -i 1',
             f'sky exec --num-nodes=2 {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[
                     sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED
                 ],
-                timeout=200 + BUMP_UP_SECONDS) +
+                timeout=200 + smoke_tests_utils.BUMP_UP_SECONDS) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing env for disk tier ----------
@@ -1465,11 +1455,11 @@ def test_aws_disk_tier():
 
     for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        name = get_cluster_name() + '-' + disk_tier.value
+        name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.AWS.max_cluster_name_length())
         region = 'us-east-2'
-        test = Test(
+        test = smoke_tests_utils.Test(
             'aws-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
@@ -1488,14 +1478,14 @@ def test_aws_disk_tier():
             f'sky down -y {name}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
         disk_types = [GCP._get_disk_type(disk_tier)]
-        name = get_cluster_name() + '-' + disk_tier.value
+        name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
@@ -1510,7 +1500,7 @@ def test_gcp_disk_tier():
             instance_type_options = ['', '--instance-type n2-standard-64']
         for disk_type, instance_type_option in zip(disk_types,
                                                    instance_type_options):
-            test = Test(
+            test = smoke_tests_utils.Test(
                 'gcp-disk-tier-' + disk_tier.value,
                 [
                     f'sky launch -y -c {name} --cloud gcp --region {region} '
@@ -1524,7 +1514,7 @@ def test_gcp_disk_tier():
                 f'sky down -y {name}',
                 timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
             )
-            run_one_test(test)
+            smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
@@ -1534,11 +1524,11 @@ def test_azure_disk_tier():
             # Azure does not support high and ultra disk tier.
             continue
         type = Azure._get_disk_type(disk_tier)
-        name = get_cluster_name() + '-' + disk_tier.value
+        name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.Azure.max_cluster_name_length())
         region = 'westus2'
-        test = Test(
+        test = smoke_tests_utils.Test(
             'azure-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
@@ -1550,17 +1540,17 @@ def test_azure_disk_tier():
             f'sky down -y {name}',
             timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
 def test_azure_best_tier_failover():
     type = Azure._get_disk_type(resources_utils.DiskTier.LOW)
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Azure.max_cluster_name_length())
     region = 'westus2'
-    test = Test(
+    test = smoke_tests_utils.Test(
         'azure-best-tier-failover',
         [
             f'sky launch -y -c {name} --cloud azure --region {region} '
@@ -1572,15 +1562,15 @@ def test_azure_best_tier_failover():
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ------ Testing Zero Quota Failover ------
 @pytest.mark.aws
 def test_aws_zero_quota_failover():
 
-    name = get_cluster_name()
-    region = get_aws_region_for_quota_failover()
+    name = smoke_tests_utils.get_cluster_name()
+    region = smoke_tests_utils.get_aws_region_for_quota_failover()
 
     if not region:
         pytest.xfail(
@@ -1589,21 +1579,21 @@ def test_aws_zero_quota_failover():
             'expected for your account?')
         return
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         'aws-zero-quota-failover',
         [
             f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_zero_quota_failover():
 
-    name = get_cluster_name()
-    region = get_gcp_region_for_quota_failover()
+    name = smoke_tests_utils.get_cluster_name()
+    region = smoke_tests_utils.get_gcp_region_for_quota_failover()
 
     if not region:
         pytest.xfail(
@@ -1612,18 +1602,18 @@ def test_gcp_zero_quota_failover():
             'expected for your account?')
         return
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         'gcp-zero-quota-failover',
         [
             f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100-80GB:1 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 def test_long_setup_run_script(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      suffix='.yaml') as f:
         f.write(
@@ -1644,7 +1634,7 @@ def test_long_setup_run_script(generic_cloud: str):
         f.write('  echo "end run"\n')
         f.flush()
 
-        test = Test(
+        test = smoke_tests_utils.Test(
             'long-setup-run-script',
             [
                 f'sky launch -y -c {name} --cloud {generic_cloud} --cpus 2+ {f.name}',
@@ -1656,4 +1646,4 @@ def test_long_setup_run_script(generic_cloud: str):
             ],
             f'sky down -y {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)

@@ -32,12 +32,7 @@ import uuid
 
 import jinja2
 import pytest
-from smoke_tests.util import get_cluster_name
-from smoke_tests.util import get_timeout
-from smoke_tests.util import run_one_test
-from smoke_tests.util import SCP_TYPE
-from smoke_tests.util import STORAGE_SETUP_COMMANDS
-from smoke_tests.util import Test
+from smoke_tests import smoke_tests_utils
 
 import sky
 from sky import global_user_state
@@ -52,7 +47,7 @@ from sky.data.data_utils import Rclone
 # ---------- file_mounts ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     extra_flags = ''
     if generic_cloud in 'kubernetes':
         # Kubernetes does not support multi-node
@@ -60,42 +55,42 @@ def test_file_mounts(generic_cloud: str):
         #  arm64 (e.g., Apple Silicon) since goofys does not work on arm64.
         extra_flags = '--num-nodes 1'
     test_commands = [
-        *STORAGE_SETUP_COMMANDS,
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
-    test = Test(
+    test = smoke_tests_utils.Test(
         'using_file_mounts',
         test_commands,
         f'sky down -y {name}',
-        get_timeout(generic_cloud, 20 * 60),  # 20 mins
+        smoke_tests_utils.get_timeout(generic_cloud, 20 * 60),  # 20 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.scp
 def test_scp_file_mounts():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     test_commands = [
-        *STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} {SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        f'sky launch -y -c {name} {smoke_tests_utils.SCP_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
-    test = Test(
+    test = smoke_tests_utils.Test(
         'SCP_using_file_mounts',
         test_commands,
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
-        *STORAGE_SETUP_COMMANDS,
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name}'),
@@ -107,20 +102,20 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
          '--env MY_LOCAL_PATH=tmpfile'),
         f'sky logs {name}-2 1 --status',  # Ensure the job succeeded.
     ]
-    test = Test(
+    test = smoke_tests_utils.Test(
         'using_file_mounts_with_env_vars',
         test_commands,
         (f'sky down -y {name} {name}-2',
          f'sky storage delete -y {storage_name} {storage_name}-2'),
         timeout=20 * 60,  # 20 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- storage ----------
 @pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
@@ -132,7 +127,7 @@ def test_aws_storage_mounts_with_stop():
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
@@ -142,18 +137,18 @@ def test_aws_storage_mounts_with_stop():
             # the mounted directory
             f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
-        test = Test(
+        test = smoke_tests_utils.Test(
             'aws_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_storage_mounts_with_stop():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
@@ -165,7 +160,7 @@ def test_gcp_storage_mounts_with_stop():
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
@@ -175,18 +170,18 @@ def test_gcp_storage_mounts_with_stop():
             # the mounted directory
             f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
-        test = Test(
+        test = smoke_tests_utils.Test(
             'gcp_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
 def test_azure_storage_mounts_with_stop():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
     default_region = 'eastus'
@@ -203,7 +198,7 @@ def test_azure_storage_mounts_with_stop():
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
@@ -215,13 +210,13 @@ def test_azure_storage_mounts_with_stop():
             # the mounted directory
             f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
-        test = Test(
+        test = smoke_tests_utils.Test(
             'azure_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
@@ -229,7 +224,7 @@ def test_kubernetes_storage_mounts():
     # Tests bucket mounting on k8s, assuming S3 is configured.
     # This test will fail if run on non x86_64 architecture, since goofys is
     # built for x86_64 only.
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
@@ -240,24 +235,24 @@ def test_kubernetes_storage_mounts():
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud kubernetes {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt || '
             f'gsutil ls gs://{storage_name}/hello.txt',
         ]
-        test = Test(
+        test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
 def test_kubernetes_context_switch():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     new_context = f'sky-test-context-{int(time.time())}'
     new_namespace = f'sky-test-namespace-{int(time.time())}'
 
@@ -301,13 +296,13 @@ def test_kubernetes_context_switch():
         'rm /tmp/sky_test_current_context; '
         f'sky down -y {name}')
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         'kubernetes_context_switch',
         test_commands,
         cleanup_commands,
         timeout=20 * 60,  # 20 mins
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.parametrize(
@@ -323,7 +318,7 @@ def test_kubernetes_context_switch():
     ])
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     timestamp = str(time.time()).replace('.', '')
     storage_name = f'sky-test-{timestamp}'
     template_str = pathlib.Path(
@@ -354,7 +349,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
@@ -362,18 +357,18 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
             f'{gsutil_command} || '
             f'{azure_blob_command}',
         ]
-        test = Test(
+        test = smoke_tests_utils.Test(
             'docker_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.cloudflare
 def test_cloudflare_storage_mounts(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
@@ -385,24 +380,24 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
         ]
 
-        test = Test(
+        test = smoke_tests_utils.Test(
             'cloudflare_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
 def test_ibm_storage_mounts():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
         storage_name, Rclone.RcloneClouds.IBM)
@@ -415,18 +410,18 @@ def test_ibm_storage_mounts():
         f.flush()
         file_path = f.name
         test_commands = [
-            *STORAGE_SETUP_COMMANDS,
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
         ]
-        test = Test(
+        test = smoke_tests_utils.Test(
             'ibm_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing Storage ----------

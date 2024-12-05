@@ -28,11 +28,7 @@ import shlex
 from typing import List, Tuple
 
 import pytest
-from smoke_tests.util import get_cluster_name
-from smoke_tests.util import run_one_test
-from smoke_tests.util import terminate_gcp_replica
-from smoke_tests.util import Test
-from smoke_tests.util import test_id
+from smoke_tests import smoke_tests_utils
 
 from sky import serve
 from sky.utils import common_utils
@@ -49,7 +45,7 @@ def _get_service_name() -> str:
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
     test_name = test_name.replace('skyserve-', 'ss-')
     test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
-    return f'{test_name}-{test_id}'
+    return f'{test_name}-{smoke_tests_utils.test_id}'
 
 
 # We check the output of the skyserve service to see if it is ready. Output of
@@ -107,8 +103,8 @@ def _get_replica_ip(name: str, replica_id: int) -> str:
 
 
 def _get_skyserve_http_test(name: str, cloud: str,
-                            timeout_minutes: int) -> Test:
-    test = Test(
+                            timeout_minutes: int) -> smoke_tests_utils.Test:
+    test = smoke_tests_utils.Test(
         f'test-skyserve-{cloud.replace("_", "-")}',
         [
             f'sky serve up -n {name} -y tests/skyserve/http/{cloud}.yaml',
@@ -161,7 +157,7 @@ def test_skyserve_gcp_http():
     """Test skyserve on GCP"""
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'gcp', 20)
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
@@ -170,7 +166,7 @@ def test_skyserve_aws_http():
     """Test skyserve on AWS"""
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'aws', 20)
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
@@ -179,7 +175,7 @@ def test_skyserve_azure_http():
     """Test skyserve on Azure"""
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'azure', 30)
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
@@ -188,7 +184,7 @@ def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'kubernetes', 30)
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.oci
@@ -197,7 +193,7 @@ def test_skyserve_oci_http():
     """Test skyserve on OCI"""
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'oci', 20)
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
@@ -218,7 +214,7 @@ def test_skyserve_llm(generic_cloud: str):
               encoding='utf-8') as f:
         prompt2output = json.load(f)
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-llm',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/llm/service.yaml',
@@ -231,7 +227,7 @@ def test_skyserve_llm(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=40 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
@@ -240,14 +236,14 @@ def test_skyserve_spot_recovery():
     name = _get_service_name()
     zone = 'us-central1-a'
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-spot-recovery-gcp',
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
-            terminate_gcp_replica(name, zone, 1),
+            smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
@@ -255,7 +251,7 @@ def test_skyserve_spot_recovery():
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
@@ -263,7 +259,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_kubernetes
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-base-ondemand-fallback',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/spot/base_ondemand_fallback.yaml',
@@ -274,7 +270,7 @@ def test_skyserve_base_ondemand_fallback(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
@@ -283,7 +279,7 @@ def test_skyserve_dynamic_ondemand_fallback():
     name = _get_service_name()
     zone = 'us-central1-a'
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-dynamic-ondemand-fallback',
         [
             f'sky serve up -n {name} --cloud gcp -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
@@ -302,7 +298,7 @@ def test_skyserve_dynamic_ondemand_fallback():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             _check_replica_in_status(name, [(2, True, 'READY'),
                                             (0, False, '')]),
-            terminate_gcp_replica(name, zone, 1),
+            smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
             f'sleep 40',
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
@@ -320,7 +316,7 @@ def test_skyserve_dynamic_ondemand_fallback():
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
@@ -330,7 +326,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-user-bug-restart',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/restart/user_bug.yaml',
@@ -355,7 +351,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve
@@ -363,7 +359,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-load-balancer',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/load_balancer/service.yaml',
@@ -378,7 +374,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
@@ -388,7 +384,7 @@ def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
     zone = 'us-central1-a'
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-auto-restart',
         [
             # TODO(tian): we can dynamically generate YAML from template to
@@ -400,7 +396,7 @@ def test_skyserve_auto_restart():
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
-            terminate_gcp_replica(name, zone, 1),
+            smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
             # Wait for consecutive failure timeout passed.
             # If the cluster is not using spot, it won't check the cluster status
             # on the cloud (since manual shutdown is not a common behavior and such
@@ -421,7 +417,7 @@ def test_skyserve_auto_restart():
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve
@@ -429,7 +425,7 @@ def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-cancel',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/cancel/cancel.yaml',
@@ -446,14 +442,14 @@ def test_skyserve_cancel(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-streaming',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/streaming/streaming.yaml',
@@ -465,14 +461,14 @@ def test_skyserve_streaming(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-readiness-timeout-fail',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task.yaml',
@@ -488,14 +484,14 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-large-readiness-timeout',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task_large_timeout.yaml',
@@ -506,7 +502,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
@@ -515,7 +511,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
@@ -536,7 +532,7 @@ def test_skyserve_update(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
@@ -548,7 +544,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                (1, False, 'SHUTTING_DOWN')])
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-rolling-update',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
@@ -574,7 +570,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack
@@ -583,7 +579,7 @@ def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-fast-update',
         [
             f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
@@ -616,14 +612,14 @@ def test_skyserve_fast_update(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-update-autoscale',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
@@ -652,7 +648,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
@@ -690,7 +686,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
                        (2, False, 'READY')]) +
             _check_service_version(name, "1"),
         ]
-    test = Test(
+    test = smoke_tests_utils.Test(
         f'test-skyserve-new-autoscaler-update-{mode}',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/new_autoscaler_before.yaml',
@@ -716,7 +712,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
@@ -726,7 +722,7 @@ def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
     name = _get_service_name()
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         'test-skyserve-failures',
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/failures/initial_delay.yaml',
@@ -764,7 +760,7 @@ def test_skyserve_failures(generic_cloud: str):
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO(Ziming, Tian): Add tests for autoscaling.
@@ -772,8 +768,8 @@ def test_skyserve_failures(generic_cloud: str):
 
 # ------- Testing user dependencies --------
 def test_user_dependencies(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'user-dependencies',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} "pip install ray>2.11; ray start --head"',
@@ -792,4 +788,4 @@ def test_user_dependencies(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)

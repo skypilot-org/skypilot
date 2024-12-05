@@ -26,16 +26,7 @@ import textwrap
 import time
 
 import pytest
-from smoke_tests.util import BUMP_UP_SECONDS
-from smoke_tests.util import get_cluster_name
-from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
-from smoke_tests.util import (
-    get_cmd_wait_until_job_status_contains_without_matching_job)
-from smoke_tests.util import get_timeout
-from smoke_tests.util import run_one_test
-from smoke_tests.util import SCP_TYPE
-from smoke_tests.util import Test
-from smoke_tests.util import VALIDATE_LAUNCH_OUTPUT
+from smoke_tests import smoke_tests_utils
 
 import sky
 from sky.skylet import events
@@ -45,25 +36,25 @@ from sky.utils import common_utils
 # ---------- Dry run: 2 Tasks in a chain. ----------
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 def test_example_app():
-    test = Test(
+    test = smoke_tests_utils.Test(
         'example_app',
         ['python examples/example_app.py'],
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- A minimal task ----------
 def test_minimal(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'minimal',
         [
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -89,20 +80,20 @@ def test_minimal(generic_cloud: str):
             f'sky exec -c {name} && exit 1 || true',
         ],
         f'sky down -y {name}',
-        get_timeout(generic_cloud),
+        smoke_tests_utils.get_timeout(generic_cloud),
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Test fast launch ----------
 def test_launch_fast(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         'test_launch_fast',
         [
             # First launch to create the cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast tests/test_yamls/minimal.yaml) && {VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Second launch to test fast launch - should not reprovision
@@ -118,9 +109,9 @@ def test_launch_fast(generic_cloud: str):
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=get_timeout(generic_cloud),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # See cloud exclusion explanations in test_autostop
@@ -129,35 +120,35 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
 def test_launch_fast_with_autostop(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
     # the VM is stopped.
     autostop_timeout = 600 if generic_cloud == 'azure' else 250
-    test = Test(
+    test = smoke_tests_utils.Test(
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 tests/test_yamls/minimal.yaml) && {VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
             # Ensure cluster is stopped
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=autostop_timeout),
             # Even the cluster is stopped, cloud platform may take a while to
             # delete the VM.
-            f'sleep {BUMP_UP_SECONDS}',
+            f'sleep {smoke_tests_utils.BUMP_UP_SECONDS}',
             # Launch again. Do full output validation - we expect the cluster to re-launch
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=get_timeout(generic_cloud) + autostop_timeout,
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ------------ Test stale job ------------
@@ -165,14 +156,14 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'stale_job',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=100),
@@ -182,16 +173,16 @@ def test_stale_job(generic_cloud: str):
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.AWS.max_cluster_name_length())
     region = 'us-east-2'
-    test = Test(
+    test = smoke_tests_utils.Test(
         'aws_stale_job_manual_restart',
         [
             f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
@@ -203,7 +194,7 @@ def test_aws_stale_job_manual_restart():
             '--output text`; '
             f'aws ec2 stop-instances --region {region} '
             '--instance-ids $id',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=40),
@@ -211,6 +202,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
+            smoke_tests_utils.
             get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
                 job_status=[sky.JobStatus.FAILED_DRIVER],
@@ -218,12 +210,12 @@ def test_aws_stale_job_manual_restart():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.GCP.max_cluster_name_length())
     zone = 'us-west2-a'
@@ -232,7 +224,7 @@ def test_gcp_stale_job_manual_restart():
                  f'--zones={zone} --format="value(name)"')
     stop_cmd = (f'gcloud compute instances stop --zone={zone}'
                 f' --quiet $({query_cmd})')
-    test = Test(
+    test = smoke_tests_utils.Test(
         'gcp_stale_job_manual_restart',
         [
             f'sky launch -y -c {name} --cloud gcp --zone {zone} "echo hi"',
@@ -244,6 +236,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
+            smoke_tests_utils.
             get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
                 job_status=[sky.JobStatus.FAILED_DRIVER],
@@ -251,16 +244,16 @@ def test_gcp_stale_job_manual_restart():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
-    test = Test(
+    test = smoke_tests_utils.Test(
         'env_check',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup examples/env_check.yaml',
@@ -269,19 +262,19 @@ def test_env_check(generic_cloud: str):
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
     if generic_cloud == 'kubernetes':
         # Kubernetes does not support multi-node
         num_nodes = 1
     timestamp = time.time()
-    test = Test('cli_logs', [
+    test = smoke_tests_utils.Test('cli_logs', [
         f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
         f'sky exec {name} "echo {timestamp} 2"',
         f'sky exec {name} "echo {timestamp} 3"',
@@ -292,17 +285,17 @@ def test_cli_logs(generic_cloud: str):
         f'sky logs {name} 1 | grep "{timestamp} 1"',
         f'sky logs {name} | grep "{timestamp} 4"',
     ], f'sky down -y {name}')
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.scp
 def test_scp_logs():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     timestamp = time.time()
-    test = Test(
+    test = smoke_tests_utils.Test(
         'SCP_cli_logs',
         [
-            f'sky launch -y -c {name} {SCP_TYPE} "echo {timestamp} 1"',
+            f'sky launch -y -c {name} {smoke_tests_utils.SCP_TYPE} "echo {timestamp} 1"',
             f'sky exec {name} "echo {timestamp} 2"',
             f'sky exec {name} "echo {timestamp} 3"',
             f'sky exec {name} "echo {timestamp} 4"',
@@ -314,7 +307,7 @@ def test_scp_logs():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ------- Testing the core API --------
@@ -324,7 +317,7 @@ def test_scp_logs():
 
 @pytest.mark.gcp
 def test_core_api_sky_launch_exec():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     task = sky.Task(run="whoami")
     task.set_resources(sky.Resources(cloud=sky.GCP()))
     job_id, handle = sky.launch(task, cluster_name=name)
@@ -347,7 +340,7 @@ def test_core_api_sky_launch_exec():
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 def test_core_api_sky_launch_fast(generic_cloud: str):
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     cloud = sky.clouds.CLOUD_REGISTRY.from_str(generic_cloud)
     try:
         task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
@@ -356,7 +349,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
                    idle_minutes_to_autostop=1,
                    fast=True)
         # Sleep to let the cluster autostop
-        get_cmd_wait_until_cluster_status_contains(
+        smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
             cluster_status=[sky.ClusterStatus.STOPPED],
             timeout=120)
@@ -430,8 +423,8 @@ class TestYamlSpecs:
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 def test_multiple_accelerators_ordered():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multiple-accelerators-ordered',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "Using user-specified accelerators list"',
@@ -440,14 +433,14 @@ def test_multiple_accelerators_ordered():
         f'sky down -y {name}',
         timeout=20 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multiple-accelerators-ordered',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered_with_default.yaml | grep "Using user-specified accelerators list"',
@@ -456,14 +449,14 @@ def test_multiple_accelerators_ordered_with_default():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_unordered():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multiple-accelerators-unordered',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
@@ -471,14 +464,14 @@ def test_multiple_accelerators_unordered():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multiple-accelerators-unordered-with-default',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
@@ -487,13 +480,13 @@ def test_multiple_accelerators_unordered_with_default():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 def test_multiple_resources():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'multiple-resources',
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
@@ -501,7 +494,7 @@ def test_multiple_resources():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Sky Benchmark ----------
@@ -510,8 +503,8 @@ def test_multiple_resources():
 @pytest.mark.no_kubernetes
 @pytest.mark.aws  # SkyBenchmark requires S3 access
 def test_sky_bench(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'sky-bench',
         [
             f'sky bench launch -y -b {name} --cloud {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
@@ -520,7 +513,7 @@ def test_sky_bench(generic_cloud: str):
         ],
         f'sky bench down {name} -y; sky bench delete {name} -y',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
@@ -558,8 +551,8 @@ def test_kubernetes_context_failover():
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(config.encode('utf-8'))
         f.flush()
-        name = get_cluster_name()
-        test = Test(
+        name = smoke_tests_utils.get_cluster_name()
+        test = smoke_tests_utils.Test(
             'kubernetes-context-failover',
             [
                 # Check if kind-skypilot is provisioned with H100 annotations already
@@ -606,4 +599,4 @@ def test_kubernetes_context_failover():
             f'sky down -y {name}-1 {name}-3',
             env={'SKYPILOT_CONFIG': f.name},
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)

@@ -23,12 +23,7 @@ import tempfile
 import textwrap
 
 import pytest
-from smoke_tests.util import get_cluster_name
-from smoke_tests.util import get_cmd_wait_until_cluster_status_contains_wildcard
-from smoke_tests.util import (
-    get_cmd_wait_until_managed_job_status_contains_matching_job_name)
-from smoke_tests.util import run_one_test
-from smoke_tests.util import Test
+from smoke_tests import smoke_tests_utils
 
 import sky
 from sky.skylet import constants
@@ -37,8 +32,8 @@ from sky.skylet import constants
 # ---------- Test region ----------
 @pytest.mark.aws
 def test_aws_region():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_region',
         [
             f'sky launch -y -c {name} --region us-east-2 examples/minimal.yaml',
@@ -53,12 +48,12 @@ def test_aws_region():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
 
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
@@ -67,7 +62,7 @@ def test_aws_with_ssh_proxy_command():
             ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
         f.flush()
-        test = Test(
+        test = smoke_tests_utils.Test(
             'aws_with_ssh_proxy_command',
             [
                 f'sky launch -y -c jump-{name} --cloud aws --cpus 2 --region us-east-1',
@@ -81,11 +76,13 @@ def test_aws_with_ssh_proxy_command():
                 f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
+                smoke_tests_utils.
                 get_cmd_wait_until_cluster_status_contains_wildcard(
                     cluster_name_wildcard='sky-jobs-controller-*',
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=300),
                 f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
+                smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[
@@ -97,13 +94,13 @@ def test_aws_with_ssh_proxy_command():
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
         )
-        run_one_test(test)
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_region_and_service_account():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_region',
         [
             f'sky launch -y -c {name} --region us-central1 --cloud gcp tests/test_yamls/minimal.yaml',
@@ -120,14 +117,14 @@ def test_gcp_region_and_service_account():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
 def test_ibm_region():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     region = 'eu-de'
-    test = Test(
+    test = smoke_tests_utils.Test(
         'region',
         [
             f'sky launch -y -c {name} --cloud ibm --region {region} examples/minimal.yaml',
@@ -137,13 +134,13 @@ def test_ibm_region():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
 def test_azure_region():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'azure_region',
         [
             f'sky launch -y -c {name} --region eastus2 --cloud azure tests/test_yamls/minimal.yaml',
@@ -160,14 +157,14 @@ def test_azure_region():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Test zone ----------
 @pytest.mark.aws
 def test_aws_zone():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_zone',
         [
             f'sky launch -y -c {name} examples/minimal.yaml --zone us-east-2b',
@@ -177,14 +174,14 @@ def test_aws_zone():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
 def test_ibm_zone():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     zone = 'eu-de-2'
-    test = Test(
+    test = smoke_tests_utils.Test(
         'zone',
         [
             f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml --zone {zone}',
@@ -194,13 +191,13 @@ def test_ibm_zone():
         ],
         f'sky down -y {name} {name}-2 {name}-3',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_zone():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_zone',
         [
             f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
@@ -210,4 +207,4 @@ def test_gcp_zone():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)

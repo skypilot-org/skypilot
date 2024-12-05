@@ -20,11 +20,7 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import pytest
-from smoke_tests.util import get_cluster_name
-from smoke_tests.util import get_cmd_wait_until_cluster_is_not_found
-from smoke_tests.util import get_cmd_wait_until_cluster_status_contains
-from smoke_tests.util import run_one_test
-from smoke_tests.util import Test
+from smoke_tests import smoke_tests_utils
 
 import sky
 
@@ -32,8 +28,8 @@ import sky
 # ---------- Test the image ----------
 @pytest.mark.aws
 def test_aws_images():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_images',
         [
             f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
@@ -47,13 +43,13 @@ def test_aws_images():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_images():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_images',
         [
             f'sky launch -y -c {name} --image-id skypilot:gpu-debian-10 --cloud gcp tests/test_yamls/minimal.yaml',
@@ -67,13 +63,13 @@ def test_gcp_images():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.azure
 def test_azure_images():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'azure_images',
         [
             f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-2204 --cloud azure tests/test_yamls/minimal.yaml',
@@ -87,13 +83,13 @@ def test_azure_images():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_aws_image_id_dict():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_image_id_dict',
         [
             # Use image id dict.
@@ -106,13 +102,13 @@ def test_aws_image_id_dict():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_image_id_dict():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_image_id_dict',
         [
             # Use image id dict.
@@ -125,13 +121,13 @@ def test_gcp_image_id_dict():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_aws_image_id_dict_region():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_image_id_dict_region',
         [
             # YAML has
@@ -162,13 +158,13 @@ def test_aws_image_id_dict_region():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_image_id_dict_region():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_image_id_dict_region',
         [
             # Use region to filter image_id dict.
@@ -195,13 +191,13 @@ def test_gcp_image_id_dict_region():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_aws_image_id_dict_zone():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'aws_image_id_dict_zone',
         [
             # YAML has
@@ -233,13 +229,13 @@ def test_aws_image_id_dict_zone():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_image_id_dict_zone():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'gcp_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
@@ -267,19 +263,19 @@ def test_gcp_image_id_dict_zone():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_clone_disk_aws():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'clone_disk_aws',
         [
             f'sky launch -y -c {name} --cloud aws --region us-east-2 --retry-until-up "echo hello > ~/user_file.txt"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
-            get_cmd_wait_until_cluster_status_contains(
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
                 timeout=60),
@@ -294,13 +290,13 @@ def test_clone_disk_aws():
         f'sky down -y {name} {name}-clone {name}-clone-2',
         timeout=30 * 60,
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_clone_disk_gcp():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'clone_disk_gcp',
         [
             f'sky launch -y -c {name} --cloud gcp --zone us-east1-b --retry-until-up "echo hello > ~/user_file.txt"',
@@ -313,14 +309,14 @@ def test_clone_disk_gcp():
         ],
         f'sky down -y {name} {name}-clone {name}-clone-2',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_mig():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     region = 'us-central1'
-    test = Test(
+    test = smoke_tests_utils.Test(
         'gcp_mig',
         [
             f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
@@ -331,8 +327,8 @@ def test_gcp_mig():
             # Check MIG exists.
             f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
             f'sky autostop -i 0 --down -y {name}',
-            get_cmd_wait_until_cluster_is_not_found(cluster_name=name,
-                                                    timeout=120),
+            smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
+                cluster_name=name, timeout=120),
             f'gcloud compute instance-templates list | grep "sky-it-{name}"',
             # Launch again with the same region. The original instance template
             # should be removed.
@@ -343,12 +339,12 @@ def test_gcp_mig():
         ],
         f'sky down -y {name}',
         env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml'})
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_force_enable_external_ips():
-    name = get_cluster_name()
+    name = smoke_tests_utils.get_cluster_name()
     test_commands = [
         f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
@@ -361,17 +357,17 @@ def test_gcp_force_enable_external_ips():
         f'sky down -y {name}',
     ]
     skypilot_config = 'tests/test_yamls/force_enable_external_ips_config.yaml'
-    test = Test('gcp_force_enable_external_ips',
-                test_commands,
-                f'sky down -y {name}',
-                env={'SKYPILOT_CONFIG': skypilot_config})
-    run_one_test(test)
+    test = smoke_tests_utils.Test('gcp_force_enable_external_ips',
+                                  test_commands,
+                                  f'sky down -y {name}',
+                                  env={'SKYPILOT_CONFIG': skypilot_config})
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.aws
 def test_image_no_conda():
-    name = get_cluster_name()
-    test = Test(
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
         'image_no_conda',
         [
             # Use image id dict.
@@ -384,14 +380,14 @@ def test_image_no_conda():
         ],
         f'sky down -y {name}',
     )
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_custom_default_conda_env(generic_cloud: str):
-    name = get_cluster_name()
-    test = Test('custom_default_conda_env', [
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky status -r {name} | grep "UP"',
         f'sky logs {name} 1 --status',
@@ -399,7 +395,7 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 2 --status',
         f'sky autostop -y -i 0 {name}',
-        get_cmd_wait_until_cluster_status_contains(
+        smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
             cluster_status=[sky.ClusterStatus.STOPPED],
             timeout=80),
@@ -408,4 +404,4 @@ def test_custom_default_conda_env(generic_cloud: str):
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky logs {name} 3 --status',
     ], f'sky down -y {name}')
-    run_one_test(test)
+    smoke_tests_utils.run_one_test(test)

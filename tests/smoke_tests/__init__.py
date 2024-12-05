@@ -1,2 +1,2 @@
 """For smoke tests import."""
-__all__ = ['util']
+__all__ = ['smoke_tests_utils']
