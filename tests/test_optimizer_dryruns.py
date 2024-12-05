@@ -663,7 +663,8 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
     _test_resources_launch(monkeypatch, zone='us-west2-a')
 
     # Maps to AWS.
-    _test_resources_launch(monkeypatch, region='us-east-2')
+    # Not use us-east-2 or us-west-1 as it is also supported by Lambda.
+    _test_resources_launch(monkeypatch, region='eu-south-1')
     _test_resources_launch(monkeypatch, zone='us-west-2a')
 
     # `sky launch`
