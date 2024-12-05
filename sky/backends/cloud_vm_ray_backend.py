@@ -2375,15 +2375,17 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
         if self.cached_cluster_info is None:
-            # We have `or self.cached_external_ips is None` here, because
+            # We have `and self.cached_external_ips is None` here, because
             # when a cluster's cloud is just upgraded to the new provsioner,
             # although it has the cached_external_ips, the cached_cluster_info
             # can be None. We need to update it here, even when force_cached is
             # set to True.
             # TODO: We can remove `self.cached_external_ips is None` after
             # version 0.8.0.
-            assert not force_cached or self.cached_external_ips is not None, (
-                force_cached, self.cached_external_ips)
+            if force_cached and self.cached_external_ips is None:
+                raise RuntimeError(
+                    'Tried to use cached cluster info, but it\'s missing for '
+                    f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(

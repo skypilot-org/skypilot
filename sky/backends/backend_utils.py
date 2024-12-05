@@ -123,7 +123,7 @@ _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
 # request) and (the instances appearing on the cloud).
 # See https://github.com/skypilot-org/skypilot/issues/4431.
 _LAUNCH_DOUBLE_CHECK_WINDOW = 60
-_LAUNCH_DOUBLE_CHECK_DELAY = 2
+_LAUNCH_DOUBLE_CHECK_DELAY = 1
 
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
@@ -1803,13 +1803,12 @@ def _update_cluster_status_no_lock(
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
-            logger.debug(str(e))
+            logger.debug(common_utils.format_exception(e))
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
-            logger.debug(
-                f'Refreshing status ({cluster_name!r}) failed: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            logger.debug(f'Refreshing status ({cluster_name!r}) failed: ',
+                         exc_info=e)
         return False
 
     # Determining if the cluster is healthy (UP):
