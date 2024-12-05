@@ -98,6 +98,11 @@ _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 30
 # The maximum retry count for fetching IP address.
 _FETCH_IP_MAX_ATTEMPTS = 3
 
+# How many times to query the cloud provider to make sure instances are
+# stopping/terminating, and how long to wait between each query.
+_TEARDOWN_WAIT_MAX_ATTEMPTS = 10
+_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS = 1
+
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
     '{cluster_name}. {extra_reason}'
@@ -4083,6 +4088,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         * Removing the terminated cluster's scripts and ray yaml files.
         """
         cluster_name_on_cloud = handle.cluster_name_on_cloud
+        cloud = handle.launched_resources.cloud
 
         if (terminate and handle.launched_resources.is_image_managed is True):
             # Delete the image when terminating a "cloned" cluster, i.e.,
@@ -4103,7 +4109,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
         if terminate:
-            cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
             try:
                 cloud.check_features_are_supported(
@@ -4129,6 +4134,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # be removed after the cluster entry in the database is removed.
         config = common_utils.read_yaml(handle.cluster_yaml)
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+
+        # Confirm that instances have actually transitioned state before
+        # updating the state database.
+        attempts = 0
+        while True:
+            try:
+                logger.debug(f'instance statuses attempt {attempts + 1}')
+                node_status_dict = provision_lib.query_instances(
+                    repr(cloud),
+                    cluster_name_on_cloud,
+                    config['provider'],
+                    non_terminated_only=False)
+                # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
+                # between "stopping/stopped" and "terminating/terminated", so we
+                # allow for either status instead of casing on `terminate`.
+                for node_id, node_status in node_status_dict.items():
+                    logger.debug(f'{node_id} status: {node_status}')
+                    if node_status not in [
+                            None, status_lib.ClusterStatus.STOPPED
+                    ]:
+                        raise RuntimeError(f'Instance {node_id} in unexpected '
+                                           f'state {node_status}.')
+                break
+            except RuntimeError:
+                attempts += 1
+                if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
+                    time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
+                else:
+                    raise
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
