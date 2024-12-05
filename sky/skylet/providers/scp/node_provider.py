@@ -357,30 +357,50 @@ class SCPNodeProvider(NodeProvider):
     @_retry_on_creation
     def _add_firewall_inbound(self, firewall_id, internal_ip):
 
-        rule_info = self.scp_client.add_firewall_inbound_rule(
-            firewall_id, internal_ip)
-        rule_id = rule_info['resourceId']
-        while True:
-            time.sleep(5)
-            rule_info = self.scp_client.get_firewall_rule_info(
-                firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE":
-                break
-        return rule_id
+        attempts = 0
+        max_attempts = 300
+
+        while attempts < max_attempts:
+            try:
+                rule_info = self.scp_client.add_firewall_inbound_rule(
+                    firewall_id, internal_ip)
+                rule_id = rule_info['resourceId']
+                while True:
+                    time.sleep(5)
+                    rule_info = self.scp_client.get_firewall_rule_info(
+                        firewall_id, rule_id)
+                    if rule_info['ruleState'] == "ACTIVE":
+                        break
+                return rule_id
+            except Exception as e:
+                attempts += 1
+                time.sleep(10)
+                continue
+        raise SCPError("Firewall Rule Error")
 
     @_retry_on_creation
     def _add_firewall_outbound(self, firewall_id, internal_ip):
 
-        rule_info = self.scp_client.add_firewall_outbound_rule(
-            firewall_id, internal_ip)
-        rule_id = rule_info['resourceId']
-        while True:
-            time.sleep(5)
-            rule_info = self.scp_client.get_firewall_rule_info(
-                firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE":
-                break
-        return rule_id
+        attempts = 0
+        max_attempts = 300
+
+        while attempts < max_attempts:
+            try:
+                rule_info = self.scp_client.add_firewall_outbound_rule(
+                    firewall_id, internal_ip)
+                rule_id = rule_info['resourceId']
+                while True:
+                    time.sleep(5)
+                    rule_info = self.scp_client.get_firewall_rule_info(
+                        firewall_id, rule_id)
+                    if rule_info['ruleState'] == "ACTIVE":
+                        break
+                return rule_id
+            except Exception as e:
+                attempts += 1
+                time.sleep(10)
+                continue
+        raise SCPError("Firewall Rule Error")
 
     def _get_firewall_id(self, vpc_id):
 
