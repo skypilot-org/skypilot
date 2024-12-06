@@ -1446,11 +1446,12 @@ def test_azure_storage_mounts_with_stop():
                             get_default_storage_account_name(default_region))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
+    # if the file does not exist, az storage blob list returns '[]'
     ls_hello_command = (f'output=$(az storage blob list -c {storage_name} '
                         f'--account-name {storage_account_name} '
                         f'--account-key {storage_account_key} '
                         f'--prefix hello.txt) '
-                        f'[ "$output" = "[]" ] && exit 1')
+                        f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, cloud, False)
@@ -1477,7 +1478,7 @@ def test_azure_storage_mounts_with_stop_only_allow_mount():
                         f'--account-name {storage_account_name} '
                         f'--account-key {storage_account_key} '
                         f'--prefix hello.txt) '
-                        f'[ "$output" = "[]" ] && exit 1')
+                        f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, cloud, True)
