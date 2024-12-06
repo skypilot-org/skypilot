@@ -175,8 +175,7 @@ class RunPod(clouds.Cloud):
         use_spot = resources.use_spot
 
         hourly_cost = r.cloud.instance_type_to_hourly_cost(
-            instance_type=instance_type, use_spot=use_spot
-        )
+            instance_type=instance_type, use_spot=use_spot)
 
         return {
             'instance_type': instance_type,

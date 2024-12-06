@@ -143,6 +143,14 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     custom_ports_str = ''
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
+
+    docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
+                   f'bash init.sh\'')
+    ports = (f'22/tcp,'
+             f'{custom_ports_str}'
+             f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
+             f'{constants.SKY_REMOTE_RAY_PORT}/http')
+
     if preemptible is None or not preemptible:
         new_instance = runpod.runpod.create_pod(
             name=name,
@@ -154,13 +162,10 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
             gpu_count=gpu_quantity,
             country_code=region,
-            ports=(f'22/tcp,'
-                   f'{custom_ports_str}'
-                   f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-                   f'{constants.SKY_REMOTE_RAY_PORT}/http'),
+            ports=ports,
             support_public_ip=True,
-            docker_args=
-            f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'')
+            docker_args=docker_args,
+        )
     else:
         new_instance = create_spot_pod(
             name=name,
@@ -173,14 +178,10 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             min_vcpu_count=4 * gpu_quantity,
             min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
             gpu_count=gpu_quantity,
-            # country_code=region,
-            ports=(f'22/tcp,'
-                   f'{custom_ports_str}'
-                   f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-                   f'{constants.SKY_REMOTE_RAY_PORT}/http'),
+            country_code=region,
+            ports=ports,
             support_public_ip=True,
-            docker_args=
-            f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'',
+            docker_args=docker_args,
         )
 
     return new_instance['id']

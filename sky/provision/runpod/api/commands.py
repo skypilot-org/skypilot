@@ -1,3 +1,18 @@
+"""This module provides functions to generate GraphQL mutations for deploying
+spot instance Pods on RunPod.
+
+Functions:
+    generate_spot_pod_deployment_mutation: Generates a GraphQL mutation string
+        for deploying a spot instance Pod on RunPod.
+
+Example:
+    >>> mutation = generate_spot_pod_deployment_mutation(
+            name='test',
+            image_name='runpod/stack',
+            gpu_type_id='NVIDIA GeForce RTX 3070',
+            bid_per_gpu=0.3
+        )
+"""
 from typing import List, Optional
 
 from runpod import get_gpu
@@ -13,12 +28,12 @@ def create_spot_pod(
     gpu_type_id: str,
     bid_per_gpu: float,
     cloud_type: str = 'ALL',
+    volume_mount_path: str = '/runpod-volume',
     gpu_count: Optional[int] = None,
     min_memory_in_gb: Optional[int] = None,
     min_vcpu_count: Optional[int] = None,
     container_disk_in_gb: Optional[int] = None,
     volume_in_gb: Optional[int] = None,
-    volume_mount_path: Optional[str] = None,
     ports: Optional[str] = None,
     start_ssh: Optional[bool] = True,
     start_jupyter: Optional[bool] = False,
@@ -37,41 +52,20 @@ def create_spot_pod(
     template_id: Optional[str] = None,
     volume_key: Optional[str] = None,
 ) -> dict:
-    """
-    Create a Spot pod.
+    """This module provides functions to generate GraphQL mutations for
+    deploying spot instance Pods on RunPod.
 
-    Parameters:
-        name (str): The name of the Pod.
-        image_name (str): The Docker image to use for the Pod environment.
-        gpu_type_id (str): The type of GPU required, e.g., 'NVIDIA RTX A6000'.
-        bid_per_gpu (float): The bid price per GPU for the spot instance.
-        cloud_type (str, optional): The type of cloud resources, default is 'ALL'.
-        gpu_count (int, optional): The number of GPUs required.
-        min_memory_in_gb (int, optional): Minimum memory (in GB) required for the instance.
-        min_vcpu_count (int, optional): Minimum number of virtual CPUs required.
-        container_disk_in_gb (int, optional): Size of the container disk in GB.
-        volume_in_gb (int, optional): Size of the volume in GB.
-        volume_mount_path (str, optional): Mount path for the volume, e.g., '/workspace'.
-        ports (str, optional): Ports to expose, formatted as 'port/protocol', e.g., '8888/http'.
-        start_ssh (bool, optional): Whether to enable SSH access to the Pod. Default is True.
-        start_jupyter (bool, optional): Whether to enable Jupyter Notebook in the Pod. Default is False.
-        env (dict, optional): Environment variables to set, provided as a dictionary of key-value pairs.
-        docker_args (str, optional): Additional Docker runtime arguments for the Pod.
-        support_public_ip (bool, optional): Whether to support public IP for the Pod. Default is True.
-        terminate_after (str, optional): Time limit after which the Pod will automatically terminate, e.g., '1h'.
-        stop_after (str, optional): Time limit after which the Pod will automatically stop, e.g., '1h'.
-        data_center_id (str, optional): Specific data center ID to target for deployment.
-        country_code (str, optional): Country code for regional targeting of deployment.
-        network_volume_id (str, optional): ID of the network volume to attach.
-        allowed_cuda_versions (List[str], optional): List of compatible CUDA versions for the Pod.
-        min_download (int, optional): Minimum network download speed (in Mbps) required.
-        min_upload (int, optional): Minimum network upload speed (in Mbps) required.
-        cuda_version (str, optional): Preferred CUDA version for the Pod.
-        template_id (str, optional): ID of the Pod template to use for deployment.
-        volume_key (str, optional): Encryption key for the Pod's attached volume.
-    :example:
+    Functions:
+        generate_spot_pod_deployment_mutation: Generates a GraphQL mutation
+            string for deploying a spot instance Pod on RunPod.
 
-    >>> pod_id = create_spot_pod('test', 'runpod/stack', 'NVIDIA GeForce RTX 3070', bid_per_gpu=0.3)
+    Example:
+        >>> mutation = generate_spot_pod_deployment_mutation(
+                name='test',
+                image_name='runpod/stack',
+                gpu_type_id='NVIDIA GeForce RTX 3070',
+                bid_per_gpu=0.3
+            )
     """
     get_gpu(gpu_type_id)
     # refer to https://graphql-spec.runpod.io/#definition-CloudTypeEnum
@@ -87,33 +81,37 @@ def create_spot_pod(
 
     if container_disk_in_gb is None and template_id is None:
         container_disk_in_gb = 10
+
     mutation = generate_spot_pod_deployment_mutation(
-        name,
-        image_name,
-        gpu_type_id,
-        bid_per_gpu,
-        cloud_type,
-        gpu_count,
-        min_memory_in_gb,
-        min_vcpu_count,
-        container_disk_in_gb,
-        volume_in_gb,
-        volume_mount_path,
-        ports,
-        start_ssh,
-        start_jupyter,
-        env,
-        docker_args,
-        support_public_ip,
-        terminate_after,
-        stop_after,
-        data_center_id,
-        country_code,
-        network_volume_id,
-        allowed_cuda_versions,
-        volume_key,
+        name=name,
+        image_name=image_name,
+        gpu_type_id=gpu_type_id,
+        bid_per_gpu=bid_per_gpu,
+        cloud_type=cloud_type,
+        gpu_count=gpu_count,
+        min_memory_in_gb=min_memory_in_gb,
+        min_vcpu_count=min_vcpu_count,
+        container_disk_in_gb=container_disk_in_gb,
+        volume_in_gb=volume_in_gb,
+        volume_mount_path=volume_mount_path,
+        ports=ports,
+        start_ssh=start_ssh,
+        start_jupyter=start_jupyter,
+        env=env,
+        docker_args=docker_args,
+        support_public_ip=support_public_ip,
+        terminate_after=terminate_after,
+        stop_after=stop_after,
+        data_center_id=data_center_id,
+        country_code=country_code,
+        network_volume_id=network_volume_id,
+        allowed_cuda_versions=allowed_cuda_versions,
+        min_download=min_download,
+        min_upload=min_upload,
+        cuda_version=cuda_version,
+        template_id=template_id,
+        volume_key=volume_key,
     )
 
-    raw_response = run_graphql_query(mutation)
-    cleaned_response = raw_response['data']['podRentInterruptable']
-    return cleaned_response
+    response = run_graphql_query(mutation)
+    return response['data']['podRentInterruptable']
