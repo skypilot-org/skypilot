@@ -10,6 +10,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Define a registry for load balancing policies
+LB_POLICIES = {}
+DEFAULT_LB_POLICY = None
+
 
 def _request_repr(request: 'fastapi.Request') -> str:
     return ('<Request '
@@ -24,6 +28,24 @@ class LoadBalancingPolicy:
 
     def __init__(self) -> None:
         self.ready_replicas: List[str] = []
+
+    def __init_subclass__(cls, name: str, default: bool = False):
+        LB_POLICIES[name] = cls
+        if default:
+            global DEFAULT_LB_POLICY
+            assert DEFAULT_LB_POLICY is None, (
+                'Only one policy can be default.')
+            DEFAULT_LB_POLICY = name
+
+    @classmethod
+    def make(cls, policy_name: Optional[str] = None) -> 'LoadBalancingPolicy':
+        """Create a load balancing policy from a name."""
+        if policy_name is None:
+            policy_name = DEFAULT_LB_POLICY
+
+        if policy_name not in LB_POLICIES:
+            raise ValueError(f'Unknown load balancing policy: {policy_name}')
+        return LB_POLICIES[policy_name]()
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
@@ -44,7 +66,7 @@ class LoadBalancingPolicy:
         raise NotImplementedError
 
 
-class RoundRobinPolicy(LoadBalancingPolicy):
+class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
     """Round-robin load balancing policy."""
 
     def __init__(self) -> None:

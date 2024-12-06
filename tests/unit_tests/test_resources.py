@@ -140,6 +140,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
+                                            num_nodes=1,
                                             dryrun=True)
 
     expected_config_base = {
@@ -180,6 +181,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
+                                            num_nodes=1,
                                             dryrun=True)
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
@@ -195,6 +197,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
+                                            num_nodes=1,
                                             dryrun=True)
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')

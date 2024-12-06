@@ -486,7 +486,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -539,7 +539,14 @@ def _parse_override_params(
         else:
             override_params['disk_tier'] = disk_tier
     if ports:
-        override_params['ports'] = ports
+        if any(p.lower() == 'none' for p in ports):
+            if len(ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify both "none" and other '
+                                     'ports.')
+            override_params['ports'] = None
+        else:
+            override_params['ports'] = ports
     return override_params
 
 
@@ -730,7 +737,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
-    ports: Optional[Tuple[str]] = None,
+    ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
@@ -1084,7 +1091,7 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: Tuple[str],
+    ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -2022,6 +2029,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2035,6 +2048,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -2101,7 +2115,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    core.tail_logs(cluster, job_id, follow, tail)
 
 
 @cli.command()
@@ -3095,6 +3109,7 @@ def show_gpus(
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+    no_permissions_str = '<no permissions>'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3135,13 +3150,16 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg +
+                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
+            available_qty = available[gpu] if available[gpu] != -1 else (
+                no_permissions_str)
             realtime_gpu_table.add_row([
                 gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available_qty
             ])
         return realtime_gpu_table
 
@@ -3151,10 +3169,12 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
+            available = node_info.free[
+                'accelerators_available'] if node_info.free[
+                    'accelerators_available'] != -1 else no_permissions_str
             node_table.add_row([
-                node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                node_name, node_info.accelerator_type,
+                node_info.total['accelerator_count'], available
             ])
         return node_table
 
@@ -3209,8 +3229,18 @@ def show_gpus(
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
+                    # TODO(Doyoung): Update the message with the multi-host TPU
+                    # support.
+                    k8s_per_node_acc_message = (
+                        'Kubernetes per node accelerator availability ')
+                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
+                            context):
+                        k8s_per_node_acc_message += (
+                            '(Note: Multi-host TPUs are detected and excluded '
+                            'from the display as multi-host TPUs are not '
+                            'supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node GPU availability'
+                           f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
@@ -3676,13 +3706,24 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='cyan')
     dag, _ = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
-    dag = sky.optimize(dag)
 
-    if not yes:
+    if yes:
+        # Skip resource preview if -y is set, since we are probably running in
+        # a script and the user won't have a chance to review it anyway.
+        # This can save a couple of seconds.
+        click.secho(
+            f'Resources for managed job {dag.name!r} will be computed on the '
+            'managed jobs controller, since --yes is set.',
+            fg='cyan')
+
+    else:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='cyan')
+        dag = sky.optimize(dag)
+
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
@@ -3873,16 +3914,25 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest job logs, restarting the jobs controller if stopped.'
+)
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+              controller: bool, refresh: bool):
     """Tail the log of a managed job."""
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
                                follow=follow,
-                               controller=controller)
+                               controller=controller,
+                               refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

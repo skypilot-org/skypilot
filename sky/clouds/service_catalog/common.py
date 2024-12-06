@@ -15,6 +15,7 @@ from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
+from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -69,8 +70,7 @@ def is_catalog_modified(filename: str) -> bool:
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     md5_filepath = meta_path + '.md5'
     if os.path.exists(md5_filepath):
-        with open(catalog_path, 'rb') as f:
-            file_md5 = hashlib.md5(f.read()).hexdigest()
+        file_md5 = common_utils.hash_file(catalog_path, 'md5').hexdigest()
         with open(md5_filepath, 'r', encoding='utf-8') as f:
             last_md5 = f.read()
         return file_md5 != last_md5
@@ -203,7 +203,8 @@ def read_catalog(filename: str,
                             f'Updating {cloud} catalog: {filename}') +
                         f'{update_frequency_str}'):
                     try:
-                        r = requests.get(url)
+                        r = requests.get(url=url,
+                                         headers={'User-Agent': 'SkyPilot/0.7'})
                         r.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         error_str = (f'Failed to fetch {cloud} catalog '

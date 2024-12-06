@@ -22,6 +22,7 @@ from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -105,6 +106,7 @@ class Optimizer:
         return egress_time
 
     @staticmethod
+    @timeline.event
     def optimize(dag: 'dag_lib.Dag',
                  minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[

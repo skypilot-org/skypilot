@@ -78,8 +78,8 @@ We can launch it with the following:
 
 .. code-block:: console
 
+  $ git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   $ sky jobs launch -n bert-qa bert_qa.yaml
-
 
 .. code-block:: yaml
 
@@ -88,39 +88,37 @@ We can launch it with the following:
 
   resources:
     accelerators: V100:1
-    # Use spot instances to save cost.
-    use_spot: true
+    use_spot: true  # Use spot instances to save cost.
 
-  # Assume your working directory is under `~/transformers`.
-  # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
-  workdir: ~/transformers
-
-  setup: |
+  envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
     # to pass the key in the command line, during `sky jobs launch`.
-    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+    WANDB_API_KEY:
 
+  # Assume your working directory is under `~/transformers`.
+  workdir: ~/transformers
+
+  setup: |
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
   run: |
-    cd ./examples/pytorch/question-answering/
+    cd examples/pytorch/question-answering/
     python run_qa.py \
-    --model_name_or_path bert-base-uncased \
-    --dataset_name squad \
-    --do_train \
-    --do_eval \
-    --per_device_train_batch_size 12 \
-    --learning_rate 3e-5 \
-    --num_train_epochs 50 \
-    --max_seq_length 384 \
-    --doc_stride 128 \
-    --report_to wandb
-
+      --model_name_or_path bert-base-uncased \
+      --dataset_name squad \
+      --do_train \
+      --do_eval \
+      --per_device_train_batch_size 12 \
+      --learning_rate 3e-5 \
+      --num_train_epochs 50 \
+      --max_seq_length 384 \
+      --doc_stride 128 \
+      --report_to wandb \
+      --output_dir /tmp/bert_qa/
 
 .. note::
 
@@ -162,55 +160,52 @@ An End-to-End Example
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
-  :emphasize-lines: 13-16,42-45
+  :emphasize-lines: 8-11,41-44
 
   # bert_qa.yaml
   name: bert-qa
 
   resources:
     accelerators: V100:1
-    use_spot: true
-
-  # Assume your working directory is under `~/transformers`.
-  # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
-  workdir: ~/transformers
+    use_spot: true  # Use spot instances to save cost.
 
   file_mounts:
     /checkpoint:
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
 
-  setup: |
+  envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
     # to pass the key in the command line, during `sky jobs launch`.
-    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+    WANDB_API_KEY:
 
+  # Assume your working directory is under `~/transformers`.
+  workdir: ~/transformers
+
+  setup: |
     pip install -e .
     cd examples/pytorch/question-answering/
-    pip install -r requirements.txt
+    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
   run: |
-    cd ./examples/pytorch/question-answering/
+    cd examples/pytorch/question-answering/
     python run_qa.py \
-    --model_name_or_path bert-base-uncased \
-    --dataset_name squad \
-    --do_train \
-    --do_eval \
-    --per_device_train_batch_size 12 \
-    --learning_rate 3e-5 \
-    --num_train_epochs 50 \
-    --max_seq_length 384 \
-    --doc_stride 128 \
-    --report_to wandb \
-    --run_name $SKYPILOT_TASK_ID \
-    --output_dir /checkpoint/bert_qa/ \
-    --save_total_limit 10 \
-    --save_steps 1000
-
-
+      --model_name_or_path bert-base-uncased \
+      --dataset_name squad \
+      --do_train \
+      --do_eval \
+      --per_device_train_batch_size 12 \
+      --learning_rate 3e-5 \
+      --num_train_epochs 50 \
+      --max_seq_length 384 \
+      --doc_stride 128 \
+      --report_to wandb \
+      --output_dir /checkpoint/bert_qa/ \
+      --run_name $SKYPILOT_TASK_ID \
+      --save_total_limit 10 \
+      --save_steps 1000
 
 As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up
 the output directory and frequency of checkpointing (see more

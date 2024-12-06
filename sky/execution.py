@@ -11,10 +11,10 @@ import sky
 from sky import admin_policy
 from sky import backends
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -108,6 +108,7 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    skip_unnecessary_provisioning: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
@@ -128,8 +129,9 @@ def _execute(
         Note that if errors occur during provisioning/data syncing/setting up,
         the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
-      handle: Optional[backends.ResourceHandle]; if provided, execution will use
-        an existing backend cluster handle instead of provisioning a new one.
+      handle: Optional[backends.ResourceHandle]; if provided, execution will
+        attempt to use an existing backend cluster handle instead of
+        provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
       retry_until_up: bool; whether to retry the provisioning until the cluster
@@ -150,6 +152,11 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
+      clone_disk_from: Optional[str]; if set, clone the disk from the specified
+        cluster.
+      skip_unecessary_provisioning: bool; if True, compare the calculated
+        cluster config to the current cluster's config. If they match, shortcut
+        provisioning even if we have Stage.PROVISION.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -267,6 +274,13 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
+
+                    controller = controller_utils.Controllers.from_name(
+                        cluster_name)
+                    if controller is not None:
+                        logger.info(
+                            f'Choosing resources for {controller.value.name}...'
+                        )
                     dag = sky.optimize(dag, minimize=optimize_target)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
@@ -281,13 +295,18 @@ def _execute(
 
     try:
         if Stage.PROVISION in stages:
-            if handle is None:
-                handle = backend.provision(task,
-                                           task.best_resources,
-                                           dryrun=dryrun,
-                                           stream_logs=stream_logs,
-                                           cluster_name=cluster_name,
-                                           retry_until_up=retry_until_up)
+            assert handle is None or skip_unnecessary_provisioning, (
+                'Provisioning requested, but handle is already set. PROVISION '
+                'should be excluded from stages or '
+                'skip_unecessary_provisioning should be set. ')
+            handle = backend.provision(
+                task,
+                task.best_resources,
+                dryrun=dryrun,
+                stream_logs=stream_logs,
+                cluster_name=cluster_name,
+                retry_until_up=retry_until_up,
+                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -298,7 +317,8 @@ def _execute(
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
         do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
-                          task.file_mounts is not None)
+                          (task.file_mounts is not None or
+                           task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
             logger.info(ux_utils.starting_message('Mounting files.'))
 
@@ -461,30 +481,50 @@ def launch(
 
     handle = None
     stages = None
+    skip_unnecessary_provisioning = False
     # Check if cluster exists and we are doing fast provisioning
     if fast and cluster_name is not None:
-        maybe_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
-        if maybe_handle is not None:
-            try:
-                # This will throw if the cluster is not available
-                backend_utils.check_cluster_available(
+        cluster_status, maybe_handle = (
+            backend_utils.refresh_cluster_status_handle(cluster_name))
+        if cluster_status == status_lib.ClusterStatus.INIT:
+            # If the cluster is INIT, it may be provisioning. We want to prevent
+            # concurrent calls from queueing up many sequential reprovision
+            # attempts. Since provisioning will hold the cluster status lock, we
+            # wait to hold that lock by force refreshing the status. This will
+            # block until the cluster finishes provisioning, then correctly see
+            # that it is UP.
+            # TODO(cooperc): If multiple processes launched in parallel see that
+            # the cluster is STOPPED or does not exist, they will still all try
+            # to provision it, since we do not hold the lock continuously from
+            # the status check until the provision call. Fixing this requires a
+            # bigger refactor.
+            cluster_status, maybe_handle = (
+                backend_utils.refresh_cluster_status_handle(
                     cluster_name,
-                    operation='executing tasks',
-                    check_cloud_vm_ray_backend=False,
-                    dryrun=dryrun)
-                handle = maybe_handle
-                # Get all stages
-                stages = [
-                    Stage.SYNC_WORKDIR,
-                    Stage.SYNC_FILE_MOUNTS,
-                    Stage.PRE_EXEC,
-                    Stage.EXEC,
-                    Stage.DOWN,
-                ]
-            except exceptions.ClusterNotUpError:
-                # Proceed with normal provisioning
-                pass
+                    force_refresh_statuses=[
+                        # If the cluster is INIT, we want to try to grab the
+                        # status lock, which should block until provisioning is
+                        # finished.
+                        status_lib.ClusterStatus.INIT,
+                    ],
+                    # Wait indefinitely to obtain the lock, so that we don't
+                    # have multiple processes launching the same cluster at
+                    # once.
+                    cluster_status_lock_timeout=-1,
+                ))
+        if cluster_status == status_lib.ClusterStatus.UP:
+            handle = maybe_handle
+            stages = [
+                # Provisioning will be short-circuited if the existing
+                # cluster config hash matches the calculated one.
+                Stage.PROVISION,
+                Stage.SYNC_WORKDIR,
+                Stage.SYNC_FILE_MOUNTS,
+                Stage.PRE_EXEC,
+                Stage.EXEC,
+                Stage.DOWN,
+            ]
+            skip_unnecessary_provisioning = True
 
     return _execute(
         entrypoint=entrypoint,
@@ -502,6 +542,7 @@ def launch(
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        skip_unnecessary_provisioning=skip_unnecessary_provisioning,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
@@ -558,8 +599,9 @@ def exec(  # pylint: disable=redefined-builtin
             submitted.
 
     Raises:
-        ValueError: if the specified cluster does not exist or is not in UP
-            status.
+        ValueError: if the specified cluster is not in UP status.
+        sky.exceptions.ClusterDoesNotExist: if the specified cluster does not
+            exist.
         sky.exceptions.NotSupportedError: if the specified cluster is a
             controller that does not support this operation.
 
