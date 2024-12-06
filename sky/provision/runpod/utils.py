@@ -102,7 +102,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
            image_name: str, ports: Optional[List[int]], public_key: str,
-           preemptible: Optional[bool]) -> str:
+           preemptible: Optional[bool], bid_per_gpu: float) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -167,6 +167,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             image_name=image_name,
             gpu_type_id=gpu_type,
             cloud_type=cloud_type,
+            bid_per_gpu=bid_per_gpu,
             container_disk_in_gb=disk_size,
             min_vcpu_count=4 * gpu_quantity,
             min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
@@ -179,7 +180,6 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             support_public_ip=True,
             docker_args=
             f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'',
-            bid_per_gpu=0.6
         )
 
     return new_instance['id']

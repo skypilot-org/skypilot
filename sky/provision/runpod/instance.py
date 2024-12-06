@@ -91,6 +91,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 ports=config.ports_to_open_on_launch,
                 public_key=config.node_config['PublicKey'],
                 preemptible=config.node_config['Preemptible'],
+                bid_per_gpu=config.node_config['bid_per_gpu'],
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
