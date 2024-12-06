@@ -269,7 +269,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--load-balancing-policy',
         choices=available_policies,
-        default='round_robin',
+        default=lb_policies.DEFAULT_LB_POLICY,
         help=f'The load balancing policy to use. Available policies: '
         f'{", ".join(available_policies)}.')
     args = parser.parse_args()
