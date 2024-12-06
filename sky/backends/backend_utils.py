@@ -1836,7 +1836,7 @@ def _update_cluster_status_no_lock(
 
     # All cases below are transitioning the cluster to non-UP states.
 
-    if len(node_statuses) == 0:
+    if not node_statuses:
         time_since_launch = time.time() - record['launched_at']
         if (record['status'] == status_lib.ClusterStatus.INIT and
                 time_since_launch < _LAUNCH_DOUBLE_CHECK_WINDOW):
@@ -1881,7 +1881,7 @@ def _update_cluster_status_no_lock(
     # terminated and we can set the cluster status to TERMINATED. This handles
     # the edge case where the cluster is terminated by the user manually through
     # the UI.
-    to_terminate = len(node_statuses) == 0
+    to_terminate = not node_statuses
 
     # A cluster is considered "abnormal", if some (but not all) nodes are
     # TERMINATED, or not all nodes are STOPPED. We check that with the following
