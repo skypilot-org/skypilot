@@ -169,10 +169,11 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             cloud_type=cloud_type,
             bid_per_gpu=bid_per_gpu,
             container_disk_in_gb=disk_size,
+            volume_in_gb=disk_size,
             min_vcpu_count=4 * gpu_quantity,
             min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
             gpu_count=gpu_quantity,
-            country_code=region,
+            # country_code=region,
             ports=(f'22/tcp,'
                    f'{custom_ports_str}'
                    f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'

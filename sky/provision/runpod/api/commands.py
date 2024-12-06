@@ -87,39 +87,33 @@ def create_spot_pod(
 
     if container_disk_in_gb is None and template_id is None:
         container_disk_in_gb = 10
-
-    raw_response = run_graphql_query(
-        generate_spot_pod_deployment_mutation(
-            name,
-            image_name,
-            gpu_type_id,
-            bid_per_gpu,
-            cloud_type,
-            gpu_count,
-            min_memory_in_gb,
-            min_vcpu_count,
-            container_disk_in_gb,
-            volume_in_gb,
-            volume_mount_path,
-            ports,
-            start_ssh,
-            start_jupyter,
-            env,
-            docker_args,
-            support_public_ip,
-            terminate_after,
-            stop_after,
-            data_center_id,
-            country_code,
-            network_volume_id,
-            allowed_cuda_versions,
-            min_download,
-            min_upload,
-            cuda_version,
-            template_id,
-            volume_key,
-        )
+    mutation = generate_spot_pod_deployment_mutation(
+        name,
+        image_name,
+        gpu_type_id,
+        bid_per_gpu,
+        cloud_type,
+        gpu_count,
+        min_memory_in_gb,
+        min_vcpu_count,
+        container_disk_in_gb,
+        volume_in_gb,
+        volume_mount_path,
+        ports,
+        start_ssh,
+        start_jupyter,
+        env,
+        docker_args,
+        support_public_ip,
+        terminate_after,
+        stop_after,
+        data_center_id,
+        country_code,
+        network_volume_id,
+        allowed_cuda_versions,
+        volume_key,
     )
 
-    cleaned_response = raw_response['data']['PodRentInterruptableInput']
+    raw_response = run_graphql_query(mutation)
+    cleaned_response = raw_response['data']['podRentInterruptable']
     return cleaned_response
