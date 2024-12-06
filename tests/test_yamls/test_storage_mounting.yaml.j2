@@ -20,13 +20,13 @@ file_mounts:
   /mount_private_copy:
     name: {{storage_name}}
     source: ~/tmp-workdir
-    mode: {% if only_allow_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
+    mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
 
   # Mounting private buckets in COPY mode with a list of files as source
   /mount_private_copy_lof:
     name: {{storage_name}}
     source: ['~/tmp-workdir/tmp file', '~/tmp-workdir/tmp file2']
-    mode: {% if only_allow_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
+    mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
 
   {% if include_private_mount | default(True) %}
   # Mounting private buckets in MOUNT mode

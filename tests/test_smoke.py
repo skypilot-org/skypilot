@@ -1337,14 +1337,14 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
                                        storage_name: str, ls_hello_command: str,
-                                       cloud: str, only_allow_mount: bool):
+                                       cloud: str, only_mount: bool):
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
     content = template.render(
         storage_name=storage_name,
         cloud=cloud,
-        only_allow_mount=only_allow_mount,
+        only_mount=only_mount,
     )
     f.write(content)
     f.flush()
@@ -1383,7 +1383,7 @@ def test_aws_storage_mounts_with_stop():
 
 
 @pytest.mark.aws
-def test_aws_storage_mounts_with_stop_only_allow_mount():
+def test_aws_storage_mounts_with_stop_only_mount():
     name = _get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
@@ -1392,7 +1392,7 @@ def test_aws_storage_mounts_with_stop_only_allow_mount():
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, cloud, True)
         test = Test(
-            'aws_storage_mounts_only_allow_mount',
+            'aws_storage_mounts_only_mount',
             test_commands,
             clean_command,
             timeout=20 * 60,  # 20 mins
@@ -1411,24 +1411,6 @@ def test_gcp_storage_mounts_with_stop():
             f, name, storage_name, ls_hello_command, cloud, False)
         test = Test(
             'gcp_storage_mounts',
-            test_commands,
-            clean_command,
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.gcp
-def test_gcp_storage_mounts_with_stop_only_allow_mount():
-    name = _get_cluster_name()
-    cloud = 'gcp'
-    storage_name = f'sky-test-{int(time.time())}'
-    ls_hello_command = f'gsutil ls gs://{storage_name}/hello.txt'
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, True)
-        test = Test(
-            'gcp_storage_mounts_only_allow_mount',
             test_commands,
             clean_command,
             timeout=20 * 60,  # 20 mins
@@ -1457,33 +1439,6 @@ def test_azure_storage_mounts_with_stop():
             f, name, storage_name, ls_hello_command, cloud, False)
         test = Test(
             'azure_storage_mounts',
-            test_commands,
-            clean_command,
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.azure
-def test_azure_storage_mounts_with_stop_only_allow_mount():
-    name = _get_cluster_name()
-    cloud = 'azure'
-    storage_name = f'sky-test-{int(time.time())}'
-    default_region = 'eastus'
-    storage_account_name = (storage_lib.AzureBlobStore.
-                            get_default_storage_account_name(default_region))
-    storage_account_key = data_utils.get_az_storage_account_key(
-        storage_account_name)
-    ls_hello_command = (f'output=$(az storage blob list -c {storage_name} '
-                        f'--account-name {storage_account_name} '
-                        f'--account-key {storage_account_key} '
-                        f'--prefix hello.txt) '
-                        f'[ "$output" = "[]" ] && exit 1 || exit 0')
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, True)
-        test = Test(
-            'azure_storage_mounts_only_allow_mount',
             test_commands,
             clean_command,
             timeout=20 * 60,  # 20 mins
