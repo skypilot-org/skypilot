@@ -1836,7 +1836,8 @@ def _update_cluster_status_no_lock(
 
     # All cases below are transitioning the cluster to non-UP states.
 
-    if not node_statuses:
+    if (not node_statuses and handle.launched_resources.cloud.STATUS_VERSION >=
+            clouds.StatusVersion.SKYPILOT):
         # Note: launched_at is set during sky launch, even on an existing
         # cluster. This could cause extra checks if the cluster was already up
         # before sky launch, but it will catch the case where the cluster was
