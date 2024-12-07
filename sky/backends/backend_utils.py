@@ -1836,10 +1836,14 @@ def _update_cluster_status_no_lock(
 
     # All cases below are transitioning the cluster to non-UP states.
 
-    if not node_statuses and record['status'] == status_lib.ClusterStatus.INIT:
-        cluster_duration = global_user_state.get_cluster_duration(
-            record['cluster_hash'])
-        if cluster_duration < _LAUNCH_DOUBLE_CHECK_WINDOW:
+    if not node_statuses:
+        # Note: launched_at is set during sky launch, even on an existing
+        # cluster. This could cause extra checks if the cluster was already up
+        # before sky launch, but it will catch the case where the cluster was
+        # terminated on the cloud and restarted by sky launch.
+        time_since_launch = time.time() - record['launched_at']
+        if (record['status'] == status_lib.ClusterStatus.INIT and
+                time_since_launch < _LAUNCH_DOUBLE_CHECK_WINDOW):
             # It's possible the instances for this cluster were just created,
             # and haven't appeared yet in the cloud API/console. Wait for a bit
             # and check again. This is a best-effort leak prevention check.

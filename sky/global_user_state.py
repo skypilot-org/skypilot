@@ -477,7 +477,7 @@ def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
     return usage_intervals[0][0]
 
 
-def get_cluster_duration(cluster_hash: str) -> int:
+def _get_cluster_duration(cluster_hash: str) -> int:
     total_duration = 0
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
@@ -678,7 +678,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         record = {
             'name': name,
             'launched_at': _get_cluster_launch_time(cluster_hash),
-            'duration': get_cluster_duration(cluster_hash),
+            'duration': _get_cluster_duration(cluster_hash),
             'num_nodes': num_nodes,
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
