@@ -4136,30 +4136,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # updating the state database.
         attempts = 0
         while True:
-            try:
-                logger.debug(f'instance statuses attempt {attempts + 1}')
-                node_status_dict = provision_lib.query_instances(
-                    repr(cloud),
-                    cluster_name_on_cloud,
-                    config['provider'],
-                    non_terminated_only=False)
+            logger.debug(f'instance statuses attempt {attempts + 1}')
+            node_status_dict = provision_lib.query_instances(
+                repr(cloud),
+                cluster_name_on_cloud,
+                config['provider'],
+                non_terminated_only=False)
+
+            unexpected_node_state: Optional[Tuple[str, str]] = None
+            for node_id, node_status in node_status_dict.items():
+                logger.debug(f'{node_id} status: {node_status}')
                 # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
                 # between "stopping/stopped" and "terminating/terminated", so we
                 # allow for either status instead of casing on `terminate`.
-                for node_id, node_status in node_status_dict.items():
-                    logger.debug(f'{node_id} status: {node_status}')
-                    if node_status not in [
-                            None, status_lib.ClusterStatus.STOPPED
-                    ]:
-                        raise RuntimeError(f'Instance {node_id} in unexpected '
-                                           f'state {node_status}.')
+                if node_status not in [None, status_lib.ClusterStatus.STOPPED]:
+                    unexpected_node_state = (node_id, node_status)
+
+            if unexpected_node_state is None:
                 break
-            except RuntimeError:
-                attempts += 1
-                if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
-                    time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
-                else:
-                    raise
+
+            attempts += 1
+            if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
+                time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
+            else:
+                (node_id, node_status) = unexpected_node_state
+                raise RuntimeError(f'Instance {node_id} in unexpected state '
+                                   f'{node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
