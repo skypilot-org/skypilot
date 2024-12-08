@@ -1839,9 +1839,8 @@ def _update_cluster_status_no_lock(
     if (not node_statuses and handle.launched_resources.cloud.STATUS_VERSION >=
             clouds.StatusVersion.SKYPILOT):
         # Note: launched_at is set during sky launch, even on an existing
-        # cluster. This could cause extra checks if the cluster was already up
-        # before sky launch, but it will catch the case where the cluster was
-        # terminated on the cloud and restarted by sky launch.
+        # cluster. This will catch the case where the cluster was terminated on
+        # the cloud and restarted by sky launch.
         time_since_launch = time.time() - record['launched_at']
         if (record['status'] == status_lib.ClusterStatus.INIT and
                 time_since_launch < _LAUNCH_DOUBLE_CHECK_WINDOW):

@@ -4133,7 +4133,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
 
         # Confirm that instances have actually transitioned state before
-        # updating the state database.
+        # updating the state database. We do this immediately before removing
+        # the state from the database, so that we can guarantee that this is
+        # always called before the state is removed. We considered running this
+        # check as part of provisioner.teardown_cluster or
+        # provision.terminate_instances, but it would open the door code paths
+        # that successfully call this function but do not first call
+        # teardown_cluster or terminate_instances. See
+        # https://github.com/skypilot-org/skypilot/pull/4443#discussion_r1872798032
         attempts = 0
         while True:
             logger.debug(f'instance statuses attempt {attempts + 1}')
