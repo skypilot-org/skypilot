@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import runpod
-from sky.provision.runpod.api.commands import create_spot_pod
+import sky.provision.runpod.api.commands as runpod_commands
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -167,14 +167,13 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             docker_args=docker_args,
         )
     else:
-        new_instance = create_spot_pod(
+        new_instance = runpod_commands.create_spot_pod(
             name=name,
             image_name=image_name,
             gpu_type_id=gpu_type,
             cloud_type=cloud_type,
             bid_per_gpu=bid_per_gpu,
             container_disk_in_gb=disk_size,
-            volume_in_gb=disk_size,
             min_vcpu_count=4 * gpu_quantity,
             min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
             gpu_count=gpu_quantity,

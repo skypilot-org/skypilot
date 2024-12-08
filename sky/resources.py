@@ -1014,7 +1014,8 @@ class Resources:
                     'The following labels are invalid:'
                     '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
-    def get_hourly_cost(self) -> float:
+    def get_cost(self, seconds: float) -> float:
+        """Returns cost in USD for the runtime in seconds."""
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self._instance_type, self.use_spot, self._region, self._zone)
@@ -1022,11 +1023,7 @@ class Resources:
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
-        return hourly_cost
-
-    def get_cost(self, seconds: float) -> float:
-        """Returns cost in USD for the runtime in seconds."""
-        return self.get_hourly_cost() * seconds / 3600
+        return hourly_cost * seconds / 3600
 
     def get_accelerators_str(self) -> str:
         accelerators = self.accelerators

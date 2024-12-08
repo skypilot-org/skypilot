@@ -1,6 +1,9 @@
 """This module provides functions to generate GraphQL mutations for deploying
 spot instance Pods on RunPod.
 
+Reference:
+    https://github.com/runpod/runpod-python/blob/main/runpod/api/mutations/pods.py
+
 Functions:
     generate_spot_pod_deployment_mutation: Generates a GraphQL mutation string
         for deploying a spot instance Pod on RunPod.

@@ -1,6 +1,9 @@
 """This module provides functions to generate GraphQL mutations for deploying
 spot instance Pods on RunPod.
 
+Reference:
+    https://github.com/runpod/runpod-python/blob/main/runpod/api/ctl_commands.py
+
 Functions:
     generate_spot_pod_deployment_mutation: Generates a GraphQL mutation string
         for deploying a spot instance Pod on RunPod.
@@ -15,11 +18,12 @@ Example:
 """
 from typing import List, Optional
 
-from runpod import get_gpu
-from runpod import get_user
-from runpod.api.graphql import run_graphql_query
+import runpod
 
 from sky.provision.runpod.api.pods import generate_spot_pod_deployment_mutation
+
+_INTERRUPTABLE_POD_FIELD: str = 'podRentInterruptable'
+_RESPONSE_DATA_FIELD: str = 'data'
 
 
 def create_spot_pod(
@@ -29,16 +33,16 @@ def create_spot_pod(
     bid_per_gpu: float,
     cloud_type: str = 'ALL',
     volume_mount_path: str = '/runpod-volume',
-    gpu_count: Optional[int] = None,
-    min_memory_in_gb: Optional[int] = None,
-    min_vcpu_count: Optional[int] = None,
+    gpu_count: Optional[int] = 1,
+    min_memory_in_gb: Optional[int] = 1,
+    min_vcpu_count: Optional[int] = 1,
     container_disk_in_gb: Optional[int] = None,
-    volume_in_gb: Optional[int] = None,
+    volume_in_gb: Optional[int] = 0,
     ports: Optional[str] = None,
     start_ssh: Optional[bool] = True,
     start_jupyter: Optional[bool] = False,
     env: Optional[dict] = None,
-    docker_args: Optional[str] = None,
+    docker_args: Optional[str] = '',
     support_public_ip: Optional[bool] = True,
     terminate_after: Optional[str] = None,
     stop_after: Optional[str] = None,
@@ -67,13 +71,13 @@ def create_spot_pod(
                 bid_per_gpu=0.3
             )
     """
-    get_gpu(gpu_type_id)
+    runpod.get_gpu(gpu_type_id)
     # refer to https://graphql-spec.runpod.io/#definition-CloudTypeEnum
     if cloud_type not in ['ALL', 'COMMUNITY', 'SECURE']:
         raise ValueError('cloud_type must be one of ALL, COMMUNITY or SECURE')
 
     if network_volume_id and data_center_id is None:
-        user_info = get_user()
+        user_info = runpod.get_user()
         for network_volume in user_info['networkVolumes']:
             if network_volume['id'] == network_volume_id:
                 data_center_id = network_volume['dataCenterId']
@@ -112,6 +116,5 @@ def create_spot_pod(
         template_id=template_id,
         volume_key=volume_key,
     )
-
-    response = run_graphql_query(mutation)
-    return response['data']['podRentInterruptable']
+    response = runpod.api.graphql.run_graphql_query(mutation)
+    return response[_RESPONSE_DATA_FIELD][_INTERRUPTABLE_POD_FIELD]
