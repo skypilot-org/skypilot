@@ -31,6 +31,7 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        load_balancer_type: Optional[str] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -64,6 +65,13 @@ class SkyServiceSpec:
                 raise ValueError(
                     f'Unknown load balancing policy: {load_balancing_policy}. '
                     f'Available policies: {list(serve.LB_POLICIES.keys())}')
+
+        if (load_balancer_type is not None and
+                load_balancer_type not in constants.LB_TYPES):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Unknown load balancer type: {load_balancer_type}. '
+                    f'Available load balancers: {constants.LB_TYPES}')
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
@@ -79,6 +87,7 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._load_balancer_type: Optional[str] = load_balancer_type
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -162,6 +171,8 @@ class SkyServiceSpec:
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
+        service_config['load_balancer_type'] = config.get(
+            'load_balancer_type', None)
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -219,6 +230,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('load_balancer_type', None, self._load_balancer_type)
         return config
 
     def probe_str(self):
@@ -270,6 +282,7 @@ class SkyServiceSpec:
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
             Spot Policy:                      {self.spot_policy_str()}
+            Load Balancer Type:               {self.load_balancer_type}
             Load Balancing Policy:            {self.load_balancing_policy}
         """)
 
@@ -329,3 +342,7 @@ class SkyServiceSpec:
     @property
     def load_balancing_policy(self) -> Optional[str]:
         return self._load_balancing_policy
+
+    @property
+    def load_balancer_type(self) -> Optional[str]:
+        return self._load_balancer_type

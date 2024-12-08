@@ -100,3 +100,11 @@ SERVE_VERSION = 2
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# TODO(ejj) ultimately these should be configurable by users.
+ENVOY_THREADS = '1'
+ENVOY_VERSION = '1.32.0'
+
+LB_TYPE_PYTHON = 'python'
+LB_TYPE_ENVOY = 'envoy'
+LB_TYPES = [LB_TYPE_PYTHON, LB_TYPE_ENVOY]
