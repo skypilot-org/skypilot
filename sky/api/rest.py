@@ -586,7 +586,10 @@ async def get(request_id: str) -> requests_lib.RequestPayload:
                 status_code=404, detail=f'Request {request_id} not found')
         if request_task.status > requests_lib.RequestStatus.RUNNING:
             return request_task.encode()
-        await asyncio.sleep(1)
+        # Sleep 0 to yield, so other coroutines can run. This busy waiting
+        # loop is performance critical for short-running requests, so we do
+        # not want to yield too long.
+        await asyncio.sleep(0)
 
 
 async def _yield_log_file_with_payloads_skipped(
@@ -629,7 +632,10 @@ async def log_streamer(request_id: Optional[str],
                 yield status_msg.update(
                     f'[dim]Waiting for {request_task.name} request: '
                     f'{request_id}[/dim]')
-            await asyncio.sleep(1)
+            # Sleep 0 to yield, so other coroutines can run. This busy waiting
+            # loop is performance critical for short-running requests, so we do
+            # not want to yield too long.
+            await asyncio.sleep(0)
             request_task = requests_lib.get_request(request_id)
         if show_request_waiting_spinner:
             yield status_msg.stop()
@@ -653,14 +659,20 @@ async def log_streamer(request_id: Optional[str],
                     request_task = requests_lib.get_request(request_id)
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
                         break
-                await asyncio.sleep(1)
+                # Sleep 0 to yield, so other coroutines can run. This busy
+                # waiting loop is performance critical for short-running
+                # requests, so we do not want to yield too long.
+                await asyncio.sleep(0)
                 continue
             line_str = line.decode('utf-8')
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
                     line_str, raise_for_mismatch=False)
                 if is_payload:
-                    await asyncio.sleep(0)  # Allow other tasks to run
+                    # Sleep 0 to yield, so other coroutines can run. This busy
+                    # waiting loop is performance critical for short-running
+                    # requests, so we do not want to yield too long.
+                    await asyncio.sleep(0)
                     continue
                 line_str = common_utils.remove_color(line_str)
             yield line_str

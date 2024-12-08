@@ -116,7 +116,10 @@ class FileLockEvent:
         return wrapper
 
 
-def _save_timeline(file_path: str):
+def save_timeline():
+    file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+    if not file_path:
+        return
     json_output = {
         'traceEvents': _events,
         'displayTimeUnit': 'ms',
@@ -130,4 +133,4 @@ def _save_timeline(file_path: str):
 
 
 if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
-    atexit.register(_save_timeline, os.environ['SKYPILOT_TIMELINE_FILE_PATH'])
+    atexit.register(save_timeline)

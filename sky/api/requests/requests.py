@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import pathlib
+import signal
 import sqlite3
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -19,7 +20,6 @@ from sky.api.requests.serializers import decoders
 from sky.api.requests.serializers import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
-from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -249,8 +249,12 @@ def kill_requests(request_ids: List[str]):
                 continue
             if request_record.pid is not None:
                 logger.debug(f'Killing request process {request_record.pid}')
-                subprocess_utils.kill_children_processes(
-                    parent_pids=[request_record.pid], force=True)
+                # Use SIGTERM instead of SIGKILL:
+                # - The executor can handle SIGTERM gracefully
+                # - After SIGTERM, the executor can reuse the request process
+                #   for other requests, avoiding the overhead of forking a new
+                #   process for each request.
+                os.kill(request_record.pid, signal.SIGTERM)
             request_record.status = RequestStatus.ABORTED
 
 

@@ -1,9 +1,11 @@
 """Executor for the requests."""
+import concurrent.futures
 import enum
 import functools
 import multiprocessing
 import os
 import queue as queue_lib
+import signal
 import sys
 import time
 import traceback
@@ -21,6 +23,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -126,8 +129,13 @@ def _get_queue(schedule_type: requests.ScheduleType) -> RequestQueue:
     return RequestQueue(schedule_type, backend=queue_backend)
 
 
-def _wrapper(request_id: str, ignore_return_value: bool):
+def _wrapper(request_id: str, ignore_return_value: bool) -> None:
     """Wrapper for a request task."""
+
+    def sigterm_handler(signum, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
 
     def redirect_output(file):
         """Redirect stdout and stderr to the log file."""
@@ -177,7 +185,10 @@ def _wrapper(request_id: str, ignore_return_value: bool):
             with skypilot_config.override_skypilot_config(
                     request_body.override_skypilot_config):
                 return_value = func(**request_body.to_kwargs())
-        except Exception as e:  # pylint: disable=broad-except
+        except KeyboardInterrupt:
+            logger.info(f'Request {request_id} aborted by user')
+            return
+        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
                 stacktrace = traceback.format_exc()
             setattr(e, 'stacktrace', stacktrace)
@@ -188,7 +199,7 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to {e}')
-            return None
+            return
         else:
             with requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
@@ -197,7 +208,10 @@ def _wrapper(request_id: str, ignore_return_value: bool):
                     request_task.set_return_value(return_value)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
-        return return_value
+        finally:
+            # We need to call the save_timeline() since atexit will not be
+            # triggered as multiple requests can be sharing the same process.
+            timeline.save_timeline()
 
 
 def schedule_request(
@@ -230,38 +244,54 @@ def request_worker(worker_id: int, schedule_type: requests.ScheduleType):
     logger.info(f'Request worker {worker_id} -- started with pid '
                 f'{multiprocessing.current_process().pid}')
     queue = _get_queue(schedule_type)
-    while True:
-        request = queue.get()
-        if request is None:
-            time.sleep(0.1)
-            continue
-        request_id, ignore_return_value = request
-        request = requests.get_request(request_id)
-        if request.status == requests.RequestStatus.ABORTED:
-            continue
-        logger.info(
-            f'Request worker {worker_id} -- running request: {request_id}')
-        # Start additional process to run the request, so that it can be aborted
-        # when requested by a user.
-        process = multiprocessing.Process(target=_wrapper,
-                                          args=(request_id,
-                                                ignore_return_value))
-        process.start()
+    if schedule_type == requests.ScheduleType.BLOCKING:
+        max_worker_size = 1
+    else:
+        max_worker_size = None
+    # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
+    # because the former is more efficient with the support of lazy creation of
+    # worker processes.
+    # We use executor instead of individual multiprocessing.Process to avoid
+    # the overhead of forking a new process for each request, which can be about
+    # 1s delay.
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_worker_size) as executor:
+        while True:
+            request = queue.get()
+            if request is None:
+                time.sleep(0.1)
+                continue
+            request_id, ignore_return_value = request
+            request = requests.get_request(request_id)
+            if request.status == requests.RequestStatus.ABORTED:
+                continue
+            logger.info(
+                f'Request worker {worker_id} -- submitted request: {request_id}'
+            )
+            # Start additional process to run the request, so that it can be
+            # aborted when requested by a user.
+            # TODO(zhwu): since the executor is reusing the request process,
+            # multiple requests can share the same process pid, which may cause
+            # issues with SkyPilot core functions if they rely on the exit of
+            # the process, such as subprocess_daemon.py.
+            future = executor.submit(_wrapper, request_id, ignore_return_value)
 
-        if schedule_type == requests.ScheduleType.BLOCKING:
-            # Wait for the request to finish.
-            try:
-                process.join()
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(
+            if schedule_type == requests.ScheduleType.BLOCKING:
+                # Wait for the request to finish.
+                try:
+                    future.result(timeout=None)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(
+                        f'Request worker {worker_id} -- request {request_id} '
+                        f'failed: {e}')
+                logger.info(
                     f'Request worker {worker_id} -- request {request_id} '
-                    f'failed: {e}')
-            logger.info(
-                f'Request worker {worker_id} -- request {request_id} finished')
-        else:
-            # Non-blocking requests are handled by the non-blocking worker.
-            logger.info(
-                f'Request worker {worker_id} -- request {request_id} submitted')
+                    'finished')
+            else:
+                # Non-blocking requests are handled by the non-blocking worker.
+                logger.info(
+                    f'Request worker {worker_id} -- request {request_id} '
+                    'submitted')
 
 
 def start(num_queue_workers: int = 1) -> List[multiprocessing.Process]:

@@ -2385,7 +2385,7 @@ def get_clusters(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
 
-    def _update_record_with_credentials(
+    def _update_record_with_credentials_and_resources_str(
             record: Optional[Dict[str, Any]]) -> None:
         """Add the credentials to the record.
 
@@ -2397,9 +2397,12 @@ def get_clusters(
         handle = record['handle']
         if handle is None:
             return
+        record['resources_str'] = resources_utils.get_readable_resources_repr(
+            handle)
         credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user,
                                                handle.ssh_user)
+
         if not credentials:
             return
         ssh_private_key_path = credentials.get('ssh_private_key', None)
@@ -2433,9 +2436,10 @@ def get_clusters(
             clusters_str = ', '.join(not_exist_cluster_names)
             logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
         records = new_records
+
     # Add auth_config to the records
     for record in records:
-        _update_record_with_credentials(record)
+        _update_record_with_credentials_and_resources_str(record)
 
     if refresh == common.StatusRefreshMode.NONE:
         return records
@@ -2459,7 +2463,7 @@ def get_clusters(
                 cluster_name,
                 force_refresh_statuses=force_refresh_statuses,
                 acquire_per_cluster_status_lock=True)
-            _update_record_with_credentials(record)
+            _update_record_with_credentials_and_resources_str(record)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:

@@ -218,6 +218,8 @@ def _get_status_colored(cluster_record: _ClusterRecord) -> str:
 
 
 def _get_resources(cluster_record: _ClusterRecord) -> str:
+    if 'resources_str' in cluster_record:
+        return cluster_record['resources_str']
     handle = cluster_record['handle']
     if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'
