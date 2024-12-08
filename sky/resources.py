@@ -1016,6 +1016,7 @@ class Resources:
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
+        hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self._instance_type, self.use_spot, self._region, self._zone)
@@ -1023,7 +1024,7 @@ class Resources:
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
-        return hourly_cost * seconds / 3600
+        return hourly_cost * hours
 
     def get_accelerators_str(self) -> str:
         accelerators = self.accelerators
