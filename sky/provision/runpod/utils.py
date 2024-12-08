@@ -151,36 +151,27 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
              f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
              f'{constants.SKY_REMOTE_RAY_PORT}/http')
 
+    params = {
+        'name': name,
+        'image_name': image_name,
+        'gpu_type_id': gpu_type,
+        'cloud_type': cloud_type,
+        'container_disk_in_gb': disk_size,
+        'min_vcpu_count': 4 * gpu_quantity,
+        'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
+        'gpu_count': gpu_quantity,
+        'country_code': region,
+        'ports': ports,
+        'support_public_ip': True,
+        'docker_args': docker_args,
+    }
+
     if preemptible is None or not preemptible:
-        new_instance = runpod.runpod.create_pod(
-            name=name,
-            image_name=image_name,
-            gpu_type_id=gpu_type,
-            cloud_type=cloud_type,
-            container_disk_in_gb=disk_size,
-            min_vcpu_count=4 * gpu_quantity,
-            min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
-            gpu_count=gpu_quantity,
-            country_code=region,
-            ports=ports,
-            support_public_ip=True,
-            docker_args=docker_args,
-        )
+        new_instance = runpod.runpod.create_pod(**params)
     else:
         new_instance = runpod_commands.create_spot_pod(
-            name=name,
-            image_name=image_name,
-            gpu_type_id=gpu_type,
-            cloud_type=cloud_type,
             bid_per_gpu=bid_per_gpu,
-            container_disk_in_gb=disk_size,
-            min_vcpu_count=4 * gpu_quantity,
-            min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
-            gpu_count=gpu_quantity,
-            country_code=region,
-            ports=ports,
-            support_public_ip=True,
-            docker_args=docker_args,
+            **params,
         )
 
     return new_instance['id']
