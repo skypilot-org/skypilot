@@ -75,9 +75,6 @@ available_node_types:
             {%- if use_spot %}
             # optionally set priority to use Spot instances
             priority: Spot
-            # set a maximum price for spot instances if desired
-            # billingProfile:
-            #     maxPrice: -1
             {%- endif %}
             cloudInitSetupCommands: |-
               {%- for cmd in cloud_init_setup_commands %}

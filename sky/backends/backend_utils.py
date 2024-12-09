@@ -111,6 +111,16 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 _ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
                             'please retry after a while.')
 
+# If a cluster is less than LAUNCH_DOUBLE_CHECK_WINDOW seconds old, and we don't
+# see any instances in the cloud, the instances might be in the proccess of
+# being created. We will wait LAUNCH_DOUBLE_CHECK_DELAY seconds and then double
+# check to make sure there are still no instances. LAUNCH_DOUBLE_CHECK_DELAY
+# should be set longer than the delay between (sending the create instance
+# request) and (the instances appearing on the cloud).
+# See https://github.com/skypilot-org/skypilot/issues/4431.
+_LAUNCH_DOUBLE_CHECK_WINDOW = 60
+_LAUNCH_DOUBLE_CHECK_DELAY = 1
+
 # Include the fields that will be used for generating tags that distinguishes
 # the cluster in ray, to avoid the stopped cluster being discarded due to
 # updates in the yaml template.
@@ -1567,14 +1577,14 @@ def check_can_clone_disk_and_override_task(
         The task to use and the resource handle of the source cluster.
 
     Raises:
-        ValueError: If the source cluster does not exist.
+        exceptions.ClusterDoesNotExist: If the source cluster does not exist.
         exceptions.NotSupportedError: If the source cluster is not valid or the
             task is not compatible to clone disk from the source cluster.
     """
     source_cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     if source_cluster_status is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.ClusterDoesNotExist(
                 f'Cannot find cluster {cluster_name!r} to clone disk from.')
 
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
@@ -1732,13 +1742,12 @@ def _update_cluster_status_no_lock(
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
-            logger.debug(str(e))
+            logger.debug(common_utils.format_exception(e))
         except Exception as e:  # pylint: disable=broad-except
             # This can be raised by `external_ssh_ports()`, due to the
             # underlying call to kubernetes API.
-            logger.debug(
-                f'Refreshing status ({cluster_name!r}) failed: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+            logger.debug(f'Refreshing status ({cluster_name!r}) failed: ',
+                         exc_info=e)
         return False
 
     # Determining if the cluster is healthy (UP):
@@ -1765,6 +1774,24 @@ def _update_cluster_status_no_lock(
         return record
 
     # All cases below are transitioning the cluster to non-UP states.
+
+    if (not node_statuses and handle.launched_resources.cloud.STATUS_VERSION >=
+            clouds.StatusVersion.SKYPILOT):
+        # Note: launched_at is set during sky launch, even on an existing
+        # cluster. This will catch the case where the cluster was terminated on
+        # the cloud and restarted by sky launch.
+        time_since_launch = time.time() - record['launched_at']
+        if (record['status'] == status_lib.ClusterStatus.INIT and
+                time_since_launch < _LAUNCH_DOUBLE_CHECK_WINDOW):
+            # It's possible the instances for this cluster were just created,
+            # and haven't appeared yet in the cloud API/console. Wait for a bit
+            # and check again. This is a best-effort leak prevention check.
+            # See https://github.com/skypilot-org/skypilot/issues/4431.
+            time.sleep(_LAUNCH_DOUBLE_CHECK_DELAY)
+            node_statuses = _query_cluster_status_via_cloud_api(handle)
+            # Note: even if all the node_statuses are UP now, we will still
+            # consider this cluster abnormal, and its status will be INIT.
+
     if len(node_statuses) > handle.launched_nodes:
         # Unexpected: in the queried region more than 1 cluster with the same
         # constructed name tag returned. This will typically not happen unless
@@ -1793,13 +1820,15 @@ def _update_cluster_status_no_lock(
                 f'{colorama.Style.RESET_ALL}')
     assert len(node_statuses) <= handle.launched_nodes
 
-    # If the node_statuses is empty, all the nodes are terminated. We can
-    # safely set the cluster status to TERMINATED. This handles the edge case
-    # where the cluster is terminated by the user manually through the UI.
+    # If the node_statuses is empty, it should mean that all the nodes are
+    # terminated and we can set the cluster status to TERMINATED. This handles
+    # the edge case where the cluster is terminated by the user manually through
+    # the UI.
     to_terminate = not node_statuses
 
-    # A cluster is considered "abnormal", if not all nodes are TERMINATED or
-    # not all nodes are STOPPED. We check that with the following logic:
+    # A cluster is considered "abnormal", if some (but not all) nodes are
+    # TERMINATED, or not all nodes are STOPPED. We check that with the following
+    # logic:
     #   * Not all nodes are terminated and there's at least one node
     #     terminated; or
     #   * Any of the non-TERMINATED nodes is in a non-STOPPED status.
@@ -1811,6 +1840,8 @@ def _update_cluster_status_no_lock(
     #     cluster is probably down.
     #   * The cluster is partially terminated or stopped should be considered
     #     abnormal.
+    #   * The cluster is partially or completely in the INIT state, which means
+    #     that provisioning was interrupted. This is considered abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
     # reset (unless it's autostopping/autodowning).
@@ -2060,7 +2091,7 @@ def check_cluster_available(
     """Check if the cluster is available.
 
     Raises:
-        ValueError: if the cluster does not exist.
+        exceptions.ClusterDoesNotExist: if the cluster does not exist.
         exceptions.ClusterNotUpError: if the cluster is not UP.
         exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -2125,7 +2156,8 @@ def check_cluster_available(
             error_msg += message
 
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
+            raise exceptions.ClusterDoesNotExist(
+                f'{colorama.Fore.YELLOW}{error_msg}{reset}')
     assert cluster_status is not None, 'handle is not None but status is None'
     backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
