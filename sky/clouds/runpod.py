@@ -174,7 +174,7 @@ class RunPod(clouds.Cloud):
         instance_type = resources.instance_type
         use_spot = resources.use_spot
 
-        hourly_cost = self.instance_type_to_hourly_cost(
+        hourly_cost = r.cloud.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
         return {
@@ -183,7 +183,7 @@ class RunPod(clouds.Cloud):
             'region': region.name,
             'image_id': image_id,
             'use_spot': use_spot,
-            'bid_per_gpu': hourly_cost,
+            'bid_per_gpu': str(hourly_cost),
         }
 
     def _get_feasible_launchable_resources(
