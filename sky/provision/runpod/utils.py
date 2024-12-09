@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import runpod
+import sky.provision.runpod.api.commands as runpod_commands
 from sky.skylet import constants
 from sky.utils import common_utils
 
@@ -100,7 +101,8 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, ports: Optional[List[int]], public_key: str) -> str:
+           image_name: str, ports: Optional[List[int]], public_key: str,
+           preemptible: Optional[bool], bid_per_gpu: float) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -142,23 +144,35 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
 
-    new_instance = runpod.runpod.create_pod(
-        name=name,
-        image_name=image_name,
-        gpu_type_id=gpu_type,
-        cloud_type=cloud_type,
-        container_disk_in_gb=disk_size,
-        min_vcpu_count=4 * gpu_quantity,
-        min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
-        gpu_count=gpu_quantity,
-        country_code=region,
-        ports=(f'22/tcp,'
-               f'{custom_ports_str}'
-               f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-               f'{constants.SKY_REMOTE_RAY_PORT}/http'),
-        support_public_ip=True,
-        docker_args=
-        f'bash -c \'echo {encoded} | base64 --decode > init.sh; bash init.sh\'')
+    docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
+                   f'bash init.sh\'')
+    ports = (f'22/tcp,'
+             f'{custom_ports_str}'
+             f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
+             f'{constants.SKY_REMOTE_RAY_PORT}/http')
+
+    params = {
+        'name': name,
+        'image_name': image_name,
+        'gpu_type_id': gpu_type,
+        'cloud_type': cloud_type,
+        'container_disk_in_gb': disk_size,
+        'min_vcpu_count': 4 * gpu_quantity,
+        'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
+        'gpu_count': gpu_quantity,
+        'country_code': region,
+        'ports': ports,
+        'support_public_ip': True,
+        'docker_args': docker_args,
+    }
+
+    if preemptible is None or not preemptible:
+        new_instance = runpod.runpod.create_pod(**params)
+    else:
+        new_instance = runpod_commands.create_spot_pod(
+            bid_per_gpu=bid_per_gpu,
+            **params,
+        )
 
     return new_instance['id']
 
