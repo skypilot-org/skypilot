@@ -292,12 +292,22 @@ class Task:
 
     def validate(self):
         """Checks if the Task fields are valid."""
+        self.validate_name()
+        self.validate_run()
+        self.validate_workdir()
+        self.validate_file_mounts()
+        for r in self.resources:
+            r.validate()
+
+    def validate_name(self):
+        """Validates if the task name is valid."""
         if not _is_valid_name(self.name):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid task name {self.name}. Valid name: '
                                  f'{_VALID_NAME_DESCR}')
 
-        # Check self.run
+    def validate_run(self):
+        """Validates if the run command is valid."""
         if callable(self.run):
             run_sig = inspect.signature(self.run)
             # Check that run is a function with 2 arguments.
@@ -336,19 +346,63 @@ class Task:
                                  f'a command generator ({CommandGen}). '
                                  f'Got {type(self.run)}')
 
-        # Workdir.
-        if self.workdir is not None:
-            full_workdir = os.path.expanduser(self.workdir)
-            if not os.path.isdir(full_workdir):
-                # Symlink to a dir is legal (isdir() follows symlinks).
+    def validate_file_mounts(self):
+        """Validates if file_mounts paths are valid.
+
+        Note: if this function is called on a remote SkyPilot server,
+        it must be after the client side has sync-ed all files to the
+        remote server.
+        """
+        if self.file_mounts is None:
+            return
+        for target, source in self.file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Workdir must exist and must be a directory (or '
-                        f'a symlink to a directory). {self.workdir} not found.')
+                        'File mount paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found: target={target} source={source}')
+            if data_utils.is_cloud_store_url(target):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'File mount destination paths cannot be cloud storage')
+            if not data_utils.is_cloud_store_url(source):
+                self.file_mounts[target] = os.path.expanduser(source)
+                if not os.path.exists(os.path.expanduser(
+                        source)) and not source.startswith('skypilot:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'File mount source {source!r} does not exist '
+                            'locally. To fix: check if it exists, and correct '
+                            'the path.')
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
 
-        # Resources.
-        for r in self.resources:
-            r.validate()
+    def validate_workdir(self):
+        """Validates if workdir path is valid.
+
+        Note: if this function is called on a remote SkyPilot server,
+        it must be after the client side has sync-ed all files to the
+        remote server.
+        """
+        if self.workdir is None:
+            return
+        full_workdir = os.path.expanduser(self.workdir)
+        if not os.path.isdir(full_workdir):
+            # Symlink to a dir is legal (isdir() follows symlinks).
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Workdir must be a valid directory (or '
+                    f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
     def from_yaml_config(
@@ -740,46 +794,7 @@ class Task:
 
         Returns:
           self: the current task, with file mounts set.
-
-        Raises:
-          ValueError: if input paths are invalid.
         """
-        if file_mounts is None:
-            self.file_mounts = None
-            return self
-        for target, source in file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
-            if data_utils.is_cloud_store_url(target):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount destination paths cannot be cloud storage')
-            # if not data_utils.is_cloud_store_url(source):
-            # file_mounts[target] = os.path.expanduser(source)
-            # if (not os.path.exists(
-            #         os.path.abspath(os.path.expanduser(source))) and
-            #         not source.startswith('skypilot:')):
-            #     with ux_utils.print_exception_no_traceback():
-            #         raise ValueError(
-            #             f'File mount source {source!r} does not exist '
-            #             'locally. To fix: check if it exists, and correct '
-            #             'the path.')
-            # TODO(zhwu): /home/username/sky_workdir as the target path need
-            # to be filtered out as well.
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
-                        'destination path of a file mount, as it will be used '
-                        'by the workdir. If uploading a file/folder to the '
-                        'workdir is needed, please specify the full path to '
-                        'the file/folder.')
-
         self.file_mounts = file_mounts
         return self
 
@@ -815,8 +830,8 @@ class Task:
             self.file_mounts = {}
         assert self.file_mounts is not None
         self.file_mounts.update(file_mounts)
-        # For validation logic:
-        return self.set_file_mounts(self.file_mounts)
+        self.validate_file_mounts()
+        return self
 
     def set_storage_mounts(
         self,

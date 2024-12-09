@@ -65,6 +65,11 @@ class CheckBody(RequestBody):
     verbose: bool
 
 
+class ValidateBody(RequestBody):
+    """The request body for the validate endpoint."""
+    dag: str
+
+
 class OptimizeBody(RequestBody):
     """The request body for the optimize endpoint."""
     dag: str

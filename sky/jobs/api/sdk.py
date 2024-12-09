@@ -30,6 +30,7 @@ def launch(
     from sky.api import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    sdk.validate(dag)
     if need_confirmation:
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)

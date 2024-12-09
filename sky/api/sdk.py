@@ -180,6 +180,27 @@ def optimize(
 @usage_lib.entrypoint
 @api_common.check_health
 @annotations.public_api
+def validate(dag: 'sky.Dag') -> str:
+    """Validate the tasks.
+
+    The file paths (workdir and file_mounts) are validated on the client side
+    while the rest (e.g. resource) are validated on server side.
+    """
+    for task in dag.tasks:
+        task.validate_workdir()
+        task.validate_file_mounts()
+    with tempfile.NamedTemporaryFile(mode='r') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_str = f.read()
+    body = payloads.ValidateBody(dag=dag_str)
+    response = requests.post(f'{api_common.get_server_url()}/validate',
+                             json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+@annotations.public_api
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
@@ -210,9 +231,9 @@ def launch(
     #     task, _ = backend_utils.check_can_clone_disk_and_override_task(
     #         clone_disk_from, cluster_name, task)
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    validate(dag)
 
     confirm_shown = False
-
     if need_confirmation:
         cluster_status = None
         request_id = status([cluster_name])
@@ -289,6 +310,7 @@ def exec(  # pylint: disable=redefined-builtin
 ) -> str:
     """Execute a task."""
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    validate(dag)
     dag = api_common.upload_mounts_to_api_server(dag, workdir_only=True)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)

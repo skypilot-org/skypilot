@@ -26,6 +26,7 @@ def up(task: Union['sky.Task', 'sky.Dag'],
     # This is to avoid circular import.
     from sky.api import sdk  # pylint: disable=import-outside-toplevel
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    sdk.validate(dag)
     request_id = sdk.optimize(dag)
     sdk.stream_and_get(request_id)
     if need_confirmation:
@@ -60,6 +61,7 @@ def update(task: Union['sky.Task', 'sky.Dag'],
     # This is to avoid circular import.
     from sky.api import sdk  # pylint: disable=import-outside-toplevel
     dag = dag_utils.convert_entrypoint_to_dag(task)
+    sdk.validate(dag)
     request_id = sdk.optimize(dag)
     sdk.stream_and_get(request_id)
     if need_confirmation:

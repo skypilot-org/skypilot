@@ -8,6 +8,7 @@ import os
 import pathlib
 import shutil
 import sys
+import tempfile
 import time
 from typing import AsyncGenerator, Deque, List, Optional
 import uuid
@@ -37,6 +38,7 @@ from sky.serve.api import rest as serve_rest
 from sky.skylet import constants
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -210,6 +212,25 @@ async def list_accelerator_counts(
         func=service_catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
     )
+
+
+@app.post('/validate')
+async def validate(validate_body: payloads.ValidateBody):
+    # TODO(SKY-1035): validate if existing cluster satisfies the requested
+    # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
+    logger.info(f'Validating tasks: {validate_body.dag}')
+    with tempfile.NamedTemporaryFile(mode='w') as f:
+        f.write(validate_body.dag)
+        f.flush()
+        dag = dag_utils.load_chain_dag_from_yaml(f.name)
+    for task in dag.tasks:
+        # Will validate workdir and file_mounts in the backend, as those need
+        # to be validated after the files are uploaded to the SkyPilot server
+        # with `upload_mounts_to_api_server`.
+        task.validate_name()
+        task.validate_run()
+        for r in task.resources:
+            r.validate()
 
 
 @app.post('/optimize')
