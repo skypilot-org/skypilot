@@ -1,7 +1,9 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
+import collections
 import random
+import threading
 import typing
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sky import sky_logging
 
@@ -65,8 +67,16 @@ class LoadBalancingPolicy:
     def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         raise NotImplementedError
 
+    def pre_execute_hook(self, replica_url: str,
+                         request: 'fastapi.Request') -> None:
+        pass
 
-class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
+    def post_execute_hook(self, replica_url: str,
+                          request: 'fastapi.Request') -> None:
+        pass
+
+
+class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
     """Round-robin load balancing policy."""
 
     def __init__(self) -> None:
@@ -90,3 +100,43 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
         ready_replica_url = self.ready_replicas[self.index]
         self.index = (self.index + 1) % len(self.ready_replicas)
         return ready_replica_url
+
+
+class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
+    """Least load load balancing policy."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.load_map: Dict[str, int] = collections.defaultdict(int)
+        self.lock = threading.Lock()
+
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        with self.lock:
+            self.ready_replicas = ready_replicas
+            for r in self.ready_replicas:
+                if r not in ready_replicas:
+                    del self.load_map[r]
+            for replica in ready_replicas:
+                self.load_map[replica] = self.load_map.get(replica, 0)
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        del request  # Unused.
+        if not self.ready_replicas:
+            return None
+        with self.lock:
+            return min(self.ready_replicas,
+                       key=lambda replica: self.load_map.get(replica, 0))
+
+    def pre_execute_hook(self, replica_url: str,
+                         request: 'fastapi.Request') -> None:
+        del request  # Unused.
+        with self.lock:
+            self.load_map[replica_url] += 1
+
+    def post_execute_hook(self, replica_url: str,
+                          request: 'fastapi.Request') -> None:
+        del request  # Unused.
+        with self.lock:
+            self.load_map[replica_url] -= 1
