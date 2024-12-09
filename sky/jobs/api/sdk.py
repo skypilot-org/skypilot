@@ -3,10 +3,12 @@ import json
 import tempfile
 import typing
 from typing import List, Optional, Union
+import webbrowser
 
 import click
 import requests
 
+from sky import sky_logging
 from sky.api import common as api_common
 from sky.api.requests import payloads
 from sky.usage import usage_lib
@@ -15,6 +17,8 @@ from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import sky
+
+logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
@@ -135,3 +139,15 @@ spot_tail_logs = common_utils.deprecated_function(
     name='sky.jobs.tail_logs',
     deprecated_name='spot_tail_logs',
     removing_version='0.8.0')
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def dashboard() -> None:
+    """Start a dashboard for managed jobs."""
+    user_hash = common_utils.get_user_hash()
+    api_server_url = api_common.get_server_url()
+    params = f'user_hash={user_hash}'
+    url = f'{api_server_url}/jobs/dashboard?{params}'
+    logger.info(f'Opening dashboard in browser: {url}')
+    webbrowser.open(url)

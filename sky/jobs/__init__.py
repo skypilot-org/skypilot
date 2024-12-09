@@ -2,6 +2,7 @@
 import pathlib
 
 from sky.jobs.api.sdk import cancel
+from sky.jobs.api.sdk import dashboard
 from sky.jobs.api.sdk import launch
 from sky.jobs.api.sdk import queue
 from sky.jobs.api.sdk import tail_logs
@@ -30,6 +31,7 @@ __all__ = [
     'launch',
     'queue',
     'tail_logs',
+    'dashboard',
     # utils
     'ManagedJobCodeGen',
     'format_job_table',

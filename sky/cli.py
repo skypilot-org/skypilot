@@ -31,14 +31,12 @@ import os
 import pathlib
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import textwrap
-import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-import webbrowser
 
 import click
 import colorama
@@ -76,6 +74,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -1400,8 +1399,12 @@ def _get_managed_jobs(
                 f'Details: {common_utils.format_exception(e, use_bracket=True)}'
             )
     except Exception as e:  # pylint: disable=broad-except
-        msg = ('Failed to query managed jobs: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+        msg = ''
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            msg += traceback.format_exc()
+            msg += '\n'
+        msg += ('Failed to query managed jobs: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
         max_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
@@ -4071,62 +4074,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
-@click.option(
-    '--port',
-    '-p',
-    default=None,
-    type=int,
-    required=False,
-    help=('Local port to use for the dashboard. If None, a free port is '
-          'automatically chosen.'))
 @usage_lib.entrypoint
-def jobs_dashboard(port: Optional[int]):
-    """Opens a dashboard for managed jobs (needs controller to be UP)."""
-    # TODO(zongheng): ideally, the controller/dashboard server should expose the
-    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
-    # see if the controller is UP first, which is slow; (2) not have to run SSH
-    # port forwarding first (we'd just launch a local dashboard which would make
-    # REST API calls to the controller dashboard server).
-    click.secho('Checking if jobs controller is up...', fg='yellow')
-    hint = ('Dashboard is not available if jobs controller is not up. Run a '
-            'managed job first.')
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message=hint,
-        non_existent_message=hint,
-        exit_if_not_accessible=True)
-
-    # SSH forward a free local port to remote's dashboard port.
-    remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
-    if port is None:
-        free_port = common_utils.find_free_port(remote_port)
-    else:
-        free_port = port
-    ssh_command = (
-        f'ssh -qNL {free_port}:localhost:{remote_port} '
-        f'{controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name}')
-    click.echo('Forwarding port: ', nl=False)
-    click.secho(f'{ssh_command}', dim=True)
-
-    with subprocess.Popen(ssh_command, shell=True,
-                          start_new_session=True) as ssh_process:
-        time.sleep(3)  # Added delay for ssh_command to initialize.
-        webbrowser.open(f'http://localhost:{free_port}')
-        click.secho(
-            f'Dashboard is now available at: http://127.0.0.1:{free_port}',
-            fg='green')
-        try:
-            ssh_process.wait()
-        except KeyboardInterrupt:
-            # When user presses Ctrl-C in terminal, exits the previous ssh
-            # command so that <free local port> is freed up.
-            try:
-                os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                # This happens if jobs controller is auto-stopped.
-                pass
-        finally:
-            click.echo('Exiting.')
+def jobs_dashboard():
+    """Opens a dashboard for managed jobs."""
+    managed_jobs.dashboard()
 
 
 # TODO(zhwu): Backward compatibility for the old `sky spot launch` command.

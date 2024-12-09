@@ -487,9 +487,9 @@ class SSHCommandRunner(CommandRunner):
             self.port = port
             self._docker_ssh_proxy_command = None
 
-    def _ssh_base_command(self, *, ssh_mode: SshMode,
-                          port_forward: Optional[List[int]],
-                          connect_timeout: Optional[int]) -> List[str]:
+    def ssh_base_command(self, *, ssh_mode: SshMode,
+                         port_forward: Optional[List[Tuple[int, int]]],
+                         connect_timeout: Optional[int]) -> List[str]:
         ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -499,11 +499,10 @@ class SSHCommandRunner(CommandRunner):
             # Force pseudo-terminal allocation for interactive/login mode.
             ssh += ['-tt']
         if port_forward is not None:
-            for port in port_forward:
-                local = remote = port
+            for local, remote in port_forward:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-L', f'{remote}:localhost:{local}']
+                ssh += ['-NL', f'{remote}:localhost:{local}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:
@@ -547,7 +546,7 @@ class SSHCommandRunner(CommandRunner):
             cmd: Union[str, List[str]],
             *,
             require_outputs: bool = False,
-            port_forward: Optional[List[int]] = None,
+            port_forward: Optional[List[Tuple[int, int]]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -588,7 +587,7 @@ class SSHCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        base_ssh_command = self._ssh_base_command(
+        base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
             connect_timeout=connect_timeout)

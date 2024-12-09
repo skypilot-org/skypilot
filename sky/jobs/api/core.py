@@ -1,6 +1,9 @@
 """SDK functions for managed jobs."""
 import os
+import signal
+import subprocess
 import tempfile
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
@@ -22,6 +25,7 @@ from sky.provision import common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -34,6 +38,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import sky
     from sky.backends import cloud_vm_ray_backend
+
+logger = sky_logging.init_logger(__name__)
 
 
 @timeline.event
@@ -126,6 +132,7 @@ def launch(
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -261,7 +268,20 @@ def _maybe_restart_controller(
     rich_utils.force_update_status(
         ux_utils.spinner_message(f'{spinner_message} - restarting '
                                  'controller'))
-    handle = core.start(jobs_controller_type.value.cluster_name)
+    handle = core.start(cluster_name=jobs_controller_type.value.cluster_name)
+    # Make sure the dashboard is running when the controller is restarted.
+    # We should not directly use execution.launch() and have the dashboard cmd
+    # in the task setup because since we are using detached_setup, it will
+    # become a job on controller which messes up the job IDs (we assume the
+    # job ID in controller's job queue is consistent with managed job IDs).
+    logger.info('Starting dashboard...')
+    runner = handle.get_command_runners()[0]
+    runner.run(
+        f'export '
+        f'{skylet_constants.USER_ID_ENV_VAR}={common_utils.get_user_hash()!r}; '
+        f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
+        stream_logs=True,
+    )
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
 
@@ -431,3 +451,53 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                   job_name=name,
                                   follow=follow,
                                   controller=controller)
+
+
+def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
+    """Opens a dashboard for managed jobs (needs controller to be UP)."""
+    # TODO(zongheng): ideally, the controller/dashboard server should expose the
+    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
+    # see if the controller is UP first, which is slow; (2) not have to run SSH
+    # port forwarding first (we'd just launch a local dashboard which would make
+    # REST API calls to the controller dashboard server).
+    logger.info('Starting dashboard')
+    hint = ('Dashboard is not available if jobs controller is not up. Run '
+            'a managed job first or run: sky jobs queue --refresh')
+    handle = _maybe_restart_controller(
+        refresh=refresh,
+        stopped_message=hint,
+        spinner_message='Checking jobs controller')
+
+    # SSH forward a free local port to remote's dashboard port.
+    remote_port = skylet_constants.SPOT_DASHBOARD_REMOTE_PORT
+    free_port = common_utils.find_free_port(remote_port)
+    runner = handle.get_command_runners()[0]
+    ssh_command = ' '.join(
+        runner.ssh_base_command(ssh_mode=command_runner.SshMode.INTERACTIVE,
+                                port_forward=[(free_port, remote_port)],
+                                connect_timeout=1))
+    ssh_command = (
+        f'{ssh_command} '
+        f'> ~/sky_logs/api_server/dashboard-{common_utils.get_user_hash()}.log '
+        '2>&1')
+    logger.info(f'Forwarding port: {colorama.Style.DIM}{ssh_command}'
+                f'{colorama.Style.RESET_ALL}')
+
+    ssh_process = subprocess.Popen(ssh_command,
+                                   shell=True,
+                                   start_new_session=True)
+    time.sleep(3)  # Added delay for ssh_command to initialize.
+    logger.info(f'{colorama.Fore.GREEN}Dashboard is now available at: '
+                f'http://127.0.0.1:{free_port}{colorama.Style.RESET_ALL}')
+
+    return free_port, ssh_process.pid
+
+
+def stop_dashboard_forwarding(pid: int) -> None:
+    # Exit the ssh command when the context manager is closed.
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        # This happens if jobs controller is auto-stopped.
+        pass
+    logger.info('Forwarding port closed. Exiting.')

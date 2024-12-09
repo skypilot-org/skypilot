@@ -1,11 +1,20 @@
 """REST API for managed jobs."""
+import os
 
 import fastapi
+import httpx
 
+from sky import sky_logging
 from sky.api.requests import executor
 from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.jobs.api import core
+from sky.jobs.api import dashboard_utils
+from sky.skylet import constants
+from sky.utils import common
+from sky.utils import common_utils
+
+logger = sky_logging.init_logger(__name__)
 
 router = fastapi.APIRouter()
 
@@ -60,3 +69,78 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
     )
+
+
+@router.get('/dashboard')
+async def dashboard(request: fastapi.Request,
+                    user_hash: str) -> fastapi.Response:
+    # Find the port for the dashboard of the user
+    os.environ[constants.USER_ID_ENV_VAR] = user_hash
+    common.reload()
+    logger.info(f'Starting dashboard for user hash: {user_hash}')
+
+    body = payloads.RequestBody()
+    body.env_vars[constants.USER_ID_ENV_VAR] = user_hash
+    body.entrypoint_command = 'jobs/dashboard'
+    body.override_skypilot_config = {}
+
+    with dashboard_utils.get_dashboard_lock_for_user(user_hash):
+        max_retries = 3
+        for attempt in range(max_retries):
+            port, pid = dashboard_utils.get_dashboard_session(user_hash)
+            if port == 0 or attempt > 0:
+                # Let the client know that we are waiting for starting the
+                # dashboard.
+                try:
+                    port, pid = core.start_dashboard_forwarding()
+                except Exception as e:  # pylint: disable=broad-except
+                    # We catch all exceptions to gracefully handle unknown
+                    # errors and raise an HTTPException to the client.
+                    msg = (
+                        'Dashboard failed to start: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    logger.error(msg)
+                    raise fastapi.HTTPException(status_code=503, detail=msg)
+                dashboard_utils.add_dashboard_session(user_hash, port, pid)
+
+            # Assuming the dashboard is forwarded to localhost on the API server
+            dashboard_url = f'http://localhost:{port}'
+            try:
+                # Ping the dashboard to check if it's still running
+                async with httpx.AsyncClient() as client:
+                    response = await client.request('GET',
+                                                    dashboard_url,
+                                                    timeout=1)
+                break  # Connection successful, proceed with the request
+            except Exception as e:  # pylint: disable=broad-except
+                # We catch all exceptions to gracefully handle unknown
+                # errors and retry or raise an HTTPException to the client.
+                msg = (
+                    f'Dashboard connection attempt {attempt + 1} failed with '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                logger.info(msg)
+                if attempt == max_retries - 1:
+                    raise fastapi.HTTPException(status_code=503, detail=msg)
+
+    # Create a client session to forward the request
+    try:
+        async with httpx.AsyncClient() as client:
+            # Make the request and get the response
+            response = await client.request(
+                method='GET',
+                url=f'{dashboard_url}',
+                headers=request.headers.raw,
+            )
+
+            # Create a new response with the content already read
+            content = await response.aread()
+            return fastapi.Response(
+                content=content,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.headers.get('content-type'))
+    except Exception as e:
+        msg = (f'Failed to forward request to dashboard: '
+               f'{common_utils.format_exception(e, use_bracket=True)}')
+        logger.error(msg)
+        raise fastapi.HTTPException(status_code=502, detail=msg)
