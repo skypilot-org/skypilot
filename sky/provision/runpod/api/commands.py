@@ -18,8 +18,7 @@ Example:
 """
 from typing import List, Optional
 
-import runpod
-
+from sky.adaptors import runpod
 from sky.provision.runpod.api.pods import generate_spot_pod_deployment_mutation
 
 _INTERRUPTABLE_POD_FIELD: str = 'podRentInterruptable'
@@ -71,13 +70,13 @@ def create_spot_pod(
                 bid_per_gpu=0.3
             )
     """
-    runpod.get_gpu(gpu_type_id)
+    runpod.runpod.get_gpu(gpu_type_id)
     # refer to https://graphql-spec.runpod.io/#definition-CloudTypeEnum
     if cloud_type not in ['ALL', 'COMMUNITY', 'SECURE']:
         raise ValueError('cloud_type must be one of ALL, COMMUNITY or SECURE')
 
     if network_volume_id and data_center_id is None:
-        user_info = runpod.get_user()
+        user_info = runpod.runpod.get_user()
         for network_volume in user_info['networkVolumes']:
             if network_volume['id'] == network_volume_id:
                 data_center_id = network_volume['dataCenterId']
@@ -116,5 +115,5 @@ def create_spot_pod(
         template_id=template_id,
         volume_key=volume_key,
     )
-    response = runpod.api.graphql.run_graphql_query(mutation)
+    response = runpod.runpod.api.graphql.run_graphql_query(mutation)
     return response[_RESPONSE_DATA_FIELD][_INTERRUPTABLE_POD_FIELD]
