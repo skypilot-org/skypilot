@@ -35,7 +35,8 @@ rm -r  ~/.sky/wheels || true
 cd ../sky-master
 git pull origin master
 pip uninstall -y skypilot
-pip install -e ".[all]"
+pip install uv
+uv pip install -e ".[all]"
 cd -
 
 conda env list | grep sky-back-compat-current || conda create -n sky-back-compat-current -y python=3.9
@@ -43,7 +44,8 @@ conda activate sky-back-compat-current
 conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 pip uninstall -y skypilot
-pip install -e ".[all]"
+pip install uv
+uv pip install -e ".[all]"
 
 
 # exec + launch
