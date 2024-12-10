@@ -160,7 +160,7 @@ def up(
         # Check that the Envoy load balancer isn't being used on an unsupported
         # cloud.
         lb_type = task_config.get('service', {}).get('load_balancer_type', None)
-        if lb_type == serve_constants.LB_TYPE_ENVOY:
+        if lb_type == serve_constants.LbType.ENVOY.value:
             for resource in controller_resources:
                 if resource.cloud is None:
                     continue

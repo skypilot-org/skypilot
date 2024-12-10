@@ -286,7 +286,7 @@ def run_load_balancer(service_name: str,
             None.
     """
 
-    if load_balancer_type == constants.LB_TYPE_PYTHON \
+    if load_balancer_type == constants.LbType.PYTHON.value \
             or load_balancer_type is None:
         plb = PythonLoadBalancer(
             service_name=service_name,
@@ -294,7 +294,7 @@ def run_load_balancer(service_name: str,
             load_balancer_port=load_balancer_port,
             load_balancing_policy_name=load_balancing_policy_name)
         plb.run()
-    elif load_balancer_type == constants.LB_TYPE_ENVOY:
+    elif load_balancer_type == constants.LbType.ENVOY.value:
         elb = EnvoyLoadBalancer(service_name=service_name,
                                 controller_url=controller_addr,
                                 load_balancer_port=load_balancer_port)

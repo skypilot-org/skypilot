@@ -393,7 +393,7 @@ def get_service_schema():
             },
             'load_balancer_type': {
                 'type': 'string',
-                'case_insensitive_enum': serve_constants.LB_TYPES
+                'case_insensitive_enum': serve_constants.ALL_LB_TYPES,
             },
         }
     }

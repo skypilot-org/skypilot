@@ -1,5 +1,7 @@
 """Constants used for SkyServe."""
 
+from enum import Enum
+
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
@@ -105,6 +107,10 @@ TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
 ENVOY_THREADS = '1'
 ENVOY_VERSION = '1.32.0'
 
-LB_TYPE_PYTHON = 'python'
-LB_TYPE_ENVOY = 'envoy'
-LB_TYPES = [LB_TYPE_PYTHON, LB_TYPE_ENVOY]
+
+class LbType(Enum):
+    PYTHON = 'python'
+    ENVOY = 'envoy'
+
+
+ALL_LB_TYPES = [t.value for t in LbType]

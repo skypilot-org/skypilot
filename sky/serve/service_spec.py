@@ -67,11 +67,11 @@ class SkyServiceSpec:
                     f'Available policies: {list(serve.LB_POLICIES.keys())}')
 
         if (load_balancer_type is not None and
-                load_balancer_type not in constants.LB_TYPES):
+                load_balancer_type not in constants.ALL_LB_TYPES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Unknown load balancer type: {load_balancer_type}. '
-                    f'Available load balancers: {constants.LB_TYPES}')
+                    f'Available load balancers: {constants.ALL_LB_TYPES}')
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
