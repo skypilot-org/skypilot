@@ -384,6 +384,17 @@ def update(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
+    original_lb_policy = service_record['load_balancing_policy']
+    assert task.service is not None, 'Service section not found.'
+    if original_lb_policy != task.service.load_balancing_policy:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Current load balancing policy '
+            f'{original_lb_policy!r} is different from the new policy '
+            f'{task.service.load_balancing_policy!r}. Updating the load '
+            'balancing policy is not supported yet and it will be ignored. '
+            'The service will continue to use the current load balancing '
+            f'policy.{colorama.Style.RESET_ALL}')
+
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(

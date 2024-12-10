@@ -15,6 +15,10 @@ logger = sky_logging.init_logger(__name__)
 # Define a registry for load balancing policies
 LB_POLICIES = {}
 DEFAULT_LB_POLICY = None
+# Prior to #4439, the default policy was round_robin. We store the legacy
+# default policy here to maintain backwards compatibility. Remove this after
+# 2 minor release, i.e., 0.9.0.
+LEGACY_DEFAULT_POLICY = 'round_robin'
 
 
 def _request_repr(request: 'fastapi.Request') -> str:
@@ -40,11 +44,17 @@ class LoadBalancingPolicy:
             DEFAULT_LB_POLICY = name
 
     @classmethod
+    def make_policy_name(cls, policy_name: Optional[str]) -> str:
+        """Return the policy name."""
+        assert DEFAULT_LB_POLICY is not None, 'No default policy set.'
+        if policy_name is None:
+            return DEFAULT_LB_POLICY
+        return policy_name
+
+    @classmethod
     def make(cls, policy_name: Optional[str] = None) -> 'LoadBalancingPolicy':
         """Create a load balancing policy from a name."""
-        if policy_name is None:
-            policy_name = DEFAULT_LB_POLICY
-
+        policy_name = cls.make_policy_name(policy_name)
         if policy_name not in LB_POLICIES:
             raise ValueError(f'Unknown load balancing policy: {policy_name}')
         return LB_POLICIES[policy_name]()
