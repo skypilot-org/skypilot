@@ -904,12 +904,7 @@ if __name__ == '__main__':
 
     workers = []
     try:
-        num_queue_workers = os.cpu_count()
-        if num_queue_workers is None:
-            num_queue_workers = 4
-        num_queue_workers *= 2
-        workers = executor.start(num_queue_workers=num_queue_workers)
-
+        workers = executor.start(cmd_args.deploy)
         logger.info('Starting SkyPilot server')
         uvicorn.run('sky.api.rest:app',
                     host=cmd_args.host,
