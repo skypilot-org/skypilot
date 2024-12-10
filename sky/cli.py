@@ -3543,7 +3543,12 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    subprocess_utils.run_in_parallel(sky.storage_delete, names)
+    results: List[Union[None, Exception]] = subprocess_utils.run_in_parallel(
+        sky.storage_delete, names, continue_on_error=True)
+    
+    for idx, result in enumerate(results):
+        if isinstance(result, Exception):
+            click.secho(f'Failed to delete storage {names[idx]}: {result}', fg='red')
 
 
 @cli.group(cls=_NaturalOrderGroup)

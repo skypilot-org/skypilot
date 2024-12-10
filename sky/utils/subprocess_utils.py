@@ -96,29 +96,47 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
     return max(4, cpu_count - 1) * _get_thread_multiplier(cloud_str)
 
 
+# TODO(andyl): Why this function returns a list of results? Why not yielding?
 def run_in_parallel(func: Callable,
                     args: Iterable[Any],
-                    num_threads: Optional[int] = None) -> List[Any]:
+                    num_threads: Optional[int] = None,
+                    continue_on_error: bool = False) -> List[Any]:
     """Run a function in parallel on a list of arguments.
-
-    The function 'func' should raise a CommandError if the command fails.
 
     Args:
         func: The function to run in parallel
         args: Iterable of arguments to pass to func
         num_threads: Number of threads to use. If None, uses
           get_parallel_threads()
+        continue_on_error: If True, continues execution when errors occur
+                         If False (default), raises the first error immediately
 
     Returns:
       A list of the return values of the function func, in the same order as the
-      arguments.
+        arguments. If continue_on_error=True, failed operations will have
+        their exceptions in the result list.
     """
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    processes = num_threads if num_threads is not None else get_parallel_threads(
-    )
+    processes = (num_threads
+                 if num_threads is not None else get_parallel_threads())
     with pool.ThreadPool(processes=processes) as p:
-        # Run the function in parallel on the arguments, keeping the order.
-        return list(p.imap(func, args))
+        ordered_iterators = p.imap(func, args)
+
+        # TODO(andyl): Is this list(ordered_iterators) clear? Maybe we should
+        # merge two cases, and move this logic deeper to
+        # `except e: results.append(e) if continue_on_error else raise e`
+        if not continue_on_error:
+            return list(ordered_iterators)
+        else:
+            results: List[Union[Any, Exception]] = []
+            while True:
+                try:
+                    result = next(ordered_iterators)
+                    results.append(result)
+                except StopIteration:
+                    break
+                except Exception as e:  # pylint: disable=broad-except
+                    results.append(e)
+            return results
 
 
 def handle_returncode(returncode: int,
