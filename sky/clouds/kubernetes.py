@@ -41,6 +41,8 @@ class Kubernetes(clouds.Cloud):
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
 
+    LEGACY_SINGLETON_REGION = 'kubernetes'
+
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
     # allow additional characters for creating ingress services to expose ports.
@@ -54,7 +56,6 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
-    _LEGACY_SINGLETON_REGION = 'kubernetes'
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -630,7 +631,7 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region == self._LEGACY_SINGLETON_REGION:
+        if region == self.LEGACY_SINGLETON_REGION:
             # For backward compatibility, we allow the region to be set to the
             # legacy singleton region.
             # TODO: Remove this after 0.9.0.

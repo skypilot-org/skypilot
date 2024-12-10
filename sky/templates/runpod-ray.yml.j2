@@ -24,6 +24,8 @@ available_node_types:
       ImageId: {{image_id}}
       PublicKey: |-
         skypilot:ssh_public_key_content
+      Preemptible: {{use_spot}}
+      BidPerGPU: {{bid_per_gpu}}
 
 head_node_type: ray_head_default
 

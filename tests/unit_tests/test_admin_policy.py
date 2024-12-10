@@ -16,6 +16,10 @@ logger = sky_logging.init_logger(__name__)
 
 POLICY_PATH = os.path.join(os.path.dirname(os.path.dirname(sky.__file__)),
                            'examples', 'admin_policy')
+if not os.path.exists(POLICY_PATH):
+    # This is used for GitHub Actions, as we copy the examples to the package.
+    POLICY_PATH = os.path.join(os.path.dirname(__file__), 'examples',
+                               'admin_policy')
 
 
 @pytest.fixture

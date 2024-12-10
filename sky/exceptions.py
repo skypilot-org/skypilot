@@ -132,6 +132,13 @@ class ClusterSetUpError(Exception):
     pass
 
 
+class ClusterDoesNotExist(ValueError):
+    """Raise when trying to operate on a cluster that does not exist."""
+    # This extends ValueError for compatibility reasons - we used to throw
+    # ValueError instead of this.
+    pass
+
+
 class NotSupportedError(Exception):
     """Raised when a feature is not supported."""
     pass

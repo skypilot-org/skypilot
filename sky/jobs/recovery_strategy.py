@@ -50,8 +50,9 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
             usage_lib.messages.usage.set_internal()
             sky.down(cluster_name)
             return
-        except ValueError:
+        except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
+            logger.debug(f'The cluster {cluster_name} is already down.')
             return
         except Exception as e:  # pylint: disable=broad-except
             retry_cnt += 1

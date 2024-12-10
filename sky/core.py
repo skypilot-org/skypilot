@@ -268,7 +268,8 @@ def _start(
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
     if not force and cluster_status == status_lib.ClusterStatus.UP:
         sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
@@ -359,12 +360,13 @@ def start(
             Useful for upgrading SkyPilot runtime.
 
     Raises:
-        ValueError: argument values are invalid: (1) the specified cluster does
-          not exist; (2) if ``down`` is set to True but
-          ``idle_minutes_to_autostop`` is None; (3) if the specified cluster is
-          the managed jobs controller, and either ``idle_minutes_to_autostop``
-          is not None or ``down`` is True (omit them to use the default
-          autostop settings).
+        ValueError: argument values are invalid: (1) if ``down`` is set to True
+          but ``idle_minutes_to_autostop`` is None; (2) if the specified
+          cluster is the managed jobs controller, and either
+          ``idle_minutes_to_autostop`` is not None or ``down`` is True (omit
+          them to use the default autostop settings).
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
@@ -412,7 +414,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             related resources.
 
     Raises:
-        ValueError: the specified cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
         RuntimeError: failed to stop the cluster.
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
           cluster, or a TPU VM Pod cluster, or the managed jobs controller.
@@ -423,7 +426,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             f'is not supported.')
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
 
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -467,14 +471,16 @@ def down(cluster_name: str, purge: bool = False) -> None:
             resources.
 
     Raises:
-        ValueError: the specified cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
         RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
           jobs controller.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
@@ -521,7 +527,7 @@ def autostop(
           rather than autostop (restartable).
 
     Raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend or the cluster is TPU VM Pod.
@@ -615,7 +621,7 @@ def queue(cluster_name: str,
             }
         ]
     raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -674,7 +680,8 @@ def cancel(
             worker node is preempted in the spot cluster.
 
     Raises:
-        ValueError: if arguments are invalid, or the cluster does not exist.
+        ValueError: if arguments are invalid.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
@@ -750,8 +757,8 @@ def tail_logs(cluster_name: str,
     Please refer to the sky.cli.tail_logs for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported or
-          the cluster does not exist.
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -793,7 +800,7 @@ def download_logs(
     Returns:
         Dict[str, str]: a mapping of job_id to local log path.
     Raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -838,7 +845,7 @@ def job_status(cluster_name: str,
         If job_ids is None and there is no job on the cluster, it will return
         {None: None}.
     Raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.

@@ -1,0 +1,2 @@
+setup: |
+  echo "hello world"

@@ -101,8 +101,8 @@ class AzureInstanceStatus(enum.Enum):
     ) -> Dict['AzureInstanceStatus', Optional[status_lib.ClusterStatus]]:
         return {
             cls.PENDING: status_lib.ClusterStatus.INIT,
-            cls.STOPPING: status_lib.ClusterStatus.INIT,
             cls.RUNNING: status_lib.ClusterStatus.UP,
+            cls.STOPPING: status_lib.ClusterStatus.STOPPED,
             cls.STOPPED: status_lib.ClusterStatus.STOPPED,
             cls.DELETING: None,
         }
