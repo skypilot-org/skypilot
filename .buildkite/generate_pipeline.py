@@ -241,7 +241,7 @@ def main():
         if not test_file.startswith('test_'):
             continue
         test_file_path = os.path.join('tests/smoke_tests', test_file)
-        if "required_before_merge" in test_file:
+        if "test_pre_merge" in test_file:
             pre_merge_files.append(test_file_path)
         else:
             release_files.append(test_file_path)
