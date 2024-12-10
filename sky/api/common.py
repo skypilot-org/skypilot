@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import colorama
 import filelock
 import httpx
+import psutil
 import pydantic
 import requests
 
@@ -33,6 +34,8 @@ API_SERVER_CMD = 'python -m sky.api.rest'
 CLIENT_DIR = pathlib.Path('~/.sky/clients')
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
+# The memory (GB) that SkyPilot tries to not use to prevent OOM.
+MIN_AVAIL_MEM_GB = 2
 
 logger = sky_logging.init_logger(__name__)
 
@@ -60,6 +63,15 @@ def is_api_server_running() -> bool:
 
 
 def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
+    # Check available memory before starting the server.
+    avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
+    if avail_mem_size_gb <= MIN_AVAIL_MEM_GB:
+        logger.warning(
+            f'{colorama.Fore.YELLOW} Your SkyPilot server machine only has '
+            f'{avail_mem_size_gb:.1f} GB of memory available. '
+            f'Recommend at least {MIN_AVAIL_MEM_GB} GB to run heavier loads '
+            f'on SkyPilot and enjoy better performance.'
+            f'{colorama.Style.RESET_ALL}')
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     # The command to run uvicorn. Adjust the app:app to your application's

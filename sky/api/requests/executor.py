@@ -18,6 +18,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.api import common as api_common
 from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.api.requests.queues import mp_queue
@@ -57,20 +58,18 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
-# The constants below are based on profiling the peak memory usage of
+# Constants based on profiling the peak memory usage of
 # various sky commands. See `tests/load_test/` for details.
 # Max memory consumption for each request.
 _PER_BLOCKING_REQUEST_MEM_GB = 0.25
-_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.1
+_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.15
+# To control the number of blocking workers.
 _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS = 2
-# Percentage of the total memory that SkyPilot is not allowed to use.
-# To prevent OOM on the server machine especially for local server.
-_MIN_AVAIL_MEM_PERCENT_DEPLOY = 0.2
-_MIN_AVAIL_MEM_PERCENT_LOCAL = 0.3
+_MAX_BLOCKING_WORKERS_LOCAL = 4
 # Percentage of memory for blocking requests
-# from the memory that SkyPilot is allowed to use.
+# from the memory reserved for SkyPilot.
 # This is to reserve some memory for non-blocking requests.
-_MAX_MEM_PERCENT_FOR_BLOCKING = 0.9
+_MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
 
 
 class QueueBackend(enum.Enum):
@@ -257,7 +256,7 @@ def schedule_request(
 
 
 def request_worker(worker_id: int, schedule_type: requests.ScheduleType,
-                   max_parallel_size: int, min_avail_mem: float):
+                   max_parallel_size: int):
     """Worker for the requests.
 
     Args:
@@ -266,8 +265,6 @@ def request_worker(worker_id: int, schedule_type: requests.ScheduleType,
             retrieve jobs.
         max_parallel_size: The maximum number of parallel jobs this worker can
             run.
-        min_avail_mem: the minimum free memory size that the workers need to
-            ensure.
     """
     logger.info(f'Request worker {worker_id} -- started with pid '
                 f'{multiprocessing.current_process().pid}')
@@ -286,12 +283,6 @@ def request_worker(worker_id: int, schedule_type: requests.ScheduleType,
                 time.sleep(0.1)
                 continue
             request_id, ignore_return_value = request
-            # Prevent OOM.
-            while psutil.virtual_memory().available < min_avail_mem:
-                logger.info(
-                    f'Request worker {worker_id} -- waiting for enough memory '
-                    f'for submitting request {request_id!r}')
-                time.sleep(1)
             request = requests.get_request(request_id)
             if request.status == requests.RequestStatus.ABORTED:
                 continue
@@ -328,15 +319,19 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     """Start the request workers."""
     # Determine the job capacity of the workers based on the system resources.
     cpu_count: int = psutil.cpu_count()
-    mem_size_gb: float = psutil.virtual_memory().total / (1024**3)
-    if deploy:
-        mem_size_gb *= _MIN_AVAIL_MEM_PERCENT_DEPLOY
-    else:
-        mem_size_gb *= _MIN_AVAIL_MEM_PERCENT_LOCAL
-    max_parallel_for_blocking = _max_parallel_size_for_blocking(
+    total_mem_size_gb: float = psutil.virtual_memory().total / (1024**3)
+    mem_size_gb = max(0, total_mem_size_gb - api_common.MIN_AVAIL_MEM_GB)
+    parallel_for_blocking = _max_parallel_size_for_blocking(
         cpu_count, mem_size_gb)
+    if not deploy:
+        parallel_for_blocking = min(parallel_for_blocking,
+                                    _MAX_BLOCKING_WORKERS_LOCAL)
     max_parallel_for_non_blocking = _max_parallel_size_for_non_blocking(
-        cpu_count, mem_size_gb)
+        mem_size_gb, parallel_for_blocking)
+    logger.info(
+        f'SkyPilot server will start {parallel_for_blocking} workers for '
+        f'blocking requests and will allow at max '
+        f'{max_parallel_for_non_blocking} non-blocking requests in parallel.')
 
     # Setup the queues.
     if queue_backend == QueueBackend.MULTIPROCESSING:
@@ -354,11 +349,11 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     time.sleep(2)
 
     workers = []
-    for worker_id in range(max_parallel_for_blocking):
+    for worker_id in range(parallel_for_blocking):
         worker = multiprocessing.Process(target=request_worker,
                                          args=(worker_id,
                                                requests.ScheduleType.BLOCKING,
-                                               1, _min_avail_mem(deploy)))
+                                               1))
         logger.info(f'Starting request worker: {worker_id}')
         worker.start()
         workers.append(worker)
@@ -367,8 +362,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     worker = multiprocessing.Process(target=request_worker,
                                      args=(-1,
                                            requests.ScheduleType.NON_BLOCKING,
-                                           max_parallel_for_non_blocking,
-                                           _min_avail_mem(deploy)))
+                                           max_parallel_for_non_blocking))
     logger.info('Starting non-blocking request worker')
     worker.start()
     workers.append(worker)
@@ -377,46 +371,19 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
 
 @functools.lru_cache(maxsize=1)
 def _max_parallel_size_for_blocking(cpu_count: int, mem_size_gb: float) -> int:
-    """Max parallelism for blocking requests.
-
-    Args:
-        cpu_count: The number of CPUs allowed for all the executors.
-        mem_size_gb: The allowed memory size in GB for all the executors.
-    """
-    assert cpu_count > 0 and mem_size_gb > 0
+    """Max parallelism for blocking requests."""
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS
     mem_based_max_parallel = int(mem_size_gb * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  _PER_BLOCKING_REQUEST_MEM_GB)
-    n = min(cpu_based_max_parallel, mem_based_max_parallel)
-    logger.info(f'Max parallel size for blocking requests: {n}')
+    n = max(1, min(cpu_based_max_parallel, mem_based_max_parallel))
     return n
 
 
 @functools.lru_cache(maxsize=1)
-def _max_parallel_size_for_non_blocking(cpu_count: int,
-                                        mem_size_gb: float) -> int:
-    """Max parallelism for non-blocking requests.
-
-    Args:
-        cpu_count: The number of CPUs allowed for all the executors.
-        mem_size_gb: The allowed memory size in GB for all the executors.
-    """
-    assert cpu_count > 0 and mem_size_gb > 0
-    parallel_size_for_blocking = _max_parallel_size_for_blocking(
-        cpu_count, mem_size_gb)
+def _max_parallel_size_for_non_blocking(mem_size_gb: float,
+                                        parallel_size_for_blocking: int) -> int:
+    """Max parallelism for non-blocking requests."""
     available_mem = mem_size_gb - (parallel_size_for_blocking *
                                    _PER_BLOCKING_REQUEST_MEM_GB)
-    assert available_mem > 0
-    n = int(available_mem / _PER_NON_BLOCKING_REQUEST_MEM_GB)
-    logger.info(f'Max parallel size for non-blocking requests: {n}')
+    n = max(1, int(available_mem / _PER_NON_BLOCKING_REQUEST_MEM_GB))
     return n
-
-
-@functools.lru_cache(maxsize=1)
-def _min_avail_mem(deploy: bool) -> float:
-    """Minimum available memory on the server machine."""
-    total_mem_gb: float = psutil.virtual_memory().total
-    if deploy:
-        return total_mem_gb * _MIN_AVAIL_MEM_PERCENT_DEPLOY
-    else:
-        return total_mem_gb * _MIN_AVAIL_MEM_PERCENT_LOCAL

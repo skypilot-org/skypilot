@@ -2146,7 +2146,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 9
+    _VERSION = 10
 
     def __init__(
             self,
@@ -2568,6 +2568,22 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     yaml_config['provider'])
                 state['launched_resources'] = launched_resources.copy(
                     region=context)
+
+        if version < 10:
+            # In https://github.com/assemble-org/skypilot/pull/48, we keep the
+            # cluster entry in the database even when it is in the transition
+            # from one region to another during the failover. We allow
+            # `handle.cluster_yaml` to be None to indicate that the cluster
+            # yaml is intentionally removed. Before that PR, the
+            # `handle.cluster_yaml` is always not None, even if it is
+            # intentionally removed.
+            # For backward compatibility, we set the `_cluster_yaml` to None
+            # if the file does not exist, assuming all the removal of the
+            # _cluster_yaml for existing clusters are intentional by SkyPilot.
+            # are intentional by SkyPilot.
+            if state['_cluster_yaml'] is not None and not os.path.exists(
+                    os.path.expanduser(state['_cluster_yaml'])):
+                state['_cluster_yaml'] = None
 
         self.__dict__.update(state)
 

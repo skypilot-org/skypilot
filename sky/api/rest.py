@@ -392,7 +392,7 @@ async def down(request: fastapi.Request, down_body: payloads.StopOrDownBody):
         request_name='down',
         request_body=down_body,
         func=core.down,
-        schedule_type=requests_lib.ScheduleType.BLOCKING,
+        schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
     )
 
 
