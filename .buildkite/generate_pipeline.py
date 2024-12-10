@@ -5,27 +5,23 @@ The script will generate two pipelines:
 
 tests/smoke_tests
 ├── test_*.py -> release pipeline
-├── test_required_before_merge.py -> pre-merge pipeline
+├── test_pre_merge.py -> pre-merge pipeline
 
 run `python .buildkite/generate_pipeline.py` to generate the pipeline for
 testing. The CI will run this script as a pre-step, and use the generated
 pipeline to run the tests.
 
-1. release pipeline, which runs all smoke tests by default, some function
-   support tests by multiple clouds, but we only generate one cloud per test
-   function to save cost.
-2. pre-merge pipeline, which generates all clouds supported by the test
-   function, author should specify which clouds to run by setting env in the
-   step.
+1. release pipeline, which runs all smoke tests by default, generates all
+   smoke tests for all clouds.
+2. pre-merge pipeline, which generates all smoke tests for all clouds,
+   author should specify which clouds to run by setting env in the step.
 
-We only have credentials for aws/azure/gcp/kubernetes(CLOUD_QUEUE_MAP) now,
-smoke tests for those clouds are generated, other clouds are not supported
-yet, smoke tests for those clouds are not generated.
+We only have credentials for aws/azure/gcp/kubernetes(CLOUD_QUEUE_MAP and
+SERVE_CLOUD_QUEUE_MAP) now, smoke tests for those clouds are generated, other
+clouds are not supported yet, smoke tests for those clouds are not generated.
 """
 
 import ast
-from collections import defaultdict
-import copy
 import os
 import random
 from typing import Any, Dict, List, Optional
@@ -78,8 +74,19 @@ def _get_full_decorator_path(decorator: ast.AST) -> str:
 
 
 def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
-    """Extract test functions and filter clouds with pytest.mark
-    from a Python test file."""
+    """Extract test functions and filter clouds using pytest.mark
+    from a Python test file.
+
+    We separate each test_function_{cloud} into different pipeline steps
+    to maximize the parallelism of the tests via the buildkite CI job queue.
+    This allows us to visualize the test results and rerun failures at the
+    granularity of each test_function_{cloud}.
+
+    If we make pytest --serve a job, it could contain dozens of test_functions
+    and run for hours. This makes it hard to visualize the test results and
+    rerun failures. Additionally, the parallelism would be controlled by pytest
+    instead of the buildkite job queue.
+    """
     with open(file_path, 'r', encoding='utf-8') as file:
         tree = ast.parse(file.read(), filename=file_path)
 
@@ -118,7 +125,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                             continue
                         clouds_to_include.append(suffix)
             clouds_to_include = (clouds_to_include if clouds_to_include else
-                                 copy.deepcopy(DEFAULT_CLOUDS_TO_RUN))
+                                 DEFAULT_CLOUDS_TO_RUN)
             clouds_to_include = [
                 cloud for cloud in clouds_to_include
                 if cloud not in clouds_to_exclude
@@ -133,6 +140,14 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                       f'but we do not have credentials for those clouds. '
                       f'Skipped.')
                 continue
+            if clouds_to_include != final_clouds_to_include:
+                excluded_clouds = set(clouds_to_include) - set(
+                    final_clouds_to_include)
+                print(
+                    f'Warning: {file_path}:{node.name} '
+                    f'is marked to run on {clouds_to_include}, '
+                    f'but we only have credentials for {final_clouds_to_include}. '
+                    f'clouds {excluded_clouds} are skipped.')
             function_name = (f'{class_name}::{node.name}'
                              if class_name else node.name)
             function_cloud_map[function_name] = (final_clouds_to_include, [
@@ -162,43 +177,41 @@ def _generate_pipeline(test_file: str) -> Dict[str, Any]:
     return {'steps': steps}
 
 
-def _dump_pipeline_to_file(output_file_pipelines_map: Dict[str,
-                                                           List[Dict[str,
-                                                                     Any]]],
+def _dump_pipeline_to_file(yaml_file_path: str,
+                           pipelines: List[Dict[str, Any]],
                            extra_env: Optional[Dict[str, str]] = None):
     default_env = {'LOG_TO_STDOUT': '1', 'PYTHONPATH': '${PYTHONPATH}:$(pwd)'}
     if extra_env:
         default_env.update(extra_env)
-
-    for yaml_file_path, pipelines in output_file_pipelines_map.items():
-        with open(yaml_file_path, 'w', encoding='utf-8') as file:
-            file.write(GENERATED_FILE_HEAD)
-            all_steps = []
-            for pipeline in pipelines:
-                all_steps.extend(pipeline['steps'])
-            # Shuffle the steps to avoid flakyness, consecutive runs of the same
-            # kind of test may fail for requiring locks on the same resources.
-            random.shuffle(all_steps)
-            final_pipeline = {'steps': all_steps, 'env': default_env}
-            yaml.dump(final_pipeline, file, default_flow_style=False)
+    with open(yaml_file_path, 'w', encoding='utf-8') as file:
+        file.write(GENERATED_FILE_HEAD)
+        all_steps = []
+        for pipeline in pipelines:
+            all_steps.extend(pipeline['steps'])
+        # Shuffle the steps to avoid flakyness, consecutive runs of the same
+        # kind of test may fail for requiring locks on the same resources.
+        random.shuffle(all_steps)
+        final_pipeline = {'steps': all_steps, 'env': default_env}
+        yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
 def _convert_release(test_files: List[str]):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
-    output_file_pipelines_map = defaultdict(list)
+    output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
         pipeline = _generate_pipeline(test_file)
-        output_file_pipelines_map[yaml_file_path].append(pipeline)
+        output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(output_file_pipelines_map,
+    _dump_pipeline_to_file(yaml_file_path,
+                           output_file_pipelines,
                            extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP})
 
 
 def _convert_pre_merge(test_files: List[str]):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_pre_merge.yaml'
-    output_file_pipelines_map = defaultdict(list)
+    output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
         # We want enable all clouds by default for each test function
@@ -213,9 +226,10 @@ def _convert_pre_merge(test_files: List[str]):
             },
             'if': 'build.env("aws") == "1"'
         })
-        output_file_pipelines_map[yaml_file_path].append(pipeline)
+        output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
-    _dump_pipeline_to_file(output_file_pipelines_map,
+    _dump_pipeline_to_file(yaml_file_path,
+                           output_file_pipelines,
                            extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
