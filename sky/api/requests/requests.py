@@ -238,11 +238,47 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     kill_requests(request_ids)
 
 
+def refresh_cluster_status_event():
+    """Periodically refresh the cluster status."""
+    # pylint: disable=import-outside-toplevel
+    import time
+
+    from sky import core
+    while True:
+        print('Refreshing cluster status...')
+        # TODO(zhwu): Periodically refresh will cause the cluster being locked
+        # and other operations, such as down, may fail due to not being able to
+        # acquire the lock.
+        core.status(refresh=True, all_users=True)
+        print('Refreshed cluster status...')
+        time.sleep(20)
+
+
+@dataclasses.dataclass
+class InternalRequestEvent:
+    id: str
+    name: str
+    event_fn: Callable[[], None]
+
+
+# Register the events to run in the background.
+INTERNAL_REQUEST_EVENTS = [
+    InternalRequestEvent(id='0',
+                         name='status',
+                         event_fn=refresh_cluster_status_event)
+]
+
+
 def kill_requests(request_ids: List[str]):
     for request_id in request_ids:
         with update_request(request_id) as request_record:
             if request_record is None:
                 logger.debug(f'No request ID {request_id}')
+                continue
+            # Skip internal requests. The internal requests are scheduled with
+            # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
+            if request_record.request_id in set(
+                    event.id for event in INTERNAL_REQUEST_EVENTS):
                 continue
             if request_record.status > RequestStatus.RUNNING:
                 logger.debug(f'Request {request_id} already finished')

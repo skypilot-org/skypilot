@@ -69,33 +69,17 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
-def refresh_cluster_status_event():
-    """Periodically refresh the cluster status."""
-    while True:
-        print('Refreshing cluster status...')
-        # TODO(zhwu): Periodically refresh will cause the cluster being locked
-        # and other operations, such as down, may fail due to not being able to
-        # acquire the lock.
-        core.status(refresh=True, all_users=True)
-        print('Refreshed cluster status...')
-        time.sleep(20)
-
-
-# Register the events to run in the background.
-events = {'status': refresh_cluster_status_event}
-
-
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
     del app  # unused
     # Startup: Run background tasks
-    for event_id, (event_name, event) in enumerate(events.items()):
+    for event in requests_lib.INTERNAL_REQUEST_EVENTS:
         executor.schedule_request(
-            request_id=str(event_id),
-            request_name=event_name,
+            request_id=event.id,
+            request_name=event.name,
             request_body=payloads.RequestBody(),
-            func=event,
+            func=event.event_fn,
             schedule_type=requests_lib.ScheduleType.NON_BLOCKING)
     yield
     # Shutdown: Add any cleanup code here if needed
