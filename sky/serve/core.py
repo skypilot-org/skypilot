@@ -165,7 +165,9 @@ def up(
                 if resource.cloud is None:
                     continue
 
-                requested_features = {clouds.CloudImplementationFeatures.ENVOY}
+                requested_features = {
+                    clouds.CloudImplementationFeatures.HOST_ENVOY_LOAD_BALANCER
+                }
                 resource.cloud.check_features_are_supported(
                     resource, requested_features)
 
