@@ -20,13 +20,13 @@ file_mounts:
   /mount_private_copy:
     name: {{storage_name}}
     source: ~/tmp-workdir
-    mode: COPY
+    mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
 
   # Mounting private buckets in COPY mode with a list of files as source
   /mount_private_copy_lof:
     name: {{storage_name}}
     source: ['~/tmp-workdir/tmp file', '~/tmp-workdir/tmp file2']
-    mode: COPY
+    mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
 
   {% if include_private_mount | default(True) %}
   # Mounting private buckets in MOUNT mode
@@ -38,7 +38,7 @@ file_mounts:
 
 run: |
   set -ex
-  
+
   # Check public bucket contents
   ls -ltr /mount_public_s3/corpora
   ls -ltr /mount_public_gcp/tiles
@@ -55,12 +55,12 @@ run: |
   ls -ltr /mount_private_mount/foo
   ls -ltr /mount_private_mount/tmp\ file
   {% endif %}
-  
+
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
   {% if include_private_mount | default(True) %}
   ! ls /mount_private_mount/circle-link
-  
+
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
   {% endif %}

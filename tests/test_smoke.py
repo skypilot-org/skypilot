@@ -37,7 +37,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, TextIO, Tuple
 import urllib.parse
 import uuid
 
@@ -1333,34 +1333,68 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 
 # ---------- storage ----------
+
+
+def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
+                                       storage_name: str, ls_hello_command: str,
+                                       cloud: str, only_mount: bool):
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(
+        storage_name=storage_name,
+        cloud=cloud,
+        only_mount=only_mount,
+    )
+    f.write(content)
+    f.flush()
+    file_path = f.name
+    test_commands = [
+        *STORAGE_SETUP_COMMANDS,
+        f'sky launch -y -c {cluster_name} --cloud {cloud} {file_path}',
+        f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
+        ls_hello_command,
+        f'sky stop -y {cluster_name}',
+        f'sky start -y {cluster_name}',
+        # Check if hello.txt from mounting bucket exists after restart in
+        # the mounted directory
+        f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
+    ]
+    clean_command = f'sky down -y {cluster_name}; sky storage delete -y {storage_name}'
+    return test_commands, clean_command
+
+
 @pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name, cloud=cloud)
+    ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
-        ]
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, False)
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            clean_command,
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_storage_mounts_with_stop_only_mount():
+    name = _get_cluster_name()
+    cloud = 'aws'
+    storage_name = f'sky-test-{int(time.time())}'
+    ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, True)
+        test = Test(
+            'aws_storage_mounts_only_mount',
+            test_commands,
+            clean_command,
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1371,29 +1405,14 @@ def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
     cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name, cloud=cloud)
+    ls_hello_command = f'gsutil ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'gsutil ls gs://{storage_name}/hello.txt',
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
-        ]
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, False)
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            clean_command,
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1409,31 +1428,19 @@ def test_azure_storage_mounts_with_stop():
                             get_default_storage_account_name(default_region))
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name, cloud=cloud)
+    # if the file does not exist, az storage blob list returns '[]'
+    ls_hello_command = (f'output=$(az storage blob list -c {storage_name} '
+                        f'--account-name {storage_account_name} '
+                        f'--account-key {storage_account_key} '
+                        f'--prefix hello.txt) '
+                        f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {cloud} {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'output=$(az storage blob list -c {storage_name} --account-name {storage_account_name} --account-key {storage_account_key} --prefix hello.txt)'
-            # if the file does not exist, az storage blob list returns '[]'
-            f'[ "$output" = "[]" ] && exit 1;'
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
-        ]
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, False)
         test = Test(
             'azure_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            clean_command,
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1446,25 +1453,15 @@ def test_kubernetes_storage_mounts():
     # built for x86_64 only.
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
+    ls_hello_command = (f'aws s3 ls {storage_name}/hello.txt || '
+                        f'gsutil ls gs://{storage_name}/hello.txt')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt || '
-            f'gsutil ls gs://{storage_name}/hello.txt',
-        ]
+        test_commands, clean_command = _storage_mounts_commands_generator(
+            f, name, storage_name, ls_hello_command, 'kubernetes', False)
         test = Test(
             'kubernetes_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            clean_command,
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
