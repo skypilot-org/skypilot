@@ -25,9 +25,8 @@
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 """
-# This is the content that will be used in the future.
 # Currently copy back the tests/smoke_tests/* to tests/test_smoke.py for review.
-# After review, we will remove the copy back part and use content below.
+# After review, we will remove all contents in this file and use content below.
 
 # All files categorized under tests/smoke_tests/*
 # Please add new test cases under that directory.
