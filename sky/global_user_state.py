@@ -826,8 +826,13 @@ def get_storage_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+def get_storage_names() -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM storage')
+    return [row[0] for row in rows]
+
+
 def get_storage() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from storage')
+    rows = _DB.cursor.execute('SELECT * FROM storage')
     records = []
     for name, launched_at, handle, last_use, status in rows:
         # TODO: use namedtuple instead of dict

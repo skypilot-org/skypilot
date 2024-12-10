@@ -3525,11 +3525,10 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        storages = sky.storage_ls()
-        if not storages:
+        names = global_user_state.get_storage_names()
+        if not names:
             click.echo('No storage(s) to delete.')
             return
-        names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
     if names:
@@ -3543,12 +3542,15 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    results: List[Union[None, Exception]] = subprocess_utils.run_in_parallel(
-        sky.storage_delete, names, continue_on_error=True)
-    
-    for idx, result in enumerate(results):
-        if isinstance(result, Exception):
-            click.secho(f'Failed to delete storage {names[idx]}: {result}', fg='red')
+    def delete_storage(name: str):
+        try:
+            sky.storage_delete(name)
+        except Exception as e:  # pylint: disable=broad-except
+            click.secho(f'Error deleting storage {name}: {e}', fg='red')
+
+    subprocess_utils.run_in_parallel(delete_storage,
+                                     names,
+                                     continue_on_error=True)
 
 
 @cli.group(cls=_NaturalOrderGroup)
