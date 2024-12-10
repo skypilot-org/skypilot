@@ -77,7 +77,7 @@ def _setup_logger():
     # being propagated to the parent logger.
     _root_logger.propagate = False
     if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
-        # If the sensitive log is enabled, we re init a new handler
+        # If the sensitive log is enabled, we reinitialize a new handler
         # and force set the level to INFO to suppress the debug logs
         # for certain loggers.
         for logger_name in _SENSITIVE_LOGGER:
