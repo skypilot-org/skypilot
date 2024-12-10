@@ -369,6 +369,14 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
+def update_cluster_handle(cluster_name: str,
+                          cluster_handle: 'backends.ResourceHandle'):
+    handle = pickle.dumps(cluster_handle)
+    _DB.cursor.execute('UPDATE clusters SET handle=(?) WHERE name=(?)',
+                       (handle, cluster_name))
+    _DB.conn.commit()
+
+
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',

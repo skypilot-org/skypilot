@@ -322,7 +322,9 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path: str) -> Dict[str, Any]:
+def read_yaml(path: Optional[str]) -> Dict[str, Any]:
+    if path is None:
+        raise ValueError('Attempted to read a None YAML.')
     with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
@@ -479,12 +481,14 @@ def remove_color(s: str):
     return _COLOR_PATTERN.sub('', s)
 
 
-def remove_file_if_exists(path: str):
+def remove_file_if_exists(path: Optional[str]):
     """Delete a file if it exists.
 
     Args:
         path: The path to the file.
     """
+    if path is None:
+        return
     try:
         os.remove(path)
     except FileNotFoundError:

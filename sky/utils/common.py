@@ -18,11 +18,11 @@ JOB_CONTROLLER_NAME: str = (
 
 class StatusRefreshMode(enum.Enum):
     """The mode of refreshing the status of a cluster."""
-
+    # Do not refresh any clusters.
     NONE = 'NONE'
-    # Automatically refresh when needed, e.g., autostop is set or the cluster
-    # is a spot instance.
+    # Only refresh clusters if their autostop is set or have spot instances.
     AUTO = 'AUTO'
+    # Refresh all clusters.
     FORCE = 'FORCE'
 
 

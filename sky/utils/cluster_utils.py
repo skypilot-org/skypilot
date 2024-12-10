@@ -129,7 +129,7 @@ class SSHConfigHelper(object):
             cluster_name: Cluster name (see `sky status`)
             ips: List of public IP addresses in the cluster. First IP is head
               node.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
+            auth_config: `auth` in cluster yaml.
             ports: List of port numbers for SSH corresponding to ips
             docker_user: If not None, use this user to ssh into the docker
             ssh_user: Override the ssh_user in auth_config
@@ -232,7 +232,7 @@ class SSHConfigHelper(object):
 
         Args:
             ip: Head node's IP address.
-            auth_config: read_yaml(handle.cluster_yaml)['auth']
+            auth_config: `auth` in cluster yaml.
             docker_user: If not None, use this user to ssh into the docker
         """
         username = auth_config['ssh_user']

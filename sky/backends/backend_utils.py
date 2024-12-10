@@ -1116,7 +1116,7 @@ def wait_until_ray_cluster_ready(
 
 
 def ssh_credential_from_yaml(
-    cluster_yaml: str,
+    cluster_yaml: Optional[str],
     docker_user: Optional[str] = None,
     ssh_user: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -1128,7 +1128,7 @@ def ssh_credential_from_yaml(
             the docker container.
         ssh_user: override the ssh_user in the cluster yaml.
     """
-    if not os.path.exists(cluster_yaml):
+    if cluster_yaml is None:
         return dict()
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -1670,8 +1670,7 @@ def check_can_clone_disk_and_override_task(
     return task, handle
 
 
-def _update_cluster_status_no_lock(
-        cluster_name: str) -> Optional[Dict[str, Any]]:
+def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from
@@ -1680,6 +1679,10 @@ def _update_cluster_status_no_lock(
     The function will update the cached cluster status in the global state. For
     the design of the cluster status and transition, please refer to the
     sky/design_docs/cluster_status.md
+
+    Note: this function is only safe to be called when the caller process is
+    holding the cluster lock, which means no other processes are modifying the
+    cluster.
 
     Returns:
         If the cluster is terminated or does not exist, return None. Otherwise
@@ -1698,6 +1701,12 @@ def _update_cluster_status_no_lock(
     if record is None:
         return None
     handle = record['handle']
+    if handle.cluster_yaml is None:
+        # Remove cluster from db since this cluster does not have a config file
+        # or any other ongoing requests
+        global_user_state.remove_cluster(cluster_name, terminate=True)
+        logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
+                     'Removing the cluster from cache.')
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return record
     cluster_name = handle.cluster_name
@@ -1997,22 +2006,19 @@ def refresh_cluster_record(
             return record
 
         if not acquire_per_cluster_status_lock:
-            return _update_cluster_status_no_lock(cluster_name)
+            return _update_cluster_status(cluster_name)
 
         # Try to acquire the lock so we can fetch the status.
         try:
             with lock.acquire(blocking=False):
-                # Lock acquired.
-
                 # Check the cluster status again, since it could have been
                 # updated between our last check and acquiring the lock.
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 if record is None or not _must_refresh_cluster_status(
                         record, force_refresh_statuses):
                     return record
-
                 # Update and return the cluster status.
-                return _update_cluster_status_no_lock(cluster_name)
+                return _update_cluster_status(cluster_name)
         except filelock.Timeout:
             # lock.acquire() will throw a Timeout exception if the lock is not
             # available and we have blocking=False.

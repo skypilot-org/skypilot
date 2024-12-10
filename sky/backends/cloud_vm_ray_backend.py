@@ -185,7 +185,7 @@ def _get_cluster_config_template(cloud):
 
 
 def write_ray_up_script_with_patched_launch_hash_fn(
-    cluster_config_path: str,
+    cluster_config_path: Optional[str],
     ray_up_kwargs: Dict[str, bool],
 ) -> str:
     """Writes a Python script that runs `ray up` with our launch hash func.
@@ -1546,6 +1546,7 @@ class RetryingVmProvisioner(object):
                                 f'{to_provision.cloud} '
                                 f'{region.name}{colorama.Style.RESET_ALL}'
                                 f'{zone_str}.'))
+                    assert handle.cluster_yaml is not None
                     provision_record = provisioner.bulk_provision(
                         to_provision.cloud,
                         region,
@@ -2152,7 +2153,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             *,
             cluster_name: str,
             cluster_name_on_cloud: str,
-            cluster_yaml: str,
+            cluster_yaml: Optional[str],
             launched_nodes: int,
             launched_resources: resources_lib.Resources,
             stable_internal_external_ips: Optional[List[Tuple[str,
@@ -2165,7 +2166,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.cluster_name_on_cloud = cluster_name_on_cloud
         # Replace the home directory with ~ for better robustness across systems
         # with different home directories.
-        if cluster_yaml.startswith(os.path.expanduser('~')):
+        if cluster_yaml is not None and cluster_yaml.startswith(
+                os.path.expanduser('~')):
             cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~', 1)
         self._cluster_yaml = cluster_yaml
         # List of (internal_ip, feasible_ip) tuples for all the nodes in the
@@ -2487,8 +2489,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.docker_user = docker_user
 
     @property
-    def cluster_yaml(self):
+    def cluster_yaml(self) -> Optional[str]:
+        if self._cluster_yaml is None:
+            return None
         return os.path.expanduser(self._cluster_yaml)
+
+    @cluster_yaml.setter
+    def cluster_yaml(self, value: Optional[str]):
+        self._cluster_yaml = value
 
     @property
     def ssh_user(self):
@@ -3901,9 +3909,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Skipped.')
             return
 
-        if not os.path.exists(handle.cluster_yaml):
+        if handle.cluster_yaml is None:
             logger.warning(f'Cluster {handle.cluster_name!r} has no '
-                           f'provision yaml {handle.cluster_yaml} so it '
+                           f'provision yaml so it '
                            'has not been provisioned. Skipped.')
             global_user_state.remove_cluster(handle.cluster_name,
                                              terminate=terminate)
@@ -4148,19 +4156,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
             handle.cluster_name)
 
-        if not terminate or remove_from_db:
-            global_user_state.remove_cluster(handle.cluster_name,
-                                             terminate=terminate)
-
         if terminate:
             # This function could be directly called from status refresh,
             # where we need to cleanup the cluster profile.
             metadata_utils.remove_cluster_metadata(handle.cluster_name)
+            self.remove_cluster_config(handle)
 
-            # Clean up generated config
-            # No try-except is needed since Ray will fail to teardown the
-            # cluster if the cluster_yaml is missing.
-            common_utils.remove_file_if_exists(handle.cluster_yaml)
+        if not terminate or remove_from_db:
+            global_user_state.remove_cluster(handle.cluster_name,
+                                             terminate=terminate)
+
+    def remove_cluster_config(self, handle: CloudVmRayResourceHandle) -> None:
+        """Remove the YAML config of a cluster."""
+        handle.cluster_yaml = None
+        global_user_state.update_cluster_handle(handle.cluster_name, handle)
+        common_utils.remove_file_if_exists(handle.cluster_yaml)
 
     def set_autostop(self,
                      handle: CloudVmRayResourceHandle,
