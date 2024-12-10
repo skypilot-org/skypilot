@@ -1,6 +1,6 @@
 """Utilities for nested config."""
 import copy
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 
@@ -28,6 +28,11 @@ class Config(Dict[str, Any]):
             default_value: The default value to return if the key is not found.
             override_configs: A dict of override configs with the same schema as
                 the config file, but only containing the keys to override.
+            allowed_override_keys: A list of keys that are allowed to be
+                overridden.
+            disallowed_override_keys: A list of keys that are disallowed to be
+                overridden.
+            pop: Whether to pop the key after getting it.
 
         Returns:
             The value of the nested key, or 'default_value' if not found.
@@ -37,7 +42,7 @@ class Config(Dict[str, Any]):
             config = _recursive_update(config, override_configs,
                                        allowed_override_keys,
                                        disallowed_override_keys)
-        return _get_nested(config, keys, default_value)
+        return _get_nested(config, keys, default_value, pop=False)
 
     def set_nested(self, keys: Tuple[str, ...], value: Any) -> None:
         """In-place sets a nested key to value.
@@ -52,6 +57,10 @@ class Config(Dict[str, Any]):
             else:
                 override = {key: override}
         _recursive_update(self, override)
+
+    def pop_nested(self, keys: Tuple[str, ...], default_value: Any) -> Any:
+        """Pops a nested key."""
+        return _get_nested(self, keys, default_value, pop=True)
 
     @classmethod
     def from_dict(cls, config: Optional[Dict[str, Any]]) -> 'Config':
@@ -122,14 +131,20 @@ def _recursive_update(
     return base_config
 
 
-def _get_nested(configs: Optional[Dict[str, Any]], keys: Iterable[str],
-                default_value: Any) -> Any:
+def _get_nested(configs: Optional[Dict[str, Any]],
+                keys: Tuple[str, ...],
+                default_value: Any,
+                pop: bool = False) -> Any:
     if configs is None:
         return default_value
     curr = configs
-    for key in keys:
+    for i, key in enumerate(keys):
         if isinstance(curr, dict) and key in curr:
-            curr = curr[key]
+            value = curr[key]
+            if i == len(keys) - 1:
+                if pop:
+                    curr.pop(key, default_value)
+            curr = value
         else:
             return default_value
     logger.debug(f'User config: {".".join(keys)} -> {curr}')

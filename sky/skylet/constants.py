@@ -318,10 +318,9 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('gcp', 'managed_instance_group'),
 ]
-DISALLOWED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
-    ('admin_policy',),
-    ('api_server',),
-]
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
+                                                       ('api_server',),
+                                                       ('allowed_clouds',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60

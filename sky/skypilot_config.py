@@ -192,7 +192,7 @@ def override_skypilot_config(
         default_value=None,
         override_configs=override_configs,
         allowed_override_keys=None,
-        disallowed_override_keys=constants.DISALLOWED_CLIENT_OVERRIDE_KEYS)
+        disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     try:
         with tempfile.NamedTemporaryFile(mode='w',
                                          prefix='skypilot_config',

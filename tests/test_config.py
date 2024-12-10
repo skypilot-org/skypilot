@@ -2,11 +2,13 @@ import copy
 import importlib
 import pathlib
 import textwrap
+from unittest import mock
 
 import pytest
 
 import sky
 from sky import skypilot_config
+from sky.api.requests import payloads
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -395,3 +397,41 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
         task_path = tmp_path / 'task.yaml'
         task_path.write_text(task_config_yaml)
         sky.Task.from_yaml(task_path)
+
+
+@mock.patch('sky.skypilot_config.to_dict',
+            return_value={
+                'api_server': 'http://example.com',
+                'aws': {
+                    'vpc_name': 'test-vpc',
+                    'security_group': 'test-sg'
+                },
+                'gcp': {
+                    'project_id': 'test-project'
+                }
+            })
+@mock.patch('sky.skylet.constants.DISALLOWED_CLIENT_OVERRIDE_KEYS',
+            [('aws', 'security_group')])
+@mock.patch('sky.skypilot_config.loaded_config_path',
+            return_value='/path/to/config.yaml')
+def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
+    with mock.patch('sky.api.requests.payloads.logger') as mock_logger:
+        # Call the function
+        result = payloads.get_override_skypilot_config_from_client()
+
+        # Verify api_server was removed
+        assert 'api_server' not in result
+
+        # Verify disallowed key was removed
+        assert 'security_group' not in result['aws']
+
+        # Verify allowed keys remain
+        assert result['aws']['vpc_name'] == 'test-vpc'
+        assert result['gcp']['project_id'] == 'test-project'
+
+        # Verify warning was logged for removed disallowed key
+        mock_logger.warning.assert_called_once_with(
+            'Key (\'aws\', \'security_group\') is specified in the client '
+            'SkyPilot config at \'/path/to/config.yaml\'. This will be '
+            'ignored. If you want to specify it, please modify it on server '
+            'side or contact your administrator.')

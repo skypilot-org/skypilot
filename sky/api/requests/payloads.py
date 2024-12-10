@@ -1,6 +1,7 @@
 """Payloads for the Sky API requests."""
 import functools
 import getpass
+import json
 import os
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -8,12 +9,15 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import pydantic
 
 from sky import serve
+from sky import sky_logging
 from sky import skypilot_config
 from sky.api import common
 from sky.skylet import constants
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import registry
+
+logger = sky_logging.init_logger(__name__)
 
 
 @functools.lru_cache()
@@ -34,17 +38,37 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
-    # server endpoint on the server side.
-    config.pop('api_server', None)
+    # server endpoint on the server side. This avoids the warning below.
+    config.pop_nested(('api_server',), default_value=None)
+    ignored_key_values = {}
+    for nested_key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        value = config.pop_nested(nested_key, default_value=None)
+        if value is not None:
+            ignored_key_values['.'.join(nested_key)] = value
+    if ignored_key_values:
+        logger.debug(f'The following keys ({json.dumps(ignored_key_values)}) '
+                     'are specified in the client SkyPilot config at '
+                     f'{skypilot_config.loaded_config_path()!r}. '
+                     'This will be ignored. If you want to specify it, '
+                     'please modify it on server side or contact your '
+                     'administrator.')
     return config
 
 
 class RequestBody(pydantic.BaseModel):
     """The request body for the SkyPilot API."""
-    env_vars: Dict[str, str] = request_body_env_vars()
-    entrypoint_command: str = common_utils.get_pretty_entry_point()
-    override_skypilot_config: Optional[Dict[
-        str, Any]] = get_override_skypilot_config_from_client()
+    env_vars: Dict[str, str] = {}
+    entrypoint_command: str = ''
+    override_skypilot_config: Optional[Dict[str, Any]] = {}
+
+    def __init__(self, **data):
+        data['env_vars'] = data.get('env_vars', request_body_env_vars())
+        data['entrypoint_command'] = data.get(
+            'entrypoint_command', common_utils.get_pretty_entry_point())
+        data['override_skypilot_config'] = data.get(
+            'override_skypilot_config',
+            get_override_skypilot_config_from_client())
+        super().__init__(**data)
 
     def to_kwargs(self) -> Dict[str, Any]:
         """Convert the request body to a kwargs dictionary on API server.
