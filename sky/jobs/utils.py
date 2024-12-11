@@ -9,7 +9,6 @@ import enum
 import inspect
 import os
 import pathlib
-import psutil
 import shlex
 import shutil
 import textwrap
@@ -19,6 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
+import psutil
 from typing_extensions import Literal
 
 from sky import backends
@@ -133,7 +133,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                         managed_job_constants.JOBS_CONTROLLER_PID_FILE_DIR),
                     str(job_id_))
                 try:
-                    with open(pid_file, 'r') as f:
+                    with open(pid_file, 'r', encoding='utf-8') as f:
                         pid = int(f.read())
                         logger.debug(f'Checking controller pid {pid}')
                         if psutil.Process(pid).is_running():
@@ -591,7 +591,7 @@ def stream_logs(job_id: Optional[int],
                 # is not considered an exceptional case.
                 return ''
 
-            time.sleep(log_lib._SKY_LOG_WAITING_GAP_SECONDS)
+            time.sleep(log_lib.SKY_LOG_WAITING_GAP_SECONDS)
 
         # See also log_lib.tail_logs.
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
@@ -613,10 +613,10 @@ def stream_logs(job_id: Optional[int],
                         if job_status.is_terminal():
                             break
 
-                    time.sleep(log_lib._SKY_LOG_TAILING_GAP_SECONDS)
+                    time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
                 # Wait for final logs to be written.
-                time.sleep(1 + log_lib._SKY_LOG_TAILING_GAP_SECONDS)
+                time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
             # Print any remaining logs including incomplete line.
             print(f.read(), end='', flush=True)
