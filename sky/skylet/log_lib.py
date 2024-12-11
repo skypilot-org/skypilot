@@ -178,7 +178,7 @@ def run_with_log(
     if process_stream:
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
-    stdin = kwargs.get('stdin', subprocess.DEVNULL)
+    stdin = kwargs.pop('stdin', subprocess.DEVNULL)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,

@@ -211,8 +211,8 @@ def _get_cloud_dependencies_installation_commands(
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
-        cloud_python_dependencies: List[str] = dependencies.extras_require[
-            cloud.canonical_name()]
+        cloud_python_dependencies: List[str] = copy.deepcopy(
+            dependencies.extras_require[cloud.canonical_name()])
 
         if isinstance(cloud, clouds.Azure):
             # azure-cli cannot be normally installed by uv.
