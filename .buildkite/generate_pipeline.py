@@ -7,9 +7,9 @@ tests/smoke_tests
 ├── test_*.py -> release pipeline
 ├── test_pre_merge.py -> pre-merge pipeline
 
-run `python .buildkite/generate_pipeline.py` to generate the pipeline for
-testing. The CI will run this script as a pre-step, and use the generated
-pipeline to run the tests.
+run `PYTHONPATH=$(pwd)/tests:$PYTHONPATH python .buildkite/generate_pipeline.py`
+to generate the pipeline for testing. The CI will run this script as a pre-step,
+and use the generated pipeline to run the tests.
 
 1. release pipeline, which runs all smoke tests by default, generates all
    smoke tests for all clouds.
@@ -27,14 +27,9 @@ import random
 import sys
 from typing import Any, Dict, List, Optional
 
-import yaml
-
-# Add project root to Python path
-tests_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tests')
-sys.path.append(tests_path)
-
 from conftest import all_clouds_in_smoke_tests
 from conftest import default_clouds_to_run
+import yaml
 
 DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
 ALL_CLOUDS_IN_SMOKE_TESTS = all_clouds_in_smoke_tests
