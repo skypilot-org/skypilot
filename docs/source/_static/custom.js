@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
+        { selector: '.toctree-l1 > a', text: 'HTTPS Encryption' },
         { selector: '.toctree-l1 > a', text: 'Pixtral (Mistral AI)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Reserved, Capacity Blocks, DWS' },
