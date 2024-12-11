@@ -10,6 +10,10 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import urllib.parse
 
+from azure.core.exceptions import ResourceExistsError
+from azure.core.exceptions import ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import ContainerClient
 import colorama
 
 from sky import check as sky_check
@@ -292,6 +296,12 @@ class AbstractStore:
           StorageBucketCreateError: If bucket creation fails
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
+        """
+        pass
+
+    def sync_bucket(self, region: Optional[str] = None):
+        """Fetches bucket if exists, or creates it if
+        it does not.
         """
         pass
 
@@ -809,7 +819,7 @@ class Storage(object):
                                  'to be reconstructed while the corresponding '
                                  'storage account '
                                  f'{s_metadata.storage_account_name!r} does '
-                                 'not exist.')
+                                 'not exist')
                 else:
                     logger.debug(f'Storage object {self.name!r} was attempted '
                                  'to be reconstructed while the corresponding '
@@ -817,6 +827,7 @@ class Storage(object):
                 continue
 
             self._add_store(store, is_reconstructed=True)
+            # self._sync_store(store)
 
     @classmethod
     def from_metadata(cls, metadata: StorageMetadata,
@@ -918,13 +929,14 @@ class Storage(object):
                          f'store with name {self.name!r}.')
             raise
 
-        # Add store to storage
-        self._add_store(store)
-
-        # Upload source to store
-        self._sync_store(store)
+        # self._add_store(store)
 
         return store
+
+    def initialize_and_sync_store(self, store: AbstractStore) -> None:
+        """Public method to initialize and sync the given store."""
+        self._add_store(store)
+        self._sync_store(store)
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
@@ -1021,7 +1033,7 @@ class Storage(object):
 
         name = config.pop('name', None)
         source = config.pop('source', None)
-        store = config.pop('store', None)
+        store = config.pop('store', None)  # where do we store this?!!?!?!?
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         if force_delete is None:
@@ -1044,8 +1056,8 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode)
-        if store is not None:
-            storage_obj.add_store(StoreType(store.upper()))
+        if store:
+            storage_obj.add_store(store_type=store.upper())
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
@@ -1154,11 +1166,11 @@ class S3Store(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.AWS())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: s3\' specified, but ' \
-                    'AWS access is disabled. To fix, enable '\
-                    'AWS by running `sky check`. More info: '\
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                    'Storage \'store: s3\' specified, but '
+                    'AWS access is disabled. To fix, enable '
+                    'AWS by running `sky check`. More info: '
+                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                )
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -1231,13 +1243,21 @@ class S3Store(AbstractStore):
           StorageInitError: If general initialization fails.
         """
         self.client = data_utils.create_s3_client(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+        self.bucket = None
+
+    def sync_bucket(self, region: Optional[str] = None):
+        if region:
+            self.region = region
+        if self.bucket is None:
+            self.bucket, is_new_bucket = self._get_bucket()
+            if self.is_sky_managed is None:
+                # If is_sky_managed is not specified, then this is a new storage
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
+                # If is_sky_managed is specified, then we take no action.
+                self.is_sky_managed = is_new_bucket
+
+        return self.bucket
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1272,7 +1292,7 @@ class S3Store(AbstractStore):
             msg_str = f'Deleted S3 bucket {self.name}.'
         else:
             msg_str = f'S3 bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
+                f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -1660,13 +1680,20 @@ class GcsStore(AbstractStore):
           StorageInitError: If general initialization fails.
         """
         self.client = gcp.storage_client()
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+        self.bucket = None
+
+    def sync_bucket(self, region: Optional[str] = None):
+        if region:
+            self.region = region
+        if self.bucket is None:
+            self.bucket, is_new_bucket = self._get_bucket()
+            if self.is_sky_managed is None:
+                # If is_sky_managed is not specified, then this is a new storage
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
+                # If is_sky_managed is specified, then we take no action.
+                self.is_sky_managed = is_new_bucket
+        return self.bucket
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1703,7 +1730,7 @@ class GcsStore(AbstractStore):
             msg_str = f'Deleted GCS bucket {self.name}.'
         else:
             msg_str = f'GCS bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
+                f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -2157,6 +2184,38 @@ class AzureBlobStore(AbstractStore):
         else:
             _raise_no_traceback_name_error('Store name must be specified.')
         return name
+
+    def sync_bucket(self, region: Optional[str] = None):
+        """
+        Ensures the Azure Blob Storage container exists.
+        If not, creates it. The 'bucket' is an alias to 'container' in Azure.
+        """
+        if region:
+            self.region = region
+
+        if not hasattr(self, 'container_name') or not self.container_name:
+            raise ValueError("Container name must be specified before syncing.")
+
+        if not hasattr(self, 'storage_client') or self.storage_client is None:
+            self.storage_client = BlobServiceClient(
+                account_url=
+                f"https://{self.storage_account_name}.blob.core.windows.net",
+                credential=self.storage_account_key)
+
+        try:
+            container_client: ContainerClient = self.storage_client.get_container_client(
+                self.container_name)
+            container_client.get_container_properties()
+            is_new_container = False
+        except ResourceNotFoundError:
+            try:
+                container_client.create_container()
+                is_new_container = True
+            except ResourceExistsError:
+                is_new_container = False
+
+        if self.is_sky_managed is None:
+            self.is_sky_managed = is_new_container
 
     def initialize(self):
         """Initializes the AZ Container object on the cloud.
@@ -2810,11 +2869,11 @@ class R2Store(AbstractStore):
         if not _is_storage_cloud_enabled(cloudflare.NAME):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: r2\' specified, but ' \
-                    'Cloudflare R2 access is disabled. To fix, '\
-                    'enable Cloudflare R2 by running `sky check`. '\
+                    'Storage \'store: r2\' specified, but '
+                    'Cloudflare R2 access is disabled. To fix, '
+                    'enable Cloudflare R2 by running `sky check`. '
                     'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
-                    )
+                )
 
     def initialize(self):
         """Initializes the R2 store object on the cloud.
@@ -2828,13 +2887,19 @@ class R2Store(AbstractStore):
           StorageInitError: If general initialization fails.
         """
         self.client = data_utils.create_r2_client(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+        self.bucket = None
+
+    def sync_bucket(self, region: Optional[str] = None):
+        if region:
+            self.region = region
+        if self.bucket is None:
+            self.bucket, is_new_bucket = self._get_bucket()
+            if self.is_sky_managed is None:
+                # If is_sky_managed is not specified, then this is a new storage
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
+                # If is_sky_managed is specified, then we take no action.
+                self.is_sky_managed = is_new_bucket
 
     def upload(self):
         """Uploads source to store bucket.
@@ -2869,7 +2934,7 @@ class R2Store(AbstractStore):
             msg_str = f'Deleted R2 bucket {self.name}.'
         else:
             msg_str = f'R2 bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
+                f'externally. Removing from local state.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -3152,8 +3217,8 @@ class IBMCosStore(AbstractStore):
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
         self.bucket_rclone_profile = \
-          Rclone.generate_rclone_bucket_profile_name(
-            self.name, Rclone.RcloneClouds.IBM)
+            Rclone.generate_rclone_bucket_profile_name(
+                self.name, Rclone.RcloneClouds.IBM)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3254,13 +3319,19 @@ class IBMCosStore(AbstractStore):
         """
         self.client = ibm.get_cos_client(self.region)
         self.s3_resource = ibm.get_cos_resource(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+        self.bucket = None
+
+    def sync_bucket(self, region: Optional[str] = None):
+        if region:
+            self.region = region
+        if self.bucket is None:
+            self.bucket, is_new_bucket = self._get_bucket()
+            if self.is_sky_managed is None:
+                # If is_sky_managed is not specified, then this is a new storage
+                # object (i.e., did not exist in global_user_state)
+                # and we should set the is_sky_managed property.
+                # If is_sky_managed is specified, then we take no action.
+                self.is_sky_managed = is_new_bucket
 
     def upload(self):
         """Uploads files from local machine to bucket.
@@ -3427,7 +3498,7 @@ class IBMCosStore(AbstractStore):
 
         # bucket's region doesn't match specified region in URI
         if bucket_region and uri_region and uri_region != bucket_region\
-              and self.sync_on_reconstruction:
+                and self.sync_on_reconstruction:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     f'Bucket {self.name} exists in '
@@ -3521,7 +3592,8 @@ class IBMCosStore(AbstractStore):
                         f'{colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
-        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
+        # type: ignore[union-attr]  # pylint: disable=line-too-long
+        except ibm.ibm_botocore.exceptions.ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Failed to create bucket: '
