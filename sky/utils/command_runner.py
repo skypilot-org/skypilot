@@ -619,6 +619,10 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        if ssh_mode == SshMode.INTERACTIVE:
+            # By default we disable stdin in run_with_log to avoid blocking, but
+            # for interactive mode, we need to enable it.
+            kwargs['stdin'] = None
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -810,6 +814,10 @@ class KubernetesCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        if ssh_mode == SshMode.INTERACTIVE:
+            # By default we disable stdin in run_with_log to avoid blocking, but
+            # for interactive mode, we need to enable it.
+            kwargs['stdin'] = None
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,

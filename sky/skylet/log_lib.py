@@ -178,11 +178,13 @@ def run_with_log(
     if process_stream:
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
+    stdin = kwargs.get('stdin', subprocess.DEVNULL)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
+                          stdin=stdin,
                           **kwargs) as proc:
         try:
             subprocess_utils.kill_process_daemon(proc.pid)
@@ -289,14 +291,11 @@ def run_bash_command_with_log(bash_command: str,
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
 
-        return run_with_log(
-            inner_command,
-            log_path,
-            stream_logs=stream_logs,
-            with_ray=with_ray,
-            # Disable input to avoid blocking.
-            stdin=subprocess.DEVNULL,
-            shell=True)
+        return run_with_log(inner_command,
+                            log_path,
+                            stream_logs=stream_logs,
+                            with_ray=with_ray,
+                            shell=True)
 
 
 def _follow_job_logs(file,
