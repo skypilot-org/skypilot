@@ -11,10 +11,13 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 
 # UX: Should we show logging prefixes and some extra information in optimizer?
-_show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
-                        not env_options.Options.MINIMIZE_LOGGING.get())
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
+
+
+def _show_logging_prefix():
+    return env_options.Options.SHOW_DEBUG_INFO.get(
+    ) or not env_options.Options.MINIMIZE_LOGGING.get()
 
 
 class NewLineFormatter(logging.Formatter):
@@ -61,7 +64,7 @@ def _setup_logger():
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    if _show_logging_prefix:
+    if _show_logging_prefix():
         _default_handler.setFormatter(FORMATTER)
     else:
         _default_handler.setFormatter(NO_PREFIX_FORMATTER)

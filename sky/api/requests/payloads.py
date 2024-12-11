@@ -26,8 +26,10 @@ def request_body_env_vars() -> dict:
     for env_var in os.environ:
         if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
             env_vars[env_var] = os.environ[env_var]
-    env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = getpass.getuser()
+    env_vars[constants.USER_ID_ENV_VAR] = os.getenv(
+        constants.USER_ID_ENV_VAR, common_utils.get_user_hash())
+    env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
+                                                 getpass.getuser())
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)

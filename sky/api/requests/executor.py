@@ -187,8 +187,8 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
+        original_env = os.environ.copy()
         try:
-
             os.environ.update(request_body.env_vars)
             user = models.User(
                 id=request_body.env_vars[constants.USER_ID_ENV_VAR],
@@ -214,7 +214,8 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
                 request_task.status = requests.RequestStatus.FAILED
                 request_task.set_error(e)
             restore_output(original_stdout, original_stderr)
-            logger.info(f'Request {request_id} failed due to {e}')
+            logger.info(f'Request {request_id} failed due to '
+                        f'{common_utils.format_exception(e)}')
             return
         else:
             with requests.update_request(request_id) as request_task:
@@ -228,6 +229,12 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
             # We need to call the save_timeline() since atexit will not be
             # triggered as multiple requests can be sharing the same process.
             timeline.save_timeline()
+            # Restore the original environment variables, so that a new request
+            # won't be affected by the previous request, e.g. SKYPILOT_DEBUG
+            # setting, etc. This is necessary as our executor is reusing the
+            # same process for multiple requests.
+            os.environ.clear()
+            os.environ.update(original_env)
 
 
 def schedule_request(
