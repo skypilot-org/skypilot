@@ -3542,7 +3542,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    def delete_storage(name: str):
+    def delete_storage(name: str) -> None:
         try:
             sky.storage_delete(name)
         except Exception as e:  # pylint: disable=broad-except
