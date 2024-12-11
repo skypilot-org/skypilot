@@ -96,7 +96,6 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
     return max(4, cpu_count - 1) * _get_thread_multiplier(cloud_str)
 
 
-# TODO(andyl): Why this function returns a list of results? Why not yielding?
 def run_in_parallel(func: Callable,
                     args: Iterable[Any],
                     num_threads: Optional[int] = None) -> List[Any]:
