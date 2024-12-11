@@ -4141,43 +4141,38 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'remove it manually to avoid image leakage. Details: '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
         if terminate:
-            try:
-                cloud = handle.launched_resources.cloud
-                config = common_utils.read_yaml(handle.cluster_yaml)
-                cloud.check_features_are_supported(
-                    handle.launched_resources,
-                    {clouds.CloudImplementationFeatures.OPEN_PORTS})
-                provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
-                                            handle.launched_resources.ports,
-                                            config['provider'])
-            except exceptions.NotSupportedError:
-                pass
-            except exceptions.PortDoesNotExistError:
-                logger.debug('Ports do not exist. Skipping cleanup.')
-            except FileNotFoundError:
-                # The cluster yaml may not exist, when the cluster is just set
-                # to INIT state and the cluster yaml file has not been written.
-                # In that case, we should be safe to assume the cluster does not
-                # exist, i.e. do not need to clean up for the ports.
-                pass
-            except Exception as e:  # pylint: disable=broad-except
-                if purge:
-                    logger.warning(
-                        f'Failed to cleanup ports. Skipping since purge is '
-                        f'set. Details: '
-                        f'{common_utils.format_exception(e, use_bracket=True)}')
-                else:
-                    raise
-
-        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
-            handle.cluster_name)
-
-        if terminate:
             # This function could be directly called from status refresh,
             # where we need to cleanup the cluster profile.
             metadata_utils.remove_cluster_metadata(handle.cluster_name)
-            self.remove_cluster_config(handle)
+            # The cluster yaml does not exist when skypilot has not found
+            # the right resource to provision the cluster.
+            if handle.cluster_yaml is not None:
+                try:
+                    cloud = handle.launched_resources.cloud
+                    config = common_utils.read_yaml(handle.cluster_yaml)
+                    cloud.check_features_are_supported(
+                        handle.launched_resources,
+                        {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                    provision_lib.cleanup_ports(repr(cloud),
+                                                cluster_name_on_cloud,
+                                                handle.launched_resources.ports,
+                                                config['provider'])
+                    self.remove_cluster_config(handle)
+                except exceptions.NotSupportedError:
+                    pass
+                except exceptions.PortDoesNotExistError:
+                    logger.debug('Ports do not exist. Skipping cleanup.')
+                except Exception as e:  # pylint: disable=broad-except
+                    if purge:
+                        msg = common_utils.format_exception(e, use_bracket=True)
+                        logger.warning(
+                            f'Failed to cleanup ports. Skipping since purge is '
+                            f'set. Details: {msg}')
+                    else:
+                        raise
 
+        sky.utils.cluster_utils.SSHConfigHelper.remove_cluster(
+            handle.cluster_name)
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,
                                              terminate=terminate)
