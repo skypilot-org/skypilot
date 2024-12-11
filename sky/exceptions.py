@@ -361,6 +361,11 @@ class NoClusterLaunchedError(Exception):
     pass
 
 
+class RequestAborted(Exception):
+    """Raised when a request is aborted."""
+    pass
+
+
 class APIServerConnectionError(RuntimeError):
 
     def __init__(self, server_url: str):

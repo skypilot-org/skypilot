@@ -26,6 +26,7 @@ import psutil
 import requests
 
 from sky import backends
+from sky import exceptions
 from sky import sky_logging
 from sky.api import common as api_common
 from sky.api.requests import payloads
@@ -687,6 +688,12 @@ def get(request_id: str) -> Any:
                          f'{stacktrace}')
         with ux_utils.print_exception_no_traceback():
             raise error_obj
+    if request_task.status == requests_lib.RequestStatus.ABORTED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.RequestAborted(
+                f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
+                f'({request_task.request_id}) is aborted by another process.'
+                f'{colorama.Style.RESET_ALL}')
     return request_task.get_return_value()
 
 
