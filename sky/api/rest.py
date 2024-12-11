@@ -318,11 +318,7 @@ async def download(download_body: payloads.DownloadBody):
 
 @app.post('/launch')
 async def launch(launch_body: payloads.LaunchBody, request: fastapi.Request):
-    """Launch a task.
-
-    Args:
-        task: The YAML string of the task to launch.
-    """
+    """Launch a task."""
     request_id = request.state.request_id
     executor.schedule_request(
         request_id,

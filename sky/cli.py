@@ -2163,7 +2163,7 @@ def logs(
         sdk.stream_and_get(log_request_id)
     finally:
         if log_request_id is not None:
-            sdk.abort(log_request_id)
+            sdk.abort(log_request_id, silent=True)
 
 
 @cli.command()
@@ -4070,7 +4070,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
             raise
     finally:
         if log_request_id is not None:
-            sdk.abort(log_request_id)
+            sdk.abort(log_request_id, silent=True)
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)

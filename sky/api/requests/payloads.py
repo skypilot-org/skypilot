@@ -147,7 +147,8 @@ class LaunchBody(RequestBody):
                                             self.env_vars,
                                             workdir_only=False)
 
-        backend = registry.BACKEND_REGISTRY.from_str(self.backend)
+        backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
+        backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
         kwargs['backend'] = backend
         kwargs['_quiet_optimizer'] = kwargs.pop('quiet_optimizer')
@@ -174,7 +175,8 @@ class ExecBody(RequestBody):
         dag = common.process_mounts_in_task(self.task,
                                             self.env_vars,
                                             workdir_only=True)
-        backend = registry.BACKEND_REGISTRY.from_str(self.backend)
+        backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
+        backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
         kwargs['backend'] = backend
         return kwargs

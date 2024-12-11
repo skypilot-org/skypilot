@@ -2609,7 +2609,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 pass
 
 
-@registry.BACKEND_REGISTRY.register
+@registry.BACKEND_REGISTRY.type_register(name='cloudvmraybackend')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     """Backend: runs on cloud virtual machines, managed by Ray.
 

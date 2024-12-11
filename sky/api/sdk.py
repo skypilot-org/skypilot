@@ -809,13 +809,17 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 
 @usage_lib.entrypoint
 @annotations.public_api
-def abort(request_id: Optional[str] = None, all: bool = False) -> str:  # pylint: disable=redefined-builtin
+def abort(
+        request_id: Optional[str] = None,
+        all: bool = False,  # pylint: disable=redefined-builtin
+        silent: bool = False) -> str:
     """Abort a request or all requests."""
+    echo = logger.info if not silent else logger.debug
     body = payloads.RequestIdBody(request_id=request_id, all=all)
     if request_id is not None:
-        print(f'Aborting request: {request_id!r}...')
+        echo(f'Aborting request: {request_id!r}...')
     elif all:
-        print('Aborting all requests...')
+        echo('Aborting all requests...')
     response = requests.post(f'{api_common.get_server_url()}/abort',
                              json=json.loads(body.model_dump_json()),
                              timeout=5)

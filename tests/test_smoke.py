@@ -693,16 +693,25 @@ def test_aws_region():
     run_one_test(test)
 
 
+# TODO(zhwu): Fix this test -- the jump-{name} cluster cannot be found by ssh,
+# when API server is hosted remotely, since we don't add jump-{name} to the ssh
+# config on the API server.
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
     name = _get_cluster_name()
-    with tempfile.NamedTemporaryFile(
-            mode='w') as f, tempfile.NamedTemporaryFile(mode='w') as f_empty:
+    api_server = skypilot_config.get_nested(('api_server', 'endpoint'), None)
+    with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
             textwrap.dedent(f"""\
         aws:
             ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
+        if api_server is not None:
+            f.write(
+                textwrap.dedent(f"""\
+            api_server:
+                endpoint: {api_server}
+            """))
         f.flush()
 
         test = Test(
@@ -734,8 +743,6 @@ def test_aws_with_ssh_proxy_command():
                     timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
-            # Make sure this test runs on local API server.
-            env={'SKYPILOT_CONFIG': f_empty.name},
         )
         run_one_test(test)
 
@@ -1612,6 +1619,8 @@ def test_kubernetes_context_switch():
     run_one_test(test)
 
 
+# TODO (zhwu): These tests may fail as it can require access cloud credentials,
+# even though the API server is running remotely. We should fix this.
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -4944,6 +4953,9 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 # ---------- Testing Storage ----------
+# TODO(zhwu): Many of these tests may fail when testing on remote API server,
+# since we may not have credentials/dependencies installed locally, and those
+# tests relies on the local environment.
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
@@ -5958,7 +5970,7 @@ class TestStorageWithCredentials:
         if handle:
             storage_obj.delete()
 
-    @pytest.mark.no_fluidstack
+    @pytest.mark.aws
     @pytest.mark.parametrize('region', [
         'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-south-1',
         'ap-southeast-1', 'ap-southeast-2', 'eu-central-1', 'eu-north-1',
@@ -5990,7 +6002,7 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in output, (
             f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
 
-    @pytest.mark.no_fluidstack
+    @pytest.mark.gcp
     @pytest.mark.parametrize('region', [
         'northamerica-northeast1', 'northamerica-northeast2', 'us-central1',
         'us-east1', 'us-east4', 'us-east5', 'us-south1', 'us-west1', 'us-west2',

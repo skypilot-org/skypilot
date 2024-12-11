@@ -193,6 +193,7 @@ def override_skypilot_config(
         override_configs=override_configs,
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    previous_env_config = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     try:
         with tempfile.NamedTemporaryFile(mode='w',
                                          prefix='skypilot_config',
@@ -204,7 +205,11 @@ def override_skypilot_config(
         _try_load_config()
         yield
     finally:
-        os.environ.pop(ENV_VAR_SKYPILOT_CONFIG)
+        if previous_env_config is not None:
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = previous_env_config
+        else:
+            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG)
+
         try:
             os.remove(f.name)
         except Exception:  # pylint: disable=broad-except

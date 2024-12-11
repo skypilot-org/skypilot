@@ -118,7 +118,7 @@ CLOUD_REGISTRY: _Registry = _Registry['cloud.Cloud'](registry_name='cloud',
                                                      exclude={'local'})
 
 BACKEND_REGISTRY: _Registry = _Registry['backend.Backend'](
-    registry_name='backend', exclude=None)
+    registry_name='backend', type_register=True, exclude=None)
 
 JOBS_RECOVERY_STRATEGY_REGISTRY: _Registry = (
     _Registry['recovery_strategy.StrategyExecutor'](

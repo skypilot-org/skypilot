@@ -312,7 +312,7 @@ def download_and_stream_latest_job_log(
 
     This function is only used by jobs controller and sky serve controller.
     """
-    os.makedirs(local_dir, exist_ok=True)
+    os.makedirs(os.path.expanduser(local_dir), exist_ok=True)
     log_file = None
     try:
         log_dirs = backend.sync_down_logs(
@@ -338,7 +338,8 @@ def download_and_stream_latest_job_log(
             # TODO(zhwu): refactor this into log_utils, along with the
             # refactoring for the log_lib.tail_logs.
             try:
-                with open(log_file, 'r', encoding='utf-8') as f:
+                with open(os.path.expanduser(log_file), 'r',
+                          encoding='utf-8') as f:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
