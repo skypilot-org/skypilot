@@ -1,5 +1,7 @@
 """Constants used for SkyServe."""
 
+from enum import Enum
+
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
@@ -100,3 +102,15 @@ SERVE_VERSION = 2
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# TODO(ejj) ultimately these should be configurable by users.
+ENVOY_THREADS = '1'
+ENVOY_VERSION = '1.32.0'
+
+
+class LbType(Enum):
+    PYTHON = 'python'
+    ENVOY = 'envoy'
+
+
+ALL_LB_TYPES = [t.value for t in LbType]

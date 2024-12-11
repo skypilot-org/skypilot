@@ -69,6 +69,10 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
+        clouds.CloudImplementationFeatures.HOST_ENVOY_LOAD_BALANCER:
+            'Envoy load balancer is not '
+            'supported on Kubernetes '
+            'controllers.'
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
