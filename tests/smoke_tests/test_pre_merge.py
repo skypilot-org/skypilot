@@ -29,7 +29,7 @@ def test_yaml_launch_and_mount(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test_yaml_launch_and_mount',
         [
-            f'sky launch -y -c {name} tests/test_yamls/minimal_test_required_before_merge.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/minimal_test_pre_merge.yaml',
             smoke_tests_utils.
             get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,

@@ -24,17 +24,21 @@ clouds are not supported yet, smoke tests for those clouds are not generated.
 import ast
 import os
 import random
+import sys
 from typing import Any, Dict, List, Optional
 
 import yaml
 
-DEFAULT_CLOUDS_TO_RUN = ['aws', 'azure']
+# Add project root to Python path
+tests_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tests')
+sys.path.append(tests_path)
 
-ALL_CLOUDS_IN_SMOKE_TESTS = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
-    'lambda_cloud'
-]
+from conftest import all_clouds_in_smoke_tests
+from conftest import default_clouds_to_run
+
+DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
+ALL_CLOUDS_IN_SMOKE_TESTS = all_clouds_in_smoke_tests
+
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'

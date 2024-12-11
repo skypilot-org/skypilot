@@ -36,6 +36,7 @@ cd ../sky-master
 git pull origin master
 pip uninstall -y skypilot
 pip install uv
+uv pip install --prerelease=allow "azure-cli>=2.65.0"
 uv pip install -e ".[all]"
 cd -
 
@@ -45,6 +46,7 @@ conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 pip uninstall -y skypilot
 pip install uv
+uv pip install --prerelease=allow "azure-cli>=2.65.0"
 uv pip install -e ".[all]"
 
 
