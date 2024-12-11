@@ -3553,9 +3553,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
             with ux_utils.print_exception_no_traceback():
                 raise e
 
-    subprocess_utils.run_in_parallel(delete_storage,
-                                     names,
-                                     continue_on_error=True)
+    subprocess_utils.run_in_parallel(delete_storage, names)
 
 
 @cli.group(cls=_NaturalOrderGroup)
