@@ -33,9 +33,14 @@ setup: |
 
 run: |
   {{ sky_activate_python_env }}
+  mkdir -p {{controller_logs_dir}}
+  mkdir -p {{controller_pid_file_dir}}
   # Start the controller for the current managed job.
-  python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
-    --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+  nohup python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %} \
+    > {{controller_logs_dir}}/$SKYPILOT_INTERNAL_JOB_ID.log 2>&1 </dev/null &
+  # Note: nohup calls exec, so the pid will stay the same.
+  echo $! > {{controller_pid_file_dir}}/$SKYPILOT_INTERNAL_JOB_ID
 
 envs:
 {%- for env_name, env_value in controller_envs.items() %}

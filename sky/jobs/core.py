@@ -119,6 +119,10 @@ def launch(
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            'controller_pid_file_dir':
+                managed_job_constants.JOBS_CONTROLLER_PID_FILE_DIR,
+            'controller_logs_dir':
+                managed_job_constants.JOBS_CONTROLLER_LOGS_DIR,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,

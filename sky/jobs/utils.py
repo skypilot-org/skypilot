@@ -9,6 +9,7 @@ import enum
 import inspect
 import os
 import pathlib
+import psutil
 import shlex
 import shutil
 import textwrap
@@ -119,8 +120,38 @@ def update_managed_job_status(job_id: Optional[int] = None):
     else:
         job_ids = [job_id]
     for job_id_ in job_ids:
-        controller_status = job_lib.get_status(job_id_)
-        if controller_status is None or controller_status.is_terminal():
+        submission_job_status = job_lib.get_status(job_id_)
+        if submission_job_status is None or submission_job_status.is_terminal():
+            if submission_job_status == job_lib.JobStatus.SUCCEEDED:
+                logger.debug(
+                    f'Job {job_id_} is already {submission_job_status}.')
+                # This is expected, since the submitted job will detach the
+                # controller and succeed, even if the controller is still
+                # running. Check the controller status directly.
+                pid_file = os.path.join(
+                    os.path.expanduser(
+                        managed_job_constants.JOBS_CONTROLLER_PID_FILE_DIR),
+                    str(job_id_))
+                try:
+                    with open(pid_file, 'r') as f:
+                        pid = int(f.read())
+                        logger.debug(f'Checking controller pid {pid}')
+                        if psutil.Process(pid).is_running():
+                            # The controller is still running.
+                            continue
+                        # Otherwise, proceed to mark the job as failed.
+                except FileNotFoundError:
+                    logger.debug('Submission succeeded but controller pid '
+                                 f'file {pid_file} not found.')
+                    # Proceed to mark the job as failed.
+                except ValueError:
+                    logger.debug(f'Failed to parse the controller pid from '
+                                 f'{pid_file}.')
+                    # Proceed to mark the job as failed.
+                except psutil.NoSuchProcess:
+                    logger.debug('Controller process not found.')
+                    # Proceed to mark the job as failed.
+
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
             tasks = managed_job_state.get_managed_jobs(job_id_)
@@ -527,6 +558,7 @@ def stream_logs(job_id: Optional[int],
                         'instead.')
             job_id = managed_job_ids.pop()
         assert job_id is not None, (job_id, job_name)
+
         # TODO: keep the following code sync with
         # job_lib.JobLibCodeGen.tail_logs, we do not directly call that function
         # as the following code need to be run in the current machine, instead
@@ -536,6 +568,59 @@ def stream_logs(job_id: Optional[int],
             return f'No managed job contrller log found with job_id {job_id}.'
         log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
         log_lib.tail_logs(job_id=job_id, log_dir=log_dir, follow=follow)
+
+        controller_log_path = os.path.join(
+            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
+            f'{job_id}.log')
+
+        # Wait for the log file to be written
+        while not os.path.exists(controller_log_path):
+            if not follow:
+                # Assume that the log file hasn't been written yet. Since we
+                # aren't following, just return.
+                return ''
+
+            job_status = managed_job_state.get_status(job_id)
+            # We know that the job is present in the state table because of
+            # earlier checks, so it should not be None.
+            assert job_status is not None, (job_id, job_name)
+            if job_status.is_terminal():
+                # Don't keep waiting. If the log file is not created by this
+                # point, it never will be. This job may have been submitted
+                # using an old version that did not create the log file, so this
+                # is not considered an exceptional case.
+                return ''
+
+            time.sleep(log_lib._SKY_LOG_WAITING_GAP_SECONDS)
+
+        # See also log_lib.tail_logs.
+        with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
+            # Note: we do not need to care about start_stream_at here, since
+            # that should be in the job log printed above.
+            for line in f:
+                print(line, end='')
+            # Flush.
+            print(end='', flush=True)
+
+            if follow:
+                while True:
+                    line = f.readline()
+                    if line is not None and line != '':
+                        print(line, end='', flush=True)
+                    else:
+                        job_status = managed_job_state.get_status(job_id)
+                        assert job_status is not None, (job_id, job_name)
+                        if job_status.is_terminal():
+                            break
+
+                    time.sleep(log_lib._SKY_LOG_TAILING_GAP_SECONDS)
+
+                # Wait for final logs to be written.
+                time.sleep(1 + log_lib._SKY_LOG_TAILING_GAP_SECONDS)
+
+            # Print any remaining logs including incomplete line.
+            print(f.read(), end='', flush=True)
+
         return ''
 
     if job_id is None:
@@ -868,6 +953,7 @@ class ManagedJobCodeGen:
         # should be removed in v0.8.0.
         code = textwrap.dedent("""\
         import os
+        import time
 
         from sky.skylet import job_lib, log_lib
         from sky.skylet import constants
