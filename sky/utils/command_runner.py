@@ -471,7 +471,7 @@ class SSHCommandRunner(CommandRunner):
         self._ssh_proxy_command = ssh_proxy_command
         self.disable_control_master = (
             disable_control_master or
-            control_master_utils.should_disable_control_master())
+            control_master_utils.should_disable_control_master(ip))
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -623,6 +623,10 @@ class SSHCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        if ssh_mode == SshMode.INTERACTIVE:
+            # By default we disable stdin in run_with_log to avoid blocking, but
+            # for interactive mode, we need to enable it.
+            kwargs['stdin'] = None
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
@@ -814,6 +818,10 @@ class KubernetesCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+        if ssh_mode == SshMode.INTERACTIVE:
+            # By default we disable stdin in run_with_log to avoid blocking, but
+            # for interactive mode, we need to enable it.
+            kwargs['stdin'] = None
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,
