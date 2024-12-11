@@ -6,6 +6,7 @@ import types
 import typing
 from typing import Any, Dict, List, Optional, Sequence
 
+from sky.skylet import constants
 from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
@@ -358,3 +359,13 @@ class UserRequestRejectedByPolicy(Exception):
 class NoClusterLaunchedError(Exception):
     """No cluster launched, so cleanup can be skipped during failover."""
     pass
+
+
+class APIServerConnectionError(RuntimeError):
+
+    def __init__(self, server_url: str):
+        super().__init__(
+            f'Could not connect to SkyPilot server at {server_url}. '
+            f'Please ensure that the server is running and '
+            f'{constants.SKY_API_SERVER_URL_ENV_VAR} environment variable '
+            f'is set correctly. Try: curl {server_url}/health')

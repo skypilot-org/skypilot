@@ -15,6 +15,7 @@ import psutil
 import pydantic
 import requests
 
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.data import data_utils
@@ -32,6 +33,7 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/tasks.db'
 DEFAULT_SERVER_URL = 'http://0.0.0.0:46580'
 API_SERVER_CMD = 'python -m sky.api.rest'
 CLIENT_DIR = pathlib.Path('~/.sky/clients')
+RETRY_COUNT_ON_TIMEOUT = 3
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
@@ -55,11 +57,22 @@ def is_api_server_local():
 
 
 def is_api_server_running() -> bool:
-    try:
-        response = requests.get(f'{get_server_url()}/health', timeout=5)
-    except requests.exceptions.ConnectionError:
-        return False
-    return response.status_code == 200
+    time_out_try_count = 1
+    server_url = get_server_url()
+    while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
+        try:
+            response = requests.get(f'{server_url}/health', timeout=2.5)
+            return response.status_code == 200
+        except requests.exceptions.Timeout as e:
+            if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.APIServerConnectionError(server_url) from e
+            time_out_try_count += 1
+            continue
+        except requests.exceptions.ConnectionError:
+            return False
+
+    return False
 
 
 def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
@@ -150,13 +163,8 @@ def check_health(func):
                                 'SkyPilot API server started.'))
                     else:
                         with ux_utils.print_exception_no_traceback():
-                            raise RuntimeError(
-                                'Could not connect to SkyPilot server at '
-                                f'{server_url}. Please ensure that the server '
-                                'is running and '
-                                f'{constants.SKY_API_SERVER_URL_ENV_VAR} '
-                                'environment variable is set correctly. Try: '
-                                f'curl {server_url}/health')
+                            raise exceptions.APIServerConnectionError(
+                                server_url)
         return func(*args, **kwargs)
 
     return wrapper
