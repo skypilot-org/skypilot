@@ -24,15 +24,14 @@ clouds are not supported yet, smoke tests for those clouds are not generated.
 import ast
 import os
 import random
-import sys
 from typing import Any, Dict, List, Optional
 
-from conftest import all_clouds_in_smoke_tests
+from conftest import cloud_to_pytest_keyword
 from conftest import default_clouds_to_run
 import yaml
 
 DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
-ALL_CLOUDS_IN_SMOKE_TESTS = all_clouds_in_smoke_tests
+PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
@@ -119,10 +118,11 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                         if suffix == 'serve':
                             is_serve_test = True
                             continue
-                        if suffix not in ALL_CLOUDS_IN_SMOKE_TESTS:
+                        if suffix not in PYTEST_TO_CLOUD_KEYWORD:
                             # This mark does not specify a cloud, so we skip it.
                             continue
-                        clouds_to_include.append(suffix)
+                        clouds_to_include.append(
+                            PYTEST_TO_CLOUD_KEYWORD[suffix])
             clouds_to_include = (clouds_to_include if clouds_to_include else
                                  DEFAULT_CLOUDS_TO_RUN)
             clouds_to_include = [
