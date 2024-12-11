@@ -3545,8 +3545,13 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     def delete_storage(name: str) -> None:
         try:
             sky.storage_delete(name)
-        except Exception as e:  # pylint: disable=broad-except
+        except (exceptions.StorageBucketDeleteError, PermissionError) as e:
             click.secho(f'Error deleting storage {name}: {e}', fg='red')
+        except ValueError as e:
+            click.secho(f'Error deleting storage {name}: {e}', fg='red')
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise e
 
     subprocess_utils.run_in_parallel(delete_storage,
                                      names,
