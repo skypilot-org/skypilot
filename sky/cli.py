@@ -3525,7 +3525,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        names = global_user_state.get_storage_names()
+        names = global_user_state.get_glob_storage_name('*')
         if not names:
             click.echo('No storage(s) to delete.')
             return
