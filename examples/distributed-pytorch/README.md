@@ -48,7 +48,7 @@ run: |
 sky launch -c train-rdzv train-rdzv.yaml
 ```
 
-In the [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
+In [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
 
 ```yaml
 run: |
