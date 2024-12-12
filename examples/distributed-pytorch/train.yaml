@@ -15,7 +15,11 @@ setup: |
 
 run: |
     cd examples/mingpt
+    export LOGLEVEL=INFO
+
     MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+    echo "Starting distributed training, head node: $MASTER_ADDR"
+
     torchrun \
     --nnodes=$SKYPILOT_NUM_NODES \
     --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \

@@ -15,11 +15,15 @@ setup: |
 
 run: |
     cd examples/mingpt
+    export LOGLEVEL=INFO
+
     MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+    echo "Starting distributed training, head node: $MASTER_ADDR"
+
     torchrun \
     --nnodes=$SKYPILOT_NUM_NODES \
     --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
     --rdzv_backend=c10d \
-    --rdzv_endpoint=$MASTER_ADDR:8008 \
-    --rdzv_id $RANDOM \
+    --rdzv_endpoint=$MASTER_ADDR:29500 \
+    --rdzv_id $SKYPILOT_TASK_ID \
     main.py

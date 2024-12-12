@@ -4,10 +4,22 @@ This example demonstrates how to run distributed training with PyTorch using Sky
 
 **The example is based on [PyTorch's official minGPT example](https://github.com/pytorch/examples/tree/main/distributed/minGPT-ddp)**
 
-## Using distributed training
+
+## Overview
+
+There are two ways to run distributed training with PyTorch:
+
+1. Using normal `torchrun`
+2. Using `rdvz` backend
+
+The main difference between the two for fixed-size distributed training is that `rdvz` backend automatically handles the rank for each node, while `torchrun` requires the rank to be set manually.
+
+SkyPilot offers easy built-in environment variables to help you start distributed training easily.
+
+### Using normal `torchrun`
 
 
-The following command spawn 2 nodes with 1 L4 GPU each. 
+The following command spawn 2 nodes with 2 L4 GPU each. 
 
 `sky launch -c train.yaml`
 
@@ -28,4 +40,39 @@ run: |
 
 
 
-## Using `rdvz`
+### Using `rdvz` backend
+
+`rdvz` is an alternative backend for distributed training:
+
+```
+sky launch -c train-rdzv.yaml
+```
+
+In the [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
+
+```yaml
+run: |
+    cd examples/mingpt
+    MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+    echo "Starting distributed training, head node: $MASTER_ADDR"
+
+    torchrun \
+    --nnodes=$SKYPILOT_NUM_NODES \
+    --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint=$MASTER_ADDR:29500 \
+    --rdzv_id $SKYPILOT_TASK_ID \
+    main.py
+```
+
+
+## Scale up
+
+If you would like to scale up the training, you can simply change the resources requirement, and SkyPilot's built-in environment variables will be set automatically.
+
+For example, the following command will spawn 4 nodes with 4 L4 GPUs each.
+
+`sky launch -c train.yaml --num-nodes 2 --gpus L4:2 --cpus 8+`
+
+We increase the `--cpus` to 8+ as well to avoid the performance to be bottlenecked by the CPU.
+
