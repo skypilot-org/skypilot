@@ -24,7 +24,6 @@ class Vast(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on Vast.'),
-        ## TODO: These are different from the fluffy cloud
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on Vast.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
