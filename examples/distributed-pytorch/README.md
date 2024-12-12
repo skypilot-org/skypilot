@@ -23,7 +23,7 @@ The following command will spawn 2 nodes with 2 L4 GPU each:
 
 `sky launch -c train.yaml`
 
-In the [train.yaml](./train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
+In [train.yaml](./train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
 
 ```yaml
 run: |
