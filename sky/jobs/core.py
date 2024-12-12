@@ -37,13 +37,13 @@ if typing.TYPE_CHECKING:
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    name: Optional[str] = None,
-    stream_logs: bool = True,
-    detach_run: bool = False,
-    retry_until_up: bool = False,
-    # TODO(cooperc): remove fast arg before 0.8.0
-    fast: bool = True,
+        task: Union['sky.Task', 'sky.Dag'],
+        name: Optional[str] = None,
+        stream_logs: bool = True,
+        detach_run: bool = False,
+        retry_until_up: bool = False,
+        # TODO(cooperc): remove fast arg before 0.8.0
+        fast: bool = True,  # pylint: disable=unused-argument for compatibility
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
