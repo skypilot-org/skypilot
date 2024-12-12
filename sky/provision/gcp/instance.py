@@ -52,6 +52,8 @@ def _filter_instances(
 # non_terminated_only=True?
 # Will there be callers who would want this to be False?
 # stop() and terminate() for example already implicitly assume non-terminated.
+# Currently, even with non_terminated_only=False, we may not have a dict entry
+# for terminated instances, if they have already been fully deleted.
 @common_utils.retry
 def query_instances(
     cluster_name_on_cloud: str,
