@@ -45,7 +45,7 @@ run: |
 `rdvz` is an alternative backend for distributed training:
 
 ```
-sky launch -c train-rdzv.yaml
+sky launch -c train-rdzv train-rdzv.yaml
 ```
 
 In the [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
