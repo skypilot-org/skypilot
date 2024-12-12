@@ -866,6 +866,15 @@ def check_credentials(context: Optional[str],
 
     _, exec_msg = is_kubeconfig_exec_auth(context)
 
+    # Check whether pod_config is valid
+    pod_config = skypilot_config.get_nested(('kubernetes', 'pod_config'),
+                                            default_value={},
+                                            override_configs={})
+    if pod_config:
+        _, pod_msg = _check_pod_config(context, pod_config)
+        if pod_msg:
+            return False, pod_msg
+
     # We now check if GPUs are available and labels are set correctly on the
     # cluster, and if not we return hints that may help debug any issues.
     # This early check avoids later surprises for user when they try to run
@@ -890,6 +899,40 @@ def check_credentials(context: Optional[str],
         return True, exec_msg
     else:
         return True, None
+
+def _check_pod_config(
+        context: Optional[str] = None, pod_config: Optional[Any] = None) \
+        -> Tuple[bool, Optional[str]]:
+    """Check if the pod_config is a valid pod config
+
+    Using create_namespaced_pod api with dry_run to check the pod_config
+    is valid or not.
+
+    Returns:
+        bool: True if pod_config is valid.
+        str: Error message about why the pod_config is invalid, None otherwise.
+    """
+    try:
+        namespace = get_kube_config_context_namespace(context)
+        kubernetes.core_api(context).create_namespaced_pod(
+            namespace,
+            body=pod_config,
+            dry_run='All',
+            field_validation='Strict',
+            _request_timeout=kubernetes.API_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        error_msg = ''
+        if e.body:
+            # get detail error message from api_exception
+            exception_body = json.loads(e.body)
+            error_msg = exception_body.get('message')
+        else:
+            error_msg = str(e)
+        return False, f'Invalid pod_config: {error_msg}'
+    except Exception as e:  # pylint: disable=broad-except
+        return False, ('An error occurred: '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
+    return True, None
 
 
 def is_kubeconfig_exec_auth(
