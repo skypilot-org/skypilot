@@ -34,6 +34,10 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
     GPU, and launches the instance.
+
+    Note: For `disk_size` it looks for instances that are of the requested
+          size or greater than it. For instance, `disk_size=100` might return
+          something with `disk_size` at 102 or even 1000.
     """
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
