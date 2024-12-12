@@ -509,16 +509,15 @@ class Storage(object):
         self.sync_on_reconstruction = sync_on_reconstruction
 
         self._constructed = False
+        # TODO(romilb, zhwu): This is a workaround to support storage deletion
+        # for managed jobs. Once sky storage supports forced management for
+        # external buckets, this can be deprecated.
+        self.force_delete = False
 
     def construct(self):
         if self._constructed:
             return
         self._constructed = True
-
-        # TODO(romilb, zhwu): This is a workaround to support storage deletion
-        # for spot. Once sky storage supports forced management for external
-        # buckets, this can be deprecated.
-        self.force_delete = False
 
         # Validate and correct inputs if necessary
         self._validate_storage_spec(self.name)
@@ -966,11 +965,12 @@ class Storage(object):
             store_type: StoreType; Specific cloud store to remove from the list
               of backing stores.
         """
-        assert self.name is not None, self
         if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
+            assert self.name is not None
             global_user_state.remove_storage(self.name)
         if store_type:
+            assert self.name is not None
             store = self.stores[store_type]
             assert store is not None, self
             is_sky_managed = store.is_sky_managed
@@ -1005,7 +1005,8 @@ class Storage(object):
                     store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
-            global_user_state.remove_storage(self.name)
+            if self.name is not None:
+                global_user_state.remove_storage(self.name)
 
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""

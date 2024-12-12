@@ -3749,7 +3749,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=60 + _BUMP_UP_SECONDS),
                 # Wait for the job to be cleaned up.
-                'sleep 20',
+                'sleep 30',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
