@@ -35,9 +35,21 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     Converts the instance_type to the Vast GPU name, finds the specs for the
     GPU, and launches the instance.
 
-    Note: For `disk_size` it looks for instances that are of the requested
-          size or greater than it. For instance, `disk_size=100` might return
-          something with `disk_size` at 102 or even 1000.
+    Notes:
+
+      *  `disk_size`: we look for instances that are of the requested
+         size or greater than it. For instance, `disk_size=100` might 
+         return something with `disk_size` at 102 or even 1000.
+
+      *  `geolocation`: Geolocation on Vast can be as specific as the 
+         host chooses to be. They can say, for instance, "Yutakachō, 
+         Shinagawa District, Tokyo, JP." Such a specific geolocation 
+         as ours would fail to return this host in a simple string 
+         comparison if a user searched for "JP".
+
+         Since regardless of specificity, all our geolocations end 
+         in two-letter country codes we just snip that to conform 
+         to how many providers state their geolocation.
     """
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
