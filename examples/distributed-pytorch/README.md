@@ -42,7 +42,7 @@ run: |
 
 ### Using `rdzv` backend
 
-`rdvz` is an alternative backend for distributed training:
+`rdzv` is an alternative backend for distributed training:
 
 ```
 sky launch -c train-rdzv train-rdzv.yaml
