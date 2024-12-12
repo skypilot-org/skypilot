@@ -24,7 +24,7 @@ The following command will spawn 2 nodes with 2 L4 GPU each:
 sky launch -c train train.yaml
 ```
 
-In the [train.yaml](./train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
+In [train.yaml](./train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
 
 ```yaml
 run: |
@@ -41,15 +41,15 @@ run: |
 
 
 
-### Using `rdvz` backend
+### Using `rdzv` backend
 
-`rdvz` is an alternative backend for distributed training:
+`rdzv` is an alternative backend for distributed training:
 
 ```
-sky launch -c train-rdzv.yaml
+sky launch -c train-rdzv train-rdzv.yaml
 ```
 
-In the [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
+In [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
 
 ```yaml
 run: |
