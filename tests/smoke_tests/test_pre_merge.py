@@ -15,17 +15,16 @@
 #
 # Only run test for AWS + generic tests
 # > pytest tests/smoke_tests/test_pre_merge.py --aws
+#
+# Change cloud for generic tests to aws
+# > pytest tests/smoke_tests/test_pre_merge.py --generic-cloud aws
 
-import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
 
 
-@pytest.mark.aws
-@pytest.mark.azure
-@pytest.mark.gcp
-def test_yaml_launch_and_mount():
+def test_yaml_launch_and_mount(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test_yaml_launch_and_mount',
