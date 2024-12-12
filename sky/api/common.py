@@ -220,7 +220,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                 f'{time.strftime("%Y-%m-%d-%H%M%S")}.log')
         with rich_utils.client_status(
                 ux_utils.spinner_message(
-                    'Uploading files to the SkyPilot Server',
+                    'Uploading files to the SkyPilot server',
                     log_file,
                     is_local=True)):
             with tempfile.NamedTemporaryFile('wb+',
