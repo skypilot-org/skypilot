@@ -40,7 +40,7 @@ run: |
 
 
 
-### Using `rdvz` backend
+### Using `rdzv` backend
 
 `rdvz` is an alternative backend for distributed training:
 
