@@ -222,8 +222,7 @@ def _convert_pre_merge(test_files: List[str]):
             'command': 'bash tests/backward_compatibility_tests.sh',
             'agents': {
                 'queue': 'back_compat'
-            },
-            'if': 'build.env("aws") == "1"'
+            }
         })
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
