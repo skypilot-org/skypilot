@@ -80,7 +80,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             request_name=event.name,
             request_body=payloads.RequestBody(),
             func=event.event_fn,
-            schedule_type=requests_lib.ScheduleType.NON_BLOCKING)
+            schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+            is_skypilot_system=True,
+        )
     yield
     # Shutdown: Add any cleanup code here if needed
 

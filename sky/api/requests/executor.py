@@ -243,15 +243,21 @@ def schedule_request(
         request_body: payloads.RequestBody,
         func: Callable[P, Any],
         ignore_return_value: bool = False,
-        schedule_type: requests.ScheduleType = requests.ScheduleType.BLOCKING):
+        schedule_type: requests.ScheduleType = requests.ScheduleType.BLOCKING,
+        is_skypilot_system: bool = False):
     """Enqueue a request to the request queue."""
+    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+    if is_skypilot_system:
+        user_id = api_common.SKYPILOT_SYSTEM_USER_ID
+        global_user_state.add_user(models.User(id=user_id, name=user_id))
     request = requests.Request(request_id=request_id,
                                name=request_name,
                                entrypoint=func,
                                request_body=request_body,
                                status=requests.RequestStatus.PENDING,
                                created_at=time.time(),
-                               schedule_type=schedule_type)
+                               schedule_type=schedule_type,
+                               user_id=user_id)
 
     if not requests.create_if_not_exists(request):
         logger.debug(f'Request {request_id} already exists.')

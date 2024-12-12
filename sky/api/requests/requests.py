@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import filelock
 
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky.api import common
 from sky.api.requests import payloads
@@ -26,6 +27,7 @@ logger = sky_logging.init_logger(__name__)
 # Tables in task.db.
 REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
+COL_USER_ID = 'user_id'
 TASK_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 # TODO(zhwu): For scalability, there are several TODOs:
@@ -60,6 +62,7 @@ REQUEST_COLUMNS = [
     'created_at',
     COL_CLUSTER_NAME,
     'schedule_type',
+    COL_USER_ID,
 ]
 
 
@@ -80,10 +83,12 @@ class RequestPayload:
     request_body: str
     status: str
     created_at: float
+    user_id: str
     return_value: str
     error: str
     pid: Optional[int]
     schedule_type: str
+    user_name: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -96,6 +101,7 @@ class Request:
     request_body: payloads.RequestBody
     status: RequestStatus
     created_at: float
+    user_id: str
     return_value: Any = None
     error: Optional[Dict[str, Any]] = None
     pid: Optional[int] = None
@@ -143,7 +149,7 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
-        # Pop the cluster name as it is not a part of Request.
+        # Pop db columns that are not a part of Request.
         content.pop(COL_CLUSTER_NAME, None)
         return cls.decode(RequestPayload(**content))
 
@@ -165,6 +171,7 @@ class Request:
         """Serialize the request task."""
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
+        user_name = global_user_state.get_user(self.user_id).name
         return RequestPayload(
             request_id=self.request_id,
             name=self.name,
@@ -176,6 +183,8 @@ class Request:
             pid=None,
             created_at=self.created_at,
             schedule_type=self.schedule_type.value,
+            user_id=self.user_id,
+            user_name=user_name,
         )
 
     def encode(self) -> RequestPayload:
@@ -194,6 +203,7 @@ class Request:
                 pid=self.pid,
                 created_at=self.created_at,
                 schedule_type=self.schedule_type.value,
+                user_id=self.user_id,
             )
         except TypeError as e:
             print(f'Error encoding: {e}\n'
@@ -218,6 +228,7 @@ class Request:
             pid=payload.pid,
             created_at=payload.created_at,
             schedule_type=ScheduleType(payload.schedule_type),
+            user_id=payload.user_id,
         )
 
 
@@ -263,7 +274,7 @@ class InternalRequestEvent:
 
 # Register the events to run in the background.
 INTERNAL_REQUEST_EVENTS = [
-    InternalRequestEvent(id='0',
+    InternalRequestEvent(id='skypilot-status-refresh-daemon',
                          name='status',
                          event_fn=refresh_cluster_status_event)
 ]
@@ -327,7 +338,8 @@ def create_table(cursor, conn):
         error BLOB,
         pid INTEGER,
         {COL_CLUSTER_NAME} TEXT,
-        schedule_type TEXT)""")
+        schedule_type TEXT,
+        {COL_USER_ID} TEXT)""")
 
 
 _DB = None

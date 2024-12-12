@@ -5659,29 +5659,30 @@ def api_abort(request_id: Optional[str], all: bool):
 
 @api.command('ls', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
-@click.option('--all',
-              '-a',
+@click.option('--all-status',
+              '-s',
               is_flag=True,
               default=False,
               required=False,
-              help='Show all requests.')
+              help='Show requests of all statuses.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_ls(request_id: Optional[str], all: bool):
+def api_ls(request_id: Optional[str], all_status: bool):
     """List requests on SkyPilot server."""
-    request_list = sdk.requests_ls(request_id, all)
+    request_list = sdk.requests_ls(request_id, all_status)
     table = log_utils.create_table([
         'ID',
+        'User',
         'Name',
         'Created',
         'Status',
     ])
     for request in request_list:
         r_id = request.request_id
-        if not all:
+        if not all_status:
             r_id = common_utils.truncate_long_string(r_id, 36)
         table.add_row([
-            r_id, request.name,
+            r_id, request.user_name, request.name,
             log_utils.readable_time_duration(request.created_at), request.status
         ])
     click.echo(table)
