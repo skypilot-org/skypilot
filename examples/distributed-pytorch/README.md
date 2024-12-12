@@ -19,7 +19,7 @@ SkyPilot offers easy built-in environment variables to help you start distribute
 ### Using normal `torchrun`
 
 
-The following command spawn 2 nodes with 2 L4 GPU each. 
+The following command will spawn 2 nodes with 2 L4 GPU each:
 
 `sky launch -c train.yaml`
 
