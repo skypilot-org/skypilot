@@ -45,6 +45,8 @@ class SkyServeLoadBalancer:
         # Use the registry to create the load balancing policy
         self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
             load_balancing_policy_name)
+        logger.info('Starting load balancer with policy '
+                    f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
         # TODO(tian): httpx.Client has a resource limit of 100 max connections

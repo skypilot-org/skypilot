@@ -592,9 +592,10 @@ def status(
             'status': (sky.ServiceStatus) service status,
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
-            'policy': (Optional[str]) load balancer policy description,
+            'policy': (Optional[str]) autoscaling policy description,
             'requested_resources_str': (str) str representation of
               requested resources,
+            'load_balancing_policy': (str) load balancing policy name,
             'replica_info': (List[Dict[str, Any]]) replica information,
         }
 
