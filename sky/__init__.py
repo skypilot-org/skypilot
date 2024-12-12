@@ -133,6 +133,7 @@ K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
+Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
@@ -150,6 +151,7 @@ __all__ = [
     'OCI',
     'Paperspace',
     'RunPod',
+    'Vast',
     'SCP',
     'Vsphere',
     'Fluidstack',

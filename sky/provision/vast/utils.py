@@ -1,0 +1,126 @@
+# pylint: disable=assignment-from-no-return
+"""Vast library wrapper for SkyPilot."""
+from typing import Any, Dict, List
+
+from sky import sky_logging
+from sky.adaptors import vast
+
+logger = sky_logging.init_logger(__name__)
+
+
+def list_instances() -> Dict[str, Dict[str, Any]]:
+    """Lists instances associated with API key."""
+    instances = vast.vast().show_instances()
+
+    instance_dict: Dict[str, Dict[str, Any]] = {}
+    for instance in instances:
+        instance['id'] = str(instance['id'])
+        info = instance
+
+        if isinstance(instance['actual_status'], str):
+            info['status'] = instance['actual_status'].upper()
+        else:
+            info['status'] = 'UNKNOWN'
+        info['name'] = instance['label']
+
+        instance_dict[instance['id']] = info
+
+    return instance_dict
+
+
+def launch(name: str, instance_type: str, region: str, disk_size: int,
+           image_name: str) -> str:
+    """Launches an instance with the given parameters.
+
+    Converts the instance_type to the Vast GPU name, finds the specs for the
+    GPU, and launches the instance.
+
+    Notes:
+
+      *  `disk_size`: we look for instances that are of the requested
+         size or greater than it. For instance, `disk_size=100` might 
+         return something with `disk_size` at 102 or even 1000.
+
+      *  `geolocation`: Geolocation on Vast can be as specific as the 
+         host chooses to be. They can say, for instance, "Yutakachō, 
+         Shinagawa District, Tokyo, JP." Such a specific geolocation 
+         as ours would fail to return this host in a simple string 
+         comparison if a user searched for "JP".
+
+         Since regardless of specificity, all our geolocations end 
+         in two-letter country codes we just snip that to conform 
+         to how many providers state their geolocation.
+    """
+    gpu_name = instance_type.split('-')[1].replace('_', ' ')
+    num_gpus = int(instance_type.split('-')[0].replace('x', ''))
+
+    query = ' '.join([
+        f'geolocation="{region[-2:]}"',
+        f'disk_space>={disk_size}',
+        f'num_gpus={num_gpus}',
+        f'gpu_name="{gpu_name}"',
+    ])
+
+    instance_list = vast.vast().search_offers(query=query)
+
+    if isinstance(instance_list, int) or len(instance_list) == 0:
+        return ''
+
+    instance_touse = instance_list[0]
+
+    new_instance_contract = vast.vast().create_instance(
+        id=instance_touse['id'],
+        direct=True,
+        ssh=True,
+        env='-e __SOURCE=skypilot',
+        onstart_cmd='touch ~/.no_auto_tmux;apt install lsof',
+        label=name,
+        image=image_name)
+
+    new_instance = vast.vast().show_instance(
+        id=new_instance_contract['new_contract'])
+
+    return new_instance['id']
+
+
+def start(instance_id: str) -> None:
+    """Stops the given instance."""
+    vast.vast().start_instance(id=instance_id)
+
+
+def stop(instance_id: str) -> None:
+    """Stops the given instance."""
+    vast.vast().stop_instance(id=instance_id)
+
+
+def remove(instance_id: str) -> None:
+    """Terminates the given instance."""
+    vast.vast().destroy_instance(id=instance_id)
+
+
+def get_ssh_ports(cluster_name) -> List[int]:
+    """Gets the SSH ports for the given cluster."""
+    logger.debug(f'Getting SSH ports for cluster {cluster_name}.')
+
+    instances = list_instances()
+    possible_names = [f'{cluster_name}-head', f'{cluster_name}-worker']
+
+    ssh_ports = []
+
+    for instance in instances.values():
+        if instance['name'] in possible_names:
+            ssh_ports.append((instance['name'], instance['ssh_port']))
+    assert ssh_ports, (
+        f'Could not find any instances for cluster {cluster_name}.')
+
+    # So now we have
+    # [(name, port) ... ]
+    #
+    # We want to put head first and otherwise sort numerically
+    # and then extract the ports.
+    ssh_ports = list(
+        x[1]
+        for x in sorted(ssh_ports,
+                        key=lambda x: -1
+                        if x[0].endswith('head') else int(x[0].split('-')[-1])))
+    return ssh_ports
