@@ -329,7 +329,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file = managed_job_state.get_local_log_file(job_id, None)
             if log_file is not None:
-                with open(log_file, 'r', encoding='utf-8') as f:
+                with open(os.path.expanduser(log_file), 'r', encoding='utf-8') as f:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
