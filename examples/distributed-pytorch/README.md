@@ -20,8 +20,9 @@ SkyPilot offers convinient built-in environment variables to help you start dist
 
 
 The following command will spawn 2 nodes with 2 L4 GPU each:
-
-`sky launch -c train.yaml`
+```
+sky launch -c train train.yaml
+```
 
 In the [train.yaml](./train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using environment variables provided by SkyPilot.
 
@@ -72,7 +73,9 @@ If you would like to scale up the training, you can simply change the resources 
 
 For example, the following command will spawn 4 nodes with 4 L4 GPUs each.
 
-`sky launch -c train.yaml --num-nodes 2 --gpus L4:2 --cpus 8+`
+```
+sky launch -c train train.yaml --num-nodes 4 --gpus L4:4 --cpus 8+
+```
 
 We increase the `--cpus` to 8+ as well to avoid the performance to be bottlenecked by the CPU.
 
