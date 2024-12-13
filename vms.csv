@@ -1,0 +1,3 @@
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice
+cpu-e2_2vcpu-8gb,,0,2,8,2,fin,"",
+cpu_2_8,,0,2,8,2,fin,"",

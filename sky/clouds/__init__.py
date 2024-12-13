@@ -25,6 +25,7 @@ from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.vsphere import Vsphere
+from sky.clouds.nebius import Nebius
 
 __all__ = [
     'IBM',
@@ -47,6 +48,7 @@ __all__ = [
     'ProvisionerVersion',
     'StatusVersion',
     'Fluidstack',
+    'Nebius',
     # Utility functions
     'cloud_in_iterable',
 ]

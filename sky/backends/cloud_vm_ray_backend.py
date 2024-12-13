@@ -1,4 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+
+# NEBIUSTODO Add error handling and template registration for the cloud.
 import copy
 import enum
 import functools
@@ -163,6 +165,7 @@ def _is_command_length_over_limit(command: str) -> bool:
 
 
 def _get_cluster_config_template(cloud):
+
     cloud_to_template = {
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
@@ -176,7 +179,8 @@ def _get_cluster_config_template(cloud):
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
-        clouds.Fluidstack: 'fluidstack-ray.yml.j2'
+        clouds.Fluidstack: 'fluidstack-ray.yml.j2',
+        clouds.Nebius: 'nebius-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 

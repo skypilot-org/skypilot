@@ -35,6 +35,7 @@ class CloudImplementationFeatures(enum.Enum):
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
+    AUTOSTOP = 'autostop'
     STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
