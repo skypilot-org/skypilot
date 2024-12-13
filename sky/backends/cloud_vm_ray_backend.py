@@ -3630,7 +3630,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # In case other running cluster operations are still holding the
             # lock.
             common_utils.remove_file_if_exists(lock_path)
-            exclude_request_to_kill = 'down' if terminate else 'stop'
+            exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
             requests_lib.kill_cluster_requests(handle.cluster_name,
                                                exclude_request_to_kill)
             try:
@@ -3903,7 +3903,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
-        exclude_request_to_kill = 'down' if terminate else 'stop'
+        exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
         requests_lib.kill_cluster_requests(handle.cluster_name,
                                            exclude_request_to_kill)
         cluster_status_fetched = False
