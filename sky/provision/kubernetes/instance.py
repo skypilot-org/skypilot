@@ -918,10 +918,10 @@ def _terminate_node(namespace: str, context: Optional[str],
     for service_name in [pod_name, f'{pod_name}-ssh']:
         _delete_k8s_resource_with_retry(
             delete_func=lambda name=service_name: kubernetes.core_api(
-                context).delete_namespaced_service(
-                    name=name,
-                    namespace=namespace,
-                    _request_timeout=config_lib.DELETION_TIMEOUT),
+                context).delete_namespaced_service(name=name,
+                                                   namespace=namespace,
+                                                   _request_timeout=config_lib.
+                                                   DELETION_TIMEOUT),
             resource_type='service',
             resource_name=service_name)
 
