@@ -27,7 +27,7 @@ class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        # clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot .'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
@@ -315,7 +315,7 @@ class Nebius(clouds.Cloud):
         # Return dictionary of credential file paths. This may look
         # something like:
         return {
-            f'.nebius/{filename}': f'.nebius/{filename}'
+            f'~/.nebius/{filename}': f'~/.nebius/{filename}'
             for filename in _CREDENTIAL_FILES
         }
 

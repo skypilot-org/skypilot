@@ -25,7 +25,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_DEFAULT_DISK_SIZE_GB = 256
+_DEFAULT_DISK_SIZE_GB = 64
 
 
 class Resources:

@@ -1,6 +1,7 @@
 """Nebius instance provisioning."""
 import os
 import time
+from time import sleep
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -13,7 +14,7 @@ from sky.utils import ux_utils
 
 from nebius.sdk import SDK
 
-PENDING_STATUS = ['STOPPED', 'RESTARTING', 'STARTING', 'DELETING']
+PENDING_STATUS = ['RESTARTING', 'STARTING', 'DELETING', 'STOPPING']
 
 DEFAULT_NEBIUS_TOKEN_PATH = os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt')
 with open(DEFAULT_NEBIUS_TOKEN_PATH, 'r') as file:
@@ -24,6 +25,7 @@ POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
+
 
 
 def _filter_instances(cluster_name_on_cloud: str,
@@ -52,11 +54,18 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
             break
     return head_instance_id
 
+def _wait_all_pending(region: str, cluster_name_on_cloud: str) -> None:
+    while True:
+        instances = _filter_instances(cluster_name_on_cloud, PENDING_STATUS)
+        if not instances:
+            break
+        logger.info(f'Waiting for {len(instances)} instances to be ready.')
+        time.sleep(POLL_INTERVAL)
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    print('TRY TO RUN INSTANCES')
+    # print('TRY TO RUN INSTANCES')
     #  pr="project-e00w18sheap5emdjx8", name
     # service = ClusterServiceClient(sdk)
     # result = service.get_by_name(GetByNameRequest(name=cluster_name_on_cloud)).wait()
@@ -67,25 +76,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     #     parent_id=result.id
     # ))
 
-    while True:
-        instances = _filter_instances(cluster_name_on_cloud, PENDING_STATUS)
-        if not instances:
-            break
-        logger.info(f'Waiting for {len(instances)} instances to be ready.')
-        time.sleep(POLL_INTERVAL)
-    exist_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-    head_instance_id = _get_head_instance_id(exist_instances)
-    to_start_count = config.count - len(exist_instances)
+    _wait_all_pending(region, cluster_name_on_cloud)
+    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    head_instance_id = _get_head_instance_id(running_instances)
+    to_start_count = config.count - len(running_instances)
+    # print('to_start_count', to_start_count)
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
-            f'{len(exist_instances)} nodes, but {config.count} are required.')
+            f'{len(running_instances)} nodes, but {config.count} are required.')
     if to_start_count == 0:
         if head_instance_id is None:
             raise RuntimeError(
                 f'Cluster {cluster_name_on_cloud} has no head node.')
         logger.info(f'Cluster {cluster_name_on_cloud} already has '
-                    f'{len(exist_instances)} nodes, no need to start more.')
+                    f'{len(running_instances)} nodes, no need to start more.')
         return common.ProvisionRecord(provider_name='nebius',
                                       cluster_name=cluster_name_on_cloud,
                                       region=region,
@@ -95,6 +100,22 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                       created_instance_ids=[])
 
     created_instance_ids = []
+    resumed_instance_ids = []
+    stopped_instances = _filter_instances(cluster_name_on_cloud, ['STOPPED'])
+    for stopped_instance in stopped_instances.keys():
+        if to_start_count > 0:
+            try:
+                utils.start(stopped_instance)
+                resumed_instance_ids.append(stopped_instance)
+                to_start_count-=1
+                if stopped_instances[stopped_instance]['name'].endswith('-head'):
+                    head_instance_id = stopped_instance
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Start instance error: {e}')
+                raise
+            sleep(POLL_INTERVAL)  # to avoid fake STOPPED status
+            logger.info(f'Started instance {stopped_instance}.')
+
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
@@ -113,42 +134,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         created_instance_ids.append(instance_id)
         if head_instance_id is None:
             head_instance_id = instance_id
-    print("head_instance_id :: ", head_instance_id)
-    # Wait for instances to be ready.
-    # while True:
-    #     instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
-    #     ready_instance_cnt = 0
-    #
-    #     for instance_id, instance in instances.items():
-    #         if instance.get('ssh_port') is not None:
-    #             ready_instance_cnt += 1
-    #     logger.info('Waiting for instances to be ready: '
-    #                 f'({ready_instance_cnt}/{config.count}).')
-    #     if ready_instance_cnt == config.count:
-    #         break
-    #
-    #     time.sleep(POLL_INTERVAL)
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(provider_name='nebius',
                                   cluster_name=cluster_name_on_cloud,
                                   region=region,
                                   zone=None,
                                   head_instance_id=head_instance_id,
-                                  resumed_instance_ids=[],
+                                  resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
-    print('WAITING INSTANCES')
-
-    while True:
-        instances = _filter_instances(cluster_name_on_cloud, PENDING_STATUS)
-        if not instances:
-            break
-        logger.info(f'Waiting for {len(instances)} instances to be ready.')
-        time.sleep(POLL_INTERVAL)
-    del region, cluster_name_on_cloud, state
+    _wait_all_pending(region, cluster_name_on_cloud)
 
 
 def stop_instances(
@@ -156,7 +154,9 @@ def stop_instances(
         provider_config: Optional[Dict[str, Any]] = None,
         worker_only: bool = False,
 ) -> None:
-    raise NotImplementedError()
+    exist_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    for instance in exist_instances:
+        utils.stop(instance)
 
 
 def terminate_instances(
@@ -185,7 +185,8 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    del region  # unused
+
+    _wait_all_pending(region, cluster_name_on_cloud)
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -221,10 +222,11 @@ def query_instances(
 
     status_map = {
         'CREATED': status_lib.ClusterStatus.INIT,
-        'RESTARTING': status_lib.ClusterStatus.INIT,
+        'STARTING': status_lib.ClusterStatus.INIT,
         'PAUSED': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
-        'STOPPED': status_lib.ClusterStatus.INIT,
+        'STOPPED': status_lib.ClusterStatus.STOPPED,
+        'STOPPING': status_lib.ClusterStatus.STOPPED,
         'DELETING': status_lib.ClusterStatus.STOPPED,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
@@ -278,4 +280,4 @@ def query_ports(
             logger.warning(f'Querying ports {ports} timed out. Ports '
                            f'{not_ready_ports} are not ready.')
             return ready_ports
-        time.sleep(1)
+        time.sleep(POLL_INTERVAL)
