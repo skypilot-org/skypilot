@@ -875,14 +875,15 @@ def stop_instances(
     raise NotImplementedError()
 
 
-def _terminate_node(namespace: str, context: Optional[str], pod_name: str) -> None:
+def _terminate_node(namespace: str, context: Optional[str],
+                    pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
-    
+
     def _delete_k8s_resource(delete_func: Callable, resource_type: str,
-                            resource_name: str) -> None:
+                             resource_name: str) -> None:
         """Helper to delete Kubernetes resources with 404 handling and retries.
-        
+
         Args:
             delete_func: Function to call to delete the resource
             resource_type: Type of resource being deleted (e.g. 'service'), 
@@ -891,7 +892,7 @@ def _terminate_node(namespace: str, context: Optional[str], pod_name: str) -> No
         """
         max_retries = 3
         retry_delay = 5  # seconds
-        
+
         for attempt in range(max_retries):
             try:
                 delete_func()
@@ -904,11 +905,10 @@ def _terminate_node(namespace: str, context: Optional[str], pod_name: str) -> No
                         'found (404).')
                     return
                 elif attempt < max_retries - 1:
-                    logger.warning(
-                        f'terminate_instances: Failed to delete '
-                        f'{resource_type} {resource_name} (attempt '
-                        f'{attempt + 1}/{max_retries}). Error: {e}. '
-                        f'Retrying in {retry_delay} seconds...')
+                    logger.warning(f'terminate_instances: Failed to delete '
+                                   f'{resource_type} {resource_name} (attempt '
+                                   f'{attempt + 1}/{max_retries}). Error: {e}. '
+                                   f'Retrying in {retry_delay} seconds...')
                     time.sleep(retry_delay)
                 else:
                     raise
@@ -916,10 +916,11 @@ def _terminate_node(namespace: str, context: Optional[str], pod_name: str) -> No
     # Delete services for the pod
     for service_name in [pod_name, f'{pod_name}-ssh']:
         _delete_k8s_resource(
-            lambda: kubernetes.core_api(context).delete_namespaced_service(
-                service_name, namespace, 
-                _request_timeout=config_lib.DELETION_TIMEOUT),
-            'service',
+            lambda name=service_name: kubernetes.core_api(context).
+            delete_namespaced_service(
+                name,
+                namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT), 'service',
             service_name)
 
     # Note - delete pod after all other resources are deleted.
@@ -928,8 +929,7 @@ def _terminate_node(namespace: str, context: Optional[str], pod_name: str) -> No
     _delete_k8s_resource(
         lambda: kubernetes.core_api(context).delete_namespaced_pod(
             pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT),
-        'pod',
-        pod_name)
+        'pod', pod_name)
 
 
 def terminate_instances(
