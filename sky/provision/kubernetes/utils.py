@@ -907,11 +907,11 @@ def check_pod_config(cluster_yaml_path: str) -> Tuple[bool, Optional[str]]:
     yaml_obj = yaml.safe_load(yaml_content)
     pod_config = \
         yaml_obj['available_node_types']['ray_head_default']['node_config']
+    context = yaml_obj['provider'].get('context',
+                                       get_current_kube_config_context_name())
     try:
-        # This ok to use None context here as we only test the pod is valid
-        # won't do any change in the cluster
-        namespace = get_kube_config_context_namespace(None)
-        kubernetes.core_api().create_namespaced_pod(
+        namespace = get_kube_config_context_namespace(context)
+        kubernetes.core_api(context).create_namespaced_pod(
             namespace,
             body=pod_config,
             dry_run='All',
@@ -925,6 +925,8 @@ def check_pod_config(cluster_yaml_path: str) -> Tuple[bool, Optional[str]]:
         else:
             error_msg = str(e)
         return False, error_msg
+    except ValueError as e:
+        return False, common_utils.format_exception(e)
     except Exception as e:  # pylint: disable=broad-except
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
