@@ -880,8 +880,9 @@ def _terminate_node(namespace: str, context: Optional[str],
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
-    def _delete_k8s_resource(delete_func: Callable, resource_type: str,
-                             resource_name: str) -> None:
+    def _delete_k8s_resource_with_retry(delete_func: Callable,
+                                        resource_type: str,
+                                        resource_name: str) -> None:
         """Helper to delete Kubernetes resources with 404 handling and retries.
 
         Args:
@@ -915,19 +916,25 @@ def _terminate_node(namespace: str, context: Optional[str],
 
     # Delete services for the pod
     for service_name in [pod_name, f'{pod_name}-ssh']:
-        _delete_k8s_resource(lambda name=service_name: kubernetes.core_api(
-            context).delete_namespaced_service(
-                name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT),
-                             'service',
-                             service_name)
+        _delete_k8s_resource_with_retry(
+            delete_func=lambda name=service_name: kubernetes.core_api(
+                context).delete_namespaced_service(
+                    name=name,
+                    namespace=namespace,
+                    _request_timeout=config_lib.DELETION_TIMEOUT),
+            resource_type='service',
+            resource_name=service_name)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    _delete_k8s_resource(
-        lambda: kubernetes.core_api(context).delete_namespaced_pod(
-            pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT),
-        'pod', pod_name)
+    _delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pod',
+        resource_name=pod_name)
 
 
 def terminate_instances(
