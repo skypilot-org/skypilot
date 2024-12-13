@@ -9,6 +9,7 @@ import typing
 from typing import Optional, Tuple
 
 import filelock
+import psutil
 
 from sky import exceptions
 from sky import sky_logging
@@ -18,6 +19,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.jobs import recovery_strategy
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.jobs import semaphore
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -29,6 +31,9 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+
+_JOB_SEMAPHORE_LOCK_DIR = os.path.expanduser('~/.sky/job_semaphore')
+_JOB_LAUNCH_SEMAPHORE_LOCK_DIR = os.path.expanduser('~/.sky/job_launch_semaphore')
 
 # Use the explicit logger name so that the logger is under the
 # `sky.jobs.controller` namespace when executed directly, so as
@@ -191,17 +196,19 @@ class JobsController:
             f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
-        logger.info('Started monitoring.')
-        managed_job_state.set_starting(job_id=self._job_id,
-                                       task_id=task_id,
-                                       callback_func=callback_func)
-        remote_job_submitted_at = self._strategy_executor.launch()
-        assert remote_job_submitted_at is not None, remote_job_submitted_at
+        with semaphore.FileLockSemaphore(lock_dir_path=_JOB_LAUNCH_SEMAPHORE_LOCK_DIR, lock_count=_get_launch_parallelism()):
+            logger.info('Started monitoring.')
+            managed_job_state.set_starting(job_id=self._job_id,
+                                        task_id=task_id,
+                                        callback_func=callback_func)
+            remote_job_submitted_at = self._strategy_executor.launch()
+            assert remote_job_submitted_at is not None, remote_job_submitted_at
 
-        managed_job_state.set_started(job_id=self._job_id,
-                                      task_id=task_id,
-                                      start_time=remote_job_submitted_at,
-                                      callback_func=callback_func)
+            managed_job_state.set_started(job_id=self._job_id,
+                                        task_id=task_id,
+                                        start_time=remote_job_submitted_at,
+                                        callback_func=callback_func)
+
         while True:
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -426,7 +433,14 @@ class JobsController:
                 job_id=self._job_id,
                 task_id=task_id,
                 task=self._dag.tasks[task_id]))
+        
+def _get_job_parallelism() -> int:
+    # Assume a running job uses 400MB memory.
+    job_memory = 400 * 1024 * 1024
+    return psutil.virtual_memory().total // job_memory
 
+def _get_launch_parallelism() -> int:
+    return os.cpu_count() * 4
 
 def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
@@ -563,8 +577,7 @@ def start(job_id, dag_yaml, retry_until_up):
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky jobs logs --controller {job_id}'))
 
-
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--job-id',
                         required=True,
@@ -580,4 +593,9 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml, args.retry_until_up)
+
+    with semaphore.FileLockSemaphore(lock_dir_path=_JOB_SEMAPHORE_LOCK_DIR, lock_count=_get_job_parallelism()):
+        start(args.job_id, args.dag_yaml, args.retry_until_up)
+
+if __name__ == '__main__':
+    main()
