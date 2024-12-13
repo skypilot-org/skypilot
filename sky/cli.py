@@ -157,7 +157,7 @@ def _get_cluster_records_and_set_ssh_config(
                     # TODO(zhwu): write the template to a temp file, don't use
                     # the one in skypilot repo, to avoid changing the file when
                     # updating skypilot.
-                    f'\'python {sky.__root_dir__}/templates/'
+                    f'\'{sys.executable} {sky.__root_dir__}/templates/'
                     f'websocket_proxy.py '
                     f'{api_common.get_server_url().split("://")[1]} '
                     f'{handle.cluster_name}\'')
