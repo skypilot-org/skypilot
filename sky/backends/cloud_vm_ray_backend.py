@@ -54,6 +54,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import accelerator_registry
+from sky.utils import cluster_utils
 from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
@@ -3122,16 +3123,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             )
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.UP)
-            # Do not need to add the cluster to ssh config file on API server.
-            # auth_config = backend_utils.ssh_credential_from_yaml(
-            #     handle.cluster_yaml,
-            #     ssh_user=handle.ssh_user,
-            #     docker_user=handle.docker_user)
-            # cluster_utils.SSHConfigHelper.add_cluster(handle.cluster_name,
-            #                                           ip_list, auth_config,
-            #                                           ssh_port_list,
-            #                                           handle.docker_user,
-            #                                           handle.ssh_user)
+            # We still add the cluster to ssh config file on API server, this
+            # is helpful for people trying to use `sky launch`'ed cluster for
+            # ssh proxy jump.
+            auth_config = backend_utils.ssh_credential_from_yaml(
+                handle.cluster_yaml,
+                ssh_user=handle.ssh_user,
+                docker_user=handle.docker_user)
+            cluster_utils.SSHConfigHelper.add_cluster(
+                handle.cluster_name, handle.cached_external_ips, auth_config,
+                handle.cached_external_ssh_ports, handle.docker_user,
+                handle.ssh_user)
 
             common_utils.remove_file_if_exists(lock_path)
 
