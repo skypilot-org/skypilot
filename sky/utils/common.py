@@ -8,12 +8,35 @@ from sky.utils import common_utils
 
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
-# Add user hash so that two users don't have the same controller VM on
-# shared-account clouds such as GCP.
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'{SKY_SERVE_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
-JOB_CONTROLLER_NAME: str = (
-    f'{JOB_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
+SERVER_ID_CONNECTOR: str = '-remote-'
+SERVER_ID = common_utils.get_user_hash(force_fresh_hash=True)
+
+
+class ControllerType(enum.Enum):
+    SERVE = 'SERVE'
+    JOBS = 'JOBS'
+
+
+def get_controller_name(controller_type: ControllerType) -> str:
+    prefix = JOB_CONTROLLER_PREFIX
+    if controller_type == ControllerType.SERVE:
+        prefix = SKY_SERVE_CONTROLLER_PREFIX
+    user_id = common_utils.get_user_hash()
+    # Comparing the two IDs can determine if the caller is trying to get the
+    # controller created by their local API server or a remote API server.
+    if user_id == SERVER_ID:
+        # Not adding server ID for locally created controller because
+        # of backward compatibility.
+        return f'{prefix}{user_id}'
+    return f'{prefix}{user_id}{SERVER_ID_CONNECTOR}{SERVER_ID}'
+
+
+# Controller names differ per user and per SkyPilot server.
+# If local: <prefix>-<user_id>
+# If remote: <prefix>-<user_id>-remote-<api_server_user_id>
+# TODO(SKY-1106): remove dynamic constants like this.
+SKY_SERVE_CONTROLLER_NAME: str = get_controller_name(ControllerType.SERVE)
+JOB_CONTROLLER_NAME: str = get_controller_name(ControllerType.JOBS)
 
 
 class StatusRefreshMode(enum.Enum):
@@ -40,13 +63,19 @@ def reload():
     from sky.utils import controller_utils
     global SKY_SERVE_CONTROLLER_NAME
     global JOB_CONTROLLER_NAME
-    SKY_SERVE_CONTROLLER_NAME = (
-        f'{SKY_SERVE_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
-    JOB_CONTROLLER_NAME = (
-        f'{JOB_CONTROLLER_PREFIX}{common_utils.get_user_hash()}')
+    SKY_SERVE_CONTROLLER_NAME = get_controller_name(ControllerType.SERVE)
+    JOB_CONTROLLER_NAME = get_controller_name(ControllerType.JOBS)
     importlib.reload(controller_utils)
 
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment
     # variables are set, such as SKYPILOT_DEBUG.
     sky_logging.reload_logger()
+
+
+def is_current_user_controller(controller_name: str) -> bool:
+    """If the controller name belongs to the current user."""
+    if SERVER_ID_CONNECTOR in controller_name:
+        controller_name = controller_name.split(SERVER_ID_CONNECTOR)[0]
+    controller_user_id = controller_name.split('-')[-1]
+    return controller_user_id == common_utils.get_user_hash()
