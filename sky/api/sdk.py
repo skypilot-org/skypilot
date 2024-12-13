@@ -36,6 +36,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -812,14 +813,26 @@ def api_server_logs(follow: bool = True, tail: str = 'all'):
 def abort(
         request_id: Optional[str] = None,
         all: bool = False,  # pylint: disable=redefined-builtin
+        all_users: bool = False,
         silent: bool = False) -> str:
     """Abort a request or all requests."""
+    if request_id is None and not all and not all_users:
+        raise click.BadParameter('Either specify a request ID or use '
+                                 '--all / --all-users to abort all requests.')
     echo = logger.info if not silent else logger.debug
-    body = payloads.RequestIdBody(request_id=request_id, all=all)
-    if request_id is not None:
-        echo(f'Aborting request: {request_id!r}...')
-    elif all:
-        echo('Aborting all requests...')
+    user_id = None
+    if not all_users:
+        user_id = common_utils.get_user_hash()
+    body = payloads.RequestIdBody(request_id=request_id,
+                                  all=all or all_users,
+                                  user_id=user_id)
+    if all_users:
+        echo('Aborting everyone\'s requests...')
+    else:
+        if request_id is not None:
+            echo(f'Aborting request: {request_id!r}...')
+        if all:
+            echo('Aborting all your requests...')
     response = requests.post(f'{api_common.get_server_url()}/abort',
                              json=json.loads(body.model_dump_json()),
                              timeout=5)

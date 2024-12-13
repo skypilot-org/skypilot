@@ -5646,15 +5646,27 @@ def api_get(request_id: Optional[str], log_path: Optional[str],
               is_flag=True,
               default=False,
               required=False,
-              help='Abort all requests.')
+              help='Abort all your requests.')
+@click.option('--all-users',
+              '-u',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Abort all requests from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_abort(request_id: Optional[str], all: bool):
+def api_abort(request_id: Optional[str], all: bool, all_users: bool):
     """Abort a request running on SkyPilot server."""
-    if request_id is None and not all:
-        raise click.BadParameter('Either specify a request ID or use --all to '
-                                 'abort all requests.')
-    sdk.abort(request_id=request_id, all=all)
+    if all or all_users:
+        keyword = 'EVERYONE\'S' if all_users else 'YOUR'
+        user_input = click.prompt(
+            f'This will abort all {keyword} requests.\n'
+            f'To proceed, please type {colorama.Style.BRIGHT}'
+            f'delete{colorama.Style.RESET_ALL}',
+            type=str)
+        if user_input != 'delete':
+            raise click.Abort()
+    sdk.abort(request_id=request_id, all=all, all_users=all_users)
 
 
 @api.command('ls', cls=_DocumentedCodeCommand)

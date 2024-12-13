@@ -423,17 +423,22 @@ def create_if_not_exists(request: Request) -> bool:
 
 @init_db
 def get_request_tasks(
-        status: Optional[List[RequestStatus]] = None,
-        cluster_names: Optional[List[str]] = None,
-        exclude_request_names: Optional[List[str]] = None) -> List[Request]:
+    status: Optional[List[RequestStatus]] = None,
+    cluster_names: Optional[List[str]] = None,
+    exclude_request_names: Optional[List[str]] = None,
+    user_id: Optional[str] = None,
+) -> List[Request]:
     """Get a list of requests that match the given filters.
 
     Args:
         status: a list of statuses of the requests to filter on.
         cluster_names: a list of cluster names to filter requests on.
         exclude_request_names: a list of request names to exclude from results.
+        user_id: the user ID to filter requests on.
+            If None, all users are included.
     """
     filters = []
+    filter_params = []
     if status is not None:
         status_list_str = ','.join(repr(status.value) for status in status)
         filters.append(f'status IN ({status_list_str})')
@@ -444,6 +449,9 @@ def get_request_tasks(
     if cluster_names is not None:
         cluster_names_str = ','.join(repr(name) for name in cluster_names)
         filters.append(f'{COL_CLUSTER_NAME} IN ({cluster_names_str})')
+    if user_id is not None:
+        filters.append(f'{COL_USER_ID} = ?')
+        filter_params.append(user_id)
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -451,8 +459,9 @@ def get_request_tasks(
         if filter_str:
             filter_str = f' WHERE {filter_str}'
         columns_str = ', '.join(REQUEST_COLUMNS)
-        cursor.execute(f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
-                       'ORDER BY created_at DESC')
+        cursor.execute(
+            f'SELECT {columns_str} FROM {REQUEST_TABLE}{filter_str} '
+            'ORDER BY created_at DESC', filter_params)
         rows = cursor.fetchall()
         if rows is None:
             return []

@@ -742,11 +742,12 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     if abort_body.all:
         print('Aborting all requests...')
         request_ids = [
-            request_task.request_id
-            for request_task in requests_lib.get_request_tasks(status=[
+            request_task.request_id for request_task in
+            requests_lib.get_request_tasks(status=[
                 requests_lib.RequestStatus.RUNNING,
                 requests_lib.RequestStatus.PENDING
-            ])
+            ],
+                                           user_id=abort_body.user_id)
         ]
     if abort_body.request_id is not None:
         print(f'Aborting request ID: {abort_body.request_id}')
