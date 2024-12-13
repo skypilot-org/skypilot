@@ -15,7 +15,7 @@ import filelock
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky.api import common
+from sky.api import constants as api_constants
 from sky.api.requests import payloads
 from sky.api.requests.serializers import decoders
 from sky.api.requests.serializers import encoders
@@ -305,7 +305,7 @@ def kill_requests(request_ids: List[str]):
             request_record.status = RequestStatus.ABORTED
 
 
-_DB_PATH = os.path.expanduser(common.API_SERVER_REQUEST_DB_PATH)
+_DB_PATH = os.path.expanduser(api_constants.API_SERVER_REQUEST_DB_PATH)
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 

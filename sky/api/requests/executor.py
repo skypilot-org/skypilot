@@ -18,7 +18,7 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.api import common as api_common
+from sky.api import constants as api_constants
 from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.api.requests.queues import mp_queue
@@ -248,10 +248,11 @@ def schedule_request(
     """Enqueue a request to the request queue."""
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
-        user_id = api_common.SKYPILOT_SYSTEM_USER_ID
+        user_id = api_constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_user(models.User(id=user_id, name=user_id))
     request = requests.Request(request_id=request_id,
-                               name=request_name,
+                               name=api_constants.REQUEST_NAME_PREFIX +
+                               request_name,
                                entrypoint=func,
                                request_body=request_body,
                                status=requests.RequestStatus.PENDING,
@@ -333,7 +334,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     # Determine the job capacity of the workers based on the system resources.
     cpu_count: int = psutil.cpu_count()
     total_mem_size_gb: float = psutil.virtual_memory().total / (1024**3)
-    mem_size_gb = max(0, total_mem_size_gb - api_common.MIN_AVAIL_MEM_GB)
+    mem_size_gb = max(0, total_mem_size_gb - api_constants.MIN_AVAIL_MEM_GB)
     parallel_for_blocking = _max_parallel_size_for_blocking(
         cpu_count, mem_size_gb)
     if not deploy:

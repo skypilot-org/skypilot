@@ -17,7 +17,7 @@ async def up(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='serve/up',
+        request_name='serve.up',
         request_body=up_body,
         func=core.up,
         schedule_type=requests.ScheduleType.BLOCKING,
@@ -31,7 +31,7 @@ async def update(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='serve/update',
+        request_name='serve.update',
         request_body=update_body,
         func=core.update,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
@@ -45,7 +45,7 @@ async def down(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='serve/down',
+        request_name='serve.down',
         request_body=down_body,
         func=core.down,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
@@ -59,7 +59,7 @@ async def terminate_replica(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='serve/terminate-replica',
+        request_name='serve.terminate_replica',
         request_body=terminate_replica_body,
         func=core.terminate_replica,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
@@ -73,7 +73,7 @@ async def status(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='serve/status',
+        request_name='serve.status',
         request_body=status_body,
         func=core.status,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
@@ -87,7 +87,7 @@ async def tail_logs(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='serve/logs',
+        request_name='serve.logs',
         request_body=log_body,
         func=core.tail_logs,
         schedule_type=requests.ScheduleType.NON_BLOCKING,

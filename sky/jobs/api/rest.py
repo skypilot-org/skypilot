@@ -25,7 +25,7 @@ async def launch(request: fastapi.Request,
 
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='jobs/launch',
+        request_name='jobs.launch',
         request_body=jobs_launch_body,
         func=core.launch,
         schedule_type=requests.ScheduleType.BLOCKING,
@@ -37,7 +37,7 @@ async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='jobs/queue',
+        request_name='jobs.queue',
         request_body=jobs_queue_body,
         func=core.queue,
         schedule_type=(requests.ScheduleType.BLOCKING if jobs_queue_body.refresh
@@ -50,7 +50,7 @@ async def cancel(request: fastapi.Request,
                  jobs_cancel_body: payloads.JobsCancelBody) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='jobs/cancel',
+        request_name='jobs.cancel',
         request_body=jobs_cancel_body,
         func=core.cancel,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
@@ -64,7 +64,7 @@ async def logs(
 ) -> None:
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='jobs/logs',
+        request_name='jobs.logs',
         request_body=jobs_logs_body,
         func=core.tail_logs,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
@@ -81,7 +81,7 @@ async def dashboard(request: fastapi.Request,
 
     body = payloads.RequestBody()
     body.env_vars[constants.USER_ID_ENV_VAR] = user_hash
-    body.entrypoint_command = 'jobs/dashboard'
+    body.entrypoint_command = 'jobs.dashboard'
     body.override_skypilot_config = {}
 
     with dashboard_utils.get_dashboard_lock_for_user(user_hash):

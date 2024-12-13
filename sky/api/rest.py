@@ -756,7 +756,7 @@ async def abort(request: fastapi.Request, abort_body: payloads.RequestIdBody):
     # Abort the target requests.
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='kill_request_processes',
+        request_name='kill_requests',
         request_body=payloads.KillRequestProcessesBody(request_ids=request_ids),
         func=requests_lib.kill_requests,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,

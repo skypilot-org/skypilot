@@ -2512,9 +2512,11 @@ def get_clusters(
         return record
 
     cluster_names = [record['name'] for record in records]
-    with progress:
-        updated_records = subprocess_utils.run_in_parallel(
-            _refresh_cluster, cluster_names)
+    updated_records = []
+    if len(cluster_names) > 0:
+        with progress:
+            updated_records = subprocess_utils.run_in_parallel(
+                _refresh_cluster, cluster_names)
 
     # Show information for removed clusters.
     kept_records = []

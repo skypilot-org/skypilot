@@ -8,6 +8,8 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky.api import constants as api_constants
+
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
@@ -29,6 +31,8 @@ def register_handler(*names: str):
 
     def decorator(func):
         for name in names:
+            if name != api_constants.DEFAULT_HANDLER_NAME:
+                name = api_constants.REQUEST_NAME_PREFIX + name
             handlers[name] = func
         return func
 
@@ -37,10 +41,10 @@ def register_handler(*names: str):
 
 def get_handler(name: str):
     """Get the handler for name."""
-    return handlers.get(name, handlers['default'])
+    return handlers.get(name, handlers[api_constants.DEFAULT_HANDLER_NAME])
 
 
-@register_handler('default')
+@register_handler(api_constants.DEFAULT_HANDLER_NAME)
 def default_handler(return_value: Any) -> Any:
     """The default handler."""
     return return_value
@@ -56,7 +60,7 @@ def encode_status(clusters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return clusters
 
 
-@register_handler('launch', 'exec', 'jobs/launch')
+@register_handler('launch', 'exec', 'jobs.launch')
 def encode_launch(
     job_id_handle: Tuple[Optional[int], Optional['backends.ResourceHandle']]
 ) -> Dict[str, Any]:
@@ -101,14 +105,14 @@ def encode_status_kubernetes(
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
 
 
-@register_handler('jobs/queue')
+@register_handler('jobs.queue')
 def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
     return jobs
 
 
-@register_handler('serve/status')
+@register_handler('serve.status')
 def encode_serve_status(
         service_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for service_status in service_statuses:

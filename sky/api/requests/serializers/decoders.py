@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import jobs as managed_jobs
 from sky import models
+from sky.api import constants as api_constants
 from sky.clouds.service_catalog import common
 from sky.data import storage
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -30,6 +31,8 @@ def register_handler(*names: str):
 
     def decorator(func):
         for name in names:
+            if name != api_constants.DEFAULT_HANDLER_NAME:
+                name = api_constants.REQUEST_NAME_PREFIX + name
             handlers[name] = func
         return func
 
@@ -38,10 +41,10 @@ def register_handler(*names: str):
 
 def get_handler(name: str):
     """Get the handler for name."""
-    return handlers.get(name, handlers['default'])
+    return handlers.get(name, handlers[api_constants.DEFAULT_HANDLER_NAME])
 
 
-@register_handler('default')
+@register_handler(api_constants.DEFAULT_HANDLER_NAME)
 def default_decode_handler(return_value: Any) -> Any:
     """The default handler."""
     return return_value
@@ -79,7 +82,7 @@ def decode_status_kubernetes(
     return all_clusters, unmanaged_clusters, all_jobs, context
 
 
-@register_handler('launch', 'exec', 'jobs/launch')
+@register_handler('launch', 'exec', 'jobs.launch')
 def decode_launch(
     return_value: Dict[str, Any]
 ) -> Tuple[str, 'backends.CloudVmRayResourceHandle']:
@@ -99,7 +102,7 @@ def decode_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     return jobs
 
 
-@register_handler('jobs/queue')
+@register_handler('jobs.queue')
 def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     jobs = return_value
     for job in jobs:
@@ -107,7 +110,7 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     return jobs
 
 
-@register_handler('serve/status')
+@register_handler('serve.status')
 def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
     service_statuses = return_value
     for service_status in service_statuses:

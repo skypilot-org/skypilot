@@ -57,6 +57,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.api import common as api_common
+from sky.api import constants as api_constants
 from sky.api import sdk
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
@@ -1171,7 +1172,7 @@ def launch(
         fast=fast,
         need_confirmation=not yes,
     )
-    job_id_handle = _async_call_or_wait(request_id, async_call, 'Launch')
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:
         job_id, handle = job_id_handle
         # Add ssh config for the cluster
@@ -1326,7 +1327,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     request_id = sdk.exec(task, cluster_name=cluster)
-    job_id_handle = _async_call_or_wait(request_id, async_call, 'Exec')
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
         sdk.stream_and_get(sdk.tail_logs(cluster, job_id, follow=True))
@@ -2255,7 +2256,7 @@ def cancel(
                                 all=all,
                                 all_users=all_users,
                                 job_ids=job_ids_to_cancel)
-        _async_call_or_wait(request_id, async_call, 'Cancel')
+        _async_call_or_wait(request_id, async_call, 'sky.cancel')
     except exceptions.NotSupportedError as e:
         controller = controller_utils.Controllers.from_name(cluster)
         assert controller is not None, cluster
@@ -2680,7 +2681,7 @@ def start(
 
     for name, request_id in zip(to_start, request_ids):
         try:
-            _async_call_or_wait(request_id, async_call, 'Start')
+            _async_call_or_wait(request_id, async_call, 'sky.start')
             if not async_call:
                 # Add ssh config for the cluster
                 _get_cluster_records_and_set_ssh_config(clusters=[name])
@@ -3039,8 +3040,9 @@ def _down_or_stop_clusters(
             try:
                 request_id = sdk.autostop(name, idle_minutes_to_autostop, down)
                 request_ids.append(request_id)
-                _async_call_or_wait(request_id, async_call,
-                                    operation.capitalize())
+                _async_call_or_wait(
+                    request_id, async_call,
+                    api_constants.REQUEST_NAME_PREFIX + operation)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -3067,8 +3069,9 @@ def _down_or_stop_clusters(
                 else:
                     request_id = sdk.stop(name, purge=purge)
                 request_ids.append(request_id)
-                _async_call_or_wait(request_id, async_call,
-                                    operation.capitalize())
+                _async_call_or_wait(
+                    request_id, async_call,
+                    api_constants.REQUEST_NAME_PREFIX + operation)
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -3690,7 +3693,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
 
     request_ids = subprocess_utils.run_in_parallel(sdk.storage_delete, names)
     for request_id in request_ids:
-        _async_call_or_wait(request_id, async_call, 'storage')
+        _async_call_or_wait(request_id, async_call, 'sky.storage')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -3865,7 +3868,8 @@ def jobs_launch(
                                      retry_until_up=retry_until_up,
                                      fast=fast,
                                      need_confirmation=not yes)
-    job_id_handle = _async_call_or_wait(request_id, async_call, 'Jobs/Launch')
+    job_id_handle = _async_call_or_wait(request_id, async_call,
+                                        'sky.jobs.launch')
     if not async_call and not detach_run:
         job_id = job_id_handle[0]
         sdk.stream_and_get(
@@ -4294,7 +4298,7 @@ def serve_up(
         dag.add(task)
 
     request_id = serve_lib.up(task, service_name, need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'serve/up')
+    _async_call_or_wait(request_id, async_call, 'sky.serve.up')
 
 
 # TODO(MaoZiming): Update Doc.
@@ -4396,7 +4400,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
                                   service_name,
                                   mode=serve_lib.UpdateMode(mode),
                                   need_confirmation=not yes)
-    _async_call_or_wait(request_id, async_call, 'serve/update')
+    _async_call_or_wait(request_id, async_call, 'sky.serve.update')
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4628,7 +4632,7 @@ def serve_down(
         request_id = serve_lib.down(service_names=service_names,
                                     all=all,
                                     purge=purge)
-    _async_call_or_wait(request_id, async_call, 'serve/down')
+    _async_call_or_wait(request_id, async_call, 'sky.serve.down')
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -5578,7 +5582,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 def local_down(async_call: bool):
     """Deletes a local cluster."""
     request_id = sdk.local_down()
-    _async_call_or_wait(request_id, async_call, request_name='local down')
+    _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -5672,7 +5676,7 @@ def api_abort(request_id: Optional[str], all: bool, all_users: bool):
 @api.command('ls', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
 @click.option('--all-status',
-              '-s',
+              '-a',
               is_flag=True,
               default=False,
               required=False,
