@@ -50,6 +50,12 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          Since regardless of specificity, all our geolocations end 
          in two-letter country codes we just snip that to conform 
          to how many providers state their geolocation.
+
+      *  Since the catalog is cached, we can't gaurantee availability 
+         of any machine at the point of inquiry.  As a consequence we 
+         search for the machine again and potentially return a failure 
+         if there is no availability.
+
     """
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
