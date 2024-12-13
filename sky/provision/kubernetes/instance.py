@@ -886,7 +886,7 @@ def _terminate_node(namespace: str, context: Optional[str],
 
         Args:
             delete_func: Function to call to delete the resource
-            resource_type: Type of resource being deleted (e.g. 'service'), 
+            resource_type: Type of resource being deleted (e.g. 'service'),
                 used in logging
             resource_name: Name of the resource being deleted, used in logging
         """
@@ -915,13 +915,11 @@ def _terminate_node(namespace: str, context: Optional[str],
 
     # Delete services for the pod
     for service_name in [pod_name, f'{pod_name}-ssh']:
-        _delete_k8s_resource(
-            lambda name=service_name: kubernetes.core_api(context).
-            delete_namespaced_service(
-                name,
-                namespace,
-                _request_timeout=config_lib.DELETION_TIMEOUT), 'service',
-            service_name)
+        _delete_k8s_resource(lambda name=service_name: kubernetes.core_api(
+            context).delete_namespaced_service(
+                name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT),
+                             'service',
+                             service_name)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
