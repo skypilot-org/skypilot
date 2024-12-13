@@ -3696,10 +3696,10 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         _async_call_or_wait(request_id, async_call, 'sky.storage')
 
 
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
 def bench():
     """SkyPilot Benchmark CLI."""
-    pass
+    raise click.UsageError('The benchmark CLI is currently disabled.')
 
 
 @cli.group(cls=_NaturalOrderGroup)
