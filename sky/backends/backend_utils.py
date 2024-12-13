@@ -916,7 +916,8 @@ def write_cluster_config(
             tmp_yaml_path,
             cluster_config_overrides=to_provision.cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
-        valid, message = kubernetes_utils.check_pod_config(tmp_yaml_path)
+        valid, message = kubernetes_utils.check_pod_config(
+            tmp_yaml_path, dryrun)
         if not valid:
             raise exceptions.InvalidCloudConfigs(
                 f'There are invalid config in pod_config, deatil: {message}')

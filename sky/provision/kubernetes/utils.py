@@ -892,7 +892,8 @@ def check_credentials(context: Optional[str],
         return True, None
 
 
-def check_pod_config(cluster_yaml_path: str) -> Tuple[bool, Optional[str]]:
+def check_pod_config(cluster_yaml_path: str, dryrun: bool) \
+    -> Tuple[bool, Optional[str]]:
     """Check if the pod_config is a valid pod config
 
     Using create_namespaced_pod api with dry_run to check the pod_config
@@ -926,6 +927,11 @@ def check_pod_config(cluster_yaml_path: str) -> Tuple[bool, Optional[str]]:
             error_msg = str(e)
         return False, error_msg
     except ValueError as e:
+        if dryrun:
+            logger.debug('ignore ValueError as there is no kube config '
+                         'in the enviroment with dry_run. '
+                         'For now we don\'t support check pod_config offline.')
+            return True, None
         return False, common_utils.format_exception(e)
     except Exception as e:  # pylint: disable=broad-except
         return False, ('An error occurred: '
