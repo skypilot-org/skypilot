@@ -690,7 +690,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
     store_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
-        store_cls = sub_path = None
+        store_type = store_cls = sub_path = None
         storage_account_name = region = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(), id=run_id)
@@ -832,7 +832,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             ux_utils.spinner_message('Uploading local sources to storage[/]  '
                                      '[dim]View storages: sky storage ls'))
     try:
-        task.sync_storage_mounts()
+        task.sync_storage_mounts(force_sync=bucket_wth_prefix is not None)
     except (ValueError, exceptions.NoCloudAccessError) as e:
         if 'No enabled cloud for storage' in str(e) or isinstance(
                 e, exceptions.NoCloudAccessError):

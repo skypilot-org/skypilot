@@ -948,7 +948,7 @@ class Task:
         store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
-    def sync_storage_mounts(self) -> None:
+    def sync_storage_mounts(self, force_sync: bool = False) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
         After syncing up, COPY-mode storage mounts are translated into regular
@@ -960,6 +960,8 @@ class Task:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
+            elif force_sync:
+                storage.sync_all_stores()
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
