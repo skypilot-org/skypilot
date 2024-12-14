@@ -224,9 +224,10 @@ class StoreType(enum.Enum):
     @classmethod
     def get_fields_from_store_url(
         cls, store_url: str
-    ) -> Tuple['StoreType', str, str, Optional[str], Optional[str]]:
-        """Returns the store type, bucket name, and sub path from a store URL,
-        and the storage account name and region if applicable.
+    ) -> Tuple['StoreType', Type['AbstractStore'], str, str, Optional[str],
+               Optional[str]]:
+        """Returns the store type, store class, bucket name, and sub path from
+        a store URL, and the storage account name and region if applicable.
 
         Args:
             store_url: str; The store URL.
@@ -241,16 +242,21 @@ class StoreType(enum.Enum):
                 if store_type == StoreType.AZURE:
                     storage_account_name, bucket_name, sub_path = \
                         data_utils.split_az_path(store_url)
+                    store_cls: Type['AbstractStore'] = AzureBlobStore
                 elif store_type == StoreType.IBM:
                     bucket_name, sub_path, region = data_utils.split_cos_path(
                         store_url)
+                    store_cls = IBMCosStore
                 elif store_type == StoreType.R2:
                     bucket_name, sub_path = data_utils.split_r2_path(store_url)
+                    store_cls = R2Store
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
+                    store_cls = GcsStore
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
-                return store_type, bucket_name, \
+                    store_cls = S3Store
+                return store_type, store_cls,bucket_name, \
                     sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
 
@@ -280,18 +286,21 @@ class AbstractStore:
                      name: str,
                      source: Optional[SourceType],
                      region: Optional[str] = None,
-                     is_sky_managed: Optional[bool] = None):
+                     is_sky_managed: Optional[bool] = None,
+                     _bucket_sub_path: Optional[str] = None):
             self.name = name
             self.source = source
             self.region = region
             self.is_sky_managed = is_sky_managed
+            self._bucket_sub_path = _bucket_sub_path
 
         def __repr__(self):
             return (f'StoreMetadata('
                     f'\n\tname={self.name},'
                     f'\n\tsource={self.source},'
                     f'\n\tregion={self.region},'
-                    f'\n\tis_sky_managed={self.is_sky_managed})')
+                    f'\n\tis_sky_managed={self.is_sky_managed},'
+                    f'\n\t_bucket_sub_path={self._bucket_sub_path})')
 
     def __init__(
         self,
@@ -363,19 +372,26 @@ class AbstractStore:
         Used when reconstructing Storage and Store objects from
         global_user_state.
         """
-        return cls(name=override_args.get('name', metadata.name),
-                   source=override_args.get('source', metadata.source),
-                   region=override_args.get('region', metadata.region),
-                   is_sky_managed=override_args.get('is_sky_managed',
-                                                    metadata.is_sky_managed),
-                   sync_on_reconstruction=override_args.get(
-                       'sync_on_reconstruction', True))
+        return cls(
+            name=override_args.get('name', metadata.name),
+            source=override_args.get('source', metadata.source),
+            region=override_args.get('region', metadata.region),
+            is_sky_managed=override_args.get('is_sky_managed',
+                                             metadata.is_sky_managed),
+            sync_on_reconstruction=override_args.get('sync_on_reconstruction',
+                                                     True),
+            # backward compatibility
+            _bucket_sub_path=override_args.get(
+                '_bucket_sub_path',
+                metadata._bucket_sub_path  # pylint: disable=protected-access
+            ) if hasattr(metadata, '_bucket_sub_path') else None)
 
     def get_metadata(self) -> StoreMetadata:
         return self.StoreMetadata(name=self.name,
                                   source=self.source,
                                   region=self.region,
-                                  is_sky_managed=self.is_sky_managed)
+                                  is_sky_managed=self.is_sky_managed,
+                                  _bucket_sub_path=self._bucket_sub_path)
 
     def initialize(self):
         """Initializes the Store object on the cloud.
@@ -406,7 +422,7 @@ class AbstractStore:
         """Removes the Storage from the cloud."""
         raise NotImplementedError
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         """Removes objects from the sub path in the bucket."""
         raise NotImplementedError
 
@@ -962,14 +978,34 @@ class Storage(object):
 
         return storage_obj
 
-    def construct_store(
-        self,
-        store_type: StoreType,
-        region: Optional[str] = None,
-        storage_account_name: Optional[str] = None,
-        _allow_bucket_creation: bool = True  # pylint: disable=invalid-name
-    ) -> AbstractStore:
-        """Initialize store object and get/create bucket."""
+    def add_store(self,
+                  store_type: Union[str, StoreType],
+                  region: Optional[str] = None) -> AbstractStore:
+        """Initializes and adds a new store to the storage.
+
+        Invoked by the optimizer after it has selected a store to
+        add it to Storage.
+
+        Args:
+          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
+          region: str; Region to place the bucket in. Caller must ensure that
+            the region is valid for the chosen store_type.
+        """
+        if isinstance(store_type, str):
+            store_type = StoreType(store_type)
+
+        if store_type in self.stores:
+            if store_type == StoreType.AZURE:
+                azure_store_obj = self.stores[store_type]
+                assert isinstance(azure_store_obj, AzureBlobStore)
+                storage_account_name = azure_store_obj.storage_account_name
+                logger.info(f'Storage type {store_type} already exists under '
+                            f'storage account {storage_account_name!r}.')
+            else:
+                logger.info(f'Storage type {store_type} already exists.')
+
+            return self.stores[store_type]
+
         store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:
             store_cls = S3Store
@@ -986,17 +1022,12 @@ class Storage(object):
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
         try:
-            kwargs: Dict[str, Any] = {}
-            if storage_account_name is not None:
-                kwargs['storage_account_name'] = storage_account_name
             store = store_cls(
                 name=self.name,
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
-                _bucket_sub_path=self._bucket_sub_path,
-                _allow_bucket_creation=_allow_bucket_creation,
-                **kwargs)
+                _bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -1027,38 +1058,6 @@ class Storage(object):
 
         return store
 
-    def add_store(self,
-                  store_type: Union[str, StoreType],
-                  region: Optional[str] = None) -> AbstractStore:
-        """Initializes and adds a new store to the storage.
-
-        Invoked by the optimizer after it has selected a store to
-        add it to Storage.
-
-        Args:
-          store_type: StoreType; Type of the storage [S3, GCS, AZURE, R2, IBM]
-          region: str; Region to place the bucket in. Caller must ensure that
-            the region is valid for the chosen store_type.
-        """
-        if isinstance(store_type, str):
-            store_type = StoreType(store_type)
-
-        if store_type in self.stores:
-            if store_type == StoreType.AZURE:
-                azure_store_obj = self.stores[store_type]
-                assert isinstance(azure_store_obj, AzureBlobStore)
-                storage_account_name = azure_store_obj.storage_account_name
-                logger.info(f'Storage type {store_type} already exists under '
-                            f'storage account {storage_account_name!r}.')
-            else:
-                logger.info(f'Storage type {store_type} already exists.')
-
-            return self.stores[store_type]
-
-        store = self.construct_store(store_type, region)
-
-        return store
-
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
         store_type = StoreType.from_store(store)
@@ -1069,21 +1068,6 @@ class Storage(object):
             if not is_reconstructed:
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
-
-    def _store_is_configured_by_user(self, store: AbstractStore) -> bool:
-        """Check if the store is configured by user in the config.
-
-        If the bucket is specified in the config, it is managed by user.
-        """
-        bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
-        if bucket_wth_prefix is None:
-            return False
-
-        store_type, bucket_name, _, _, _ = StoreType.get_fields_from_store_url(
-            bucket_wth_prefix)
-        if StoreType.from_store(store) != store_type:
-            return False
-        return store.name == bucket_name and store.bucket_sub_path is not None
 
     def delete(self, store_type: Optional[StoreType] = None) -> None:
         """Deletes data for all sky-managed storage objects.
@@ -1103,12 +1087,9 @@ class Storage(object):
             is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
-            if is_sky_managed or self._store_is_configured_by_user(store):
+            if is_sky_managed:
                 self.handle.remove_store(store)
-                if is_sky_managed:
-                    store.delete()
-                else:
-                    store.delete_sub_path()
+                store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
                 delete = all(
@@ -1123,13 +1104,9 @@ class Storage(object):
             del self.stores[store_type]
         else:
             for _, store in self.stores.items():
-                if store.is_sky_managed or self._store_is_configured_by_user(
-                        store):
+                if store.is_sky_managed:
                     self.handle.remove_store(store)
-                    if store.is_sky_managed:
-                        store.delete()
-                    else:
-                        store.delete_sub_path()
+                    store.delete()
                 elif self.force_delete:
                     store.delete()
             self.stores = {}
@@ -1430,6 +1407,8 @@ class S3Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted S3 bucket {self.name}.'
@@ -1907,6 +1886,8 @@ class GcsStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
         deleted_by_skypilot = self._delete_gcs_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted GCS bucket {self.name}.'
@@ -2735,6 +2716,8 @@ class AzureBlobStore(AbstractStore):
                     f'{colorama.Style.RESET_ALL}')
 
     def delete_sub_path(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         try:
             container_url = data_utils.AZURE_CONTAINER_URL.format(
@@ -3177,6 +3160,8 @@ class R2Store(AbstractStore):
                     f'{colorama.Style.RESET_ALL}')
 
     def delete_sub_path(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_r2_bucket_sub_path(
             self.name, self._bucket_sub_path)
@@ -3651,6 +3636,8 @@ class IBMCosStore(AbstractStore):
                     f'{colorama.Style.RESET_ALL}')
 
     def delete_sub_path(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         bucket = self.s3_resource.Bucket(self.name)
         try:

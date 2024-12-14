@@ -726,16 +726,21 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Get the bucket name for the workdir and file mounts,
     # we store all these files in same bucket from config.
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    store_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
-        store_type = sub_path = None
+        store_cls = sub_path = None
         storage_account_name = region = None
-        allow_bucket_creation = True
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(), id=run_id)
     else:
-        store_type, bucket_name, sub_path, storage_account_name, region = \
-            storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix)
-        allow_bucket_creation = False
+        store_type, store_cls, bucket_name, sub_path, storage_account_name, \
+            region = storage_lib.StoreType.get_fields_from_store_url(
+                bucket_wth_prefix)
+        store_kwargs['allow_bucket_creation'] = False
+        if storage_account_name is not None:
+            store_kwargs['storage_account_name'] = storage_account_name
+        if region is not None:
+            store_kwargs['region'] = region
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
@@ -747,18 +752,24 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             raise ValueError(
                 f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
                 'workdir and file_mounts contains it as the target.')
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=workdir,
-            persistent=False,
-            mode=storage_lib.StorageMode.COPY,
-            _bucket_sub_path=_sub_path_join(
-                sub_path,
-                constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id)))
+        bucket_sub_path = _sub_path_join(
+            sub_path,
+            constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id))
+        stores = None
         if store_type is not None:
-            storage_obj.construct_store(store_type, region,
-                                        storage_account_name,
-                                        allow_bucket_creation)
+            assert store_cls is not None
+            stores = {
+                store_type: store_cls(name=bucket_name,
+                                      source=workdir,
+                                      _bucket_sub_path=bucket_sub_path,
+                                      **store_kwargs)
+            }
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=workdir,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _bucket_sub_path=bucket_sub_path)
         new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -777,18 +788,23 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=src,
-            persistent=False,
-            mode=storage_lib.StorageMode.COPY,
-            _bucket_sub_path=_sub_path_join(
-                sub_path,
-                constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id)))
+        bucket_sub_path = _sub_path_join(
+            sub_path, constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
+        stores = None
         if store_type is not None:
-            storage_obj.construct_store(store_type, region,
-                                        storage_account_name,
-                                        allow_bucket_creation)
+            assert store_cls is not None
+            stores = {
+                store_type: store_cls(name=bucket_name,
+                                      source=src,
+                                      _bucket_sub_path=bucket_sub_path,
+                                      **store_kwargs)
+            }
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=src,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _bucket_sub_path=bucket_sub_path)
         new_storage_mounts[dst] = storage_obj
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
@@ -809,16 +825,23 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             src_to_file_id[src] = i
             os.link(os.path.abspath(os.path.expanduser(src)),
                     os.path.join(local_fm_path, f'file-{i}'))
+        stores = None
+        if store_type is not None:
+            assert store_cls is not None
+            stores = {
+                store_type: store_cls(name=bucket_name,
+                                      source=local_fm_path,
+                                      _bucket_sub_path=file_mounts_tmp_subpath,
+                                      **store_kwargs)
+            }
         storage_obj = storage_lib.Storage(
             name=bucket_name,
             source=local_fm_path,
             persistent=False,
             mode=storage_lib.StorageMode.MOUNT,
+            stores=stores,
             _bucket_sub_path=file_mounts_tmp_subpath)
-        if store_type is not None:
-            storage_obj.construct_store(store_type, region,
-                                        storage_account_name,
-                                        allow_bucket_creation)
+
         new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
