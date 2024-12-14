@@ -1435,10 +1435,19 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
+
+    # Set mount flags based on cloud provider
+    include_s3_mount = cloud in ['aws', 'kubernetes']
+    include_gcs_mount = cloud in ['gcp', 'kubernetes']
+    include_azure_mount = cloud == 'azure'
+
     content = template.render(
         storage_name=storage_name,
         cloud=cloud,
         only_mount=only_mount,
+        include_s3_mount=include_s3_mount,
+        include_gcs_mount=include_gcs_mount,
+        include_azure_mount=include_azure_mount,
     )
     f.write(content)
     f.flush()
@@ -1645,6 +1654,13 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     gsutil_command = f'gsutil ls gs://{storage_name}/hello.txt'
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
+
+    # Set mount flags based on cloud provider
+    include_s3_mount = generic_cloud in ['aws', 'kubernetes']
+    include_gcs_mount = generic_cloud == 'gcp'
+    include_azure_mount = generic_cloud == 'azure'
+    include_private_mount = True  # Default to True
+
     if azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
@@ -1654,9 +1670,16 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         include_private_mount = False if generic_cloud == 'azure' else True
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
+                                  include_s3_mount=include_s3_mount,
+                                  include_gcs_mount=include_gcs_mount,
                                   include_private_mount=include_private_mount)
     else:
-        content = template.render(storage_name=storage_name,)
+        content = template.render(storage_name=storage_name,
+                                  include_azure_mount=include_azure_mount,
+                                  include_s3_mount=include_s3_mount,
+                                  include_gcs_mount=include_gcs_mount,
+                                  include_private_mount=include_private_mount)
+
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -1666,9 +1689,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
-            f'{s3_command} || '
-            f'{gsutil_command} || '
-            f'{azure_blob_command}',
+            f'sky exec {name} -- "{s3_command} || {gsutil_command} || {azure_blob_command}"',
+            f'sky logs {name} 2 --status',  # Ensure the bucket check succeeded.
         ]
         test = Test(
             'docker_storage_mounts',
@@ -4950,9 +4972,15 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 # ---------- Testing Storage ----------
-# TODO(zhwu): Many of these tests may fail when testing on remote API server,
-# since we may not have credentials/dependencies installed locally, and those
-# tests relies on the local environment.
+# These tests are essentially unit tests for Storage, but they require
+# credentials and network connection. Thus, they are included with smoke tests.
+# Since these tests require cloud credentials to verify bucket operations,
+# they should not be run when the API server is remote and the user does not
+# have any credentials locally.
+# TODO(romilb): In the future, we should figure out a way to ship these tests
+#  to the API server and run them there. Maybe these tests can be packaged as a
+#  SkyPilot task run on a remote cluster launched via the API server.
+@pytest.mark.local
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 

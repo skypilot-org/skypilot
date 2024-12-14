@@ -3,6 +3,8 @@ from typing import List, Optional
 import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
 
+from sky.api import common as api_common
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
@@ -92,6 +94,8 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
+    config.addinivalue_line('markers',
+                            'local: mark test to run only on local API server')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -129,6 +133,8 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
+    skip_marks['local'] = pytest.mark.skip(
+        reason='test requires local API server')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -140,6 +146,8 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_marks['slow'])
+        if 'local' in item.keywords and not api_common.is_api_server_local():
+            item.add_marker(skip_marks['local'])
         if _is_generic_test(
                 item) and f'no_{generic_cloud_keyword}' in item.keywords:
             item.add_marker(skip_marks[generic_cloud])
