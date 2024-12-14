@@ -1418,7 +1418,7 @@ class S3Store(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_s3_bucket_sub_path(
             self.name, self._bucket_sub_path)
@@ -1897,7 +1897,7 @@ class GcsStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_gcs_bucket(self.name,
                                                       self._bucket_sub_path)
@@ -2715,7 +2715,7 @@ class AzureBlobStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
@@ -3159,7 +3159,7 @@ class R2Store(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
@@ -3635,7 +3635,7 @@ class IBMCosStore(AbstractStore):
         logger.info(f'{colorama.Fore.GREEN}Deleted COS bucket {self.name}.'
                     f'{colorama.Style.RESET_ALL}')
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
