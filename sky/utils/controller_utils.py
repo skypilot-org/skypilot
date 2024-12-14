@@ -724,7 +724,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 f'Translating {msg} to SkyPilot Storage...'))
 
     # Get the bucket name for the workdir and file mounts,
-    # we stores all these files in same bucket from config.
+    # we store all these files in same bucket from config.
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
     if bucket_wth_prefix is None:
         store_type = sub_path = None
