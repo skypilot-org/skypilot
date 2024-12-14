@@ -736,7 +736,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         store_type, store_cls, bucket_name, sub_path, storage_account_name, \
             region = storage_lib.StoreType.get_fields_from_store_url(
                 bucket_wth_prefix)
-        store_kwargs['allow_bucket_creation'] = False
+        store_kwargs['_allow_bucket_creation'] = False
         if storage_account_name is not None:
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
