@@ -960,9 +960,9 @@ class Task:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
-            elif force_sync:
-                storage.sync_all_stores()
             else:
+                if force_sync:
+                    storage.sync_all_stores()
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
