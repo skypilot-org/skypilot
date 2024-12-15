@@ -207,11 +207,20 @@ def _async_call_or_wait(request_id: str, async_call: bool,
         try:
             return sdk.stream_and_get(request_id)
         except KeyboardInterrupt:
-            click.secho(
-                f'\n{colorama.Style.DIM}Request will continue running '
-                f'asynchronously. '
-                f'To stream logs from SkyPilot server: sky api get {request_id}'
-                f'{colorama.Style.RESET_ALL}',)
+            logger.info(
+                ux_utils.starting_message('Request will continue running '
+                                          'asynchronously.') +
+                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
+                f'{ux_utils.BOLD}sky api get {request_id}'
+                f'{colorama.Style.RESET_ALL}'
+                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
+                'visit: '
+                f'{api_common.get_server_url()}/stream?request_id={request_id}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To abort '
+                'the request, run: '
+                f'{ux_utils.BOLD}sky api abort {request_id}'
+                f'{colorama.Style.RESET_ALL}'
+                f'\n{colorama.Style.RESET_ALL}')
             raise
     else:
         click.secho(f'Submitted {request_name} request: {request_id}',
@@ -219,9 +228,12 @@ def _async_call_or_wait(request_id: str, async_call: bool,
         click.echo(
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
             f'sky api get {request_id[:-8]}{colorama.Style.RESET_ALL}\n'
-            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}Or, visit: '
-            f'{api_common.get_server_url()}/stream?request_id={request_id}'
-            f'{colorama.Style.RESET_ALL}')
+            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
+            f'{api_common.get_server_url()}/stream?request_id={request_id}\n'
+            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To abort '
+            'the request, run: '
+            f'{ux_utils.BOLD}sky api abort {request_id}'
+            f'{colorama.Style.RESET_ALL}\n')
 
 
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],

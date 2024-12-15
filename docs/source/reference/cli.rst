@@ -117,6 +117,54 @@ Storage CLI
    :prog: sky storage delete
    :nested: full
 
+
+.. _sky-api-cli:
+
+API Server CLI
+--------------
+
+End-user CLI
+~~~~~~~~~~~~~
+
+.. _sky-api-login:
+.. click:: sky.api.cli:api_login
+   :prog: sky api login
+   :nested: full
+
+.. _sky-api-info:
+.. click:: sky.api.cli:api_info
+   :prog: sky api info
+   :nested: full
+
+.. click:: sky.api.cli:api_get
+   :prog: sky api get
+   :nested: full
+
+.. _sky-api-ls:
+.. click:: sky.api.cli:api_ls
+   :prog: sky api ls
+   :nested: full
+
+.. _sky-api-abort:
+.. click:: sky.api.cli:api_abort
+   :prog: sky api abort
+   :nested: full
+
+Admin CLI
+~~~~~~~~~~
+
+.. click:: sky.api.cli:api_stop
+   :prog: sky api stop
+   :nested: full
+
+.. click:: sky.api.cli:api_start
+   :prog: sky api start
+   :nested: full
+
+.. click:: sky.api.cli:api_server_logs
+   :prog: sky api server_logs
+   :nested: full
+
 Utils: ``show-gpus``/``check``/``cost-report``
 -------------------------------------------------
 
