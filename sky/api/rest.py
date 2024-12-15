@@ -288,8 +288,8 @@ async def download(download_body: payloads.DownloadBody):
 
     # Create a temporary zip file
     zip_filename = f'folder_{int(time.time())}.zip'
-    zip_path = pathlib.Path(common.api_server_logs_dir_prefix(
-        user_hash)).expanduser().resolve() / zip_filename
+    zip_path = pathlib.Path(
+        logs_dir_on_api_server).expanduser().resolve() / zip_filename
 
     try:
         folders = [
