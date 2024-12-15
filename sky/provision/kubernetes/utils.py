@@ -2427,6 +2427,7 @@ def get_gpu_resource_key():
     Returns:
         str: The selected GPU resource name.
     """
-    # Retrieve GPU resource name from environment variable, if set. Else use default.
+    # Retrieve GPU resource name from environment variable, if set.
+    # Else use default.
     # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
-    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default = GPU_RESOURCE_KEY)
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)

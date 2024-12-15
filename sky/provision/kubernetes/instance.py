@@ -180,7 +180,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             #  case we will need to update this logic.
                             # TODO(Doyoung): Update the error message raised
                             # with the multi-host TPU support.
-                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key()
+                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key()  # pylint: disable=line-too-long
                             if 'Insufficient google.com/tpu' in event_message:
                                 extra_msg = (
                                     f'Verify if '
@@ -199,8 +199,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                    in event_message)):
                                 extra_msg = (
                                     f'Verify if any node matching label  '
-                                    f'{pod.spec.node_selector[label_key]} and sufficient '
-                                    f'resource {gpu_resource_key} is available in the cluster.')
+                                    f'{pod.spec.node_selector[label_key]} and '
+                                    f'sufficient resource {gpu_resource_key} '
+                                    f'is available in the cluster.')
                                 raise config_lib.KubernetesError(
                                     _lack_resource_msg('GPU',
                                                        pod,
