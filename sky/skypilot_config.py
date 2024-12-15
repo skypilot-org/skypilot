@@ -193,7 +193,7 @@ def override_skypilot_config(
         override_configs=override_configs,
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    previous_env_config = loaded_config_path()
+    previous_loaded_config_path = _loaded_config_path
     try:
         with tempfile.NamedTemporaryFile(mode='w',
                                          prefix='skypilot_config',
@@ -205,8 +205,8 @@ def override_skypilot_config(
         _try_load_config()
         yield
     finally:
-        if previous_env_config is not None:
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = previous_env_config
+        if previous_loaded_config_path is not None:
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = previous_loaded_config_path
         else:
             os.environ.pop(ENV_VAR_SKYPILOT_CONFIG)
         # Load the config to restore the original _dict.
