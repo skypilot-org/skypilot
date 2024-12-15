@@ -209,7 +209,9 @@ def override_skypilot_config(
             os.environ[ENV_VAR_SKYPILOT_CONFIG] = previous_loaded_config_path
         else:
             os.environ.pop(ENV_VAR_SKYPILOT_CONFIG)
-        # Load the config to restore the original _dict.
+        # Load the config to restore the original _dict, so that the next
+        # override_skypilot_config() is not affected by the overriden config
+        # above.
         _try_load_config()
 
         try:
