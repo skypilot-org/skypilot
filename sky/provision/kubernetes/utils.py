@@ -28,6 +28,7 @@ from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -36,7 +37,6 @@ if typing.TYPE_CHECKING:
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
-IN_CLUSTER_REGION = 'in-cluster'
 
 DEFAULT_SERVICE_ACCOUNT_NAME = 'skypilot-service-account'
 
@@ -920,6 +920,9 @@ def is_kubeconfig_exec_auth(
         str: Error message if exec-based authentication is used, None otherwise
     """
     k8s = kubernetes.kubernetes
+    if context == kubernetes.in_cluster_context_name():
+        # If in-cluster config is used, exec-based auth is not used.
+        return False, None
     try:
         k8s.config.load_kube_config()
     except kubernetes.config_exception():
@@ -1002,30 +1005,34 @@ def is_incluster_config_available() -> bool:
     return os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
 
 
-def get_all_kube_config_context_names() -> List[Optional[str]]:
-    """Get all kubernetes context names from the kubeconfig file.
+def get_all_kube_context_names() -> List[str]:
+    """Get all kubernetes context names available in the environment.
 
-    If running in-cluster, returns [None] to indicate in-cluster config.
+    Fetches context names from the kubeconfig file and in-cluster auth, if any.
+
+    If running in-cluster and IN_CLUSTER_CONTEXT_NAME_ENV_VAR is not set,
+    returns the default in-cluster kubernetes context name.
 
     We should not cache the result of this function as the admin policy may
     update the contexts.
 
     Returns:
         List[Optional[str]]: The list of kubernetes context names if
-            available, an empty list otherwise. If running in-cluster,
-            returns [None] to indicate in-cluster config.
+            available, an empty list otherwise.
     """
     k8s = kubernetes.kubernetes
+    context_names = []
     try:
         all_contexts, _ = k8s.config.list_kube_config_contexts()
         # all_contexts will always have at least one context. If kubeconfig
         # does not have any contexts defined, it will raise ConfigException.
-        return [context['name'] for context in all_contexts]
+        context_names = [context['name'] for context in all_contexts]
     except k8s.config.config_exception.ConfigException:
-        # If running in cluster, return [None] to indicate in-cluster config
-        if is_incluster_config_available():
-            return [None]
-        return []
+        # If no config found, continue
+        pass
+    if is_incluster_config_available():
+        context_names.append(kubernetes.in_cluster_context_name())
+    return context_names
 
 
 @functools.lru_cache()
@@ -1038,11 +1045,15 @@ def get_kube_config_context_namespace(
             the default namespace.
     """
     k8s = kubernetes.kubernetes
-    # Get namespace if using in-cluster config
     ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
-    if os.path.exists(ns_path):
-        with open(ns_path, encoding='utf-8') as f:
-            return f.read().strip()
+    # If using in-cluster context, get the namespace from the service account
+    # namespace file. Uses the same logic as adaptors.kubernetes._load_config()
+    # to stay consistent with in-cluster config loading.
+    if (context_name == kubernetes.in_cluster_context_name() or
+            context_name is None):
+        if os.path.exists(ns_path):
+            with open(ns_path, encoding='utf-8') as f:
+                return f.read().strip()
     # If not in-cluster, get the namespace from kubeconfig
     try:
         contexts, current_context = k8s.config.list_kube_config_contexts()
@@ -1129,7 +1140,11 @@ class KubernetesInstanceType:
         name = (f'{common_utils.format_float(self.cpus)}CPU--'
                 f'{common_utils.format_float(self.memory)}GB')
         if self.accelerator_count:
-            name += f'--{self.accelerator_count}{self.accelerator_type}'
+            # Replace spaces with underscores in accelerator type to make it a
+            # valid logical instance type name.
+            assert self.accelerator_type is not None, self.accelerator_count
+            acc_name = self.accelerator_type.replace(' ', '_')
+            name += f'--{self.accelerator_count}{acc_name}'
         return name
 
     @staticmethod
@@ -1160,7 +1175,9 @@ class KubernetesInstanceType:
             accelerator_type = match.group('accelerator_type')
             if accelerator_count:
                 accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type)
+                # This is to revert the accelerator types with spaces back to
+                # the original format.
+                accelerator_type = str(accelerator_type).replace('_', ' ')
             else:
                 accelerator_count = None
                 accelerator_type = None
@@ -1693,6 +1710,8 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
             else:
                 destination[key].extend(value)
         else:
+            if destination is None:
+                destination = {}
             destination[key] = value
 
 
@@ -2051,6 +2070,7 @@ def get_namespace_from_config(provider_config: Dict[str, Any]) -> str:
                                get_kube_config_context_namespace(context))
 
 
+@timeline.event
 def filter_pods(namespace: str,
                 context: Optional[str],
                 tag_filters: Dict[str, str],
@@ -2181,9 +2201,9 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
     context = provider_config.get('context',
                                   get_current_kube_config_context_name())
-    if context == IN_CLUSTER_REGION:
-        # If the context (also used as the region) is set to IN_CLUSTER_REGION
-        # we need to use in-cluster auth.
+    if context == kubernetes.in_cluster_context_name():
+        # If the context (also used as the region) is in-cluster, we need to
+        # we need to use in-cluster auth by setting the context to None.
         context = None
     return context
 

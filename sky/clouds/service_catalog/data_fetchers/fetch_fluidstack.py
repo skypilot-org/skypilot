@@ -15,6 +15,26 @@ ENDPOINT = 'https://platform.fluidstack.io/list_available_configurations'
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser('~/.fluidstack/api_key')
 
 plan_vcpus_memory = [{
+    'gpu_type': 'H100_SXM5_80GB',
+    'gpu_count': 1,
+    'min_cpu_count': 52,
+    'min_memory': 450
+}, {
+    'gpu_type': 'H100_SXM5_80GB',
+    'gpu_count': 2,
+    'min_cpu_count': 52,
+    'min_memory': 450
+}, {
+    'gpu_type': 'H100_SXM5_80GB',
+    'gpu_count': 4,
+    'min_cpu_count': 104,
+    'min_memory': 900
+}, {
+    'gpu_type': 'H100_SXM5_80GB',
+    'gpu_count': 8,
+    'min_cpu_count': 192,
+    'min_memory': 1800
+}, {
     'gpu_type': 'RTX_A6000_48GB',
     'gpu_count': 2,
     'min_cpu_count': 12,
@@ -150,7 +170,8 @@ GPU_MAP = {
     'H100_PCIE_80GB': 'H100',
     'H100_NVLINK_80GB': 'H100',
     'A100_NVLINK_80GB': 'A100-80GB',
-    'A100_SXM4_80GB': 'A100-80GB',
+    'A100_SXM4_80GB': 'A100-80GB-SXM',
+    'H100_SXM5_80GB': 'H100-SXM',
     'A100_PCIE_80GB': 'A100-80GB',
     'A100_SXM4_40GB': 'A100',
     'A100_PCIE_40GB': 'A100',
