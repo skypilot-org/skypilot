@@ -2705,6 +2705,9 @@ class AzureBlobStore(AbstractStore):
 
     def delete(self) -> None:
         """Deletes the storage."""
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_az_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = (f'Deleted AZ Container {self.name!r} under storage '
@@ -3150,6 +3153,8 @@ class R2Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
         deleted_by_skypilot = self._delete_r2_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted R2 bucket {self.name}.'
@@ -3631,6 +3636,9 @@ class IBMCosStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         self._delete_cos_bucket()
         logger.info(f'{colorama.Fore.GREEN}Deleted COS bucket {self.name}.'
                     f'{colorama.Style.RESET_ALL}')

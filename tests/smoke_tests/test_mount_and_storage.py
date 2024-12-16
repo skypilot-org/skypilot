@@ -1099,12 +1099,14 @@ class TestStorageWithCredentials:
 
         # Check bucket is empty, all files under sub directory should be deleted
         store = tmp_local_storage_obj_with_sub_path.stores[store_type]
-        store._delete_sub_path()
+        store.is_sky_managed = False
+        store.delete()
         files = self.list_all_files(store_type,
                                     tmp_local_storage_obj_with_sub_path.name)
         assert len(files) == 0
 
         # Now, delete the entire bucket
+        store.is_sky_managed = True
         tmp_local_storage_obj_with_sub_path.delete()
 
         # Run sky storage ls to check if storage object is deleted
