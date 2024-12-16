@@ -20,7 +20,7 @@ from sky.utils import subprocess_utils
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
 # manual termination with aws ec2 does not accidentally terminate other clusters
-# for for the different managed jobs launch with the same job name but a
+# for the different managed jobs launch with the same job name but a
 # different job id.
 test_id = str(uuid.uuid4())[-2:]
 

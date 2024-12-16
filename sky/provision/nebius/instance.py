@@ -14,7 +14,7 @@ from sky.utils import ux_utils
 
 from nebius.sdk import SDK
 
-PENDING_STATUS = ['RESTARTING', 'STARTING', 'DELETING', 'STOPPING']
+PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
 DEFAULT_NEBIUS_TOKEN_PATH = os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt')
 with open(DEFAULT_NEBIUS_TOKEN_PATH, 'r') as file:
@@ -75,7 +75,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # result = service.list(ListNodeGroupsRequest(
     #     parent_id=result.id
     # ))
-
+    # print('config', config)
+    # print('----')
+    # print('node_config', config.node_config)
     _wait_all_pending(region, cluster_name_on_cloud)
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
@@ -125,7 +127,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 region=region,
                 image_name=config.node_config['ImageId'],
                 disk_size=config.node_config['DiskSize'],
-                ports=config.ports_to_open_on_launch,
                 public_key=config.node_config['PublicKey'])
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
@@ -221,9 +222,7 @@ def query_instances(
     instances = _filter_instances(cluster_name_on_cloud, None)
 
     status_map = {
-        'CREATED': status_lib.ClusterStatus.INIT,
         'STARTING': status_lib.ClusterStatus.INIT,
-        'PAUSED': status_lib.ClusterStatus.INIT,
         'RUNNING': status_lib.ClusterStatus.UP,
         'STOPPED': status_lib.ClusterStatus.STOPPED,
         'STOPPING': status_lib.ClusterStatus.STOPPED,

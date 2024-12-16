@@ -136,14 +136,14 @@ def start(instance_id: str) -> None:
     )).wait()
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, ports: Optional[List[int]], public_key: str) -> str:
+           image_name: str, public_key: str) -> str:
     logger.debug("Launching instance '%s'", name)
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
     GPU, and launches the instance.
     """
-    print('LAUNCH', instance_type, region, disk_size, image_name, ports, public_key)
+    # print('LAUNCH', instance_type, region, disk_size, image_name, public_key)
     disk_name = 'disk-'+name
     try:
         service = DiskServiceClient(sdk)
@@ -183,6 +183,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                 name=name,
         )).wait()
         start(instance.metadata.id)
+        instance_id = instance.metadata.id
     except RequestError:
         service = InstanceServiceClient(sdk)
         instance = service.create(CreateInstanceRequest(
@@ -218,19 +219,20 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                 )]
             )
         )).wait()
+        instance_id = instance.resource_id
         while True:
             service = InstanceServiceClient(sdk)
             instance = service.get_by_name(GetByNameRequest(
                 parent_id="project-e00w18sheap5emdjx8",
                 name=name,
             )).wait()
-            print('waiting :: ', instance.status.state.name)
-            if instance.status.state.name == "RUNNING":
+            # print('waiting :: ', instance.status.state.name)
+            if instance.status.state.name == "STARTING":
                 break
             time.sleep(POLL_INTERVAL)
             logger.info(f'Waiting for instance {name} start running.')
-
-    return instance.resource_id
+        instance_id = instance.metadata.id
+    return instance_id
 
 
 def remove(instance_id: str) -> None:

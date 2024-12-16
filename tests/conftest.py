@@ -22,7 +22,7 @@ import pytest
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod', 'nebius'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -43,7 +43,8 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
-    'runpod': 'runpod'
+    'runpod': 'runpod',
+    'nebius': 'nebius'
 }
 
 

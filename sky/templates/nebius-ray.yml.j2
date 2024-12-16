@@ -21,6 +21,15 @@ available_node_types:
       InstanceType: {{instance_type}}
       DiskSize: {{disk_size}}
       ImageId: "ubuntu22.04-driverless"
+      UserData: |
+        #cloud-config
+        users:
+          - name: ubuntu:ssh_user
+            shell: /bin/bash
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            ssh_authorized_keys:
+              - |-
+                skypilot:ssh_public_key_content
       PublicKey: |-
         skypilot:ssh_public_key_content
       # TODO: more configs that is required by the provisioner to create new
@@ -31,7 +40,7 @@ head_node_type: ray_head_default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "~/pysdk": "/Users/salik/Projects/pysdk",
+  "~/pysdk": "/Users/salik/Projects/pysdk", # TODO: remove after publish
   "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
   "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
 {%- for remote_path, local_path in credentials.items() %}
@@ -68,30 +77,15 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     echo 'START conda_installation_commands';
     {{ conda_installation_commands }}
+    source ~/.bashrc;
     echo 'FINNISHED conda_installation_commands';
-    /home/ubuntu/skypilot-runtime/bin/python -m pip install ./pysdk;
+    {{ sky_pip_cmd }} install ./pysdk;
     echo 'FINNISHED install ./pysdk';
     {{ ray_skypilot_installation_commands }}
     echo 'FINNISHED ray_skypilot_installation_commands';
-    (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
-    echo 'FINNISHED 2';
-    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    echo 'FINNISHED 3';
-    source ~/.bashrc;
-    echo 'FINNISHED 4';
-    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
-    echo 'FINNISHED 5';
-    python3 -c "from ray.scripts.scripts import main; print(1)" || exit 1;
-    echo 'FINNISHED 6';
-    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[nebius,remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
-    echo 'FINNISHED 7';
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
-    echo 'FINNISHED 8';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
-    echo 'FINNISHED 9';
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    echo 'FINNISHED 10';
-{#    python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;#}
     echo 'FINNISHED 11';
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 

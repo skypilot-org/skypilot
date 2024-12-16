@@ -13,8 +13,6 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
-
-
 _CREDENTIAL_FILES = [
     # credential files for Nebius,
     # TODO: Change this to the actual credential files
@@ -48,7 +46,7 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+            cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -87,8 +85,8 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-        cls,
-        instance_type: str,
+            cls,
+            instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
         logging.debug('Nebius cloud get vcpus mem: %s', cls._REPR)
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
@@ -96,13 +94,13 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def zones_provision_loop(
-        cls,
-        *,
-        region: str,
-        num_nodes: int,
-        instance_type: str,
-        accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool = False,
+            cls,
+            *,
+            region: str,
+            num_nodes: int,
+            instance_type: str,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool = False,
     ) -> Iterator[None]:
         logging.debug('Nebius cloud zone provision loop: %s', cls._REPR)
         del num_nodes  # unused
@@ -120,7 +118,7 @@ class Nebius(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        logging.debug('Nebius cloud instance type to hourly cost: %s',)
+        logging.debug('Nebius cloud instance type to hourly cost: %s', )
         return service_catalog.get_hourly_cost(instance_type,
                                                use_spot=use_spot,
                                                region=region,
@@ -133,7 +131,7 @@ class Nebius(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         """Returns the hourly cost of the accelerators, in dollars/hour."""
-        logging.debug('Nebius cloud accelerators to hourly cost: %s',1)
+        logging.debug('Nebius cloud accelerators to hourly cost: %s', 1)
         del accelerators, use_spot, region, zone  # unused
         ########
         # TODO #
@@ -144,7 +142,7 @@ class Nebius(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        logging.debug('Nebius cloud get egress cost: %s',1)
+        logging.debug('Nebius cloud get egress cost: %s', 1)
         ########
         # TODO #
         ########
@@ -176,13 +174,13 @@ class Nebius(clouds.Cloud):
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, int]]:
-        logging.debug('Nebius cloud accelerators from instance type: %s',)
+        logging.debug('Nebius cloud accelerators from instance type: %s', )
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='nebius')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
-        logging.debug('Nebius cloud get zone shell cmd: %s',)
+        logging.debug('Nebius cloud get zone shell cmd: %s', )
         return None
 
     def make_deploy_resources_variables(
@@ -193,7 +191,7 @@ class Nebius(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        logging.debug('Nebius cloud make deploy resources variables: %s',)
+        logging.debug('Nebius cloud make deploy resources variables: %s', )
         del zones, dryrun, cluster_name
 
         return {
@@ -271,7 +269,6 @@ class Nebius(clouds.Cloud):
             from nebius.base.error import SDKError
             from nebius.aio.service_error import RequestError
 
-
             try:
                 # sdk = SDK()
                 DEFAULT_NEBIUS_TOKEN_PATH = os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt')
@@ -284,7 +281,7 @@ class Nebius(clouds.Cloud):
                     f'EMPTY TOKEN \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install nebius \n'
-                    f'        $ nebius store_api_key <NEBIUS_IAM_TOKEN> \n'
+                    f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
             try:
@@ -295,7 +292,7 @@ class Nebius(clouds.Cloud):
                     f'{e.status} \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install nebius \n'
-                    f'        $ nebius store_api_key <NEBIUS_IAM_TOKEN> \n'
+                    f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt  \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
 
