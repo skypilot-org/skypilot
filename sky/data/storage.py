@@ -1409,6 +1409,7 @@ class S3Store(AbstractStore):
     def delete(self) -> None:
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted S3 bucket {self.name}.'
@@ -1888,6 +1889,7 @@ class GcsStore(AbstractStore):
     def delete(self) -> None:
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_gcs_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted GCS bucket {self.name}.'
@@ -2719,8 +2721,6 @@ class AzureBlobStore(AbstractStore):
                     f'{colorama.Style.RESET_ALL}')
 
     def _delete_sub_path(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
-            return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         try:
             container_url = data_utils.AZURE_CONTAINER_URL.format(
@@ -3155,6 +3155,7 @@ class R2Store(AbstractStore):
     def delete(self) -> None:
         if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_r2_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted R2 bucket {self.name}.'
@@ -3165,8 +3166,6 @@ class R2Store(AbstractStore):
                     f'{colorama.Style.RESET_ALL}')
 
     def _delete_sub_path(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
-            return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         deleted_by_skypilot = self._delete_r2_bucket_sub_path(
             self.name, self._bucket_sub_path)
@@ -3644,8 +3643,6 @@ class IBMCosStore(AbstractStore):
                     f'{colorama.Style.RESET_ALL}')
 
     def _delete_sub_path(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
-            return self._delete_sub_path()
         assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
         bucket = self.s3_resource.Bucket(self.name)
         try:

@@ -38,6 +38,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky import global_user_state
 from sky import skypilot_config
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.data import data_utils
@@ -1100,6 +1101,10 @@ class TestStorageWithCredentials:
         # Check bucket is empty, all files under sub directory should be deleted
         store = tmp_local_storage_obj_with_sub_path.stores[store_type]
         store.is_sky_managed = False
+        if store_type == storage_lib.StoreType.AZURE:
+            azure.assign_storage_account_iam_role(
+                storage_account_name=store.storage_account_name,
+                resource_group_name=store.resource_group_name)
         store.delete()
         files = self.list_all_files(store_type,
                                     tmp_local_storage_obj_with_sub_path.name)
