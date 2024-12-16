@@ -552,7 +552,7 @@ class EnvoyLoadBalancer(SkyServeLoadBalancer):
             raise RuntimeError(error)
 
         while True:
-            # TODO(ejj) add support for reporting QPS up to the controller.
+            # TODO(ejj): add support for reporting QPS up to the controller.
             # Presently auto-scaling doesn't work without it.
             await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
             ready_replica_urls = await self._controller_sync({})
