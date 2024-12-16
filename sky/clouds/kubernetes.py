@@ -83,7 +83,7 @@ class Kubernetes(clouds.Cloud):
         # Use a fresh user hash to avoid conflicts in the secret object naming.
         # This can happen when the controller is reusing the same user hash
         # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.get_user_hash(force_fresh_hash=True)
+        fresh_user_hash = common_utils.generate_user_hash()
         return f'ssh-publickey-{fresh_user_hash}'
 
     @classmethod

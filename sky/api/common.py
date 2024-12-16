@@ -7,6 +7,7 @@ import tempfile
 import time
 import typing
 from typing import Any, Dict, Optional
+import uuid
 
 import colorama
 import filelock
@@ -105,7 +106,9 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
             requests.get(f'{server_url}/health', timeout=1)
             break
         except requests.exceptions.ConnectionError as e:
-            if retry_cnt < 20:
+            # TODO(zhwu): this should be made as small as possible to avoid
+            # unnecessary delays.
+            if retry_cnt < 25:
                 retry_cnt += 1
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -263,12 +266,14 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 
-    timestamp = str(int(time.time()))
+    # We should not use int(time.time()) as there can be multiple requests at
+    # the same second.
+    task_id = str(uuid.uuid4().hex)
     client_dir = (CLIENT_DIR.expanduser().resolve() / user_hash)
     client_task_dir = client_dir / 'tasks'
     client_task_dir.mkdir(parents=True, exist_ok=True)
 
-    client_task_path = client_task_dir / f'{timestamp}.yaml'
+    client_task_path = client_task_dir / f'{task_id}.yaml'
     client_task_path.write_text(task)
 
     client_file_mounts_dir = client_dir / 'file_mounts'
@@ -321,7 +326,7 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
 
-    translated_client_task_path = client_dir / f'{timestamp}_translated.yaml'
+    translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
     common_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
     dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))

@@ -131,8 +131,12 @@ def to_dict() -> config_utils.Config:
     return copy.deepcopy(_dict)
 
 
-def _try_load_config() -> None:
+def _reload_config() -> None:
     global _dict, _loaded_config_path
+    # Reset the global variables, to avoid using stale values.
+    _dict = config_utils.Config()
+    _loaded_config_path = None
+
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
         config_path = os.path.expanduser(config_path_via_env_var)
@@ -173,7 +177,7 @@ def loaded_config_path() -> Optional[str]:
 
 
 # Load on import.
-_try_load_config()
+_reload_config()
 
 
 def loaded() -> bool:
@@ -183,34 +187,45 @@ def loaded() -> bool:
 
 @contextlib.contextmanager
 def override_skypilot_config(
-        override_configs: Dict[str, Any]) -> Iterator[None]:
+        override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
     # TODO(zhwu): allow admin user to extend the disallowed keys or specify
     # allowed keys.
+    if not override_configs:
+        # If no override configs (None or empty dict), do nothing.
+        yield
+        return
+    original_env_config_path = _loaded_config_path
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
         override_configs=override_configs,
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    previous_env_config = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    with tempfile.NamedTemporaryFile(
+            mode='w',
+            prefix='skypilot_config',
+            # Have to avoid deleting the file as the underlying function needs
+            # to read the config file, and we need to close the file mode='w'
+            # to enable reading.
+            delete=False) as f:
+        common_utils.dump_yaml(f.name, dict(config))
+        os.environ[ENV_VAR_SKYPILOT_CONFIG] = f.name
     try:
-        with tempfile.NamedTemporaryFile(mode='w',
-                                         prefix='skypilot_config',
-                                         delete=False) as f:
-            common_utils.dump_yaml(f.name, dict(config))
-            f.flush()
-            f.close()
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = f.name
-        _try_load_config()
+        _reload_config()
         yield
     finally:
-        if previous_env_config is not None:
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = previous_env_config
+        if original_env_config_path is not None:
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_config_path
         else:
-            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG)
+            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
+        # Reload the config to restore the original config to avoid the next
+        # request reusing the same process to use the config for the current
+        # request.
+        _reload_config()
 
         try:
             os.remove(f.name)
         except Exception:  # pylint: disable=broad-except
+            # Failing to delete the file is not critical.
             pass

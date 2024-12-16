@@ -56,36 +56,38 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash(force_fresh_hash: bool = False) -> str:
+def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+    if user_hash is None:
+        return False
+    try:
+        int(user_hash, 16)
+    except (TypeError, ValueError):
+        return False
+    return len(user_hash) == USER_HASH_LENGTH
+
+
+def generate_user_hash() -> str:
+    """Generates a unique user-machine specific hash."""
+    hash_str = user_and_hostname_hash()
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    if not _is_valid_user_hash(user_hash):
+        # A fallback in case the hash is invalid.
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
+    return user_hash
+
+
+def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
     hostname changes causing a new user hash to be generated.
-
-    Args:
-        force_fresh_hash: Bypasses the cached hash in USER_HASH_FILE and the
-            hash in the USER_ID_ENV_VAR and forces a fresh user-machine hash
-            to be generated. Used by `kubernetes.ssh_key_secret_field_name` to
-            avoid controllers sharing the same ssh key field name as the
-            local client.
     """
+    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
+    if _is_valid_user_hash(user_hash):
+        assert user_hash is not None
+        return user_hash
 
-    def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
-        if user_hash is None:
-            return False
-        try:
-            int(user_hash, 16)
-        except (TypeError, ValueError):
-            return False
-        return len(user_hash) == USER_HASH_LENGTH
-
-    if not force_fresh_hash:
-        user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-        if _is_valid_user_hash(user_hash):
-            assert user_hash is not None
-            return user_hash
-
-    if not force_fresh_hash and os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
@@ -93,19 +95,10 @@ def get_user_hash(force_fresh_hash: bool = False) -> str:
         if _is_valid_user_hash(user_hash):
             return user_hash
 
-    hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    if not _is_valid_user_hash(user_hash):
-        # A fallback in case the hash is invalid.
-        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
+    user_hash = generate_user_hash()
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    if not force_fresh_hash:
-        # Do not cache to file if force_fresh_hash is True since the file may
-        # be intentionally using a different hash, e.g. we want to keep the
-        # user_hash for usage collection the same on the jobs/serve controller
-        # as users' local client.
-        with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-            f.write(user_hash)
+    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
     return user_hash
 
 

@@ -1,5 +1,6 @@
 """Executor for the requests."""
 import concurrent.futures
+import contextlib
 import enum
 import functools
 import multiprocessing
@@ -23,7 +24,6 @@ from sky.api.requests import payloads
 from sky.api.requests import requests
 from sky.api.requests.queues import mp_queue
 from sky.skylet import constants
-from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import timeline
@@ -145,6 +145,34 @@ def _get_queue(schedule_type: requests.ScheduleType) -> RequestQueue:
     return RequestQueue(schedule_type, backend=queue_backend)
 
 
+@contextlib.contextmanager
+def override_request_env_and_config(request_body: payloads.RequestBody):
+    """Override the environment and SkyPilot config for a request."""
+    original_env = os.environ.copy()
+    os.environ.update(request_body.env_vars)
+    user = models.User(id=request_body.env_vars[constants.USER_ID_ENV_VAR],
+                       name=request_body.env_vars[constants.USER_ENV_VAR])
+    global_user_state.add_user(user)
+    common_utils.set_current_command(request_body.entrypoint_command)
+    # Force color to be enabled.
+    os.environ['CLICOLOR_FORCE'] = '1'
+    common.reload()
+    try:
+        with skypilot_config.override_skypilot_config(
+                request_body.override_skypilot_config):
+            yield
+    finally:
+        # We need to call the save_timeline() since atexit will not be
+        # triggered as multiple requests can be sharing the same process.
+        timeline.save_timeline()
+        # Restore the original environment variables, so that a new request
+        # won't be affected by the previous request, e.g. SKYPILOT_DEBUG
+        # setting, etc. This is necessary as our executor is reusing the
+        # same process for multiple requests.
+        os.environ.clear()
+        os.environ.update(original_env)
+
+
 def _wrapper(request_id: str, ignore_return_value: bool) -> None:
     """Wrapper for a request task."""
 
@@ -187,28 +215,20 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = redirect_output(f)
-        original_env = os.environ.copy()
+        # Redirect the stdout/stderr before overriding the environment and
+        # config, as there can be some logs during override that needs to be
+        # captured in the log file.
         try:
-            os.environ.update(request_body.env_vars)
-            user = models.User(
-                id=request_body.env_vars[constants.USER_ID_ENV_VAR],
-                name=request_body.env_vars[constants.USER_ENV_VAR])
-            global_user_state.add_user(user)
-            common_utils.set_current_command(request_body.entrypoint_command)
-            # Force color to be enabled.
-            os.environ['CLICOLOR_FORCE'] = '1'
-            common.reload()
-            with skypilot_config.override_skypilot_config(
-                    request_body.override_skypilot_config):
+            with override_request_env_and_config(request_body):
                 return_value = func(**request_body.to_kwargs())
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} aborted by user')
+            restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
                 stacktrace = traceback.format_exc()
             setattr(e, 'stacktrace', stacktrace)
-            usage_lib.store_exception(e)
             with requests.update_request(request_id) as request_task:
                 assert request_task is not None, request_id
                 request_task.status = requests.RequestStatus.FAILED
@@ -225,16 +245,6 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
                     request_task.set_return_value(return_value)
             restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
-        finally:
-            # We need to call the save_timeline() since atexit will not be
-            # triggered as multiple requests can be sharing the same process.
-            timeline.save_timeline()
-            # Restore the original environment variables, so that a new request
-            # won't be affected by the previous request, e.g. SKYPILOT_DEBUG
-            # setting, etc. This is necessary as our executor is reusing the
-            # same process for multiple requests.
-            os.environ.clear()
-            os.environ.update(original_env)
 
 
 def schedule_request(

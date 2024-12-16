@@ -9,7 +9,14 @@ from sky.utils import common_utils
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 SERVER_ID_CONNECTOR: str = '-remote-'
-SERVER_ID = common_utils.get_user_hash(force_fresh_hash=True)
+# We use the user hash (machine-specific) hash of the server to determine if a
+# SkyPilot server is started by the same user. It will be the same across the
+# whole lifecycle of the server, including:
+# 1. all requests, because this global variable is set once during server
+#    starts.
+# 2. SkyPilot server restarts, as long as the `~/.sky` folder is persisted and
+#    the env var set during starting the server is the same.
+SERVER_ID = common_utils.get_user_hash()
 
 
 class ControllerType(enum.Enum):

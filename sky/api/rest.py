@@ -204,7 +204,7 @@ async def list_accelerator_counts(
 async def validate(validate_body: payloads.ValidateBody):
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
-    logger.info(f'Validating tasks: {validate_body.dag}')
+    # logger.info(f'Validating tasks: {validate_body.dag}')
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(validate_body.dag)
         f.flush()
@@ -282,14 +282,15 @@ async def download(download_body: payloads.DownloadBody):
             raise fastapi.HTTPException(
                 status_code=400, detail=f'Invalid folder path: {folder_path}')
 
-        if not folder_path.exists():
+        if not folder_path.expanduser().resolve().exists():
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Folder not found: {folder_path}')
 
     # Create a temporary zip file
-    zip_filename = f'folder_{int(time.time())}.zip'
-    zip_path = pathlib.Path(common.api_server_logs_dir_prefix(
-        user_hash)).expanduser().resolve() / zip_filename
+    log_id = str(uuid.uuid4().hex)
+    zip_filename = f'folder_{log_id}.zip'
+    zip_path = pathlib.Path(
+        logs_dir_on_api_server).expanduser().resolve() / zip_filename
 
     try:
         folders = [

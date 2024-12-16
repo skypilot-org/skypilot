@@ -3,6 +3,22 @@ import pytest
 from sky.utils import config_utils
 
 
+def test_nested_config(monkeypatch) -> None:
+    """Test that the nested config works."""
+    config = config_utils.Config()
+    config.set_nested(('aws', 'ssh_proxy_command'), 'value')
+    assert config == {'aws': {'ssh_proxy_command': 'value'}}
+
+    assert config.get_nested(('admin_policy',), 'default') == 'default'
+    config.set_nested(('aws', 'use_internal_ips'), True)
+    assert config == {
+        'aws': {
+            'ssh_proxy_command': 'value',
+            'use_internal_ips': True
+        }
+    }
+
+
 def test_merge_k8s_configs_with_container_resources():
     """Test merging Kubernetes configs with container resource specifications."""
     base_config = {
