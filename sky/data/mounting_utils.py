@@ -170,7 +170,7 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo "{rclone_config}" >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
-    log_dir_path = os.path.expanduser('~/.sky/rclone_log')
+    log_dir_path = '~/.sky/rclone_log'
     log_file_path = os.path.join(log_dir_path, f'{bucket_name}.log')
     create_log_cmd = f'mkdir -p {log_dir_path} && touch {log_file_path}'
     # when mounting multiple directories with vfs cache mode, it's handled by
@@ -183,20 +183,19 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
         '--daemon --daemon-wait 0 '
-        # need to update the log file so it grabs the home directory from the remote instance.
-        f'--log-file {log_file_path} --log-level DEBUG ' #log related flags
+        f'--log-file {log_file_path} --log-level DEBUG '
         # '--dir-cache-time' sets how long directory listings are cached before
         # rclone checks the remote storage for changes again. A shorter
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
         # '--transfers 1' guarantees the files written at the local mount point
-        # to be  uploaded to the backend storage in the order of creation.
+        # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
-        # after last use.
-        '--transfers 1 --vfs-cache-poll-interval 5s --vfs-write-back 1s '
+        # after last use of the file in local mountpoint.
+        '--transfers 1 --vfs-cache-poll-interval 30s --vfs-write-back 1s '
         '> /dev/null 2>&1 &')
     return mount_cmd
 
