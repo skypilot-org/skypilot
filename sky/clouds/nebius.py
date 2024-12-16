@@ -6,6 +6,8 @@ import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from nebius.api.nebius.iam.v1 import ProjectServiceClient, GetProjectRequest
+
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.utils import resources_utils
@@ -270,10 +272,9 @@ class Nebius(clouds.Cloud):
             from nebius.aio.service_error import RequestError
 
             try:
-                # sdk = SDK()
                 DEFAULT_NEBIUS_TOKEN_PATH = os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt')
                 with open(DEFAULT_NEBIUS_TOKEN_PATH, 'r') as file:
-                    NEBIUS_IAM_TOKEN = file.read().strip()
+                    NEBIUS_IAM_TOKEN, NB_PROJECT_ID= file.read().strip().split('\n')
                 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
             except SDKError as e:
@@ -282,11 +283,14 @@ class Nebius(clouds.Cloud):
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install nebius \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
+                    f'   Copy your project ID from the web console Project settings and save it to file \n'
+                    f'        $ NB_PROJECT_ID >> ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
             try:
-                response = sdk.whoami().wait()
-                print(response.profile)
+                service = ProjectServiceClient(sdk)
+                get = service.get(GetProjectRequest(id=NB_PROJECT_ID)).wait()
+                logging.info(f'Project name: {get.metadata.name}')
             except RequestError as e:
                 return False, (
                     f'{e.status} \n'  # First line is indented by 4 spaces

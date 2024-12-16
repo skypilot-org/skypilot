@@ -4,6 +4,8 @@ import time
 from time import sleep
 from typing import Any, Dict, List, Optional
 
+from nebius.api.nebius.iam.v1 import ProjectServiceClient, ListProjectsRequest
+
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
@@ -16,17 +18,14 @@ from nebius.sdk import SDK
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
-DEFAULT_NEBIUS_TOKEN_PATH = os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt')
-with open(DEFAULT_NEBIUS_TOKEN_PATH, 'r') as file:
-    NEBIUS_IAM_TOKEN = file.read().strip()
+with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
+    NEBIUS_IAM_TOKEN, NB_PROJECT_ID = file.read().strip().split('\n')
 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
 POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
-
-
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
@@ -65,24 +64,10 @@ def _wait_all_pending(region: str, cluster_name_on_cloud: str) -> None:
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    # print('TRY TO RUN INSTANCES')
-    #  pr="project-e00w18sheap5emdjx8", name
-    # service = ClusterServiceClient(sdk)
-    # result = service.get_by_name(GetByNameRequest(name=cluster_name_on_cloud)).wait()
-    # print('RESULT::', result)
-    #
-    # service = NodeGroupServiceClient(sdk)
-    # result = service.list(ListNodeGroupsRequest(
-    #     parent_id=result.id
-    # ))
-    # print('config', config)
-    # print('----')
-    # print('node_config', config.node_config)
     _wait_all_pending(region, cluster_name_on_cloud)
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
     to_start_count = config.count - len(running_instances)
-    # print('to_start_count', to_start_count)
     if to_start_count < 0:
         raise RuntimeError(
             f'Cluster {cluster_name_on_cloud} already has '
@@ -197,7 +182,6 @@ def get_cluster_info(
                 instance_id=instance_id,
                 internal_ip=instance_info['internal_ip'],
                 external_ip=instance_info['external_ip'],
-                ssh_port=instance_info['ssh_port'],
                 tags={},
             )
         ]
