@@ -575,6 +575,7 @@ class Storage(object):
         persistent: Optional[bool] = True,
         mode: StorageMode = StorageMode.MOUNT,
         sync_on_reconstruction: bool = True,
+        is_sky_managed: Optional[bool] = None,
         # pylint: disable=invalid-name
         _bucket_sub_path: Optional[str] = None
     ) -> None:
@@ -615,6 +616,8 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
+          is_sky_managed: Optional[bool]; Whether the storage
+            is managed by sky, Its used to construct the store object.
           _bucket_sub_path: Optional[str]; The subdirectory to use for the
             storage object.
         """
@@ -624,6 +627,7 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
+        self.is_sky_managed = is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -1027,6 +1031,7 @@ class Storage(object):
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
+                is_sky_managed=self.is_sky_managed,
                 _bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1150,11 +1155,11 @@ class Storage(object):
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
-
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+        is_sky_managed = config.pop('is_sky_managed', None)
         force_delete = config.pop('_force_delete', None)
         # pylint: disable=invalid-name
         _bucket_sub_path = config.pop('_bucket_sub_path', None)
@@ -1178,6 +1183,7 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode,
+                          is_sky_managed=is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
@@ -1186,7 +1192,7 @@ class Storage(object):
         storage_obj.force_delete = force_delete
         return storage_obj
 
-    def to_yaml_config(self) -> Dict[str, str]:
+    def to_yaml_config(self) -> Dict[str, Any]:
         config = {}
 
         def add_if_not_none(key: str, value: Optional[Any]):
@@ -1205,6 +1211,7 @@ class Storage(object):
         if len(self.stores) > 0:
             stores = ','.join([store.value for store in self.stores])
         add_if_not_none('store', stores)
+        add_if_not_none('is_sky_managed', self.is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
