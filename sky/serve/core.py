@@ -153,23 +153,17 @@ def up(
             serve_utils.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        controller_resources = controller_utils.get_controller_resources(
-            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-            task_resources=task.resources)
 
-        # Check that the Envoy load balancer isn't being used on an unsupported
-        # cloud.
+        requested_features = set()
         lb_type = task_config.get('service', {}).get('load_balancer_type', None)
         if lb_type == serve_constants.LbType.ENVOY.value:
-            for resource in controller_resources:
-                if resource.cloud is None:
-                    continue
+            requested_features.add(
+                clouds.CloudImplementationFeatures.HOST_ENVOY_LOAD_BALANCER)
 
-                requested_features = {
-                    clouds.CloudImplementationFeatures.HOST_ENVOY_LOAD_BALANCER
-                }
-                resource.cloud.check_features_are_supported(
-                    resource, requested_features)
+        controller_resources = controller_utils.get_controller_resources(
+            controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+            task_resources=task.resources,
+            requested_features=requested_features)
 
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,

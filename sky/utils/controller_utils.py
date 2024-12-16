@@ -449,6 +449,7 @@ def shared_controller_vars_to_fill(
 def get_controller_resources(
     controller: Controllers,
     task_resources: Iterable['resources.Resources'],
+    requested_features: Optional[Set[clouds.CloudImplementationFeatures]] = None
 ) -> Set['resources.Resources']:
     """Read the skypilot config and setup the controller resources.
 
@@ -517,9 +518,13 @@ def get_controller_resources(
             cloud_name = str(resource.cloud)
             if cloud_name not in requested_clouds_with_region_zone:
                 try:
+                    if requested_features is None:
+                        requested_features = set()
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+
                     resource.cloud.check_features_are_supported(
-                        resources.Resources(),
-                        {clouds.CloudImplementationFeatures.HOST_CONTROLLERS})
+                        resources.Resources(), requested_features)
                 except exceptions.NotSupportedError:
                     # Skip the cloud if it does not support hosting controllers.
                     continue
@@ -593,7 +598,14 @@ def get_controller_resources(
                 result.add(resource_copy)
 
     if not result:
-        return {controller_resources_to_use}
+        result = {controller_resources_to_use}
+
+    # Raise an exception if the user manuallys specifeid an unsupported cloud.
+    for resource in result:
+        if resource.cloud is not None:
+            resource.cloud.check_features_are_supported(resource,
+                                                        requested_features)
+
     return result
 
 
