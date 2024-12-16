@@ -568,6 +568,7 @@ class Rclone:
         GCS = 'GCS'
         IBM = 'IBM'
         R2 = 'R2'
+        AZURE = 'AZURE'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -583,14 +584,17 @@ class Rclone:
                 Rclone.RcloneStores.S3: 'sky-s3',
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
-                Rclone.RcloneStores.R2: 'sky-r2'
+                Rclone.RcloneStores.R2: 'sky-r2',
+                Rclone.RcloneStores.AZURE: 'sky-azure'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
         def get_config(self,
                        bucket_name: Optional[str] = None,
                        rclone_profile_name: Optional[str] = None,
-                       region: Optional[str] = None) -> str:
+                       region: Optional[str] = None,
+                       storage_account_name: Optional[str] = None,
+                       storage_account_key: Optional[str] = None) -> str:
             """Generates an Rclone configuration for a specific storage type.
 
             This method creates an Rclone configuration string based on the storage
@@ -661,6 +665,14 @@ class Rclone:
                     endpoint = {endpoint}
                     region = auto
                     acl = private
+                    """)
+            elif self is Rclone.RcloneStores.AZURE:
+                assert storage_account_name and storage_account_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = azureblob
+                    account = {storage_account_name}
+                    key = {storage_account_key}
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
