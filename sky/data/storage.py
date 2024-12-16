@@ -3094,6 +3094,19 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.R2.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.R2.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+
     def _create_r2_bucket(self,
                           bucket_name: str,
                           region='auto') -> StorageHandle:

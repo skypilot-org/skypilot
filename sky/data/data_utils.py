@@ -567,6 +567,7 @@ class Rclone:
         S3 = 'S3'
         GCS = 'GCS'
         IBM = 'IBM'
+        R2 = 'R2'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -582,6 +583,7 @@ class Rclone:
                 Rclone.RcloneStores.S3: 'sky-s3',
                 Rclone.RcloneStores.GCS: 'sky-gcs',
                 Rclone.RcloneStores.IBM: 'sky-ibm',
+                Rclone.RcloneStores.R2: 'sky-r2'
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -640,6 +642,24 @@ class Rclone:
                     region = {region}
                     endpoint = s3.{region}.cloud-object-storage.appdomain.cloud
                     location_constraint = {region}-smart
+                    acl = private
+                    """)
+            elif self is Rclone.RcloneStores.R2:
+                cloudflare_session = cloudflare.session()
+                cloudflare_credentials = (
+                    cloudflare.get_r2_credentials(cloudflare_session)
+                )
+                endpoint = cloudflare.create_endpoint()
+                access_key_id = cloudflare_credentials.access_key
+                secret_access_key = cloudflare_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Cloudflare
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint}
+                    region = auto
                     acl = private
                     """)
             else:
