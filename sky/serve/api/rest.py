@@ -52,6 +52,18 @@ async def down(
     )
 
 
+@router.post('/endpoint')
+async def endpoint(request: fastapi.Request,
+                   endpoint_body: payloads.ServeEndpointBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='serve.endpoint',
+        request_body=endpoint_body,
+        func=core.serve_controller_endpoint,
+        schedule_type=requests.ScheduleType.NON_BLOCKING,
+    )
+
+
 @router.post('/terminate-replica')
 async def terminate_replica(
     request: fastapi.Request,

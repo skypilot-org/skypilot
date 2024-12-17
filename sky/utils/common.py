@@ -41,6 +41,9 @@ def get_controller_name(controller_type: ControllerType) -> str:
 # Controller names differ per user and per SkyPilot server.
 # If local: <prefix>-<user_id>
 # If remote: <prefix>-<user_id>-remote-<api_server_user_id>
+# DO NOT use these variables on the client side because client side doesn't know
+# the remote server's user id, so client side will get local-version controller
+# name.
 # TODO(SKY-1106): remove dynamic constants like this.
 SKY_SERVE_CONTROLLER_NAME: str = get_controller_name(ControllerType.SERVE)
 JOB_CONTROLLER_NAME: str = get_controller_name(ControllerType.JOBS)

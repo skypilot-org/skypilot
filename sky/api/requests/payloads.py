@@ -267,6 +267,11 @@ class EndpointBody(RequestBody):
     port: Optional[Union[int, str]] = None
 
 
+class ServeEndpointBody(RequestBody):
+    """The request body for the serve controller endpoint."""
+    port: Optional[Union[int, str]] = None
+
+
 class JobStatusBody(RequestBody):
     """The request body for the job status endpoint."""
     cluster_name: str

@@ -27,7 +27,6 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -807,6 +806,8 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
     from sky.api import sdk  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from sky.serve.api import sdk as serve_sdk
 
     # Don't use backend_utils.is_controller_up since it is too slow.
     # handle = global_user_state.get_handle_from_cluster_name(
@@ -818,8 +819,7 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if load_balancer_port is None:
         return '-'
     try:
-        request_id = sdk.endpoints(common.SKY_SERVE_CONTROLLER_NAME,
-                                   load_balancer_port)
+        request_id = serve_sdk.endpoint(load_balancer_port)
         endpoints = sdk.stream_and_get(request_id)
         endpoint = endpoints.get(str(load_balancer_port), None)
     except exceptions.ClusterNotUpError:

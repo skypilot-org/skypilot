@@ -727,3 +727,27 @@ def tail_logs(
                             target,
                             replica_id,
                             follow=follow)
+
+
+def serve_controller_endpoint(
+        port: Optional[Union[int, str]] = None) -> Dict[int, str]:
+    """Gets the endpoint for the serve controller.
+
+    Args:
+        port: The port number to get the endpoint for. If None, endpoints
+            for all ports are returned..
+
+    Returns: A dictionary of port numbers to endpoints. If endpoint is None,
+        the dictionary will contain all ports:endpoints exposed on the
+        controller.
+
+    Raises:
+        ValueError: if the controller is not UP or the endpoint is not exposed.
+        RuntimeError: if the controller has no ports to be exposed or no
+            endpoints are exposed yet.
+    """
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                'Fetching endpoints for serve controller')):
+        return backend_utils.get_endpoints(
+            cluster=common.SKY_SERVE_CONTROLLER_NAME, port=port)

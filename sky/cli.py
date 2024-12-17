@@ -2856,7 +2856,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
             to be torn down (e.g., because it has services running or
             it is in init state)
     """
-    if controller_name != common.SKY_SERVE_CONTROLLER_NAME:
+    if not common.is_current_user_controller(controller_name):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'Tearing down other user\'s sky serve controller '

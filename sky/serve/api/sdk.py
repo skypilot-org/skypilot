@@ -157,3 +157,12 @@ def tail_logs(service_name: str,
         timeout=(5, None),
     )
     return api_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@api_common.check_health
+def endpoint(port: Optional[Union[int, str]] = None) -> str:
+    body = payloads.ServeEndpointBody(port=port,)
+    response = requests.post(f'{api_common.get_server_url()}/serve/endpoint',
+                             json=json.loads(body.model_dump_json()))
+    return api_common.get_request_id(response)
