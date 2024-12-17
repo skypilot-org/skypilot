@@ -879,27 +879,62 @@ def _terminate_node(namespace: str, context: Optional[str],
                     pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
-    try:
-        kubernetes.core_api(context).delete_namespaced_service(
-            pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT)
-        kubernetes.core_api(context).delete_namespaced_service(
-            f'{pod_name}-ssh',
-            namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT)
-    except kubernetes.api_exception():
-        pass
+
+    def _delete_k8s_resource_with_retry(delete_func: Callable,
+                                        resource_type: str,
+                                        resource_name: str) -> None:
+        """Helper to delete Kubernetes resources with 404 handling and retries.
+
+        Args:
+            delete_func: Function to call to delete the resource
+            resource_type: Type of resource being deleted (e.g. 'service'),
+                used in logging
+            resource_name: Name of the resource being deleted, used in logging
+        """
+        max_retries = 3
+        retry_delay = 5  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                delete_func()
+                return
+            except kubernetes.api_exception() as e:
+                if e.status == 404:
+                    logger.warning(
+                        f'terminate_instances: Tried to delete {resource_type} '
+                        f'{resource_name}, but the {resource_type} was not '
+                        'found (404).')
+                    return
+                elif attempt < max_retries - 1:
+                    logger.warning(f'terminate_instances: Failed to delete '
+                                   f'{resource_type} {resource_name} (attempt '
+                                   f'{attempt + 1}/{max_retries}). Error: {e}. '
+                                   f'Retrying in {retry_delay} seconds...')
+                    time.sleep(retry_delay)
+                else:
+                    raise
+
+    # Delete services for the pod
+    for service_name in [pod_name, f'{pod_name}-ssh']:
+        _delete_k8s_resource_with_retry(
+            delete_func=lambda name=service_name: kubernetes.core_api(
+                context).delete_namespaced_service(name=name,
+                                                   namespace=namespace,
+                                                   _request_timeout=config_lib.
+                                                   DELETION_TIMEOUT),
+            resource_type='service',
+            resource_name=service_name)
+
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    try:
-        kubernetes.core_api(context).delete_namespaced_pod(
-            pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            logger.warning('terminate_instances: Tried to delete pod '
-                           f'{pod_name}, but the pod was not found (404).')
-        else:
-            raise
+    _delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pod',
+        resource_name=pod_name)
 
 
 def terminate_instances(
