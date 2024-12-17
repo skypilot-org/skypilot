@@ -540,8 +540,8 @@ class EnvoyLoadBalancer(SkyServeLoadBalancer):
         # attempts to start before giving up.
         envoy_started = False
         logger.info(f'Starting envoy {self.envoy_name}')
-        for _ in range(30):
-            await asyncio.sleep(5)
+        for _ in range(50):
+            await asyncio.sleep(3)
             envoy_started = await self._start_envoy()
             if envoy_started:
                 break
