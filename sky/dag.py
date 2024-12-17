@@ -76,9 +76,9 @@ class Dag:
 
         return out_degree_condition and in_degree_condition
 
-    def validate(self):
+    def validate(self, workdir_only: bool = False):
         for task in self.tasks:
-            task.validate()
+            task.validate(workdir_only=workdir_only)
 
 
 class _DagContext(threading.local):

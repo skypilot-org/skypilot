@@ -567,6 +567,30 @@ def test_multi_tenant(generic_cloud: str):
             for cmd in commands
         ]
 
+    stop_test_cmds = [
+        'echo "==== Test multi-tenant cluster stop ===="',
+        *set_user(
+            user_2,
+            user_2_name,
+            [
+                f'sky stop -y -a',
+                # -a should only stop clusters from the current user.
+                f's=$(sky status -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep UP',
+                f's=$(sky status -u {name}-2) && echo "$s" && echo "$s" | grep {user_2_name} | grep STOPPED',
+                # Explicit cluster name should stop the cluster.
+                f'sky stop -y {name}-1',
+                # Stopping cluster should not change the ownership of the cluster.
+                f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
+                f'sky status {name}-1 | grep STOPPED',
+                # Both clusters should be stopped.
+                f'sky status -u | grep {name}-1 | grep STOPPED',
+                f'sky status -u | grep {name}-2 | grep STOPPED',
+            ]),
+    ]
+    if generic_cloud == 'kubernetes':
+        # Skip the stop test for Kubernetes, as stopping is not supported.
+        stop_test_cmds = []
+
     test = Test(
         'test_multi_tenant',
         [
@@ -597,31 +621,15 @@ def test_multi_tenant(generic_cloud: str):
                     f's=$(sky status -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep UP',
                     f's=$(sky status -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep UP',
                 ]),
-            'echo "==== Test multi-tenant cluster stop ===="',
-            *set_user(
-                user_2,
-                user_2_name,
-                [
-                    f'sky stop -y -a',
-                    # -a should only stop clusters from the current user.
-                    f's=$(sky status -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep UP',
-                    f's=$(sky status -u {name}-2) && echo "$s" && echo "$s" | grep {user_2_name} | grep STOPPED',
-                    # Explicit cluster name should stop the cluster.
-                    f'sky stop -y {name}-1',
-                    # Stopping cluster should not change the ownership of the cluster.
-                    f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
-                    f'sky status {name}-1 | grep STOPPED',
-                    # Both clusters should be stopped.
-                    f'sky status -u | grep {name}-1 | grep STOPPED',
-                    f'sky status -u | grep {name}-2 | grep STOPPED',
-                ]),
+            *stop_test_cmds,
             'echo "==== Test multi-tenant cluster down ===="',
             *set_user(
                 user_2,
                 user_2_name,
                 [
                     f'sky down -y -a',
-                    f'sky status -u | grep {name}-1 | grep STOPPED',
+                    # STOPPED or UP based on whether we run the stop_test_cmds.
+                    f'sky status -u | grep {name}-1 | grep "STOPPED\|UP"',
                     # Current user's clusters should be down'ed.
                     f'sky status -u | grep {name}-2 && exit 1 || true',
                     # Explicit cluster name should delete the cluster.
@@ -1689,7 +1697,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
-            f'sky exec {name} -- "{s3_command} || {gsutil_command} || {azure_blob_command}"',
+            f'sky exec {name} -- "{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; {s3_command} || {gsutil_command} || {azure_blob_command}"',
             f'sky logs {name} 2 --status',  # Ensure the bucket check succeeded.
         ]
         test = Test(
@@ -2324,6 +2332,7 @@ def test_tpu_vm_pod():
 
 
 # ---------- TPU Pod Slice on GKE. ----------
+@pytest.mark.tpu
 @pytest.mark.kubernetes
 def test_tpu_pod_slice_gke():
     name = _get_cluster_name()
@@ -4464,14 +4473,14 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f's=$(sky serve status {name}); echo "$s";'
             'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
-            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
+            f'sleep 2; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
             + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
             # User bug failure will cause no further scaling.
             f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
             f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, SkyPilot here"; do sleep 2; done; sleep 2; '
+            'until curl --connect-timeout 10 --max-time 10 http://$endpoint | grep "Hi, SkyPilot here"; do sleep 1; done; sleep 2; '
             + _check_replica_in_status(name, [(1, False, 'READY'),
                                               (1, False, 'FAILED')]),
         ],

@@ -2617,7 +2617,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 pass
 
 
-@registry.BACKEND_REGISTRY.type_register(name='cloudvmraybackend')
+@registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
@@ -2626,7 +2626,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
       * Cloud providers' implementations under clouds/
     """
 
-    NAME = 'cloudvmraybackend'
+    NAME = 'cloudvmray'
 
     # Backward compatibility, with the old name of the handle.
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name

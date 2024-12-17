@@ -26,9 +26,9 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
     with sky.Dag() as dag:
         cluster_resources = sky.Resources(
             cloud,
-            # We need to set CPUs to 8+ so that the total number of RUNNING jobs
-            # is not limited by the number of CPU cores.
-            cpus='8+',
+            # We need to set CPUs to 5+ so that the total number of RUNNING jobs
+            # is not limited by the number of CPU cores (5 x 2 x 2 = 20).
+            cpus='5+',
             accelerators={'T4': 1},
             use_spot=True)
         task = sky.Task(num_nodes=2).set_resources(cluster_resources)

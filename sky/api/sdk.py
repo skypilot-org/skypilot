@@ -240,7 +240,7 @@ def launch(
     confirm_shown = False
     if need_confirmation:
         cluster_status = None
-        request_id = status([cluster_name])
+        request_id = status([cluster_name], all_users=True)
         clusters = get(request_id)
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not

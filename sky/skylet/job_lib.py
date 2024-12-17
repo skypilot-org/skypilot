@@ -513,17 +513,20 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
 
 
 def _get_jobs(
-        username: Optional[str],
+        user_hash: Optional[str],
         status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     """Returns jobs with the given fields, sorted by job_id, descending."""
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [repr(status.value) for status in status_list]
     filter_str = f'WHERE status IN ({",".join(status_str_list)})'
-    if username is not None:
-        filter_str += f' AND username={username!r}'
+    params = []
+    if user_hash is not None:
+        # We use the old username field for compatibility.
+        filter_str += ' AND username=(?)'
+        params.append(user_hash)
     rows = _CURSOR.execute(
-        f'SELECT * FROM jobs {filter_str} ORDER BY job_id DESC')
+        f'SELECT * FROM jobs {filter_str} ORDER BY job_id DESC', params)
     records = _get_records_from_rows(rows)
     return records
 
@@ -726,7 +729,7 @@ def fail_all_jobs_in_progress() -> None:
 def update_status() -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
-    nonterminal_jobs = _get_jobs(username=None,
+    nonterminal_jobs = _get_jobs(user_hash=None,
                                  status_list=JobStatus.nonterminal_statuses())
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
@@ -776,11 +779,11 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
     return job_table
 
 
-def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
+def dump_job_queue(user_hash: Optional[str], all_jobs: bool) -> str:
     """Get the job queue in encoded json format.
 
     Args:
-        username: The username to show jobs for. Show all the users if None.
+        user_hash: The user hash to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
     status_list: Optional[List[JobStatus]] = [
@@ -789,7 +792,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
     if all_jobs:
         status_list = None
 
-    jobs = _get_jobs(username, status_list=status_list)
+    jobs = _get_jobs(user_hash, status_list=status_list)
     for job in jobs:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
@@ -997,11 +1000,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
+    def get_job_queue(cls, user_hash: Optional[str], all_jobs: bool) -> str:
         # TODO(zhwu): get_job_queue should be combined with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
-            f'{username!r}, {all_jobs})',
+            f'{user_hash!r}, {all_jobs})',
             'print(job_queue, flush=True)',
         ]
         return cls._build(code)

@@ -659,10 +659,10 @@ def queue(cluster_name: str,
         exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
-    username: Optional[str] = common_utils.get_user_hash()
+    user_hash: Optional[str] = common_utils.get_user_hash()
     if all_users:
-        username = None
-    code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
+        user_hash = None
+    code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
         cluster_name,

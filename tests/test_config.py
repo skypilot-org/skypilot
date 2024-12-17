@@ -389,7 +389,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
                     'project_id': 'test-project'
                 }
             })
-@mock.patch('sky.skylet.constants.DISALLOWED_CLIENT_OVERRIDE_KEYS',
+@mock.patch('sky.skylet.constants.SKIPPED_CLIENT_OVERRIDE_KEYS',
             [('aws', 'security_group')])
 @mock.patch('sky.skypilot_config.loaded_config_path',
             return_value='/path/to/config.yaml')

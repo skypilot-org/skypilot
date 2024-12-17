@@ -290,12 +290,13 @@ class Task:
         if dag is not None:
             dag.add(self)
 
-    def validate(self):
+    def validate(self, workdir_only: bool = False):
         """Validate all fields of the task."""
         self.validate_name()
         self.validate_run()
         self.expand_and_validate_workdir()
-        self.expand_and_validate_file_mounts()
+        if not workdir_only:
+            self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()
 

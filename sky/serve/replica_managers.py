@@ -740,7 +740,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',
                           encoding='utf-8') as replica_log_file, open(
-                              job_log_file_name, 'r',
+                              os.path.expanduser(job_log_file_name),
+                              'r',
                               encoding='utf-8') as job_file:
                     replica_log_file.write(job_file.read())
             else:
