@@ -183,15 +183,16 @@ def optimize(
 @usage_lib.entrypoint
 @api_common.check_health
 @annotations.public_api
-def validate(dag: 'sky.Dag') -> str:
+def validate(dag: 'sky.Dag', workdir_only: bool = False) -> str:
     """Validate the tasks.
 
     The file paths (workdir and file_mounts) are validated on the client side
     while the rest (e.g. resource) are validated on server side.
     """
     for task in dag.tasks:
-        task.validate_workdir()
-        task.validate_file_mounts()
+        task.expand_and_validate_workdir()
+        if not workdir_only:
+            task.expand_and_validate_file_mounts()
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         dag_str = f.read()
@@ -313,7 +314,7 @@ def exec(  # pylint: disable=redefined-builtin
 ) -> str:
     """Execute a task."""
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    validate(dag)
+    validate(dag, workdir_only=True)
     dag = api_common.upload_mounts_to_api_server(dag, workdir_only=True)
     with tempfile.NamedTemporaryFile(mode='r') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)

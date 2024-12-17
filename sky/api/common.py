@@ -173,6 +173,12 @@ def check_health(func):
 
 def upload_mounts_to_api_server(dag: 'sky.Dag',
                                 workdir_only: bool = False) -> 'dag_lib.Dag':
+    """Upload user files to remote API server.
+
+    This function needs to be called after sdk.validate(),
+    as the file paths need to be expanded to keep file_mounts_mapping
+    aligned with the actual task uploaded to SkyPilot server.
+    """
     # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
     if is_api_server_local():
         return dag
@@ -185,15 +191,17 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
         task_.file_mounts_mapping = {}
         if task_.workdir:
             workdir = task_.workdir
-            upload_list.append(_full_path(workdir))
-            task_.file_mounts_mapping[workdir] = _full_path(workdir)
+            assert os.path.isabs(workdir)
+            upload_list.append(workdir)
+            task_.file_mounts_mapping[workdir] = workdir
         if workdir_only:
             continue
         if task_.file_mounts is not None:
             for src in task_.file_mounts.values():
                 if not data_utils.is_cloud_store_url(src):
-                    upload_list.append(_full_path(src))
-                    task_.file_mounts_mapping[src] = _full_path(src)
+                    assert os.path.isabs(src)
+                    upload_list.append(src)
+                    task_.file_mounts_mapping[src] = src
                 if src == constants.LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
                     # The placeholder for the local skypilot config path is in
                     # file mounts for controllers. It will be replaced with the
@@ -210,7 +218,6 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                         storage_source = [storage_source]
                     for src in storage_source:
                         upload_list.append(_full_path(src))
-                        task_.file_mounts_mapping[src] = _full_path(src)
                         task_.file_mounts_mapping[src] = _full_path(src)
 
     server_url = get_server_url()
@@ -289,8 +296,6 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
             continue
         file_mounts_mapping = task_config.get('file_mounts_mapping', {})
         if not file_mounts_mapping:
-            # We did not mount any files to new paths on the remote server
-            # so no need to resolve filepaths.
             # We did not mount any files to new paths on the remote server
             # so no need to resolve filepaths.
             continue

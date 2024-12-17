@@ -291,11 +291,11 @@ class Task:
             dag.add(self)
 
     def validate(self):
-        """Checks if the Task fields are valid."""
+        """Validate all fields of the task."""
         self.validate_name()
         self.validate_run()
-        self.validate_workdir()
-        self.validate_file_mounts()
+        self.expand_and_validate_workdir()
+        self.expand_and_validate_file_mounts()
         for r in self.resources:
             r.validate()
 
@@ -346,8 +346,8 @@ class Task:
                                  f'a command generator ({CommandGen}). '
                                  f'Got {type(self.run)}')
 
-    def validate_file_mounts(self):
-        """Validates if file_mounts paths are valid.
+    def expand_and_validate_file_mounts(self):
+        """Expand file_mounts paths to absolute paths and validate them.
 
         Note: if this function is called on a remote SkyPilot server,
         it must be after the client side has sync-ed all files to the
@@ -367,9 +367,10 @@ class Task:
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
             if not data_utils.is_cloud_store_url(source):
-                self.file_mounts[target] = os.path.expanduser(source)
-                if not os.path.exists(os.path.expanduser(
-                        source)) and not source.startswith('skypilot:'):
+                self.file_mounts[target] = os.path.abspath(
+                    os.path.expanduser(source))
+                if not os.path.exists(self.file_mounts[target]
+                                     ) and not source.startswith('skypilot:'):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'File mount source {source!r} does not exist '
@@ -387,8 +388,8 @@ class Task:
                         'workdir is needed, please specify the full path to '
                         'the file/folder.')
 
-    def validate_workdir(self):
-        """Validates if workdir path is valid.
+    def expand_and_validate_workdir(self):
+        """Expand workdir to absolute path and validate it.
 
         Note: if this function is called on a remote SkyPilot server,
         it must be after the client side has sync-ed all files to the
@@ -396,13 +397,14 @@ class Task:
         """
         if self.workdir is None:
             return
-        full_workdir = os.path.expanduser(self.workdir)
-        if not os.path.isdir(full_workdir):
+        user_workdir = self.workdir
+        self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
+        if not os.path.isdir(self.workdir):
             # Symlink to a dir is legal (isdir() follows symlinks).
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Workdir must be a valid directory (or '
-                    f'a symlink to a directory). {self.workdir} not found.')
+                    f'a symlink to a directory). {user_workdir} not found.')
 
     @staticmethod
     def from_yaml_config(
@@ -830,7 +832,7 @@ class Task:
             self.file_mounts = {}
         assert self.file_mounts is not None
         self.file_mounts.update(file_mounts)
-        self.validate_file_mounts()
+        self.expand_and_validate_file_mounts()
         return self
 
     def set_storage_mounts(
