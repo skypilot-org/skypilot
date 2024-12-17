@@ -1310,15 +1310,14 @@ def test_azure_spot_instance_verification():
     test = smoke_tests_utils.Test(
         'azure-spot-verification',
         [
-            f'sky launch -c {name} --cloud azure tests/test_yamls/minimal.yaml --use-spot -y',
-            f'sky logs {name} 1 --status', f"TARGET_VM_NAME='{name}'; "
-            "VM_INFO=$(az vm list --query \"[?contains(name, '$TARGET_VM_NAME')].{Name:name, ResourceGroup:resourceGroup}\" -o tsv); "
-            "[[ -z \"$VM_INFO\" ]] && exit 1; "
-            "FULL_VM_NAME=$(echo \"$VM_INFO\" | awk '{print $1}'); "
-            "RESOURCE_GROUP=$(echo \"$VM_INFO\" | awk '{print $2}'); "
-            "VM_DETAILS=$(az vm list --resource-group \"$RESOURCE_GROUP\" --query \"[?name=='$FULL_VM_NAME'].{Name:name, Location:location, Priority:priority}\" -o table); "
-            "[[ -z \"$VM_DETAILS\" ]] && exit 1; "
-            "echo \"$VM_DETAILS\" | grep -qw 'Spot' && exit 0 || exit 1"
+            f'TARGET_VM_NAME=\'{name}\'; '
+            'VM_INFO=$(az vm list --query \'[?contains(name, "$TARGET_VM_NAME")].{Name:name, ResourceGroup:resourceGroup}\' -o tsv); '
+            '[[ -z "$VM_INFO" ]] && exit 1; '
+            'FULL_VM_NAME=$(echo "$VM_INFO" | awk \'{print $1}\'); '
+            'RESOURCE_GROUP=$(echo "$VM_INFO" | awk \'{print $2}\'); '
+            'VM_DETAILS=$(az vm list --resource-group "$RESOURCE_GROUP" --query \'[?name=="$FULL_VM_NAME"].{Name:name, Location:location, Priority:priority}\' -o table); '
+            '[[ -z "$VM_DETAILS" ]] && exit 1; '
+            'echo "$VM_DETAILS" | grep -qw "Spot" && exit 0 || exit 1'
         ],
         f'sky down -y {name}',
     )
