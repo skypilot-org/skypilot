@@ -5,7 +5,6 @@ service:
     initial_delay_seconds: 180
   replica_policy:
     min_replicas: 3
-  load_balancer_type: python
 
 resources:
   ports: 8080
