@@ -139,7 +139,7 @@ def _get_cluster_records_and_set_ssh_config(
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the SkyPilot server
-                # with websocet.
+                # with websocket.
                 key_path = (
                     cluster_utils.SSHConfigHelper.generate_local_key_file(
                         handle.cluster_name, credentials))
@@ -152,7 +152,7 @@ def _get_cluster_records_and_set_ssh_config(
                     '-o UserKnownHostsFile=/dev/null '
                     '-o IdentitiesOnly=yes '
                     '-W %h:%p '
-                    'sky@127.0.0.1 '
+                    f'{handle.ssh_user}@127.0.0.1 '
                     '-o ProxyCommand='
                     # TODO(zhwu): write the template to a temp file, don't use
                     # the one in skypilot repo, to avoid changing the file when
