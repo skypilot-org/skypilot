@@ -539,7 +539,7 @@ class EnvoyLoadBalancer(SkyServeLoadBalancer):
         # Because docker can take some time to come up, we make multiple
         # attempts to start before giving up.
         envoy_started = False
-        logger.info('Starting envoy %s', self.envoy_name)
+        logger.info(f'Starting envoy {self.envoy_name}')
         for _ in range(30):
             await asyncio.sleep(5)
             envoy_started = await self._start_envoy()
