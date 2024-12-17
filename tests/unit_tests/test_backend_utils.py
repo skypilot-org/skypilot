@@ -22,6 +22,8 @@ from sky.resources import Resources
             return_value='~/.aws/credentials')
 @mock.patch('sky.backends.backend_utils._get_yaml_path_from_cluster_name',
             return_value='/tmp/fake/path')
+@mock.patch('sky.backends.backend_utils._deterministic_cluster_yaml_hash',
+            return_value='fake-hash')
 @mock.patch('sky.utils.common_utils.fill_template')
 def test_write_cluster_config_w_remote_identity(mock_fill_template,
                                                 *mocks) -> None:

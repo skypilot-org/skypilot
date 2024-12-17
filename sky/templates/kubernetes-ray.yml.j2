@@ -222,7 +222,9 @@ provider:
             - protocol: TCP
               port: 22
               targetPort: 22
-      # Service that maps to the head node of the Ray cluster.
+      # Service that maps to the head node of the Ray cluster, so that the
+      # worker nodes can find the head node using
+      # {{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local
       - apiVersion: v1
         kind: Service
         metadata:
@@ -235,18 +237,12 @@ provider:
             # names.
             name: {{cluster_name_on_cloud}}-head
         spec:
+            # Create a headless service so that the head node can be reached by
+            # the worker nodes with any port number.
+            clusterIP: None
             # This selector must match the head node pod's selector below.
             selector:
                 component: {{cluster_name_on_cloud}}-head
-            ports:
-                - name: client
-                  protocol: TCP
-                  port: 10001
-                  targetPort: 10001
-                - name: dashboard
-                  protocol: TCP
-                  port: 8265
-                  targetPort: 8265
 
 # Specify the pod type for the ray head node (as configured below).
 head_node_type: ray_head_default
@@ -280,7 +276,6 @@ available_node_types:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
-
         restartPolicy: Never
 
         # Add node selector if GPU/TPUs are requested:
@@ -322,18 +317,158 @@ available_node_types:
         - name: ray-node
           imagePullPolicy: IfNotPresent
           image: {{image_id}}
+          env:
+            - name: SKYPILOT_POD_NODE_TYPE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['ray-node-type']
+            {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
+            - name: {{ key }}
+              value: {{ value }}
+            {% endfor %}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
           args: 
             - |
+              # For backwards compatibility, we put a marker file in the pod
+              # to indicate that the pod is running with the changes introduced 
+              # in project nimbus: https://github.com/skypilot-org/skypilot/pull/4393
+              # TODO: Remove this marker file and it's usage in setup_commands
+              # after v0.10.0 release.
+              touch /tmp/skypilot_is_nimbus
+              
               # Helper function to conditionally use sudo
+              # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
+              [ $(id -u) -eq 0 ] && function sudo() { "$@"; } || true;
 
-              # Run apt update in background and log to a file
+              STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
+
+              # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
+                (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
+                PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
+
+                # Separate packages into two groups: packages that are installed first
+                # so that curl and rsync are available sooner to unblock the following
+                # conda installation and rsync.
+                set -e
+                INSTALL_FIRST="";
+                MISSING_PACKAGES="";
+                for pkg in $PACKAGES; do
+                  if [ "$pkg" == "netcat" ]; then
+                    if ! dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; then
+                      INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
+                    fi
+                  elif ! dpkg -l | grep -q "^ii  $pkg "; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ]; then
+                      INSTALL_FIRST="$INSTALL_FIRST $pkg";
+                    else
+                      MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
+                    fi
+                  fi
+                done;
+                if [ ! -z "$INSTALL_FIRST" ]; then
+                  echo "Installing core packages: $INSTALL_FIRST";
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y $INSTALL_FIRST;
+                fi;
+                # SSH and other packages are not necessary, so we disable set -e
+                set +e
+                
+                if [ ! -z "$MISSING_PACKAGES" ]; then
+                  echo "Installing missing packages: $MISSING_PACKAGES";
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y $MISSING_PACKAGES;
+                fi;
+                $(prefix_cmd) mkdir -p /var/run/sshd;
+                $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
+                $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;
+                cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
+                $(prefix_cmd) mkdir -p ~/.ssh;
+                $(prefix_cmd) chown -R $(whoami) ~/.ssh;
+                $(prefix_cmd) chmod 700 ~/.ssh;
+                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
+                $(prefix_cmd) service ssh restart;
+                $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+                ) > /tmp/${STEPS[0]}.log 2>&1 || {
+                  echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
+                  cat /tmp/${STEPS[0]}.log
+                  exit 1
+                }
+              ) &
+
+              # STEP 2: Install conda, ray and skypilot (for dependencies); start
+              # ray cluster.
+              (
+                (
+                set -e
+                mkdir -p ~/.sky
+                # Wait for `curl` package to be installed before installing conda
+                # and ray.
+                until dpkg -l | grep -q "^ii  curl "; do
+                  sleep 0.1
+                  echo "Waiting for curl package to be installed..."
+                done
+                {{ conda_installation_commands }}
+                {{ ray_installation_commands }}
+                VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                touch /tmp/ray_skypilot_installation_complete
+                echo "=== Ray and skypilot installation completed ==="
+
+                # Disable set -e, as we have some commands that are ok to fail
+                # after the ray start.
+                # TODO(zhwu): this is a hack, we should fix the commands that are
+                # ok to fail.
+                if [ "$SKYPILOT_POD_NODE_TYPE" == "head" ]; then
+                  set +e
+                  {{ ray_head_start_command }}
+                else
+                  # Start ray worker on the worker pod.
+                  # Wait until the head pod is available with an IP address
+                  export SKYPILOT_RAY_HEAD_IP="{{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local"
+                  export SKYPILOT_RAY_PORT={{skypilot_ray_port}}
+                  # Wait until the ray cluster is started on the head pod
+                  until dpkg -l | grep -q "^ii  \(netcat\|netcat-openbsd\|netcat-traditional\) "; do
+                    sleep 0.1
+                    echo "Waiting for netcat package to be installed..."
+                  done
+                  until nc -z -w 1 ${SKYPILOT_RAY_HEAD_IP} ${SKYPILOT_RAY_PORT}; do
+                    sleep 0.1
+                  done
+
+                  set +e
+                  {{ ray_worker_start_command }}
+                fi
+                ) > /tmp/${STEPS[1]}.log 2>&1 || {
+                  echo "Error: ${STEPS[1]} failed. Continuing anyway..." > /tmp/${STEPS[1]}.failed
+                  cat /tmp/${STEPS[1]}.log
+                  exit 1
+                }
+              ) &
+
+
+              # STEP 3: Set up environment variables; this should be relatively fast.
+              (
+                (
+                set -e
+                if [ $(id -u) -eq 0 ]; then
+                  echo 'alias sudo=""' >> ~/.bashrc; echo succeed;
+                else
+                  if command -v sudo >/dev/null 2>&1; then
+                    timeout 2 sudo -l >/dev/null 2>&1 && echo succeed || { echo 52; exit 52; };
+                  else
+                    { echo 52; exit 52; };
+                  fi;
+                fi;
+                printenv | while IFS='=' read -r key value; do echo "export $key=\"$value\""; done > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                ) > /tmp/${STEPS[2]}.log 2>&1 || {
+                  echo "Error: ${STEPS[2]} failed. Continuing anyway..." > /tmp/${STEPS[2]}.failed
+                  cat /tmp/${STEPS[2]}.log
+                  exit 1
+                }
               ) &
 
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
@@ -425,6 +560,7 @@ available_node_types:
               # https://gitlab.com/arm-research/smarter/smarter-device-manager
               smarter-devices/fuse: "1"
               {% endif %}
+            {% if k8s_resource_key is not none or k8s_fuse_device_required %}
             limits:
               # Limits need to be defined for GPU/TPU requests
               {% if k8s_resource_key is not none %}
@@ -433,7 +569,8 @@ available_node_types:
               {% if k8s_fuse_device_required %}
               smarter-devices/fuse: "1"
               {% endif %}
-
+            {% endif %}
+            
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.
@@ -441,42 +578,51 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line 'for step in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
+  # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
-    PACKAGES="gcc patch pciutils rsync fuse curl";
-    MISSING_PACKAGES="";
-    for pkg in $PACKAGES; do
-      if ! dpkg -l | grep -q "^ii  $pkg "; then
-        MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
-      fi
-    done;
-    if [ ! -z "$MISSING_PACKAGES" ]; then
-      echo "Installing missing packages: $MISSING_PACKAGES";
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING_PACKAGES;
-    fi;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    {{ conda_installation_commands }}
-    {{ ray_skypilot_installation_commands }}
+    STEPS=("apt-ssh-setup" "runtime-setup" "env-setup")
+    start_epoch=$(date +%s);
+    echo "=== Logs for asynchronous ray and skypilot installation ===";
+    if [ -f /tmp/skypilot_is_nimbus ]; then
+      echo "=== Logs for asynchronous ray and skypilot installation ===";
+      [ -f /tmp/ray_skypilot_installation_complete ] && cat /tmp/${STEPS[1]}.log || 
+      { tail -f -n +1 /tmp/${STEPS[1]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; until [ -f /tmp/ray_skypilot_installation_complete ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+      [ -f /tmp/${STEPS[1]}.failed ] && { echo "Error: ${STEPS[1]} failed. Exiting."; exit 1; } || true;
+    fi
+    end_epoch=$(date +%s);
+    echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
+    {{ skypilot_wheel_installation_commands }}
+    end_epoch=$(date +%s);
+    echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
+    start_epoch=$(date +%s);
     sudo touch ~/.sudo_as_admin_successful;
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
-    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf');
+    ulimit -n 1048576;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
-  {% if tpu_requested %}
-  # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
-  # the TPU runtime, are written. These capture runtime information about the
-  # TPU execution, including any warnings, errors, or general activity of
-  # the TPU driver. By default, the /tmp/tpu_logs directory is created with
-  # 755 permissions, and the user of the provisioned pod is not necessarily
-  # a root. Hence, we need to update the write permission so the logs can be
-  # properly written.
-  # TODO(Doyoung): Investigate to see why TPU workload fails to run without
-  # execution permission, such as granting 766 to log file. Check if it's a
-  # must and see if there's a workaround to grant minimum permission. 
-  - sudo chmod 777 /tmp/tpu_logs;
-  {% endif %}
+    end_epoch=$(date +%s);
+    echo "=== Setup system configs and fuse completed in $(($end_epoch - $start_epoch)) secs ===";
+    for step in $STEPS; do [ -f "/tmp/${step}.failed" ] && { echo "Error: /tmp/${step}.failed found:"; cat /tmp/${step}.log; exit 1; } || true; done;
+    {% if tpu_requested %}
+    # The /tmp/tpu_logs directory is where TPU-related logs, such as logs from
+    # the TPU runtime, are written. These capture runtime information about the
+    # TPU execution, including any warnings, errors, or general activity of
+    # the TPU driver. By default, the /tmp/tpu_logs directory is created with
+    # 755 permissions, and the user of the provisioned pod is not necessarily
+    # a root. Hence, we need to update the write permission so the logs can be
+    # properly written.
+    # TODO(Doyoung): Investigate to see why TPU workload fails to run without
+    # execution permission, such as granting 766 to log file. Check if it's a
+    # must and see if there's a workaround to grant minimum permission. 
+    sudo chmod 777 /tmp/tpu_logs;
+    {% endif %}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
