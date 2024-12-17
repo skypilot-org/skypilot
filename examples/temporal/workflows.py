@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import timedelta
+from textwrap import dedent
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -21,7 +22,7 @@ with workflow.unsafe.imports_passed_through():
 class SkyPilotWorkflowInput:
     cluster_prefix: str
     repo_url: str
-    data_bucket_url: str = None
+    data_bucket_url: str | None = None
 
 
 @workflow.defn
@@ -113,4 +114,17 @@ class SkyPilotWorkflow:
         workflow.logger.info(f"Down result: {down_result}")
 
         # Return the combined result
-        return f"Preprocessing: {preprocess_result}, Training: {train_result}, Evaluation: {eval_result}"
+        return dedent(
+            f"""
+            Preprocessing
+            =============
+            {preprocess_result}
+            
+            Training
+            ========
+            {train_result}
+            
+            Evaluation
+            ==========
+            {eval_result}"""
+        )
