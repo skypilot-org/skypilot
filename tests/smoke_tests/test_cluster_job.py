@@ -1317,6 +1317,7 @@ def test_azure_spot_instance_verification():
             'RESOURCE_GROUP=$(echo "$VM_INFO" | awk \'{print $2}\'); '
             'VM_DETAILS=$(az vm list --resource-group "$RESOURCE_GROUP" --query \'[?name=="$FULL_VM_NAME"].{Name:name, Location:location, Priority:priority}\' -o table); '
             '[[ -z "$VM_DETAILS" ]] && exit 1; '
+            'echo "VM Details:"; echo "$VM_DETAILS"; '
             'echo "$VM_DETAILS" | grep -qw "Spot" && exit 0 || exit 1'
         ],
         f'sky down -y {name}',
