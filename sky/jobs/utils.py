@@ -53,6 +53,10 @@ LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
 
+# Controller checks if the job is valid to start every this many seconds.
+# Jobs will be started only if the controller has enough resources.
+JOB_STARTING_STATUS_CHECK_GAP_SECONDS = 5
+
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
