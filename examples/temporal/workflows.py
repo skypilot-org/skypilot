@@ -20,6 +20,7 @@ with workflow.unsafe.imports_passed_through():
 
 @dataclass
 class SkyPilotWorkflowInput:
+    cloud: str
     cluster_prefix: str
     repo_url: str
     data_bucket_url: str | None = None
@@ -63,7 +64,7 @@ class SkyPilotWorkflow:
             SkyLaunchCommand(
                 cluster_name,
                 f"{clone_path}/data_preprocessing.yaml",
-                f"--cloud aws {data_bucket_flag}",
+                f"--cloud {input.cloud} {data_bucket_flag}",
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
@@ -86,7 +87,7 @@ class SkyPilotWorkflow:
             SkyLaunchCommand(
                 cluster_name,
                 f"{clone_path}/train.yaml",
-                f"--cloud aws {data_bucket_flag}",
+                f"--cloud {input.cloud} {data_bucket_flag}",
             ),
             start_to_close_timeout=timedelta(minutes=60),
             retry_policy=retry_policy,

@@ -1,8 +1,13 @@
 import asyncio
+import os
 import traceback
+from pathlib import Path
 
+from dotenv import load_dotenv
 from temporalio.client import Client, WorkflowFailureError
 from workflows import SkyPilotWorkflow, SkyPilotWorkflowInput
+
+load_dotenv(Path(__file__).parent.joinpath(".env"))
 
 
 async def main():
@@ -14,9 +19,10 @@ async def main():
         result = await client.execute_workflow(
             SkyPilotWorkflow.run,
             SkyPilotWorkflowInput(
+                cloud=os.getenv("SKYPILOT_CLOUD", ""),
                 cluster_prefix="my-workflow",  # cluster name prefix
                 repo_url="https://github.com/mjkanji/mock_train_workflow.git",
-                data_bucket_url="s3://skypilot-temporal-bucket",
+                data_bucket_url=os.getenv("SKYPILOT_BUCKET_URL", ""),
             ),  # repo url
             id="skypilot-workflow-id",
             task_queue="skypilot-task-queue",
