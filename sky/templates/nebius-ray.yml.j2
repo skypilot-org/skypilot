@@ -20,9 +20,7 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       DiskSize: {{disk_size}}
-      ImageId: "ubuntu22.04-driverless"
       UserData: |
-        #cloud-config
         users:
           - name: skypilot:ssh_user
             shell: /bin/bash
@@ -30,8 +28,6 @@ available_node_types:
             ssh_authorized_keys:
               - |-
                 skypilot:ssh_public_key_content
-      PublicKey: |-
-        skypilot:ssh_public_key_content
       # TODO: more configs that is required by the provisioner to create new
       # instances on the FluffyCloud:
       # sky/provision/fluffycloud/instance.py::run_instances

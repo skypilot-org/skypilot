@@ -78,15 +78,20 @@ def start(instance_id: str) -> None:
         id=instance_id
     )).wait()
 
-def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, public_key: str) -> str:
+def launch(name: str, instance_type: str, region: str, disk_size: int, user_data: str) -> str:
     logger.debug("Launching instance '%s'", name)
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
     GPU, and launches the instance.
     """
-    # print('LAUNCH', instance_type, region, disk_size, image_name, public_key)
+    platform, preset = instance_type.split('_')
+    if platform in ('cpu-d3', 'cpu-e2'):
+        image_family = 'ubuntu22.04-driverless'
+    elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
+        image_family = 'ubuntu22.04-cuda12'
+    else:
+        raise RuntimeError(f"Unsupported platform: {platform}")
     disk_name = 'disk-'+name
     try:
         service = DiskServiceClient(sdk)
@@ -103,7 +108,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                 name=disk_name,
             ),
             spec=DiskSpec(
-                source_image_family=SourceImageFamily(image_family="ubuntu22.04-driverless"),
+                source_image_family=SourceImageFamily(image_family=image_family),
                 size_gibibytes=disk_size,
                 type=DiskSpec.DiskType.NETWORK_SSD,
             )
@@ -117,7 +122,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             )).wait()
             if DiskStatus.State(disk.status.state).name == "READY":
                 break
-            logger.info(f'Waiting for disk {disk_name} to be ready.')
+            logger.debug(f'Waiting for disk {disk_name} to be ready.')
             time.sleep(POLL_INTERVAL)
     try:
         service = InstanceServiceClient(sdk)
@@ -147,17 +152,10 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                     )
 
                 ),
-                cloud_init_user_data="""
-                users:
-                  - name: ubuntu
-                    sudo: ALL=(ALL) NOPASSWD:ALL
-                    shell: /bin/bash
-                    ssh_authorized_keys:
-                      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDLklNDmzf6c08IcPJgrlLrXs3WAkIB3rDWcLHQ6UGh7+Lq1SFheMriZVBYSsbweTt35OtF8NxGOcUZeYl0dE+QzVM+i5lhoBWiyt4Q6EAsGVpX3/jASKuc4aL6FeB44tJMmQhXekkkjGaP3UMp+/w7vy6P0dcGG6i6Ub8+lNpdxwlDZIMbD0964llkfDo6hjZpeolPsKdI8pKWXdglWnxnK3AAYxxWIbGNkOtSgZrte1wzDsva5K5itfF22jNNFJwJBImnTUF5PRaHLeM0loK7v5Kqf+3YzgyaQDVUfC+uJ6PdMYIDJCeOgOU9A2NSZ8XxHE/ogKxKsv6a8ekI1TZl
-                """,
+                cloud_init_user_data=user_data,
                 resources=ResourcesSpec(
-                    platform=instance_type.split('_')[0],
-                    preset=instance_type.split('_')[1]
+                    platform=platform,
+                    preset=preset
                 ),
                 network_interfaces=[NetworkInterfaceSpec(
                     subnet_id = sub_net.items[0].metadata.id,
@@ -176,7 +174,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             if instance.status.state.name == "STARTING":
                 break
             time.sleep(POLL_INTERVAL)
-            logger.info(f'Waiting for instance {name} start running.')
+            logger.debug(f'Waiting for instance {name} start running.')
         instance_id = instance.metadata.id
     return instance_id
 

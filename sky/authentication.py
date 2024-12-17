@@ -505,4 +505,4 @@ def setup_nebius_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
-    return config
+    return configure_ssh_info(config)

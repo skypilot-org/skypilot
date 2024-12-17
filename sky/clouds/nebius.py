@@ -284,7 +284,7 @@ class Nebius(clouds.Cloud):
                     f'        $ pip install nebius \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
-                    f'        $ NB_PROJECT_ID >> ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
+                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
             try:
@@ -296,7 +296,9 @@ class Nebius(clouds.Cloud):
                     f'{e.status} \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install nebius \n'
-                    f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt  \n'
+                    f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
+                    f'   Copy your project ID from the web console Project settings and save it to file \n'
+                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
 
@@ -310,11 +312,6 @@ class Nebius(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         logging.debug('Nebius cloud get credential file mounts')
-        ########
-        # TODO #
-        ########
-        # Return dictionary of credential file paths. This may look
-        # something like:
         return {
             f'~/.nebius/{filename}': f'~/.nebius/{filename}'
             for filename in _CREDENTIAL_FILES
