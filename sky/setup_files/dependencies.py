@@ -78,15 +78,9 @@ aws_dependencies = [
     # We have to explicitly pin the version to optimize the time for
     # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
     'urllib3<2',
-    # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
-    # should instead use CLI V2 which is not pip-installable. See
-    # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
-    'awscli>=1.27.10',
+    'awscli @ git+https://github.com/aws/aws-cli.git@v2',
     'botocore>=1.29.10',
-    'boto3>=1.26.1',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    'boto3>=1.26.1'
 ]
 
 # azure-cli cannot be installed normally by uv, so we need to work around it in
