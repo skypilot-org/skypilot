@@ -1,5 +1,5 @@
+import asyncio
 import os
-import subprocess
 from dataclasses import dataclass
 
 from temporalio import activity
@@ -34,17 +34,18 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
     # Run the provided SkyPilot command using subprocess
     command = f"sky launch -y -c {input.cluster_name} {input.flags} {input.entrypoint}"
 
-    try:
-        result = subprocess.run(
-            command.split(), capture_output=True, text=True, check=True
-        )
-        activity.logger.info(f"Sky launch output: {result.stdout}")
-        return result.stdout.strip()  # Return the output from the subprocess
-    except subprocess.CalledProcessError as e:
-        activity.logger.error(f"Sky launch failed with error: {e}")
-        activity.logger.error(f"Stdout: {e.stdout}")
-        activity.logger.error(f"Stderr: {e.stderr}")
-        raise  # Re-raise the exception to indicate failure
+    proc = await asyncio.create_subprocess_shell(
+        command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode == 0:
+        activity.logger.info(f"Sky launch output: {stdout}")
+        return stdout.decode().strip()  # Return the output from the subprocess
+    else:
+        activity.logger.error(f"Sky launch failed with error: {stderr}")
+        raise Exception(f"sky launch failed.\nStdout: {stdout}\nStderr:{stderr}")
 
 
 @activity.defn
@@ -54,17 +55,18 @@ async def run_sky_down(input: SkyDownCommand) -> str:
     # Run the sky down command using subprocess
     command = f"sky down -y {input.cluster_name}"
 
-    try:
-        result = subprocess.run(
-            command.split(), capture_output=True, text=True, check=True
-        )
-        activity.logger.info(f"Sky down output: {result.stdout}")
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        activity.logger.error(f"Sky down failed with error: {e}")
-        activity.logger.error(f"Stdout: {e.stdout}")
-        activity.logger.error(f"Stderr: {e.stderr}")
-        raise  # Re-raise the exception to indicate failure
+    proc = await asyncio.create_subprocess_shell(
+        command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode == 0:
+        activity.logger.info(f"Sky down output: {stdout}")
+        return stdout.decode().strip()  # Return the output from the subprocess
+    else:
+        activity.logger.error(f"Sky down failed with error: {stderr}")
+        raise Exception(f"Sky down failed.\nStdout: {stdout}\nStderr:{stderr}")
 
 
 @activity.defn
@@ -77,17 +79,18 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
     # Run the sky exec command using subprocess
     full_command = f"sky exec {input.cluster_name} {input.flags} {input.entrypoint}"
 
-    try:
-        result = subprocess.run(
-            full_command, shell=True, capture_output=True, text=True, check=True
-        )
-        activity.logger.info(f"Sky exec output: {result.stdout}")
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        activity.logger.error(f"Sky exec failed with error: {e}")
-        activity.logger.error(f"Stdout: {e.stdout}")
-        activity.logger.error(f"Stderr: {e.stderr}")
-        raise  # Re-raise the exception to indicate failure
+    proc = await asyncio.create_subprocess_shell(
+        full_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode == 0:
+        activity.logger.info(f"Sky exec output: {stdout}")
+        return stdout.decode().strip()  # Return the output from the subprocess
+    else:
+        activity.logger.error(f"Sky exec failed with error: {stderr}")
+        raise Exception(f"sky exec failed.\nStdout: {stdout}\nStderr:{stderr}")
 
 
 @dataclass
@@ -113,12 +116,15 @@ async def run_git_clone(input: GitCloneInput) -> str:
         # If it doesn't exist, clone the repository
         command = f"git clone {input.repo_url} {input.clone_path}"
 
-    try:
-        result = subprocess.run(
-            command.split(), capture_output=True, text=True, check=True
-        )
-        activity.logger.info(f"Git clone output: {result.stdout}")
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        activity.logger.error(f"Git clone failed with error: {e}")
-        raise  # Re-raise the exception to indicate failure
+    proc = await asyncio.create_subprocess_shell(
+        command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode == 0:
+        activity.logger.info(f"git clone output: {stdout}")
+        return stdout.decode().strip()  # Return the output from the subprocess
+    else:
+        activity.logger.error(f"git clone failed with error: {stderr}")
+        raise Exception(f"git clone failed.\nStdout: {stdout}\nStderr:{stderr}")
