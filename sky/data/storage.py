@@ -522,12 +522,6 @@ class Storage(object):
         # Validate and correct inputs if necessary
         self._validate_storage_spec(self.name)
 
-        # Sky optimizer either adds a storage object instance or selects
-        # from existing ones
-        self.stores = {}
-        for store in self.stores:
-            self.add_store(store)
-
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
@@ -550,6 +544,10 @@ class Storage(object):
 
         else:
             # Storage does not exist in global_user_state, create new stores
+            # Sky optimizer either adds a storage object instance or selects
+            # from existing ones
+            input_stores = self.stores
+            self.stores = {}
             sky_managed_stores = {
                 t: s.get_metadata()
                 for t, s in self.stores.items()
@@ -559,6 +557,9 @@ class Storage(object):
                                                source=self.source,
                                                mode=self.mode,
                                                sky_stores=sky_managed_stores)
+
+            for store in input_stores:
+                self.add_store(store)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
