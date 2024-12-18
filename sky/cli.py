@@ -3742,11 +3742,12 @@ def jobs_launch(
         resource.cloud is not None and resource.cloud.can_credential_expire()
     ]
     if len(reauth_needed_clouds) > 0:
-        prompt = (
-            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to '
-            'jobs being out of control. It is recommended to use credentials  '
-            'that never expire or a service account. Proceed?')
-        click.confirm(prompt, default=False, abort=True, show_default=True)
+        warnings = (
+            f'Expiring credentials detected for {reauth_needed_clouds}. Clusters may '
+            'be leaked if the credentials expire while jobs are running. It is '
+            'recommended to use credentials that never expire or a service account.'
+        )
+        click.secho(warnings, fg='yellow')
 
     managed_jobs.launch(dag,
                         name,
@@ -4239,11 +4240,12 @@ def serve_up(
         resource.cloud is not None and resource.cloud.can_credential_expire()
     ]
     if len(reauth_needed_clouds) > 0:
-        prompt = (
-            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to '
-            'jobs being out of control. It is recommended to use credentials '
-            'that never expire or a service account. Proceed?')
-        click.confirm(prompt, default=False, abort=True, show_default=True)
+        warnings = (
+            f'Expiring credentials detected for {reauth_needed_clouds}. Clusters may '
+            'be leaked if the credentials expire while jobs are running. It is '
+            'recommended to use credentials that never expire or a service account.'
+        )
+        click.secho(warnings, fg='yellow')
 
     serve_lib.up(task, service_name)
 
