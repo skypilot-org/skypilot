@@ -97,7 +97,13 @@ _ACC_INSTANCE_TYPE_DICTS = {
         8: ['g2-standard-96'],
     },
     'H100': {
+        1: ['a3-highgpu-1g'],
+        2: ['a3-highgpu-2g'],
+        4: ['a3-highgpu-4g'],
         8: ['a3-highgpu-8g'],
+    },
+    'H100-MEGA': {
+        8: ['a3-megagpu-8g'],
     }
 }
 
@@ -286,7 +292,9 @@ def get_instance_type_for_accelerator(
 
     if acc_name in _ACC_INSTANCE_TYPE_DICTS:
         df = _df[_df['InstanceType'].notna()]
-        instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name].get(acc_count, None)
+        if instance_types is None:
+            return None, []
         df = df[df['InstanceType'].isin(instance_types)]
 
         # Check the cpus and memory specified by the user.

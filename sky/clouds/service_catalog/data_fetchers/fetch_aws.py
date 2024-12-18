@@ -538,11 +538,13 @@ if __name__ == '__main__':
     instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
-    image_df = get_all_regions_images_df(user_regions)
-    _check_regions_integrity(image_df, 'images')
+    # Disable refreshing images.csv as we are using skypilot custom AMIs
+    # See sky/clouds/service_catalog/images/README.md for more details.
+    # image_df = get_all_regions_images_df(user_regions)
+    # _check_regions_integrity(image_df, 'images')
 
-    image_df.to_csv('aws/images.csv', index=False)
-    print('AWS Images saved to aws/images.csv')
+    # image_df.to_csv('aws/images.csv', index=False)
+    # print('AWS Images saved to aws/images.csv')
 
     if args.az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()

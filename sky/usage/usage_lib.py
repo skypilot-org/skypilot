@@ -432,8 +432,9 @@ def entrypoint_context(name: str, fallback: bool = False):
         with ux_utils.enable_traceback():
             trace = traceback.format_exc()
             messages.usage.stacktrace = trace
-            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            detailed_reason = getattr(e, 'detailed_reason', None)
+            if detailed_reason is not None:
+                messages.usage.stacktrace += '\nDetails: ' + detailed_reason
             messages.usage.exception = common_utils.remove_color(
                 common_utils.format_exception(e))
         raise

@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -94,6 +94,12 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
     f'\nTo query common AI images: {colorama.Style.BRIGHT}gcloud compute images list --project deeplearning-platform-release | less{colorama.Style.RESET_ALL}'
 )
 
+# Image ID tags
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-2204'
+# For GPU-related package version, see sky/clouds/service_catalog/images/provisioners/cuda.sh
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-2204'
+_DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-debian-10'
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -161,7 +167,7 @@ class GCP(clouds.Cloud):
         # ~/.config/gcloud/application_default_credentials.json.
         f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
     _APPLICATION_CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -169,7 +175,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
         'to the path of your service account key file.\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -411,6 +417,7 @@ class GCP(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
@@ -422,7 +429,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = 'skypilot:cpu-debian-11'
+        image_id = _DEFAULT_CPU_IMAGE_ID
 
         def _failover_disk_tier() -> Optional[resources_utils.DiskTier]:
             if (r.disk_tier is not None and
@@ -471,13 +478,16 @@ class GCP(clouds.Cloud):
                     'runtime_version']
                 resources_vars['tpu_node_name'] = r.accelerator_args.get(
                     'tpu_name')
+                # TPU VMs require privileged mode for docker containers to
+                # access TPU devices.
+                resources_vars['docker_run_options'] = ['--privileged']
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
                 if acc in ('A100-80GB', 'L4'):
                     # A100-80GB and L4 have a different name pattern.
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}'
-                elif acc == 'H100':
+                elif acc in ('H100', 'H100-MEGA'):
                     resources_vars['gpu'] = f'nvidia-{acc.lower()}-80gb'
                 else:
                     resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
@@ -487,10 +497,10 @@ class GCP(clouds.Cloud):
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = 'skypilot:k80-debian-10'
+                    image_id = _DEFAULT_GPU_K80_IMAGE_ID
                 else:
                     # CUDA driver version 535.86.10, CUDA Library 12.2
-                    image_id = 'skypilot:gpu-debian-11'
+                    image_id = _DEFAULT_GPU_IMAGE_ID
 
         if (resources.image_id is not None and
                 resources.extract_docker_image() is None):
@@ -540,6 +550,11 @@ class GCP(clouds.Cloud):
         resources_vars[
             'force_enable_external_ips'] = skypilot_config.get_nested(
                 ('gcp', 'force_enable_external_ips'), False)
+
+        # Add gVNIC from config
+        resources_vars['enable_gvnic'] = skypilot_config.get_nested(
+            ('gcp', 'enable_gvnic'), False)
+
         return resources_vars
 
     def _get_feasible_launchable_resources(
@@ -655,7 +670,7 @@ class GCP(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.
         return None
@@ -821,7 +836,7 @@ class GCP(clouds.Cloud):
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

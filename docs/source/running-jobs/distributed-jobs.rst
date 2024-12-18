@@ -14,7 +14,7 @@ For example, here is a simple PyTorch Distributed training example:
    name: resnet-distributed-app
 
    resources:
-     accelerators: V100:4
+     accelerators: A100:8
 
    num_nodes: 2
 
@@ -33,7 +33,7 @@ For example, here is a simple PyTorch Distributed training example:
 
      MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
      torchrun \
-      --nnodes=$SKPILOT_NUM_NODES \
+      --nnodes=$SKYPILOT_NUM_NODES \
       --master_addr=$MASTER_ADDR \
       --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
       --node_rank=$SKYPILOT_NODE_RANK \
@@ -42,7 +42,7 @@ For example, here is a simple PyTorch Distributed training example:
 
 In the above,
 
-- :code:`num_nodes: 2` specifies that this task is to be run on 2 nodes, with each node having 4 V100s;
+- :code:`num_nodes: 2` specifies that this task is to be run on 2 nodes, with each node having 8 A100s;
 - The highlighted lines in the ``run`` section show common environment variables that are useful for launching distributed training, explained below.
 
 .. note::

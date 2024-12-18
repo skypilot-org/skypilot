@@ -1,9 +1,12 @@
 """Utility functions for UX."""
 import contextlib
+import os
 import sys
 import traceback
-from typing import Callable
+import typing
+from typing import Callable, Optional, Union
 
+import colorama
 import rich.console as rich_console
 
 from sky import sky_logging
@@ -11,11 +14,25 @@ from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import pathlib
+
 console = rich_console.Console()
+
+INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
+INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
+
+# Console formatting constants
+BOLD = '\033[1m'
+RESET_BOLD = '\033[0m'
+
+# Log path hint in the spinner during launching
+_LOG_PATH_HINT = (f'{colorama.Style.DIM}View logs at: {{log_path}}'
+                  f'{colorama.Style.RESET_ALL}')
 
 
 def console_newline():
-    """Print a newline to the console using rich.
+    """Prints a newline to the console using rich.
 
     Useful when catching exceptions inside console.status()
     """
@@ -50,7 +67,7 @@ def print_exception_no_traceback():
 
 @contextlib.contextmanager
 def enable_traceback():
-    """Revert the effect of print_exception_no_traceback().
+    """Reverts the effect of print_exception_no_traceback().
 
     This is used for usage_lib to collect the full traceback.
     """
@@ -61,7 +78,7 @@ def enable_traceback():
 
 
 class RedirectOutputForProcess:
-    """Redirect stdout and stderr to a file.
+    """Redirects stdout and stderr to a file.
 
     This class enabled output redirect for multiprocessing.Process.
     Example usage:
@@ -102,3 +119,69 @@ class RedirectOutputForProcess:
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+def log_path_hint(log_path: Union[str, 'pathlib.Path']) -> str:
+    """Gets the log path hint for the given log path."""
+    log_path = str(log_path)
+    expanded_home = os.path.expanduser('~')
+    if log_path.startswith(expanded_home):
+        log_path = '~' + log_path[len(expanded_home):]
+    return _LOG_PATH_HINT.format(log_path=log_path)
+
+
+def starting_message(message: str) -> str:
+    """Gets the starting message for the given message."""
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    return f'{colorama.Style.RESET_ALL}⚙︎ {message}'
+
+
+def finishing_message(
+        message: str,
+        log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+    """Gets the finishing message for the given message."""
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    success_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.GREEN}✓ '
+                      f'{message}{colorama.Style.RESET_ALL}')
+    if log_path is None:
+        return success_prefix
+    path_hint = log_path_hint(log_path)
+    return f'{success_prefix}  {path_hint}'
+
+
+def error_message(message: str,
+                  log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+    """Gets the error message for the given message."""
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    error_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.RED}⨯'
+                    f'{colorama.Style.RESET_ALL} {message}')
+    if log_path is None:
+        return error_prefix
+    path_hint = log_path_hint(log_path)
+    return f'{error_prefix}  {path_hint}'
+
+
+def retry_message(message: str) -> str:
+    """Gets the retry message for the given message."""
+    # We have to reset the color before the message, because sometimes if a
+    # previous spinner with dimmed color overflows in a narrow terminal, the
+    # color might be messed up.
+    return (f'{colorama.Style.RESET_ALL}{colorama.Fore.YELLOW}↺'
+            f'{colorama.Style.RESET_ALL} {message}')
+
+
+def spinner_message(
+        message: str,
+        log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+    """Gets the spinner message for the given message and log path."""
+    colored_spinner = f'[bold cyan]{message}[/]'
+    if log_path is None:
+        return colored_spinner
+    path_hint = log_path_hint(log_path)
+    return f'{colored_spinner}  {path_hint}'

@@ -119,11 +119,67 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
     $ kubectl config set-context --current --namespace=mynamespace
 
 
+
+Viewing cluster status
+----------------------
+
+To view the status of all SkyPilot resources in the Kubernetes cluster, run :code:`sky status --k8s`.
+
+Unlike :code:`sky status` which lists only the SkyPilot resources launched by the current user,
+:code:`sky status --k8s` lists all SkyPilot resources in the Kubernetes cluster across all users.
+
+.. code-block:: console
+
+    $ sky status --k8s
+    Kubernetes cluster state (context: mycluster)
+    SkyPilot clusters
+    USER     NAME                           LAUNCHED    RESOURCES                                  STATUS
+    alice    infer-svc-1                    23 hrs ago  1x Kubernetes(cpus=1, mem=1, {'L4': 1})    UP
+    alice    sky-jobs-controller-80b50983   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
+    alice    sky-serve-controller-80b50983  23 hrs ago  1x Kubernetes(cpus=4, mem=4)               UP
+    bob      dev                            1 day ago   1x Kubernetes(cpus=2, mem=8, {'H100': 1})  UP
+    bob      multinode-dev                  1 day ago   2x Kubernetes(cpus=2, mem=2)               UP
+    bob      sky-jobs-controller-2ea485ea   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
+
+    Managed jobs
+    In progress tasks: 1 STARTING
+    USER     ID  TASK  NAME      RESOURCES   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+    alice    1   -     eval      1x[CPU:1+]  2 days ago  49s            8s            0            SUCCEEDED
+    bob      4   -     pretrain  1x[H100:4]  1 day ago   1h 1m 11s      1h 14s        0            SUCCEEDED
+    bob      3   -     bigjob    1x[CPU:16]  1 day ago   1d 21h 11m 4s  -             0            STARTING
+    bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
+    bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
+
+You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --cloud k8s`.
+
+.. code-block:: console
+
+    $ sky show-gpus --cloud k8s
+    Kubernetes GPUs
+    GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+    L4    1, 2, 4                   12          12
+    H100  1, 2, 4, 8                16          16
+
+    Kubernetes per node GPU availability
+    NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+    my-cluster-0               L4        4           4
+    my-cluster-1               L4        4           4
+    my-cluster-2               L4        2           2
+    my-cluster-3               L4        2           2
+    my-cluster-4               H100      8           8
+    my-cluster-5               H100      8           8
+
+
 .. _kubernetes-custom-images:
 
 Using Custom Images
 -------------------
-By default, we use and maintain a SkyPilot container image that has conda and a few other basic tools installed.
+By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
+
+1. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot``: used for CPU-only clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s>`__).
+2. ``us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu``: used for GPU clusters (`Dockerfile <https://github.com/skypilot-org/skypilot/blob/master/Dockerfile_k8s_gpu>`__).
+
+These images are pre-installed with SkyPilot dependencies for fast startup.
 
 To use your own image, add :code:`image_id: docker:<your image tag>` to the :code:`resources` section of your task YAML.
 
@@ -205,9 +261,25 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 FAQs
 ----
 
+* **Can I use multiple Kubernetes clusters with SkyPilot?**
+
+  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+
+  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+
 * **Are autoscaling Kubernetes clusters supported?**
 
-  To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
+  To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+
+  If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
+
+  .. code-block:: yaml
+
+      # ~/.sky/config.yaml
+      kubernetes:
+        provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
+        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs in scale-to-zero setting
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
@@ -224,7 +296,7 @@ FAQs
 * **How can I specify custom configuration for the pods created by SkyPilot?**
 
   You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
-  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.22/#pod-v1-core>`_.
+  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_.
 
   For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
 
@@ -240,6 +312,11 @@ FAQs
                 volumeMounts:       # Custom volume mounts for the pod
                   - mountPath: /foo
                     name: example-volume
+                resources:          # Custom resource requests and limits
+                  requests:
+                    rdma/rdma_shared_device_a: 1
+                  limits:
+                    rdma/rdma_shared_device_a: 1
             volumes:
               - name: example-volume
                 hostPath:
@@ -247,3 +324,32 @@ FAQs
                   type: Directory
 
   For more details refer to :ref:`config-yaml`.
+
+* **I am using a custom image. How can I speed up the pod startup time?**
+
+  You can pre-install SkyPilot dependencies in your custom image to speed up the pod startup time. Simply add these lines at the end of your Dockerfile:
+
+  .. code-block:: dockerfile
+
+    FROM <your base image>
+
+    # Install system dependencies
+    RUN apt update -y && \
+        apt install git gcc rsync sudo patch openssh-server pciutils fuse unzip socat netcat-openbsd curl -y && \
+        rm -rf /var/lib/apt/lists/*
+
+    # Install conda and other python dependencies
+    RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
+        bash Miniconda3-Linux-x86_64.sh -b && \
+        eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
+        grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
+        rm Miniconda3-Linux-x86_64.sh && \
+        export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+        python3 -m venv ~/skypilot-runtime && \
+        PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
+        $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+        $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+        curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+        sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+        echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
+
