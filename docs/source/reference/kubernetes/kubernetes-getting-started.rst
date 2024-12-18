@@ -119,6 +119,37 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
     $ kubectl config set-context --current --namespace=mynamespace
 
 
+Listing available GPUs
+----------------------
+
+You can list the GPUs available on your cluster with :code:`sky show-gpus`.
+It will show the total GPUs and free GPUs for each GPU type on the cluster, as well as the per node GPU availability.
+
+.. code-block:: console
+
+  $ sky show-gpus
+  Kubernetes GPUs
+  GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+  L4    1, 2, 4       12          2
+  H100  1, 2, 4, 8    16          12
+
+  Kubernetes per node GPU availability
+  NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+  gke-inference-pool-0       L4        4           2
+  gke-inference-pool-1       L4        4           0
+  gke-inference-pool-2       L4        2           0
+  gke-inference-pool-3       L4        2           0
+  gke-training-pool-0        H100      8           8
+  gke-training-pool-1        H100      8           4
+  
+  Cloud GPUs
+  COMMON_GPU  AVAILABLE_QUANTITIES
+  A10         1, 2, 4
+  A100        1, 2, 4, 8, 16
+  A100-80GB   1, 2, 4, 8
+  H100        1, 2, 4, 8, 12
+  ...
+  
 
 Viewing cluster status
 ----------------------
@@ -168,30 +199,6 @@ You can also inspect the real-time GPU usage on the cluster with :code:`sky show
     my-cluster-3               L4        2           2
     my-cluster-4               H100      8           8
     my-cluster-5               H100      8           8
-
-
-Listing Available GPUs
-----------------------
-
-You can list the GPUs available on your cluster with :code:`sky show-gpus --cloud kubernetes`.
-It will show the total GPUs and free GPUs for each GPU type on the cluster, as well as the per node GPU availability.
-
-.. code-block:: console
-
-  $ sky show-gpus --cloud kubernetes
-  Kubernetes GPUs
-  GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-  L4    1, 2, 4       12          2
-  H100  1, 2, 4, 8    16          12
-
-  Kubernetes per node GPU availability
-  NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
-  gke-inference-pool-0       L4        4           2
-  gke-inference-pool-1       L4        4           0
-  gke-inference-pool-2       L4        2           0
-  gke-inference-pool-3       L4        2           0
-  gke-training-pool-0        H100      8           8
-  gke-training-pool-1        H100      8           4
 
 
 .. _kubernetes-custom-images:
