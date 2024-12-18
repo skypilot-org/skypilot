@@ -1144,7 +1144,7 @@ def test_gcp_stale_job_manual_restart():
             # Ensure the skylet updated the stale job status.
             _get_cmd_wait_until_job_status_contains_without_matching_job(
                 cluster_name=name,
-                job_status=[JobStatus.FAILED],
+                job_status=[JobStatus.FAILED.value],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
         f'sky down -y {name}',
