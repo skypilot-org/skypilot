@@ -28,12 +28,12 @@ class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        # clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.AUTO_TERMINATE: 'Stopping not supported. Can\'t delete disk.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot .'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
-    _regions: List[clouds.Region] = ['fin']
+    _regions: List[clouds.Region] = ['eu-north1', 'eu-west1']
 
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
