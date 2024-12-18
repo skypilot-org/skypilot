@@ -101,7 +101,6 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
     return az_mappings
 
 
-@timeline.event
 def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
@@ -292,6 +291,7 @@ def get_region_zones_for_instance_type(instance_type: str,
     return us_region_list + other_region_list
 
 
+@timeline.event
 def list_accelerators(
         gpus_only: bool,
         name_filter: Optional[str],
