@@ -132,6 +132,9 @@ class GCPIdentityType(enum.Enum):
 
     SHARED_CREDENTIALS_FILE = ''
 
+    def can_credential_expire(self) -> bool:
+        return self == GCPIdentityType.SHARED_CREDENTIALS_FILE
+
 
 @clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
@@ -862,6 +865,9 @@ class GCP(clouds.Cloud):
             # Skip if the application key path is not found.
             pass
         return credentials
+
+    def can_credential_expire(self) -> bool:
+        return self._get_identity_type().can_credential_expire()
 
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:

@@ -3737,6 +3737,18 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
+    reauth_needed_clouds = [
+        resource.cloud for task in dag.tasks for resource in task.resources
+        if resource.cloud.can_credential_expire()
+    ]
+    if reauth_needed_clouds:
+        prompt = (
+            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to jobs '
+            'being out of control. It is recommended to use credentials that never '
+            'expire or a service account. Proceed?'
+        )
+        click.confirm(prompt, default=False, abort=True, show_default=True)
+
     managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
@@ -4222,6 +4234,18 @@ def serve_up(
         prompt = f'Launching a new service {service_name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    reauth_needed_clouds = [
+        resource.cloud for task in dag.tasks for resource in task.resources
+        if resource.cloud.can_credential_expire()
+    ]
+    if reauth_needed_clouds:
+        prompt = (
+            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to jobs '
+            'being out of control. It is recommended to use credentials that never '
+            'expire or a service account. Proceed?'
+        )
+        click.confirm(prompt, default=False, abort=True, show_default=True)
 
     serve_lib.up(task, service_name)
 

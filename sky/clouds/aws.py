@@ -100,6 +100,16 @@ class AWSIdentityType(enum.Enum):
     #     region                us-east-1      config-file    ~/.aws/config
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
+    def can_credential_expire(self) -> bool:
+        """Check if the AWS identity type can expire."""
+        expirable_types = {
+            AWSIdentityType.SSO,
+            AWSIdentityType.ENV,
+            AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE
+        }
+        return self in expirable_types
+
 
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
@@ -811,6 +821,9 @@ class AWS(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
+
+    def can_credential_expire(self) -> bool:
+        return self._current_identity_type().can_credential_expire()
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
