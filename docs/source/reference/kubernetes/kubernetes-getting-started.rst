@@ -258,6 +258,67 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 
     To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
 
+Customizing SkyPilot pods
+-------------------------
+
+You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
+The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_. This will apply to all pods created by SkyPilot. 
+
+For example, to set custom environment variables and use GPUDirect RDMA, you can add the following to your :code:`~/.sky/config.yaml` file:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml 
+    kubernetes:
+      pod_config:
+        spec:
+          containers:
+            - env:                # Custom environment variables to set in pod
+              - name: MY_ENV_VAR
+                value: MY_ENV_VALUE
+              resources:          # Custom resources for GPUDirect RDMA
+                requests:
+                  rdma/rdma_shared_device_a: 1
+                limits:
+                  rdma/rdma_shared_device_a: 1
+
+
+Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., a `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) directly to your SkyPilot pods:
+
+.. code-block:: yaml
+
+    # ~/.sky/config.yaml
+    kubernetes:
+      pod_config:
+        spec:
+          containers:
+            - volumeMounts:       # Custom volume mounts for the pod
+                - mountPath: /data
+                  name: nfs-volume
+          volumes:
+            - name: nfs-volume
+              nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
+                server: nfs.example.com
+                path: /nfs
+
+
+.. tip::
+
+    You can set the ``pod_config`` on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <task-yaml-experimental>`.
+
+    .. code-block:: yaml
+
+       # task.yaml
+       run: |
+         python myscript.py
+
+       # Set pod_config for this task
+       experimental:
+         config_overrides:
+           pod_config:
+             ...
+
+
 FAQs
 ----
 
@@ -292,38 +353,6 @@ FAQs
 * **How do I view the pods created by SkyPilot on my Kubernetes cluster?**
 
   You can use your existing observability tools to filter resources with the label :code:`parent=skypilot` (:code:`kubectl get pods -l 'parent=skypilot'`). As an example, follow the instructions :ref:`here <kubernetes-observability>` to deploy the Kubernetes Dashboard on your cluster.
-
-* **How can I specify custom configuration for the pods created by SkyPilot?**
-
-  You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
-  The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_.
-
-  For example, to set custom environment variables and attach a volume on your pods, you can add the following to your :code:`~/.sky/config.yaml` file:
-
-  .. code-block:: yaml
-
-      kubernetes:
-        pod_config:
-          spec:
-            containers:
-              - env:
-                - name: MY_ENV_VAR
-                  value: MY_ENV_VALUE
-                volumeMounts:       # Custom volume mounts for the pod
-                  - mountPath: /foo
-                    name: example-volume
-                resources:          # Custom resource requests and limits
-                  requests:
-                    rdma/rdma_shared_device_a: 1
-                  limits:
-                    rdma/rdma_shared_device_a: 1
-            volumes:
-              - name: example-volume
-                hostPath:
-                  path: /tmp
-                  type: Directory
-
-  For more details refer to :ref:`config-yaml`.
 
 * **I am using a custom image. How can I speed up the pod startup time?**
 
