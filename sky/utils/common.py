@@ -77,6 +77,11 @@ def reload():
     JOB_CONTROLLER_NAME = get_controller_name(ControllerType.JOBS)
     importlib.reload(controller_utils)
 
+    # We have to reload the kubernetes utils because it uses the lru_cache which
+    # should be cleared between among requests.
+    from sky.provision.kubernetes import utils
+    importlib.reload(utils)
+
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment
     # variables are set, such as SKYPILOT_DEBUG.
