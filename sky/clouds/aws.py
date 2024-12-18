@@ -103,9 +103,7 @@ class AWSIdentityType(enum.Enum):
     def can_credential_expire(self) -> bool:
         """Check if the AWS identity type can expire."""
         expirable_types = {
-            AWSIdentityType.SSO,
-            AWSIdentityType.ENV,
-            AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.SSO, AWSIdentityType.ENV, AWSIdentityType.IAM_ROLE,
             AWSIdentityType.CONTAINER_ROLE
         }
         return self in expirable_types
@@ -823,7 +821,9 @@ class AWS(clouds.Cloud):
         }
 
     def can_credential_expire(self) -> bool:
-        return self._current_identity_type().can_credential_expire()
+        identity_type = self._current_identity_type()
+        return identity_type is not None and identity_type.can_credential_expire(
+        )
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')

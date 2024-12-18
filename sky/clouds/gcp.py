@@ -867,7 +867,9 @@ class GCP(clouds.Cloud):
         return credentials
 
     def can_credential_expire(self) -> bool:
-        return self._get_identity_type().can_credential_expire()
+        identity_type = self._get_identity_type()
+        return identity_type is not None and identity_type.can_credential_expire(
+        )
 
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:

@@ -3738,15 +3738,14 @@ def jobs_launch(
     common_utils.check_cluster_name_is_valid(name)
 
     reauth_needed_clouds = [
-        resource.cloud for task in dag.tasks for resource in task.resources
-        if resource.cloud.can_credential_expire()
+        resource.cloud for task in dag.tasks for resource in task.resources if
+        resource.cloud is not None and resource.cloud.can_credential_expire()
     ]
-    if reauth_needed_clouds:
+    if len(reauth_needed_clouds) > 0:
         prompt = (
-            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to jobs '
-            'being out of control. It is recommended to use credentials that never '
-            'expire or a service account. Proceed?'
-        )
+            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to '
+            'jobs being out of control. It is recommended to use credentials  '
+            'that never expire or a service account. Proceed?')
         click.confirm(prompt, default=False, abort=True, show_default=True)
 
     managed_jobs.launch(dag,
@@ -4236,15 +4235,14 @@ def serve_up(
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     reauth_needed_clouds = [
-        resource.cloud for task in dag.tasks for resource in task.resources
-        if resource.cloud.can_credential_expire()
+        resource.cloud for task in dag.tasks for resource in task.resources if
+        resource.cloud is not None and resource.cloud.can_credential_expire()
     ]
-    if reauth_needed_clouds:
+    if len(reauth_needed_clouds) > 0:
         prompt = (
-            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to jobs '
-            'being out of control. It is recommended to use credentials that never '
-            'expire or a service account. Proceed?'
-        )
+            f'Launching jobs with cloud(s) {reauth_needed_clouds} may lead to '
+            'jobs being out of control. It is recommended to use credentials '
+            'that never expire or a service account. Proceed?')
         click.confirm(prompt, default=False, abort=True, show_default=True)
 
     serve_lib.up(task, service_name)
