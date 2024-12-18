@@ -1,0 +1,40 @@
+envs:
+  DATA_BUCKET: r2://skypilot-lmsys-chat-1m
+  # The name of the model to be used for inference.
+  MODEL_NAME: meta-llama/Meta-Llama-3.1-8B-Instruct
+  HF_TOKEN:
+  # Output bucket to use for storing the results
+  OUTPUT_BUCKET:
+  # The file that contains the paths to data chunks to be processed.
+  DATA_METADATA:
+
+
+file_mounts:
+  /data:
+    source: $DATA_BUCKET
+    mode: MOUNT
+
+  /output:
+    source: $OUTPUT_BUCKET
+    mode: MOUNT
+
+  /groups.txt: $DATA_GROUP_METADATA
+
+workdir: .
+
+resources:
+  accelerators: {L4, L40, A10, A10g, A100, A100-80GB}
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+
+setup: |
+  pip install vllm
+
+
+run: |
+  python worker.py \
+    --data-metadata /groups.txt \
+    --model-name $MODEL_NAME \
+    --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE
