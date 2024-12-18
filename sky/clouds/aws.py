@@ -101,9 +101,17 @@ class AWSIdentityType(enum.Enum):
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
     def can_credential_expire(self) -> bool:
-        """Check if the AWS identity type can expire."""
+        """Check if the AWS identity type can expire.
+
+        SSO,IAM Role,and Container Role use temporary credentials, which
+        expire and require re-authentication or re-acquisition of credentials.
+        ENV and Shared Credentials File store long-term credentials, which do
+        not expire unless manually changed, but if temporary credentials are
+        used,they will expire and require re-authentication.
+        """
         expirable_types = {
-            AWSIdentityType.SSO, AWSIdentityType.ENV, AWSIdentityType.CONTAINER_ROLE
+            AWSIdentityType.SSO, AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE
         }
         return self in expirable_types
 
