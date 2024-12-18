@@ -182,7 +182,7 @@ The skypilot API server is designed to be fault tolerant. If the API server pod 
 
 To retain state during pod termination, we use a persistent volume claim. The persistent volume claim is backed by a PersistentVolume that is created by the Helm chart.
 
-You can customize the storage settings using the following values in your ``values.yaml``:
+You can customize the storage settings using the following values by creating a ``values.yaml`` file:
 
 .. code-block:: yaml
 

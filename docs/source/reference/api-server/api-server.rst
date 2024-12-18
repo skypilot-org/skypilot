@@ -66,7 +66,17 @@ Connecting to Remote API Server
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can configure your local SkyPilot
-to connect to it with ``sky api login``.
+to connect to it.
+
+Install the SkyPilot client on your local machine:
+
+.. code-block:: console
+
+    $ pip install --extra-index-url http://skypilot-packages.s3-website-us-west-2.amazonaws.com/simple/ \
+    --trusted-host skypilot-packages.s3-website-us-west-2.amazonaws.com \
+    skypilot-beta[kubernetes,aws]
+
+Run ``sky api login`` to connect to the API server.
 
 .. code-block:: console
 
