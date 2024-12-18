@@ -115,7 +115,7 @@ def label():
             print('Continuing without using nvidia RuntimeClass. '
                   'This may fail on K3s clusters. '
                   'For more details, refer to K3s deployment notes at: '
-                  'https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html')  # pylint: disable=line-too-long
+                  'https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html')  # pylint: disable=line-too-long
             nvidia_exists = False
 
         if nvidia_exists:
