@@ -328,15 +328,14 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
     if azure_mount_unsupported_ubuntu_version in image_id:
-        # The store for mount_private_mount is not specified in the template.
-        # If we're running on Azure, the private mount will be created on
-        # azure blob. That will not be supported on the ubuntu 18.04 image
-        # and thus fail. For other clouds, the private mount on other
-        # storage types (GCS/S3) should succeed.
-        include_private_mount = False if generic_cloud == 'azure' else True
+        # Set the store for the private mount to None, when using AWS or GCP, as
+        # SkyPilot should automatically pick the right store on the same cloud.
+        # For other clouds, since SkyPilot may choose azure as the store, which
+        # is not supported on ubuntu 18.04, we set the store to s3.
+        private_mount_store = (None if generic_cloud in ['aws', 'gcp'] else 's3')
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
-                                  include_private_mount=include_private_mount)
+                                  private_mount_store=private_mount_store)
     else:
         content = template.render(storage_name=storage_name,)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
