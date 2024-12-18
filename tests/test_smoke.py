@@ -312,31 +312,20 @@ def _terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 def run_one_test(test: Test) -> Tuple[int, str, str]:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
-    log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
-    if log_to_stdout:
-        write = test.echo
-        flush = lambda: None
-        subprocess_out = sys.stderr
-        test.echo(f'Test started. Log to stdout')
-    else:
-        log_file = tempfile.NamedTemporaryFile('a',
-                                               prefix=f'{test.name}-',
-                                               suffix='.log',
-                                               delete=False)
-        write = log_file.write
-        flush = log_file.flush
-        subprocess_out = log_file
-        test.echo(f'Test started. Log: less {log_file.name}')
-
+    log_file = tempfile.NamedTemporaryFile('a',
+                                           prefix=f'{test.name}-',
+                                           suffix='.log',
+                                           delete=False)
+    test.echo(f'Test started. Log: less {log_file.name}')
     env_dict = os.environ.copy()
     if test.env:
         env_dict.update(test.env)
     for command in test.commands:
-        write(f'+ {command}\n')
-        flush()
+        log_file.write(f'+ {command}\n')
+        log_file.flush()
         proc = subprocess.Popen(
             command,
-            stdout=subprocess_out,
+            stdout=log_file,
             stderr=subprocess.STDOUT,
             shell=True,
             executable='/bin/bash',
@@ -345,11 +334,11 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         try:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
-            flush()
+            log_file.flush()
             test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(str(e))
-            write(f'Timeout after {test.timeout} seconds.\n')
-            flush()
+            log_file.write(f'Timeout after {test.timeout} seconds.\n')
+            log_file.flush()
             # Kill the current process.
             proc.terminate()
             proc.returncode = 1  # None if we don't set it.
@@ -364,29 +353,22 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
     msg = (f'{outcome}.'
-           f'{reason}')
-    if log_to_stdout:
-        test.echo(msg)
-    else:
-        msg += f'\nLog: less {log_file.name}\n'
-        test.echo(msg)
-        write(msg)
-
+           f'{reason}'
+           f'\nLog: less {log_file.name}\n')
+    test.echo(msg)
+    log_file.write(msg)
     if (proc.returncode == 0 or
             pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
-            stdout=subprocess_out,
+            stdout=log_file,
             stderr=subprocess.STDOUT,
             timeout=10 * 60,  # 10 mins
             shell=True,
         )
 
     if proc.returncode:
-        if log_to_stdout:
-            raise Exception(f'test failed')
-        else:
-            raise Exception(f'test failed: less {log_file.name}')
+        raise Exception(f'test failed: less {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
@@ -3528,7 +3510,6 @@ def test_managed_jobs_storage(generic_cloud: str):
                     job_name=name,
                     job_status=[ManagedJobStatus.SUCCEEDED],
                     timeout=60 + _BUMP_UP_SECONDS),
-                f'sleep 30',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]',
                 # Check if file was written to the mounted output bucket
                 output_check_cmd
