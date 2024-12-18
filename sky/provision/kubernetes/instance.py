@@ -722,7 +722,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'Continuing without using nvidia RuntimeClass.\n'
                        'If you are on a K3s cluster, manually '
                        'override runtimeClassName in ~/.sky/config.yaml. '
-                       'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
+                       'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
     needs_gpus = False
     limits = pod_spec['spec']['containers'][0].get('resources',
