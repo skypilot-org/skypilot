@@ -1322,7 +1322,7 @@ def test_azure_spot_instance_verification():
             'echo "VM Details:"; echo "$VM_DETAILS"; '
             'echo "$VM_DETAILS" | grep -qw "Spot" && exit 0 || exit 1'
         ],
-        #f'sky down -y {name}',
+        f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
 
