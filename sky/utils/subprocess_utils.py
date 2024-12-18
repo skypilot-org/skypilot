@@ -120,6 +120,7 @@ def run_in_parallel(func: Callable,
         # Run the function in parallel on the arguments, keeping the order.
         return list(p.imap(func, args))
 
+
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: Union[str, Callable[[], str]],
@@ -293,16 +294,22 @@ def kill_process_daemon(process_pid: int) -> None:
         stdin=subprocess.DEVNULL,
     )
 
-def maybe_parallelize_cloud_operation(func: Callable, clouds: List[Any],
-                                     num_threads: Optional[int] = None) -> List[Any]:
-    """Apply a function to a list of clouds, with parallelism if there is more than one cloud."""
+
+def maybe_parallelize_cloud_operation(
+        func: Callable,
+        clouds: List[Any],
+        num_threads: Optional[int] = None) -> List[Any]:
+    """Apply a function to a list of clouds,
+    with parallelism if there is more than one cloud.
+    """
     count = len(clouds)
     if count == 0:
         return []
     # Short-circuit in single cloud setup.
     if count == 1:
         return [func(clouds[0])]
-    # Cloud operations are assumed to be IO-bound, so the parallelism is set to the number of clouds by default,
-    # we are still safe because the number of clouds is enumarable even if this assumption does not hold.
+    # Cloud operations are assumed to be IO-bound, so the parallelism is set to
+    # the number of clouds by default, we are still safe because the number of
+    # clouds is enumarable even if this assumption does not hold.
     processes = num_threads if num_threads is not None else count
     return run_in_parallel(func, clouds, processes)

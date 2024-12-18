@@ -5,7 +5,7 @@ import hashlib
 import os
 import time
 import typing
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 import requests
@@ -15,7 +15,7 @@ from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
-from sky.utils import common_utils, subprocess_utils
+from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 

@@ -9,7 +9,8 @@ from sky.clouds.service_catalog.constants import ALL_CLOUDS
 from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
-from sky.utils import resources_utils, subprocess_utils
+from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -46,8 +47,9 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
                 f'Module "{cloud}_catalog" does not '
                 f'implement the "{method_name}" method') from None
         return method(*args, **kwargs)
-    
-    results = subprocess_utils.maybe_parallelize_cloud_operation(_execute_catalog_method, clouds)
+
+    results = subprocess_utils.maybe_parallelize_cloud_operation(
+        _execute_catalog_method, clouds)  # type: ignore
     if single:
         return results[0]
     return results
@@ -359,7 +361,6 @@ def is_image_tag_valid(tag: str,
                        clouds: CloudFilter = None) -> bool:
     """Validates the image tag."""
     return _map_clouds_catalog(clouds, 'is_image_tag_valid', tag, region)
-
 
 
 __all__ = [
