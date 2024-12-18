@@ -3743,10 +3743,10 @@ def jobs_launch(
     ]
     if len(reauth_needed_clouds) > 0:
         warnings = (
-            f'Expiring credentials detected for {reauth_needed_clouds}. Clusters may '
-            'be leaked if the credentials expire while jobs are running. It is '
-            'recommended to use credentials that never expire or a service account.'
-        )
+            f'Expiring credentials detected for {reauth_needed_clouds}.'
+            'Clusters may be leaked if the credentials expire while jobs are '
+            'running. It is recommended to use credentials that never expire '
+            'or a service account.')
         click.secho(warnings, fg='yellow')
 
     managed_jobs.launch(dag,
@@ -4241,10 +4241,10 @@ def serve_up(
     ]
     if len(reauth_needed_clouds) > 0:
         warnings = (
-            f'Expiring credentials detected for {reauth_needed_clouds}. Clusters may '
-            'be leaked if the credentials expire while jobs are running. It is '
-            'recommended to use credentials that never expire or a service account.'
-        )
+            f'Expiring credentials detected for {reauth_needed_clouds}.'
+            'Clusters may be leaked if the credentials expire while jobs are '
+            'running. It is recommended to use credentials that never expire '
+            'or a service account.')
         click.secho(warnings, fg='yellow')
 
     serve_lib.up(task, service_name)
