@@ -144,7 +144,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
-    '  { bash Miniconda3-Linux-x86_64.sh -b; '
+    '{ bash Miniconda3-Linux-x86_64.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
@@ -162,7 +162,8 @@ CONDA_INSTALLATION_COMMANDS = (
     # --seed will include pip and setuptools, which are present in venvs created
     # with python -m venv.
     # --python 3.10 will ensure the specific python version is downloaded and
-    # installed in the venv.
+    # installed in the venv. SkyPilot requires Python<3.12, and using 3.10 is
+    # preferrable.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
