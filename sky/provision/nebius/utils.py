@@ -19,11 +19,18 @@ from nebius.sdk import SDK
 
 POLL_INTERVAL = 5
 
-with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
-    NEBIUS_IAM_TOKEN, NB_PROJECT_ID = file.read().strip().split('\n')
-sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
-
 logger = sky_logging.init_logger(__name__)
+
+def get_iam_token_project_id() -> (str, str):
+    with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
+        iam_token = file.read().strip()
+    with open(os.path.expanduser('~/.nebius/NB_PROJECT_ID.txt'), 'r') as file:
+        project_id = file.read().strip()
+    return iam_token, project_id
+
+
+NEBIUS_IAM_TOKEN, NB_PROJECT_ID = get_iam_token_project_id()
+sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
 def retry(func):
     """Decorator to retry a function."""

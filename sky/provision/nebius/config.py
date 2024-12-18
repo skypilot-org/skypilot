@@ -1,4 +1,4 @@
-"""Runpod configuration bootstrapping."""
+"""Nebius configuration bootstrapping."""
 
 from sky.provision import common
 

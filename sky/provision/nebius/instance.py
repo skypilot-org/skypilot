@@ -4,12 +4,11 @@ import time
 from time import sleep
 from typing import Any, Dict, List, Optional
 
-from nebius.api.nebius.iam.v1 import ProjectServiceClient, ListProjectsRequest
-
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.nebius import utils
+from sky.provision.nebius.utils import get_iam_token_project_id, POLL_INTERVAL
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -18,11 +17,11 @@ from nebius.sdk import SDK
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
-with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
-    NEBIUS_IAM_TOKEN, NB_PROJECT_ID = file.read().strip().split('\n')
+NEBIUS_IAM_TOKEN, NB_PROJECT_ID = get_iam_token_project_id()
+
+
 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
-POLL_INTERVAL = 5
 QUERY_PORTS_TIMEOUT_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)

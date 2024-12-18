@@ -19,6 +19,7 @@ _CREDENTIAL_FILES = [
     # credential files for Nebius,
     # TODO: Change this to the actual credential files
     'NEBIUS_IAM_TOKEN.txt',
+    'NB_PROJECT_ID.txt'
 ]
 
 
@@ -30,9 +31,6 @@ class Nebius(clouds.Cloud):
         # clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot .'),
-        clouds.CloudImplementationFeatures.MULTI_NODE:
-            ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trivial on Nebius.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = ['fin']
@@ -272,9 +270,11 @@ class Nebius(clouds.Cloud):
             from nebius.aio.service_error import RequestError
 
             try:
-                DEFAULT_NEBIUS_TOKEN_PATH = os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt')
-                with open(DEFAULT_NEBIUS_TOKEN_PATH, 'r') as file:
-                    NEBIUS_IAM_TOKEN, NB_PROJECT_ID= file.read().strip().split('\n')
+
+                with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
+                    NEBIUS_IAM_TOKEN = file.read().strip()
+                with open(os.path.expanduser('~/.nebius/NB_PROJECT_ID.txt'), 'r') as file:
+                    NB_PROJECT_ID = file.read().strip()
                 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
             except SDKError as e:
@@ -284,7 +284,7 @@ class Nebius(clouds.Cloud):
                     f'        $ pip install nebius \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
-                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
+                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NB_PROJECT_ID.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
             try:
@@ -298,7 +298,7 @@ class Nebius(clouds.Cloud):
                     f'        $ pip install nebius \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
-                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
+                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NB_PROJECT_ID.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
 
