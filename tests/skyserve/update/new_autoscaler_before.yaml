@@ -5,10 +5,9 @@ service:
   replicas: 2
 
 resources:
-  cloud: gcp
   ports: 8081
   cpus: 2+
 
 workdir: examples/serve/http_server
 
-run: python3 server.py
+run: python3 server.py --port 8081

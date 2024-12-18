@@ -1,8 +1,7 @@
 """ RunPod Cloud. """
 
-import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -25,15 +24,9 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as runpod API does not implement spot.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
-        clouds.CloudImplementationFeatures.IMAGE_ID:
-            ('Specifying image ID is not supported on RunPod.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            (f'Docker image is currently not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             ('Customizing disk tier is not supported yet on RunPod.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
@@ -75,11 +68,8 @@ class RunPod(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'RunPod does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'runpod')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -151,7 +141,7 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls, instance_type: str) -> Optional[Dict[str, int]]:
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='runpod')
 
@@ -165,20 +155,35 @@ class RunPod(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
+
+        if r.image_id is None:
+            image_id = 'runpod/base:0.0.2'
+        elif r.extract_docker_image() is not None:
+            image_id = r.extract_docker_image()
         else:
-            custom_resources = None
+            image_id = r.image_id[r.region]
+
+        instance_type = resources.instance_type
+        use_spot = resources.use_spot
+
+        hourly_cost = self.instance_type_to_hourly_cost(
+            instance_type=instance_type, use_spot=use_spot)
 
         return {
-            'instance_type': resources.instance_type,
+            'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'image_id': image_id,
+            'use_spot': use_spot,
+            'bid_per_gpu': str(hourly_cost),
         }
 
     def _get_feasible_launchable_resources(
@@ -264,7 +269,7 @@ class RunPod(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
@@ -276,3 +281,9 @@ class RunPod(clouds.Cloud):
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='runpod')
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        # TODO: use 0.0 for now to allow all images. We should change this to
+        # return the docker image size.
+        return 0.0

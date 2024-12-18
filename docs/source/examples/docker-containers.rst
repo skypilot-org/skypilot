@@ -10,12 +10,17 @@ SkyPilot can run a container either as a task, or as the runtime environment of 
 
 .. note::
 
-    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
+    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, either use your docker image (the username should be ``root`` for RunPod) :ref:`as a runtime environment <docker-containers-as-runtime-environments>` or use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
+
 
 .. _docker-containers-as-tasks:
 
 Running Containers as Tasks
 ---------------------------
+
+.. note::
+
+    On Kubernetes, running Docker runtime in a pod is not recommended. Instead, :ref:`use your container as a runtime environment <docker-containers-as-runtime-environments>`.
 
 SkyPilot can run containerized applications directly as regular tasks. The default VM images provided by SkyPilot already have the Docker runtime pre-configured.
 
@@ -160,8 +165,21 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 
     2. The container image must grant sudo permissions without requiring password authentication for the user. Having a root user is also acceptable.
 
+.. note::
+
+  Using a container with a customized entrypoint as a runtime environment is
+  supported, with the container's entrypoint being overridden by :code:`/bin/bash`.
+  Specific commands can be executed in the :code:`setup` and :code:`run` sections
+  of the task YAML file. However, this approach is not compatible with RunPod due
+  to limitations in the RunPod API, so ensure that you choose a container with a
+  default entrypoint (i.e. :code:`/bin/bash`).
+
 Private Registries
 ^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+    These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
 When using this mode, to access Docker images hosted on private registries,
 you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:

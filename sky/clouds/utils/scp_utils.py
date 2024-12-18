@@ -223,6 +223,7 @@ class SCPClient:
     def create_security_group(self, zone_id, vpc, sg_name):
         url = f'{API_ENDPOINT}/security-group/v3/security-groups'
         request_body = {
+            'loggable': False,
             'securityGroupName': sg_name,
             'serviceZoneId': zone_id,
             'vpcId': vpc,

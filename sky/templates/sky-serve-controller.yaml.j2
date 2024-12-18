@@ -23,7 +23,9 @@ setup: |
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
-  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+  {%- if local_user_config_path is not none %}
+  {{remote_user_config_path}}: {{local_user_config_path}}
+  {%- endif %}
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}

@@ -115,7 +115,7 @@ html[data-theme="dark"] {
     padding: 2px 5px; /* Reduced padding for a more compact label */
     margin-left: 6px; /* Space between the text and the label */
 
-    vertical-align: middle;
+    vertical-align: text-bottom;
     line-height: 1; /* Adjust line height to ensure vertical alignment */
 }
 

@@ -87,10 +87,21 @@ Available fields and semantics:
     # Default: false.
     disable_ecc: false
 
+  # Admin policy to be applied to all tasks. (optional).
+  #
+  # The policy class to be applied to all tasks, which can be used to validate
+  # and mutate user requests.
+  #
+  # This is useful for enforcing certain policies on all tasks, e.g.,
+  # add custom labels; enforce certain resource limits; etc.
+  #
+  # The policy class should implement the sky.AdminPolicy interface.
+  admin_policy: my_package.SkyPilotPolicyV1
+
   # Advanced AWS configurations (optional).
   # Apply to all new instances but not existing ones.
   aws:
-    # Tags to assign to all instances launched by SkyPilot (optional).
+    # Tags to assign to all instances and buckets created by SkyPilot (optional).
     #
     # Example use case: cost tracking by user/team/project.
     #
@@ -193,6 +204,35 @@ Available fields and semantics:
     # Default: false.
     disk_encrypted: false
 
+    # Reserved capacity (optional).
+    #
+    # Whether to prioritize capacity reservations (considered as 0 cost) in the
+    # optimizer.
+    #
+    # If you have capacity reservations in your AWS project:
+    # Setting this to true guarantees the optimizer will pick any matching
+    # reservation within all regions and AWS will auto consume your reservations
+    # with instance match criteria to "open", and setting to false means
+    # optimizer uses regular, non-zero pricing in optimization (if by chance any
+    # matching reservation exists, AWS will still consume the reservation).
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from AWS when set to true.
+    #
+    # Default: false.
+    prioritize_reservations: false
+    #
+    # The targeted capacity reservations (CapacityReservationId) to be
+    # considered when provisioning clusters on AWS. SkyPilot will automatically
+    # prioritize this reserved capacity (considered as zero cost) if the
+    # requested resources matches the reservation.
+    #
+    # Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-reservations-launch.html
+    specific_reservations:
+      - cr-a1234567
+      - cr-b2345678
+
+
     # Identity to use for AWS instances (optional).
     #
     # LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
@@ -203,6 +243,10 @@ Available fields and semantics:
     # SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
     # instances. SkyPilot will auto-create and reuse a service account (IAM
     # role) for AWS instances.
+    #
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
     #
     # Customized service account (IAM role): <string> or <list of single-element dict>
     # - <string>: apply the service account with the specified name to all instances.
@@ -223,7 +267,8 @@ Available fields and semantics:
     #
     # - This only affects AWS instances. Local AWS credentials will still be
     #   uploaded to non-AWS instances (since those instances may need to access
-    #   AWS resources).
+    #   AWS resources). To fully disable credential upload, set
+    #   `remote_identity: NO_UPLOAD`.
     # - If the SkyPilot jobs/serve controller is on AWS, this setting will make
     #   non-AWS managed jobs / non-AWS service replicas fail to access any
     #   resources on AWS (since the controllers don't have AWS credential
@@ -307,12 +352,15 @@ Available fields and semantics:
     # Setting this to true guarantees the optimizer will pick any matching
     # reservation and GCP will auto consume your reservation, and setting to
     # false means optimizer uses regular, non-zero pricing in optimization (if
-    # by chance any matching reservation is selected, GCP still auto consumes
-    # the reservation).
+    # by chance any matching reservation exists, GCP still auto consumes the
+    # reservation).
     #
     # If you have "specifically targeted" reservations (set by the
     # `specific_reservations` field below): This field will automatically be set
     # to true.
+    #
+    # Note: this setting is default to false for performance reasons, as it can
+    # take half a minute to retrieve the reservations from GCP when set to true.
     #
     # Default: false.
     prioritize_reservations: false
@@ -363,11 +411,16 @@ Available fields and semantics:
     # instances. SkyPilot will auto-create and reuse a service account for GCP
     # instances.
     #
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
+    #
     # Two caveats of SERVICE_ACCOUNT for multicloud users:
     #
     # - This only affects GCP instances. Local GCP credentials will still be
     #   uploaded to non-GCP instances (since those instances may need to access
-    #   GCP resources).
+    #   GCP resources). To fully disable credential uploads, set
+    #   `remote_identity: NO_UPLOAD`.
     # - If the SkyPilot jobs/serve controller is on GCP, this setting will make
     #   non-GCP managed jobs / non-GCP service replicas fail to access any
     #   resources on GCP (since the controllers don't have GCP credential
@@ -376,9 +429,24 @@ Available fields and semantics:
     # Default: 'LOCAL_CREDENTIALS'.
     remote_identity: LOCAL_CREDENTIALS
 
+    # Enable gVNIC (optional).
+    #
+    # Set to true to use gVNIC on GCP instances. gVNIC offers higher performance
+    # for multi-node clusters, but costs more.
+    # Reference: https://cloud.google.com/compute/docs/networking/using-gvnic
+    #
+    # Default: false.
+    enable_gvnic: false
+
   # Advanced Azure configurations (optional).
   # Apply to all new instances but not existing ones.
   azure:
+    # By default, SkyPilot creates a unique resource group for each VM when
+    # launched. If specified, all VMs will be launched within the provided
+    # resource group. Additionally, controllers for serve and managed jobs will
+    # be created in this resource group. Note: This setting only applies to VMs
+    # and does not affect storage accounts or containers.
+    resource_group_vm: user-resource-group-name
     # Specify an existing Azure storage account for SkyPilot-managed containers.
     # If not set, SkyPilot will use its default naming convention to create and
     # use the storage account unless container endpoint URI is used as source.
@@ -439,6 +507,10 @@ Available fields and semantics:
     # SkyPilot will auto-create and reuse a service account with necessary roles
     # in the user's namespace.
     #
+    # NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
+    # avoiding overriding any existing credentials that may be automounted on
+    # the cluster.
+    #
     # <string>: The name of a service account to use for all Kubernetes pods.
     # This service account must exist in the user's namespace and have all
     # necessary permissions. Refer to https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/kubernetes.html
@@ -447,10 +519,24 @@ Available fields and semantics:
     # Using SERVICE_ACCOUNT or a custom service account only affects Kubernetes
     # instances. Local ~/.kube/config will still be uploaded to non-Kubernetes
     # instances (e.g., a serve controller on GCP or AWS may need to provision
-    # Kubernetes resources).
+    # Kubernetes resources). To fully disable credential uploads, set
+    # `remote_identity: NO_UPLOAD`.
     #
     # Default: 'SERVICE_ACCOUNT'.
     remote_identity: my-k8s-service-account
+
+    # Allowed context names to use for Kubernetes clusters (optional).
+    #
+    # SkyPilot will try provisioning and failover Kubernetes contexts in the
+    # same order as they are specified here. E.g., SkyPilot will try using
+    # context1 first. If it is out of resources or unreachable, it will failover
+    # and try context2.
+    #
+    # If not specified, only the current active context is used for launching
+    # new clusters.
+    allowed_contexts:
+      - context1
+      - context2
 
     # Attach custom metadata to Kubernetes objects created by SkyPilot
     #

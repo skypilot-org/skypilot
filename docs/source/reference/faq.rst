@@ -38,7 +38,7 @@ How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 Currently, there is a difference in whether ``.git`` is synced up depending on the command used:
 
 - For regular ``sky launch``, the workdir's ``.git`` is synced up by default.
-- For managed spot jobs ``sky spot launch``, the workdir's ``.git`` is excluded by default.
+- For managed jobs ``sky jobs launch``, the workdir's ``.git`` is excluded by default.
 
 In the second case, to ensure the workdir's ``.git`` is synced up for managed spot jobs, you can explicitly add a file mount to sync it up:
 
@@ -192,6 +192,22 @@ For example, if you have access to special regions of GCP, add the data to ``~/.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
 
+Package Installation
+---------------------
+
+Unable to import PyTorch in a SkyPilot task.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For `PyTorch <https://pytorch.org/>`_ installation, if you are using the default SkyPilot images (not passing in `--image-id`), ``pip install torch`` should work.
+
+But if you use your own image which has an older NVIDIA driver (535.161.08 or lower) and you install the default PyTorch, you may encounter the following error:
+
+.. code-block:: bash
+
+  ImportError: /home/azureuser/miniconda3/lib/python3.10/site-packages/torch/lib/../../nvidia/cusparse/lib/libcusparse.so.12: undefined symbol: __nvJitLinkComplete_12_4, version libnvJitLink.so.12
+
+You will need to install a PyTorch version that is compatible with your NVIDIA driver, e.g., ``pip install torch --index-url https://download.pytorch.org/whl/cu121``.
+
+
 Miscellaneous
 -------------
 
@@ -212,21 +228,4 @@ To launch a VS Code tunnel using a SkyPilot task definition, you can use the fol
       code tunnel --accept-server-license-terms
 
 Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
-
-PyTorch 2.2.0 failed on SkyPilot clusters. What should I do?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The latest PyTorch release (2.2.0) has a version conflict with the default cuDNN version on SkyPilot clusters, which may raise a segmentation fault when you run the job.
-
-To fix this, you can choose one of the following solutions:
-
-1. Use older version of PyTorch (like 2.1.0) instead of 2.2.0, i.e. :code:`pip install "torch<2.2"`;
-2. Remove the cuDNN from the cluster's :code:`LD_LIBRARY_PATH` by adding the following line to your task:
-
-.. code-block:: yaml
-
-  run: |
-    export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | sed 's|:/usr/local/cuda/lib64||g; s|/usr/local/cuda/lib64:||g; s|/usr/local/cuda/lib64||g')
-    # Other commands using PyTorch 2.2.0
-    ...
 

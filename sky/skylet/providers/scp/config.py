@@ -114,13 +114,21 @@ class ZoneConfig:
 
     def _get_vm_init_script(self, ssh_public_key):
 
+        import subprocess
         init_script_content = self._get_default_config_cmd(
         ) + self._get_ssh_key_gen_cmd(ssh_public_key)
+        init_script_content_string = f'"{init_script_content}"'
+        command = f'echo {init_script_content_string} | base64'
+        result = subprocess.run(command,
+                                shell=True,
+                                capture_output=True,
+                                text=True)
+        init_script_content_base64 = result.stdout
         return {
-            "encodingType": "plain",
+            "encodingType": "base64",
             "initialScriptShell": "bash",
             "initialScriptType": "text",
-            "initialScriptContent": init_script_content
+            "initialScriptContent": init_script_content_base64
         }
 
     def _get_ssh_key_gen_cmd(self, ssh_public_key):

@@ -28,14 +28,14 @@ Run the following command to start GPT-2 (124M) training on a GPU VM with 8 A100
 sky launch -c gpt2 gpt2.yaml
 ```
 
-![GPT-2 training with 8 A100 GPUs](https://imgur.com/v8SGpsF.png)
+![GPT-2 training with 8 A100 GPUs](https://i.imgur.com/v8SGpsF.png)
 
 Or, you can train the model with a single A100, by adding `--gpus A100`:
 ```bash
 sky launch -c gpt2 gpt2.yaml --gpus A100
 ```
 
-![GPT-2 training with a single A100](https://imgur.com/hN65g4r.png)
+![GPT-2 training with a single A100](https://i.imgur.com/hN65g4r.png)
 
 
 It is also possible to speed up the training of the model on 8 H100 (2.3x more tok/s than 8x A100s):
@@ -43,7 +43,7 @@ It is also possible to speed up the training of the model on 8 H100 (2.3x more t
 sky launch -c gpt2 gpt2.yaml --gpus H100:8
 ```
 
-![GPT-2 training with 8 H100](https://imgur.com/STbi80b.png)
+![GPT-2 training with 8 H100](https://i.imgur.com/STbi80b.png)
 
 ### Download logs and visualizations
 
@@ -54,7 +54,7 @@ scp -r gpt2:~/llm.c/log124M .
 We can visualize the training progress with the notebook provided in [llm.c](https://github.com/karpathy/llm.c/blob/master/dev/vislog.ipynb). (Note: we cut off the training after 10K steps, which already achieve similar validation loss as OpenAI GPT-2 checkpoint.)
 
 <div align="center">
-<img src="https://imgur.com/lskPEAQ.png" width="60%">
+<img src="https://i.imgur.com/lskPEAQ.png" width="60%">
 </div>
 
 > Yes! We are able to reproduce the training of GPT-2 (124M) on any cloud with SkyPilot.

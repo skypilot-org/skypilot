@@ -35,6 +35,13 @@ Below we include minimal guides to set up a new Kubernetes cluster in different 
 
         Amazon's hosted Kubernetes service.
 
+    .. grid-item-card::  On-demand Cloud VMs
+        :link: kubernetes-setup-ondemand
+        :link-type: ref
+        :text-align: center
+
+        We provide scripts to deploy k8s on on-demand cloud VMs.
+
 .. _kubernetes-setup-kind:
 
 
@@ -107,9 +114,9 @@ Deploying on Google Cloud GKE
      # Example:
      # gcloud container clusters get-credentials testcluster --region us-central1-c
 
-3. [If using GPUs] If your GKE nodes have GPUs, you may need to to
-   `manually install <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_
-   nvidia drivers. You can do so by deploying the daemonset
+3. [If using GPUs] For GKE versions newer than 1.30.1-gke.115600, NVIDIA drivers are pre-installed and no additional setup is required. If you are using an older GKE version, you may need to
+   `manually install <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_
+   NVIDIA drivers for GPU support. You can do so by deploying the daemonset
    depending on the GPU and OS on your nodes:
 
    .. code-block:: console
@@ -126,7 +133,8 @@ Deploying on Google Cloud GKE
      # For Ubuntu based nodes with L4 GPUs:
      $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded-R525.yaml
 
-   To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
+   .. tip::
+      To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` resource is listed under the ``Capacity`` section.
 
 4. Verify your kubernetes cluster is correctly set up for SkyPilot by running :code:`sky check`:
 
@@ -134,15 +142,21 @@ Deploying on Google Cloud GKE
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud kubernetes`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --cloud kubernetes
-       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       L4    1, 2, 3, 4    8           6
-       A100  1, 2          4           2
+       $ sky show-gpus --cloud k8s
+       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       L4    1, 2, 4                   8           6
+       A100  1, 2                      4           2
 
+       Kubernetes per node GPU availability
+       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+       my-cluster-0               L4        4           4
+       my-cluster-1               L4        4           2
+       my-cluster-2               A100      2           2
+       my-cluster-3               A100      2           0
 
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
@@ -183,20 +197,27 @@ Deploying on Amazon EKS
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud kubernetes`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --cloud k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --cloud kubernetes
-       GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-       A100  1, 2          4           2
+       $ sky show-gpus --cloud k8s
+       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+       A100  1, 2                      4           2
+
+       Kubernetes per node GPU availability
+       NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+       my-cluster-0               A100      2           2
 
 .. _kubernetes-setup-onprem:
 
 Deploying on on-prem clusters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
+If you have a list of IP addresses and the SSH credentials for your on-prem cluster, you can follow our
+:ref:`Using Existing Machines <existing-machines>` guide to set up SkyPilot on your on-prem cluster.
+
+Alternatively, you can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
 such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_,
 `k3s <https://docs.k3s.io/quick-start>`_ or
 `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.
@@ -268,3 +289,14 @@ After the GPU operator is installed, create the nvidia RuntimeClass required by 
       name: nvidia
     handler: nvidia
     EOF
+
+
+.. _kubernetes-setup-ondemand:
+
+Deploying on cloud VMs
+^^^^^^^^^^^^^^^^^^^^^^
+
+You can also spin up on-demand cloud VMs and deploy Kubernetes on them.
+
+We provide scripts to take care of provisioning VMs, installing Kubernetes, setting up GPU support and configuring your local kubeconfig.
+Refer to our `Deploying Kubernetes on VMs guide <https://github.com/skypilot-org/skypilot/tree/master/examples/k8s_cloud_deploy>`_ for more details.

@@ -207,3 +207,4 @@ def wait_for_managed_group_to_be_stable(project_id: str, zone: str,
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode('ascii')
         logger.info(stderr)
+        raise

@@ -11,9 +11,6 @@ docker:
   container_name: {{docker_container_name}}
   run_options:
     - --ulimit nofile=1048576:1048576
-    {%- if custom_resources is not none %}
-      --gpus all
-    {%- endif %}
     {%- for run_option in docker_run_options %}
     - {{run_option}}
     {%- endfor %}
@@ -76,8 +73,10 @@ available_node_types:
             VolumeSize: {{disk_size}}
             VolumeType: {{disk_tier}}
             Encrypted: {{disk_encrypted}}
-            {% if custom_disk_perf %}
+            {% if disk_iops %}
             Iops: {{disk_iops}}
+            {% endif %}
+            {% if disk_throughput %}
             Throughput: {{disk_throughput}}
             {% endif %}
       {% if use_spot %}
@@ -87,6 +86,12 @@ available_node_types:
           #   SpotOptions:
           #       MaxPrice: MAX_HOURLY_PRICE
       {% endif %}
+      CapacityReservationSpecification:
+        CapacityReservationPreference: open
+        {% if specific_reservations %}
+        CapacityReservationTarget:
+          CapacityReservationId: {{specific_reservations}}
+        {% endif %}
       # Use cloud init in UserData to set up the authorized_keys to get
       # around the number of keys limit and permission issues with
       # ec2.describe_key_pairs.
@@ -117,6 +122,15 @@ available_node_types:
           - path: /etc/apt/apt.conf.d/10cloudinit-disable
             content: |
               APT::Periodic::Enable "0";
+          - path: /etc/apt/apt.conf.d/52unattended-upgrades-local
+            content: |
+              Unattended-Upgrade::DevRelease "false";
+              Unattended-Upgrade::Allowed-Origins {};
+        bootcmd:
+          - systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+          - systemctl disable apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+          - systemctl mask apt-daily.service apt-daily-upgrade.service unattended-upgrades.service
+          - systemctl daemon-reload
       TagSpecifications:
         - ResourceType: instance
           Tags:
@@ -126,6 +140,9 @@ available_node_types:
             - Key: {{ label_key }}
               Value: {{ label_value|tojson }}
             {%- endfor %}
+      # Use IDMSv2
+      MetadataOptions:
+        HttpTokens: required 
 
 head_node_type: ray.head.default
 
@@ -156,6 +173,7 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line 'rm ~/.aws/credentials': explicitly remove the credentials file to be safe. This is to guard against the case where the credential files was uploaded once as `remote_identity` was not set in a previous launch.
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
@@ -168,7 +186,12 @@ setup_commands:
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    {%- if remote_identity != 'LOCAL_CREDENTIALS' %}
+    rm ~/.aws/credentials || true;
+    {%- endif %}
+
+
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.

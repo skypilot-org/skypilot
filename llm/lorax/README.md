@@ -4,7 +4,7 @@
 <!-- $UNCOMMENT# LoRAX: Multi-LoRA Inference Server -->
 
 <p align="center">
-    <img src="https://imgur.com/OUapRYC.png" alt="LoRAX" style="width:200px;" />
+    <img src="https://i.imgur.com/OUapRYC.png" alt="LoRAX" style="width:200px;" />
 </p>
 
 [LoRAX](https://github.com/predibase/lorax) (LoRA eXchange) is a framework that allows users to serve thousands of fine-tuned LLMs on a single GPU, dramatically reducing the cost of serving without compromising on throughput or latency. It works by dynamically loading multiple fine-tuned "adapters" (LoRAs, etc.) on top of a single base model at runtime. Concurrent requests for different adapters can be processed together in a single batch, allowing LoRAX to maintain near linear throughput scaling as the number of adapters increases.
@@ -91,7 +91,7 @@ Here are some other interesting Mistral-7B fine-tuned models to test out:
 - [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
 - [Undi95/Mistral-7B-roleplay_alpaca-lora](https://huggingface.co/Undi95/Mistral-7B-roleplay_alpaca-lora): Fine-tuned using role-play prompts.
 
-You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=-lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
+You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
 
 ## Stop the deployment
 

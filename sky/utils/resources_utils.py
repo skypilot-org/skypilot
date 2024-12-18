@@ -2,10 +2,14 @@
 import dataclasses
 import enum
 import itertools
+import json
+import math
 import re
 import typing
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
+from sky import skypilot_config
+from sky.clouds import cloud_registry
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -24,6 +28,7 @@ class DiskTier(enum.Enum):
     LOW = 'low'
     MEDIUM = 'medium'
     HIGH = 'high'
+    ULTRA = 'ultra'
     BEST = 'best'
 
     @classmethod
@@ -160,6 +165,16 @@ def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
 
 
+def make_ray_custom_resources_str(
+        resource_dict: Optional[Dict[str, Union[int, float]]]) -> Optional[str]:
+    """Convert resources to Ray custom resources format."""
+    if resource_dict is None:
+        return None
+    # Ray does not allow fractional resources, so we need to ceil the values.
+    ceiled_dict = {k: math.ceil(v) for k, v in resource_dict.items()}
+    return json.dumps(ceiled_dict, separators=(',', ':'))
+
+
 @dataclasses.dataclass
 class FeasibleResources:
     """Feasible resources returned by cloud.
@@ -176,3 +191,24 @@ class FeasibleResources:
     resources_list: List['resources_lib.Resources']
     fuzzy_candidate_list: List[str]
     hint: Optional[str]
+
+
+def need_to_query_reservations() -> bool:
+    """Checks if we need to query reservations from cloud APIs.
+
+    We need to query reservations if:
+    - The cloud has specific reservations.
+    - The cloud prioritizes reservations over on-demand instances.
+
+    This is useful to skip the potentially expensive reservation query for
+    clouds that do not use reservations.
+    """
+    for cloud_str in cloud_registry.CLOUD_REGISTRY.keys():
+        cloud_specific_reservations = skypilot_config.get_nested(
+            (cloud_str, 'specific_reservations'), None)
+        cloud_prioritize_reservations = skypilot_config.get_nested(
+            (cloud_str, 'prioritize_reservations'), False)
+        if (cloud_specific_reservations is not None or
+                cloud_prioritize_reservations):
+            return True
+    return False

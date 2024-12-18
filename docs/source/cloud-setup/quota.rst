@@ -5,7 +5,7 @@ Requesting Quota Increase
 
 
 Most cloud providers enforce a quota policy to limit the number of VM instances that can exist in a given region.
-Users may encounter `QuotaExceeded` or `VcpuLimitExceeded` errors during resources provisioning, especially for high end GPUs such as V100/A100.
+Users may encounter `QuotaExceeded` or `VcpuLimitExceeded` errors during resources provisioning, especially for high end GPUs such as H100/A100.
 To check or increase your quota limits, please follow the below instructions.
 After submitting the request, it will usually take a few days for the support team to review.
 To increase chances of being approved, you may respond their inquiry emails on how the requested resources will be used your projects.
@@ -34,7 +34,7 @@ Azure
   - For Deployment model, ensure **Resource Manager** is selected.
   - For Locations, select all regions in which you want to increase quotas.
   - For each region you selected, select one or more VM series from the Quotas drop-down list.
-  - For each VM Series you selected (e.g., ``NCSv3``, ``NDv2`` for V100 instances), enter the new vCPU limit that you want for this subscription. You may check `for more VM Series <https://docs.microsoft.com/en-us/azure/virtual-machines/sizes-gpu>`_.
+  - For each VM Series you selected (e.g., ``ND_H100_v5`` for H100 instances), enter the new vCPU limit that you want for this subscription. You may check `for more VM Series <https://docs.microsoft.com/en-us/azure/virtual-machines/sizes-gpu>`_.
   - When you're finished, select **Save and continue**.
 
 5. Enter or confirm your contact details, then select **Next**.
@@ -45,10 +45,11 @@ GCP
 
 1. In the Google Cloud Console, go to the `Quota page <https://console.cloud.google.com/iam-admin/quotas/>`_.
 2. Click **Filter** and select ``Service: Compute Engine API``.
-3. Choose ``Limit Name: instance_name``. (e.g., ``NVIDIA-V100-GPUS-per-project-region``). You may check the `the compute GPU list <https://cloud.google.com/compute/quotas#gpu_quota>`_.
-4. Select the checkbox of the region whose quota you want to change.
-5. Click **Edit Quotas** and fill out the new limit.
-6. Click **Submit Request**.
+3. For H100 GPUs: choose ``metric: GPUS_PER_GPU_FAMILY`` and select dimension ``gpu_family: NVIDIA_H100``.
+4. For all other GPUs: choose ``Limit Name: instance_name``. (e.g., ``NVIDIA-V100-GPUS-per-project-region``). You may check the `the compute GPU list <https://cloud.google.com/compute/quotas#gpu_quota>`_.
+5. Select the checkbox of the region whose quota you want to change.
+6. Click **Edit Quotas** and fill out the new limit.
+7. Click **Submit Request**.
 
 OCI
 -------------------------------

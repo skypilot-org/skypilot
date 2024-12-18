@@ -10,14 +10,14 @@ The followings are the demos of Code Llama 70B hosted by SkyPilot Serve (aka Sky
 ## Demos
 <figure>
 <center>
-<img src="https://imgur.com/fguAmP0.gif" width="60%" title="Coding Assistant: Connect to hosted Code Llama with Tabby in VScode" />
+<img src="https://i.imgur.com/fguAmP0.gif" width="60%" title="Coding Assistant: Connect to hosted Code Llama with Tabby in VScode" />
 
 <figcaption>Coding Assistant: Connect to hosted Code Llama with Tabby in VScode</figcaption>
 </figure>
 
 <figure>
 <center>
-<img src="https://imgur.com/Dor1MoE.gif" width="60%" title="Chat: Connect to hosted Code Llama with FastChat" />
+<img src="https://i.imgur.com/Dor1MoE.gif" width="60%" title="Chat: Connect to hosted Code Llama with FastChat" />
 
 <figcaption>Chat: Connect to hosted Code Llama with FastChat</figcaption>
 </figure>

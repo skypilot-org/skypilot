@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -11,16 +11,19 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
+from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -110,6 +113,79 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
                                       cluster_names=cluster_names)
 
 
+def status_kubernetes(
+) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
+           List['kubernetes_utils.KubernetesSkyPilotClusterInfo'], List[Dict[
+               str, Any]], Optional[str]]:
+    """Get all SkyPilot clusters and jobs in the Kubernetes cluster.
+
+    Managed jobs and services are also included in the clusters returned.
+    The caller must parse the controllers to identify which clusters are run
+    as managed jobs or services.
+all_clusters, unmanaged_clusters, all_jobs, context
+    Returns:
+        A tuple containing:
+        - all_clusters: List of KubernetesSkyPilotClusterInfo with info for
+            all clusters, including managed jobs, services and controllers.
+        - unmanaged_clusters: List of KubernetesSkyPilotClusterInfo with info
+            for all clusters excluding managed jobs and services. Controllers
+            are included.
+        - all_jobs: List of managed jobs from all controllers. Each entry is a
+            dictionary job info, see jobs.queue_from_kubernetes_pod for details.
+        - context: Kubernetes context used to fetch the cluster information.
+    """
+    context = kubernetes_utils.get_current_kube_config_context_name()
+    try:
+        pods = kubernetes_utils.get_skypilot_pods(context)
+    except exceptions.ResourcesUnavailableError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Failed to get SkyPilot pods from '
+                             f'Kubernetes: {str(e)}') from e
+    all_clusters, jobs_controllers, _ = (kubernetes_utils.process_skypilot_pods(
+        pods, context))
+    all_jobs = []
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                '[bold cyan]Checking in-progress managed jobs[/]')) as spinner:
+        for i, job_controller_info in enumerate(jobs_controllers):
+            user = job_controller_info.user
+            pod = job_controller_info.pods[0]
+            status_message = '[bold cyan]Checking managed jobs controller'
+            if len(jobs_controllers) > 1:
+                status_message += f's ({i + 1}/{len(jobs_controllers)})'
+            spinner.update(f'{status_message}[/]')
+            try:
+                job_list = managed_jobs.queue_from_kubernetes_pod(
+                    pod.metadata.name)
+            except RuntimeError as e:
+                logger.warning('Failed to get managed jobs from controller '
+                               f'{pod.metadata.name}: {str(e)}')
+                job_list = []
+            # Add user field to jobs
+            for job in job_list:
+                job['user'] = user
+            all_jobs.extend(job_list)
+    # Reconcile cluster state between managed jobs and clusters:
+    # To maintain a clear separation between regular SkyPilot clusters
+    # and those from managed jobs, we need to exclude the latter from
+    # the main cluster list.
+    # We do this by reconstructing managed job cluster names from each
+    # job's name and ID. We then use this set to filter out managed
+    # clusters from the main cluster list. This is necessary because there
+    # are no identifiers distinguishing clusters from managed jobs from
+    # regular clusters.
+    managed_job_cluster_names = set()
+    for job in all_jobs:
+        # Managed job cluster name is <job_name>-<job_id>
+        managed_cluster_name = f'{job["job_name"]}-{job["job_id"]}'
+        managed_job_cluster_names.add(managed_cluster_name)
+    unmanaged_clusters = [
+        c for c in all_clusters
+        if c.cluster_name not in managed_job_cluster_names
+    ]
+    return all_clusters, unmanaged_clusters, all_jobs, context
+
+
 def endpoints(cluster: str,
               port: Optional[Union[int, str]] = None) -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
@@ -127,8 +203,9 @@ def endpoints(cluster: str,
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
     """
-    with rich_utils.safe_status('[bold cyan]Fetching endpoints for cluster '
-                                f'{cluster}...[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                f'Fetching endpoints for cluster {cluster}')):
         return backend_utils.get_endpoints(cluster=cluster, port=port)
 
 
@@ -191,7 +268,8 @@ def _start(
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
     if not force and cluster_status == status_lib.ClusterStatus.UP:
         sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
@@ -282,12 +360,13 @@ def start(
             Useful for upgrading SkyPilot runtime.
 
     Raises:
-        ValueError: argument values are invalid: (1) the specified cluster does
-          not exist; (2) if ``down`` is set to True but
-          ``idle_minutes_to_autostop`` is None; (3) if the specified cluster is
-          the managed jobs controller, and either ``idle_minutes_to_autostop``
-          is not None or ``down`` is True (omit them to use the default
-          autostop settings).
+        ValueError: argument values are invalid: (1) if ``down`` is set to True
+          but ``idle_minutes_to_autostop`` is None; (2) if the specified
+          cluster is the managed jobs controller, and either
+          ``idle_minutes_to_autostop`` is not None or ``down`` is True (omit
+          them to use the default autostop settings).
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
@@ -335,7 +414,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             related resources.
 
     Raises:
-        ValueError: the specified cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
         RuntimeError: failed to stop the cluster.
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
           cluster, or a TPU VM Pod cluster, or the managed jobs controller.
@@ -346,7 +426,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             f'is not supported.')
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
 
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -390,14 +471,16 @@ def down(cluster_name: str, purge: bool = False) -> None:
             resources.
 
     Raises:
-        ValueError: the specified cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
         RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
           jobs controller.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
@@ -444,7 +527,7 @@ def autostop(
           rather than autostop (restartable).
 
     Raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend or the cluster is TPU VM Pod.
@@ -538,7 +621,7 @@ def queue(cluster_name: str,
             }
         ]
     raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -597,7 +680,8 @@ def cancel(
             worker node is preempted in the spot cluster.
 
     Raises:
-        ValueError: if arguments are invalid, or the cluster does not exist.
+        ValueError: if arguments are invalid.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the specified cluster is a
           controller that does not support this operation.
@@ -665,15 +749,16 @@ def cancel(
 @usage_lib.entrypoint
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
-              follow: bool = True) -> None:
+              follow: bool = True,
+              tail: int = 0) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported or
-          the cluster does not exist.
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -698,7 +783,7 @@ def tail_logs(cluster_name: str,
         f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.tail_logs(handle, job_id, follow=follow)
+    backend.tail_logs(handle, job_id, follow=follow, tail=tail)
 
 
 @usage_lib.entrypoint
@@ -715,7 +800,7 @@ def download_logs(
     Returns:
         Dict[str, str]: a mapping of job_id to local log path.
     Raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
@@ -760,7 +845,7 @@ def job_status(cluster_name: str,
         If job_ids is None and there is no job on the cluster, it will return
         {None: None}.
     Raises:
-        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.

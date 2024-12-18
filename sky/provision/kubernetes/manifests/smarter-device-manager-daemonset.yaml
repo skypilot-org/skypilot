@@ -26,6 +26,9 @@ spec:
       hostname: smarter-device-management
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
       containers:
       - name: smarter-device-manager
         image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/smarter-device-manager:v1.1.2

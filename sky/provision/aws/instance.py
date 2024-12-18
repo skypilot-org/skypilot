@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
+from sky.clouds.utils import aws_utils
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.aws import utils
@@ -208,6 +209,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
     assert 'NetworkInterfaces' not in conf, conf
     assert security_group_ids is not None, conf
 
+    logger.debug(f'Creating {count} instances with config: \n{conf}')
+
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
     num_subnets = len(subnet_ids)
@@ -321,9 +324,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 'Key': 'Name',
                 'Value': f'sky-{cluster_name_on_cloud}-worker'
             })
+        # Remove AWS internal tags, as they are not allowed to be set by users.
+        target_instance_tags = [
+            tag for tag in target_instance.tags
+            if not tag['Key'].startswith('aws:')
+        ]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
-            Tags=target_instance.tags + node_tag,
+            Tags=target_instance_tags + node_tag,
         )
         return target_instance.id
 
@@ -429,19 +437,87 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             head_instance_id = _create_node_tag(resumed_instances[0])
 
     if to_start_count > 0:
+        target_reservation_names = (config.node_config.get(
+            'CapacityReservationSpecification',
+            {}).get('CapacityReservationTarget',
+                    {}).get('CapacityReservationId', []))
+        created_instances = []
+        if target_reservation_names:
+            node_config = copy.deepcopy(config.node_config)
+            # Clear the capacity reservation specification settings in the
+            # original node config, as we will create instances with
+            # reservations with specific settings for each reservation.
+            node_config['CapacityReservationSpecification'] = {
+                'CapacityReservationTarget': {}
+            }
+
+            reservations = aws_utils.list_reservations_for_instance_type(
+                node_config['InstanceType'], region=region)
+            # Filter the reservations by the user-specified ones, because
+            # reservations contain 'open' reservations as well, which do not
+            # need to explicitly specify in the config for creating instances.
+            target_reservations = []
+            for r in reservations:
+                if (r.targeted and r.name in target_reservation_names):
+                    target_reservations.append(r)
+            logger.debug(f'Reservations: {reservations}')
+            logger.debug(f'Target reservations: {target_reservations}')
+
+            target_reservations_list = sorted(
+                target_reservations,
+                key=lambda x: x.available_resources,
+                reverse=True)
+            for r in target_reservations_list:
+                if r.available_resources <= 0:
+                    # We have sorted the reservations by the available
+                    # resources, so if the reservation is not available, the
+                    # following reservations are not available either.
+                    break
+                reservation_count = min(r.available_resources, to_start_count)
+                logger.debug(f'Creating {reservation_count} instances '
+                             f'with reservation {r.name}')
+                node_config['CapacityReservationSpecification'][
+                    'CapacityReservationTarget'] = {
+                        'CapacityReservationId': r.name
+                    }
+                if r.type == aws_utils.ReservationType.BLOCK:
+                    # Capacity block reservations needs to specify the market
+                    # type during instance creation.
+                    node_config['InstanceMarketOptions'] = {
+                        'MarketType': aws_utils.ReservationType.BLOCK.value
+                    }
+                created_reserved_instances = _create_instances(
+                    ec2_fail_fast,
+                    cluster_name_on_cloud,
+                    node_config,
+                    tags,
+                    reservation_count,
+                    associate_public_ip_address=(
+                        not config.provider_config['use_internal_ips']))
+                created_instances.extend(created_reserved_instances)
+                to_start_count -= reservation_count
+                if to_start_count <= 0:
+                    break
+
         # TODO(suquark): If there are existing instances (already running or
         #  resumed), then we cannot guarantee that they will be in the same
         #  availability zone (when there are multiple zones specified).
         #  This is a known issue before.
 
-        created_instances = _create_instances(
-            ec2_fail_fast,
-            cluster_name_on_cloud,
-            config.node_config,
-            tags,
-            to_start_count,
-            associate_public_ip_address=(
-                not config.provider_config['use_internal_ips']))
+        if to_start_count > 0:
+            # Remove the capacity reservation specification from the node config
+            # as we have already created the instances with the reservations.
+            config.node_config.get('CapacityReservationSpecification',
+                                   {}).pop('CapacityReservationTarget', None)
+            created_remaining_instances = _create_instances(
+                ec2_fail_fast,
+                cluster_name_on_cloud,
+                config.node_config,
+                tags,
+                to_start_count,
+                associate_public_ip_address=(
+                    not config.provider_config['use_internal_ips']))
+            created_instances.extend(created_remaining_instances)
         created_instances.sort(key=lambda x: x.id)
 
         created_instance_ids = [n.id for n in created_instances]

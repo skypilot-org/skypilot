@@ -1,6 +1,6 @@
-.. _dnn-training:
+.. _ai-training:
 
-Tutorial: DNN Training
+Tutorial: AI Training
 ======================
 This example uses SkyPilot to train a Transformer-based language model from HuggingFace.
 

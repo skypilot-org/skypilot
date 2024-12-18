@@ -69,7 +69,7 @@ the task yaml ``examples/serve/http_server/task.yaml``, by changing the ``replic
 field:
 
 .. code-block:: yaml
-    :emphasize-lines: 10
+    :emphasize-lines: 6
 
     # examples/serve/http_server/task.yaml
     service:
