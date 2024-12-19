@@ -540,6 +540,7 @@ def test_skyserve_update(generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do # DO does not support `--cpus 2`
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -720,7 +721,9 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
+# TODO: DO does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
