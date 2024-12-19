@@ -1254,18 +1254,6 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
                 f'{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}')
 
 
-def _make_resource_finder(
-    resources: resources_lib.Resources,
-    num_nodes: int,
-) -> Callable[[clouds.Cloud], Tuple[clouds.Cloud, resources_lib.Resources]]:
-
-    def fn(cloud: clouds.Cloud) -> Tuple[clouds.Cloud, resources_lib.Resources]:
-        return cloud, cloud.get_feasible_launchable_resources(
-            resources, num_nodes)
-
-    return fn
-
-
 def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
@@ -1306,8 +1294,9 @@ def _fill_in_launchable_resources(
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
 
-        feasible_list = subprocess_utils.maybe_parallelize_cloud_operation(
-            _make_resource_finder(resources, task.num_nodes), clouds_list)
+        feasible_list = subprocess_utils.run_in_parallel(
+            lambda cloud, r=resources, n=task.num_nodes:
+            (cloud, cloud.get_feasible_launchable_resources(r, n)), clouds_list)
         for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint

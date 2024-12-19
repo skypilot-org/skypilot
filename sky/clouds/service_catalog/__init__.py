@@ -48,8 +48,8 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
                 f'implement the "{method_name}" method') from None
         return method(*args, **kwargs)
 
-    results = subprocess_utils.maybe_parallelize_cloud_operation(
-        _execute_catalog_method, clouds)  # type: ignore
+    results = subprocess_utils.run_in_parallel(_execute_catalog_method, clouds,
+                                               len(clouds))  # type: ignore
     if single:
         return results[0]
     return results

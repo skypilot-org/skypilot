@@ -1,4 +1,5 @@
 """Utility functions for subprocesses."""
+import collections
 from multiprocessing import pool
 import os
 import random
@@ -113,6 +114,12 @@ def run_in_parallel(func: Callable,
       A list of the return values of the function func, in the same order as the
       arguments.
     """
+    if isinstance(args, collections.abc.Sized):
+        if len(args) == 0:
+            return []
+        # Short-circuit for single element
+        if len(args) == 1:
+            return [func(next(iter(args)))]
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     processes = num_threads if num_threads is not None else get_parallel_threads(
     )
@@ -293,23 +300,3 @@ def kill_process_daemon(process_pid: int) -> None:
         # Disable input
         stdin=subprocess.DEVNULL,
     )
-
-
-def maybe_parallelize_cloud_operation(
-        func: Callable,
-        clouds: List[Any],
-        num_threads: Optional[int] = None) -> List[Any]:
-    """Apply a function to a list of clouds,
-    with parallelism if there is more than one cloud.
-    """
-    count = len(clouds)
-    if count == 0:
-        return []
-    # Short-circuit in single cloud setup.
-    if count == 1:
-        return [func(clouds[0])]
-    # Cloud operations are assumed to be IO-bound, so the parallelism is set to
-    # the number of clouds by default, we are still safe because the number of
-    # clouds is enumarable even if this assumption does not hold.
-    processes = num_threads if num_threads is not None else count
-    return run_in_parallel(func, clouds, processes)
