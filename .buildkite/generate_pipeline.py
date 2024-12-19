@@ -5,7 +5,7 @@ The script will generate two pipelines:
 
 tests/smoke_tests
 ├── test_*.py -> release pipeline
-├── test_pre_merge.py -> pre-merge pipeline
+├── test_quick_tests_core.py -> run quick tests on PR before merging
 
 run `PYTHONPATH=$(pwd)/tests:$PYTHONPATH python .buildkite/generate_pipeline.py`
 to generate the pipeline for testing. The CI will run this script as a pre-step,
@@ -208,8 +208,8 @@ def _convert_release(test_files: List[str]):
                            extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP})
 
 
-def _convert_pre_merge(test_files: List[str]):
-    yaml_file_path = '.buildkite/pipeline_smoke_tests_pre_merge.yaml'
+def _convert_quick_tests_core(test_files: List[str]):
+    yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
@@ -234,18 +234,18 @@ def _convert_pre_merge(test_files: List[str]):
 def main():
     test_files = os.listdir('tests/smoke_tests')
     release_files = []
-    pre_merge_files = []
+    quick_tests_core_files = []
     for test_file in test_files:
         if not test_file.startswith('test_'):
             continue
         test_file_path = os.path.join('tests/smoke_tests', test_file)
-        if "test_pre_merge" in test_file:
-            pre_merge_files.append(test_file_path)
+        if "test_quick_tests_core" in test_file:
+            quick_tests_core_files.append(test_file_path)
         else:
             release_files.append(test_file_path)
 
     _convert_release(release_files)
-    _convert_pre_merge(pre_merge_files)
+    _convert_quick_tests_core(quick_tests_core_files)
 
 
 if __name__ == '__main__':
