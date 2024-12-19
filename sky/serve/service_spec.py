@@ -8,6 +8,7 @@ import yaml
 
 from sky import serve
 from sky.serve import constants
+from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -327,5 +328,6 @@ class SkyServiceSpec:
         return self._use_ondemand_fallback
 
     @property
-    def load_balancing_policy(self) -> Optional[str]:
-        return self._load_balancing_policy
+    def load_balancing_policy(self) -> str:
+        return lb_policies.LoadBalancingPolicy.make_policy_name(
+            self._load_balancing_policy)

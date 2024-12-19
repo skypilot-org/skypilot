@@ -45,6 +45,8 @@ class SkyServeLoadBalancer:
         # Use the registry to create the load balancing policy
         self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
             load_balancing_policy_name)
+        logger.info('Starting load balancer with policy '
+                    f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
@@ -128,6 +130,7 @@ class SkyServeLoadBalancer:
             encountered if anything goes wrong.
         """
         logger.info(f'Proxy request to {url}')
+        self._load_balancing_policy.pre_execute_hook(url, request)
         try:
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
@@ -147,11 +150,16 @@ class SkyServeLoadBalancer:
                 content=await request.body(),
                 timeout=constants.LB_STREAM_TIMEOUT)
             proxy_response = await client.send(proxy_request, stream=True)
+
+            async def background_func():
+                await proxy_response.aclose()
+                self._load_balancing_policy.post_execute_hook(url, request)
+
             return fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
                 headers=proxy_response.headers,
-                background=background.BackgroundTask(proxy_response.aclose))
+                background=background.BackgroundTask(background_func))
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}')
@@ -263,7 +271,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--load-balancing-policy',
         choices=available_policies,
-        default='round_robin',
+        default=lb_policies.DEFAULT_LB_POLICY,
         help=f'The load balancing policy to use. Available policies: '
         f'{", ".join(available_policies)}.')
     args = parser.parse_args()

@@ -811,7 +811,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
         'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
     ]
     if show_all:
-        service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
+        service_columns.extend([
+            'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
+        ])
     service_table = log_utils.create_table(service_columns)
 
     replica_infos = []
@@ -832,6 +834,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         endpoint = get_endpoint(record)
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
+        load_balancing_policy = record['load_balancing_policy']
 
         service_values = [
             service_name,
@@ -842,7 +845,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            service_values.extend([policy, requested_resources_str])
+            service_values.extend(
+                [policy, load_balancing_policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
