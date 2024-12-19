@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -153,6 +154,9 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # We use 120KB as a threshold to be safe for other arguments that
 # might be added during ssh.
 _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
+
+_RESOURCES_UNAVAILABLE_LOG = (
+    'Reasons for provision failures (for details, please check the log above):')
 
 
 def _is_command_length_over_limit(command: str) -> bool:
@@ -1995,6 +1999,7 @@ class RetryingVmProvisioner(object):
                                        skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
+        resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
 
         # Retrying launchable resources.
         while True:
@@ -2070,6 +2075,7 @@ class RetryingVmProvisioner(object):
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
                 _add_to_blocked_resources(self._blocked_resources, to_provision)
+                resource_exceptions[to_provision] = failover_history[-1]
             else:
                 # If we reach here, it means that the existing cluster must have
                 # a previous status of INIT, because other statuses (UP,
@@ -2114,7 +2120,22 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                raise e.with_failover_history(failover_history)
+                table = log_utils.create_table(['Resource', 'Reason'])
+                for (resource, exception) in resource_exceptions.items():
+                    launched_resource_str = str(resource)
+                    # accelerator_args is way too long.
+                    # Convert from:
+                    #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
+                    # to:
+                    #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
+                    pattern = ', accelerator_args={.*}'
+                    launched_resource_str = re.sub(pattern, '...',
+                                                   launched_resource_str)
+                    table.add_row([launched_resource_str, exception])
+                table.max_table_width = shutil.get_terminal_size().columns
+                raise exceptions.ResourcesUnavailableError(
+                    _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
+                    failover_history=failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
@@ -2877,7 +2898,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'the `--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message,
+                            error_message + '\n' + str(e),
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
