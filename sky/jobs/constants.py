@@ -2,10 +2,12 @@
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
+JOBS_CONTROLLER_LOGS_DIR = '~/sky_controller_logs'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
 # Resources as a dict for the jobs controller.
+# TODO(cooperc): Update
 # Use default CPU instance type for jobs controller with >= 24GB, i.e.
 # m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8s_v4 (8vCPUs, 32 GB)
 # for Azure, and n1-standard-8 (8 vCPUs, 32 GB) for GCP, etc.

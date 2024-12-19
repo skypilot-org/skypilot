@@ -33,11 +33,13 @@ setup: |
 
 run: |
   {{ sky_activate_python_env }}
-  # Start the controller for the current managed job.
-  python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
-    --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+  # Call schedule_step to kick off the job if there are sufficient available resources.
+  # Note: job is submitted by CloudVmRayBackend._exec_code_on_head() calling managed_job_codegen.set_pending().
+  python -u -m sky.jobs.scheduler
+
 
 envs:
+  DAG_YAML_PATH: {{remote_user_yaml_path}}
 {%- for env_name, env_value in controller_envs.items() %}
   {{env_name}}: {{env_value}}
 {%- endfor %}

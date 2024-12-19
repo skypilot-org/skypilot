@@ -1,5 +1,6 @@
 """Controller: handles the life cycle of a managed job."""
 import argparse
+import contextlib
 import multiprocessing
 import os
 import pathlib
@@ -16,6 +17,7 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import recovery_strategy
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
@@ -175,11 +177,31 @@ class JobsController:
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             cluster_name, self._backend, task, self._retry_until_up)
-        managed_job_state.set_submitted(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            submitted_at,
+
+        def _schedule_launch():
+            if task_id == 0:
+                # The job is already SUBMITTED in this case, and we do not need to schedule.
+                return contextlib.nullcontext()
+            # We need to wait for a scheduling slot.
+            # Neither the previous task or the current task is SUBMITTED or RUNNING.
+            return scheduler.schedule_active_job_launch(is_running=False)
+
+        with _schedule_launch():
+            # Note: task_id 0 will already be set to submitted by the scheduler.
+            # However, we only call the callback func here, so keep this.
+            managed_job_state.set_submitted(self._job_id,
+                                            task_id,
+                                            callback_func=callback_func)
+        logger.info(
+            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
+            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
+
+        logger.info('Started monitoring.')
+        managed_job_state.set_starting(
+            job_id=self._job_id,
+            task_id=task_id,
+            run_timestamp=self._backend.run_timestamp,
+            submit_time=submitted_at,
             resources_str=backend_utils.get_task_resources_str(
                 task, is_managed_job=True),
             specs={
@@ -187,14 +209,6 @@ class JobsController:
                     self._strategy_executor.max_restarts_on_errors
             },
             callback_func=callback_func)
-        logger.info(
-            f'Submitted managed job {self._job_id} (task: {task_id}, name: '
-            f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
-
-        logger.info('Started monitoring.')
-        managed_job_state.set_starting(job_id=self._job_id,
-                                       task_id=task_id,
-                                       callback_func=callback_func)
         remote_job_submitted_at = self._strategy_executor.launch()
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
@@ -202,6 +216,8 @@ class JobsController:
                                       task_id=task_id,
                                       start_time=remote_job_submitted_at,
                                       callback_func=callback_func)
+        # Finished sky launch so now maybe something else can launch.
+        scheduler.schedule_step()
         while True:
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -350,14 +366,21 @@ class JobsController:
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
-            managed_job_state.set_recovering(job_id=self._job_id,
-                                             task_id=task_id,
-                                             callback_func=callback_func)
+            managed_job_state.set_pending_recovery(job_id=self._job_id,
+                                                   task_id=task_id,
+                                                   callback_func=callback_func)
+            # schedule_recovery() will block until we can recover
+            with scheduler.schedule_active_job_launch(is_running=True):
+                managed_job_state.set_recovering(job_id=self._job_id,
+                                                 task_id=task_id,
+                                                 callback_func=callback_func)
             recovered_time = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
+            # Just finished launching, maybe something was waiting to start.
+            scheduler.schedule_step()
 
     def run(self):
         """Run controller logic and handle exceptions."""
@@ -562,6 +585,10 @@ def start(job_id, dag_yaml, retry_until_up):
                 FAILED_CONTROLLER,
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky jobs logs --controller {job_id}'))
+
+        # Run the scheduler to kick off any pending jobs that can now start.
+        logger.info('Running scheduler')
+        scheduler.schedule_step()
 
 
 if __name__ == '__main__':
