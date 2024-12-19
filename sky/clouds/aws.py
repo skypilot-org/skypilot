@@ -100,6 +100,22 @@ class AWSIdentityType(enum.Enum):
     #     region                us-east-1      config-file    ~/.aws/config
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
+    def can_credential_expire(self) -> bool:
+        """Check if the AWS identity type can expire.
+
+        SSO,IAM Role,and Container Role use temporary credentials, which
+        expire and require re-authentication or re-acquisition of credentials.
+        ENV and Shared Credentials File store long-term credentials, which do
+        not expire unless manually changed, but if temporary credentials are
+        used,they will expire and require re-authentication.
+        """
+        expirable_types = {
+            AWSIdentityType.ENV, AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE,
+            AWSIdentityType.SHARED_CREDENTIALS_FILE
+        }
+        return self in expirable_types
+
 
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
@@ -811,6 +827,12 @@ class AWS(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
+
+    @functools.lru_cache(maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._current_identity_type()
+        return identity_type is not None and identity_type.can_credential_expire(
+        )
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
