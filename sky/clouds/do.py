@@ -273,7 +273,7 @@ class DO(clouds.Cloud):
             return {
                 f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
             }
-        except do_utils.DigitalOceanError as err:
+        except do_utils.DigitalOceanError:
             return {}
 
     @classmethod

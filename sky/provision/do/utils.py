@@ -61,7 +61,6 @@ def _init_client():
         raise DigitalOceanError(
             'no credentials file found from '
             f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
-        return _client
 
     # attempt default context
     credentials = common_utils.read_yaml(CREDENTIALS_PATH)
