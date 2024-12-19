@@ -1293,7 +1293,7 @@ def test_cancel_ibm():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
-@pytest.makr.no_do
+@pytest.mark.no_do
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = smoke_tests_utils.get_cluster_name()
