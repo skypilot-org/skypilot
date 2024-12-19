@@ -31,6 +31,7 @@ class SkyServiceSpec:
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
+        expose_service: Optional[bool] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -79,6 +80,7 @@ class SkyServiceSpec:
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
+        self._expose_service: Optional[bool] = expose_service
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -159,6 +161,8 @@ class SkyServiceSpec:
                     'base_ondemand_fallback_replicas', None)
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
+        if config.get('expose_service', False):
+            service_config['expose_service'] = True
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
@@ -219,6 +223,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('expose_service', None, self._expose_service)
         return config
 
     def probe_str(self):
@@ -321,6 +326,10 @@ class SkyServiceSpec:
     @property
     def downscale_delay_seconds(self) -> Optional[int]:
         return self._downscale_delay_seconds
+
+    @property
+    def expose_service(self) -> Optional[bool]:
+        return self._expose_service
 
     @property
     def use_ondemand_fallback(self) -> bool:
