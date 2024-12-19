@@ -197,8 +197,9 @@ def test_skyserve_oci_http():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
+@pytest.mark.parametrize('accelerator', [{'do' : 'H100'}])
 @pytest.mark.serve
-def test_skyserve_llm(generic_cloud: str):
+def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
 
@@ -217,7 +218,7 @@ def test_skyserve_llm(generic_cloud: str):
     test = smoke_tests_utils.Test(
         f'test-skyserve-llm',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} --gpus {accelerator} -y tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
@@ -257,6 +258,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_do
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
