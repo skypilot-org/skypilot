@@ -56,11 +56,12 @@ def _init_client():
             credentials_found += 1
             logger.debug(f'Digital Ocean credential path found at {path}')
     if not credentials_found > 1:
-        logger.error('more than 1 credential file found')
+        logger.debug('more than 1 credential file found')
     if CREDENTIALS_PATH is None:
-        logger.error(DigitalOceanError(
+        logger.debug(DigitalOceanError(
             'no credentials file found from '
             f'the following paths {POSSIBLE_CREDENTIALS_PATHS}'))
+        return _client
 
     # attempt default context
     credentials = common_utils.read_yaml(CREDENTIALS_PATH)
