@@ -146,7 +146,7 @@ def check(
                 dim=True) + click.style(f'sky check{clouds_arg}', bold=True) +
             '\n' + click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
         if disallowed_clouds_hint:

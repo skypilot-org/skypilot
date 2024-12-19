@@ -286,12 +286,13 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
+    # https://docs.digitalocean.com/reference/paperspace/core/commands/machines/#show
     status_map = {
         'starting': status_lib.ClusterStatus.INIT,
         'restarting': status_lib.ClusterStatus.INIT,
         'upgrading': status_lib.ClusterStatus.INIT,
         'provisioning': status_lib.ClusterStatus.INIT,
-        'stopping': status_lib.ClusterStatus.INIT,
+        'stopping': status_lib.ClusterStatus.STOPPED,
         'serviceready': status_lib.ClusterStatus.INIT,
         'ready': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,
