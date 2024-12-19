@@ -110,8 +110,9 @@ class AWSIdentityType(enum.Enum):
         used,they will expire and require re-authentication.
         """
         expirable_types = {
-            AWSIdentityType.SSO, AWSIdentityType.IAM_ROLE,
-            AWSIdentityType.CONTAINER_ROLE
+            AWSIdentityType.ENV, AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE,
+            AWSIdentityType.SHARED_CREDENTIALS_FILE
         }
         return self in expirable_types
 
@@ -827,6 +828,7 @@ class AWS(clouds.Cloud):
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
+    @functools.lru_cache(maxsize=1)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
         return identity_type is not None and identity_type.can_credential_expire(
