@@ -1,7 +1,7 @@
 """Oracle OCI cloud adaptor"""
 
-import os
 import logging
+import os
 
 from sky.adaptors import common
 

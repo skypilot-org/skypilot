@@ -8,7 +8,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
-from sky.utils import ux_utils, rich_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 

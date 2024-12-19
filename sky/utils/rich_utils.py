@@ -1,7 +1,7 @@
 """Rich status spinner utils."""
 import contextlib
 import threading
-from typing import Union, Dict, Optional
+from typing import Dict, Optional, Union
 
 import rich.console as rich_console
 
@@ -15,6 +15,7 @@ _logging_lock = threading.RLock()
 # Track sub thread progress statuses
 _thread_statuses: Dict[int, Optional[str]] = {}
 _status_lock = threading.RLock()
+
 
 class _NoOpConsoleStatus:
     """An empty class for multi-threaded console.status."""
@@ -82,6 +83,7 @@ class _RevertibleStatus:
 
 class _ThreadStatus:
     """A wrapper of sub thread status"""
+
     def __init__(self, message: str):
         self.thread_id = threading.get_ident()
         self.message = message
@@ -113,6 +115,7 @@ class _ThreadStatus:
         _thread_statuses[self.thread_id] = self.message
         refresh()
 
+
 def refresh():
     """Refresh status to include all thread statuses."""
     if _status is None or _main_message is None:
@@ -123,6 +126,7 @@ def refresh():
             if v is not None:
                 msg = msg + f'\n  └─ {v}'
         _status.update(msg)
+
 
 def safe_status(msg: str) -> Union['rich_console.Status', '_NoOpConsoleStatus']:
     """A wrapper for multi-threaded console.status."""
@@ -136,6 +140,7 @@ def safe_status(msg: str) -> Union['rich_console.Status', '_NoOpConsoleStatus']:
         return _RevertibleStatus(msg)
     else:
         return _ThreadStatus(msg)
+
 
 def stop_safe_status():
     """Stops all nested statuses.
