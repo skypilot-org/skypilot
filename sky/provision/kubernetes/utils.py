@@ -1234,7 +1234,7 @@ def construct_ssh_jump_command(
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
                               f'-o IdentitiesOnly=yes '
-                              f'-W %h:%p {ssh_jump_user}@{ssh_jump_ip}')
+                              f'-W \[%h\]:%p {ssh_jump_user}@{ssh_jump_ip}')
     if ssh_jump_port is not None:
         ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
