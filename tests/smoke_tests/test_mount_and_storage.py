@@ -332,7 +332,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         # SkyPilot should automatically pick the right store on the same cloud.
         # For other clouds, since SkyPilot may choose azure as the store, which
         # is not supported on ubuntu 18.04, we set the store to s3.
-        private_mount_store = (None if generic_cloud in ['aws', 'gcp'] else 's3')
+        private_mount_store = (None
+                               if generic_cloud in ['aws', 'gcp'] else 's3')
         content = template.render(storage_name=storage_name,
                                   include_azure_mount=False,
                                   private_mount_store=private_mount_store)
