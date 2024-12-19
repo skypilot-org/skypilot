@@ -268,10 +268,13 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        do_utils.client()
-        return {
-            f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
-        }
+        try:
+            do_utils.client()
+            return {
+                f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
+            }
+        except do_utils.DigitalOceanError as err:
+            return {}
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
