@@ -67,7 +67,9 @@ def create_table(cursor, conn):
         task_id INTEGER DEFAULT 0,
         task_name TEXT,
         specs TEXT,
-        local_log_file TEXT DEFAULT NULL)""")
+        local_log_file TEXT DEFAULT NULL,
+        pid INTEGER DEFAULT NULL,
+        dag_yaml_path TEXT)""")
     conn.commit()
 
     db_utils.add_column_to_table(cursor, conn, 'spot', 'failure_reason', 'TEXT')
@@ -106,6 +108,11 @@ def create_table(cursor, conn):
                                  }))
     db_utils.add_column_to_table(cursor, conn, 'spot', 'local_log_file',
                                  'TEXT DEFAULT NULL')
+
+    db_utils.add_column_to_table(cursor, conn, 'spot', 'pid',
+                                 'INTEGER DEFAULT NULL')
+
+    db_utils.add_column_to_table(cursor, conn, 'spot', 'dag_yaml_path', 'TEXT')
 
     # `job_info` contains the mapping from job_id to the job_name.
     # In the future, it may contain more information about each job.
@@ -161,6 +168,8 @@ columns = [
     'task_name',
     'specs',
     'local_log_file',
+    'pid',
+    'dag_yaml_path',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
@@ -189,16 +198,18 @@ class ManagedJobStatus(enum.Enum):
         SUCCEEDED       ->  SUCCEEDED
         FAILED          ->  FAILED
         FAILED_SETUP    ->  FAILED_SETUP
+    Not all statuses are in this list, since some ManagedJobStatuses are only
+    possible while the cluster is INIT/STOPPED/not yet UP.
     Note that the JobStatus will not be stuck in PENDING, because each cluster
     is dedicated to a managed job, i.e. there should always be enough resource
     to run the job and the job will be immediately transitioned to RUNNING.
+
     """
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
-    # The submitted_at timestamp of the managed job in the 'spot' table will be
-    # set to the time when the job is firstly submitted by the user (set to
-    # PENDING).
     PENDING = 'PENDING'
+    # The submitted_at timestamp of the managed job in the 'spot' table will be
+    # set to the time when the job controller begins running.
     # SUBMITTED: The jobs controller starts the controller process.
     SUBMITTED = 'SUBMITTED'
     # STARTING: The controller process is launching the cluster for the managed
@@ -209,6 +220,9 @@ class ManagedJobStatus(enum.Enum):
     # The start_at timestamp of the managed job in the 'spot' table will be set
     # to the time when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    # PENDING_RECOVERY: The cluster is preempted, and the controller process is
+    # waiting (e.g. for available resources) to recover the cluster.
+    PENDING_RECOVERY = 'PENDING_RECOVERY'
     # RECOVERING: The cluster is preempted, and the controller process is
     # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
@@ -280,6 +294,7 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.SUBMITTED: colorama.Fore.BLUE,
     ManagedJobStatus.STARTING: colorama.Fore.BLUE,
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
+    ManagedJobStatus.PENDING_RECOVERY: colorama.Fore.CYAN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
     ManagedJobStatus.SUCCEEDED: colorama.Fore.GREEN,
     ManagedJobStatus.FAILED: colorama.Fore.RED,
@@ -302,29 +317,48 @@ def set_job_name(job_id: int, name: str):
             VALUES (?, ?)""", (job_id, name))
 
 
-def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
+def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str,
+                dag_yaml_path: str):
     """Set the task to pending state."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             INSERT INTO spot
-            (spot_job_id, task_id, task_name, resources, status)
-            VALUES (?, ?, ?, ?, ?)""",
+            (spot_job_id, task_id, task_name, resources, status, dag_yaml_path)
+            VALUES (?, ?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
-             ManagedJobStatus.PENDING.value))
+             ManagedJobStatus.PENDING.value, dag_yaml_path))
 
 
-def set_submitted(job_id: int, task_id: int, run_timestamp: str,
-                  submit_time: float, resources_str: str,
-                  specs: Dict[str, Union[str,
-                                         int]], callback_func: CallbackType):
+def set_submitted(job_id: int, task_id: int, callback_func: CallbackType):
     """Set the task to submitted.
 
     Args:
         job_id: The managed job ID.
         task_id: The task ID.
+        callback_func: The callback function.
+    """
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE spot SET
+            status=(?)
+            WHERE spot_job_id=(?) AND
+            task_id=(?)""", (ManagedJobStatus.SUBMITTED.value, job_id, task_id))
+    callback_func('SUBMITTED')
+
+
+def set_starting(job_id: int, task_id: int, run_timestamp: str,
+                 submit_time: float, resources_str: str,
+                 specs: Dict[str, Union[str,
+                                        int]], callback_func: CallbackType):
+    """Set the task to starting state.
+
+    Args:
+        job_id: The managed job ID.
+        task_id: The task ID.
         run_timestamp: The run_timestamp of the run. This will be used to
-            determine the log directory of the managed task.
+        determine the log directory of the managed task.
         submit_time: The time when the managed task is submitted.
         resources_str: The resources string of the managed task.
         specs: The specs of the managed task.
@@ -335,31 +369,20 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
     # make it easier to find them based on one of the values.
     # Also, using the earlier timestamp should be closer to the term
     # `submit_at`, which represents the time the managed task is submitted.
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE spot SET
-            resources=(?),
-            submitted_at=(?),
-            status=(?),
-            run_timestamp=(?),
-            specs=(?)
-            WHERE spot_job_id=(?) AND
-            task_id=(?)""",
-            (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
-             run_timestamp, json.dumps(specs), job_id, task_id))
-    callback_func('SUBMITTED')
-
-
-def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
-    """Set the task to starting state."""
     logger.info('Launching the spot cluster...')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
-            UPDATE spot SET status=(?)
+            UPDATE spot SET
+            status=(?),
+            resources=(?),
+            submitted_at=(?),
+            run_timestamp=(?),
+            specs=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""", (ManagedJobStatus.STARTING.value, job_id, task_id))
+            task_id=(?)""",
+            (ManagedJobStatus.STARTING.value, resources_str, submit_time,
+             run_timestamp, json.dumps(specs), job_id, task_id))
     callback_func('STARTING')
 
 
@@ -384,8 +407,23 @@ def set_started(job_id: int, task_id: int, start_time: float,
     callback_func('STARTED')
 
 
+def set_pending_recovery(job_id: int, task_id: int,
+                         callback_func: CallbackType):
+    """Set the task to pending recovery state, and update the job duration."""
+    logger.info('=== Recovering... ===')
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE spot SET
+            status=(?), job_duration=job_duration+(?)-last_recovered_at
+            WHERE spot_job_id=(?) AND
+            task_id=(?)""", (ManagedJobStatus.PENDING_RECOVERY.value,
+                             time.time(), job_id, task_id))
+    callback_func('PENDING_RECOVERY')
+
+
 def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
-    """Set the task to recovering state, and update the job duration."""
+    """Set the task to recovering state."""
     logger.info('=== Recovering... ===')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -458,9 +496,11 @@ def set_failed(
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         previous_status = cursor.execute(
             'SELECT status FROM spot WHERE spot_job_id=(?)',
-            (job_id,)).fetchone()
-        previous_status = ManagedJobStatus(previous_status[0])
-        if previous_status in [ManagedJobStatus.RECOVERING]:
+            (job_id,)).fetchone()[0]
+        previous_status = ManagedJobStatus(previous_status)
+        if previous_status in [
+                ManagedJobStatus.PENDING_RECOVERY, ManagedJobStatus.RECOVERING
+        ]:
             # If the job is recovering, we should set the
             # last_recovered_at to the end_time, so that the
             # end_at - last_recovered_at will not be affect the job duration
@@ -528,6 +568,12 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
         cursor.execute(
             'UPDATE spot SET local_log_file=(?) '
             f'WHERE {filter_str}', filter_args)
+
+
+def set_job_controller_pid(job_id: int, pid: int):
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            f'UPDATE spot SET pid={pid} WHERE spot_job_id={job_id!r}')
 
 
 # ======== utility functions ========
@@ -694,3 +740,42 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
             f'SELECT local_log_file FROM spot '
             f'WHERE {filter_str}', filter_args).fetchone()
         return local_log_file[-1] if local_log_file else None
+
+
+def get_num_launching_jobs() -> int:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        return cursor.execute(
+            'SELECT COUNT(*) '
+            'FROM spot '
+            'WHERE status IN (?, ?, ?)', (
+                ManagedJobStatus.SUBMITTED.value,
+                ManagedJobStatus.STARTING.value,
+                ManagedJobStatus.RECOVERING.value,
+            )).fetchone()[0]
+
+
+def get_num_alive_jobs() -> int:
+    terminal_status_fields = ', '.join(
+        ['?'] * len(ManagedJobStatus.terminal_statuses()))
+    terminal_status_field_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        return cursor.execute(
+            'SELECT COUNT(*) '
+            'FROM spot '
+            f'WHERE status NOT IN (?, {terminal_status_fields})',
+            (ManagedJobStatus.PENDING.value,
+             *terminal_status_field_values)).fetchone()[0]
+
+
+def get_first_pending_job_id_and_yaml() -> Optional[Tuple[int, str]]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        # Only consider the first task in the job dag. If it is not pending, the controller for the whole job has already been started.
+        return cursor.execute(
+            'SELECT spot_job_id, dag_yaml_path '
+            'FROM spot '
+            'WHERE task_id = 0 '
+            'AND status = (?) '
+            'ORDER BY spot_job_id LIMIT 1',
+            (ManagedJobStatus.PENDING.value,)).fetchone()

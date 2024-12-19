@@ -3329,8 +3329,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         codegen: str,
         job_id: int,
+        task: task_lib.Task,
         detach_run: bool = False,
-        managed_job_dag: Optional['dag.Dag'] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3378,11 +3378,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             _dump_code_to_file(codegen)
             job_submit_cmd = f'{mkdir_code} && {code}'
 
-        if managed_job_dag is not None:
+        if task.managed_job_dag is not None:
             # Add the managed job to job queue database.
             managed_job_codegen = managed_jobs.ManagedJobCodeGen()
             managed_job_code = managed_job_codegen.set_pending(
-                job_id, managed_job_dag)
+                job_id, task.managed_job_dag, task.envs['DAG_YAML_PATH'])
             # Set the managed job to PENDING state to make sure that this
             # managed job appears in the `sky jobs queue`, when there are
             # already 2x vCPU controller processes running on the controller VM,
@@ -4896,7 +4896,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                task=task)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -4952,4 +4952,4 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                task=task)
