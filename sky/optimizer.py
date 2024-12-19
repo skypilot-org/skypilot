@@ -4,7 +4,7 @@ import copy
 import enum
 import json
 import typing
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
 import numpy as np
@@ -1296,7 +1296,8 @@ def _fill_in_launchable_resources(
 
         feasible_list = subprocess_utils.run_in_parallel(
             lambda cloud, r=resources, n=task.num_nodes:
-            (cloud, cloud.get_feasible_launchable_resources(r, n)), clouds_list)
+            (cloud, cloud.get_feasible_launchable_resources(r, n)),
+            clouds_list)
         for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
