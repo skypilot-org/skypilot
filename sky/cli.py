@@ -35,6 +35,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import webbrowser
@@ -72,6 +73,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -1398,8 +1400,12 @@ def _get_managed_jobs(
                 f'Details: {common_utils.format_exception(e, use_bracket=True)}'
             )
     except Exception as e:  # pylint: disable=broad-except
-        msg = ('Failed to query managed jobs: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+        msg = ''
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            msg += traceback.format_exc()
+            msg += '\n'
+        msg += ('Failed to query managed jobs: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
         max_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
