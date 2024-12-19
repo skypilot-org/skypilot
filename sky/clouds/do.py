@@ -262,6 +262,8 @@ class DO(clouds.Cloud):
             do_utils.client().droplets.list()
         except do.exceptions().HttpResponseError as err:
             return False, str(err)
+        except do_utils.DigitalOceanError as err:
+            return False, str(err)
 
         return True, None
 

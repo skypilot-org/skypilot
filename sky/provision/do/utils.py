@@ -58,9 +58,9 @@ def _init_client():
     if not credentials_found > 1:
         logger.debug('more than 1 credential file found')
     if CREDENTIALS_PATH is None:
-        logger.debug(DigitalOceanError(
+        raise DigitalOceanError(
             'no credentials file found from '
-            f'the following paths {POSSIBLE_CREDENTIALS_PATHS}'))
+            f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
         return _client
 
     # attempt default context
@@ -88,8 +88,9 @@ def _init_client():
             except do.exceptions().HttpResponseError:
                 continue
         else:
-            logger.debug('no valid api tokens found try '
-                         'setting a new API token with `doctl auth init`')
+            raise DigitalOceanError(
+                'no valid api tokens found try '
+                'setting a new API token with `doctl auth init`')
     return _client
 
 
