@@ -8,6 +8,9 @@
 {% endif %}
 
 {#- Logo HTML and image #}
-<a class="navbar-brand logo" href="{{ href }}">
-    {{ theme_logo["svg"] }}
+<a class="navbar-brand logo only-light" href="{{ href }}">
+    {{ theme_logo["svg_dark"] }}
+</a>
+<a class="navbar-brand logo only-dark" href="{{ href }}">
+    {{ theme_logo["svg_dark"] }}
 </a>

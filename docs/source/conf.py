@@ -85,7 +85,13 @@ html_theme_options = {
     ],
     'navbar_persistent': ['search-button-field'],
     'logo': {
-        'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
+        # 'image_light': render_svg_logo('_static/SkyPilot_wide_light.svg'),
+        # 'image_dark': render_svg_logo('_static/SkyPilot_wide_dark.svg'),
+        'svg_light': render_svg_logo('_static/SkyPilot_wide_light.svg'),
+        'svg_dark': render_svg_logo('_static/SkyPilot_wide_dark.svg'),
+        # 'image_light': '_static/SkyPilot_wide_light.svg',
+        # 'image_dark': '_static/SkyPilot_wide_dark.svg',
+        # 'svg': render_svg_logo('_static/SkyPilot_wide_light.svg'),
     },
     'icon_links': [{
         'name': 'Slack',
