@@ -1000,6 +1000,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.Cudo,
             clouds.Paperspace,
             clouds.Azure,
+            clouds.DO,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):

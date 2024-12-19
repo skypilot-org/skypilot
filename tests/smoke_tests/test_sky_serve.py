@@ -25,7 +25,7 @@
 import inspect
 import json
 import shlex
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -197,9 +197,11 @@ def test_skyserve_oci_http():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
-def test_skyserve_llm(generic_cloud: str):
+def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_service_name()
 
     def generate_llm_test_command(prompt: str, expected_output: str) -> str:
@@ -217,7 +219,7 @@ def test_skyserve_llm(generic_cloud: str):
     test = smoke_tests_utils.Test(
         f'test-skyserve-llm',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} --gpus {accelerator} -y tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
@@ -257,6 +259,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_do
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -321,6 +324,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
@@ -507,6 +511,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -537,6 +542,7 @@ def test_skyserve_update(generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -654,6 +660,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
+@pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -717,6 +724,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
