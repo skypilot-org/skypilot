@@ -10,4 +10,4 @@ workdir: .
 num_nodes: 1
 
 run: |
-  ls -l ~/aws/tests/test_yamls/minimal_test_pre_merge.yaml
+  ls -l ~/aws/tests/test_yamls/minimal_test_quick_tests_core.yaml
