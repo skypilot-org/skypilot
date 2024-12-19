@@ -5,7 +5,10 @@ import os
 
 from sky.adaptors import common
 
-# Get rid of circuit breaker info logs, which may mess up console status
+# Suppress OCI circuit breaker logging before lazy import, because
+# oci modules prints additional message during imports, i.e., the
+# set_logger in the LazyImport called after imports will not take
+# effect.
 logging.getLogger('oci.circuit_breaker').setLevel(logging.WARNING)
 
 CONFIG_PATH = '~/.oci/config'
