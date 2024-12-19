@@ -1,4 +1,5 @@
 """Utility functions for subprocesses."""
+import collections
 from multiprocessing import pool
 import os
 import random
@@ -113,6 +114,12 @@ def run_in_parallel(func: Callable,
       A list of the return values of the function func, in the same order as the
       arguments.
     """
+    if isinstance(args, collections.abc.Sized):
+        if len(args) == 0:
+            return []
+        # Short-circuit for single element
+        if len(args) == 1:
+            return [func(next(iter(args)))]
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     processes = num_threads if num_threads is not None else get_parallel_threads(
     )

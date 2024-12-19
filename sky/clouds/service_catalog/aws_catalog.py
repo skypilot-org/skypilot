@@ -292,6 +292,7 @@ def get_region_zones_for_instance_type(instance_type: str,
     return us_region_list + other_region_list
 
 
+@timeline.event
 def list_accelerators(
         gpus_only: bool,
         name_filter: Optional[str],
