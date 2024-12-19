@@ -101,8 +101,8 @@ class AzureInstanceStatus(enum.Enum):
     ) -> Dict['AzureInstanceStatus', Optional[status_lib.ClusterStatus]]:
         return {
             cls.PENDING: status_lib.ClusterStatus.INIT,
-            cls.STOPPING: status_lib.ClusterStatus.INIT,
             cls.RUNNING: status_lib.ClusterStatus.UP,
+            cls.STOPPING: status_lib.ClusterStatus.STOPPED,
             cls.STOPPED: status_lib.ClusterStatus.STOPPED,
             cls.DELETING: None,
         }
@@ -305,7 +305,8 @@ def _create_vm(
         network_profile=network_profile,
         identity=compute.VirtualMachineIdentity(
             type='UserAssigned',
-            user_assigned_identities={provider_config['msi']: {}}))
+            user_assigned_identities={provider_config['msi']: {}}),
+        priority=node_config['azure_arm_parameters'].get('priority', None))
     vm_poller = compute_client.virtual_machines.begin_create_or_update(
         resource_group_name=provider_config['resource_group'],
         vm_name=vm_name,
