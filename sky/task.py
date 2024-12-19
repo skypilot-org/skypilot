@@ -23,7 +23,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
-
+from sky.utils import timeline
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 

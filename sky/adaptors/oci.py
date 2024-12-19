@@ -1,8 +1,12 @@
 """Oracle OCI cloud adaptor"""
 
 import os
+import logging
 
 from sky.adaptors import common
+
+# Get rid of circuit breaker info logs, which may mess up console status
+logging.getLogger('oci.circuit_breaker').setLevel(logging.WARNING)
 
 CONFIG_PATH = '~/.oci/config'
 ENV_VAR_OCI_CONFIG = 'OCI_CONFIG'
