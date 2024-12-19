@@ -25,7 +25,7 @@
 import inspect
 import json
 import shlex
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -201,6 +201,7 @@ def test_skyserve_oci_http():
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_service_name()
 
     def generate_llm_test_command(prompt: str, expected_output: str) -> str:
