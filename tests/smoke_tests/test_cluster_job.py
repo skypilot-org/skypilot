@@ -220,16 +220,18 @@ def test_scp_job_queue():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
-def test_job_queue_multinode(generic_cloud: str):
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = smoke_tests_utils.Test(
         'job_queue_multinode',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_multinode.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_multinode.yaml',
-            f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/job_queue/cluster_multinode.yaml',
+            f'sky exec {name} -n {name}-1 -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-2 -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-3 --detach-setup -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
@@ -238,16 +240,16 @@ def test_job_queue_multinode(generic_cloud: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep SETTING_UP',
             f'sky cancel -y {name} 1 2 3',
-            f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-4 --detach-setup -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
             'sleep 5',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
             f'sky cancel -y {name} 4',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
-            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus T4:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus T4:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 5 --status',
             f'sky logs {name} 6 --status',
             f'sky logs {name} 7 --status',
@@ -1238,12 +1240,14 @@ def test_cancel_azure():
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-def test_cancel_pytorch(generic_cloud: str):
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'cancel-pytorch',
         [
-            f'sky launch -c {name} --cloud {generic_cloud} examples/resnet_distributed_torch.yaml -y -d',
+            f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 90',
             f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep python) || '

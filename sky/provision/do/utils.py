@@ -61,20 +61,33 @@ def _init_client():
             'no credentials file found from '
             f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
 
-    auth_contexts = common_utils.read_yaml(CREDENTIALS_PATH)['auth-contexts']
-    for context, api_token in auth_contexts.items():
+    # attempt default context
+    credentials = common_utils.read_yaml(CREDENTIALS_PATH)
+    default_token = credentials.get('access-token', None)
+    if default_token is not None:
         try:
-            test_client = do.pydo.Client(token=api_token)
+            test_client = do.pydo.Client(token=default_token)
             test_client.droplets.list()
-            logger.debug(f'using {context} context')
+            logger.debug('trying `default` context')
             _client = test_client
-            break
+            return _client
         except do.exceptions().HttpResponseError:
-            continue
-    else:
-        raise DigitalOceanError(
-            'no valid api tokens found try '
-            'setting a new API token with `doctl auth init`')
+            pass
+
+    auth_contexts = credentials.get('auth-contexts', None)
+    if auth_contexts is not None:
+        for context, api_token in auth_contexts.items():
+            try:
+                test_client = do.pydo.Client(token=api_token)
+                test_client.droplets.list()
+                logger.debug(f'using {context} context')
+                _client = test_client
+                break
+            except do.exceptions().HttpResponseError:
+                continue
+        else:
+            logger.debug('no valid api tokens found try '
+                         'setting a new API token with `doctl auth init`')
     return _client
 
 
@@ -167,7 +180,7 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
     tags = [f'{key}:{value}' for key, value in tags.items()]
     default_image = constants.GPU_IMAGES.get(
         config.node_config['InstanceType'],
-        'ubuntu-22-04-x64',
+        'gpu-h100x1-base',
     )
     image_id = config.node_config['ImageId']
     image_id = image_id if image_id is not None else default_image
@@ -183,7 +196,6 @@ def create_instance(region: str, cluster_name_on_cloud: str, instance_type: str,
                 config.authentication_config['ssh_public_key'])['fingerprint']
         ],
         'tags': tags,
-        'user_data': constants.INSTALL_DOCKER,
     }
     instance = _create_droplet(instance_request)
 
