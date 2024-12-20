@@ -2,7 +2,7 @@
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
-JOBS_CONTROLLER_LOGS_DIR = '~/sky_controller_logs'
+JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 

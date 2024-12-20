@@ -55,7 +55,7 @@ _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
 
 def maybe_start_waiting_jobs() -> None:
-    """Determine if any managed jobs can be launched, and if so, launch them.
+    """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
     For newly submitted jobs, this includes starting the job controller
     process. For jobs that are already alive but are waiting to launch a new
@@ -76,7 +76,6 @@ def maybe_start_waiting_jobs() -> None:
     the jobs controller. New job controller processes will be detached from the
     current process and there will not be a parent/child relationship - see
     launch_new_process_tree for more.
-
     """
     try:
         # We must use a global lock rather than a per-job lock to ensure correct
@@ -112,7 +111,7 @@ def maybe_start_waiting_jobs() -> None:
                         # Can't schedule anything, break from scheduling loop.
                         break
 
-                logger.info(f'Scheduling job {maybe_next_job["job_id"]}')
+                logger.debug(f'Scheduling job {maybe_next_job["job_id"]}')
                 state.scheduler_set_launching(maybe_next_job['job_id'],
                                               current_state)
 
@@ -136,7 +135,7 @@ def maybe_start_waiting_jobs() -> None:
                         run_cmd, log_output=log_path)
                     state.set_job_controller_pid(job_id, pid)
 
-                    logger.info(f'Job {job_id} started with pid {pid}')
+                    logger.debug(f'Job {job_id} started with pid {pid}')
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -203,7 +202,6 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
 
     The job could be in any terminal ManagedJobStatus. However, once DONE, it
     should never transition back to another state.
-
     """
     if idempotent and (state.get_job_schedule_state(job_id)
                        == state.ManagedJobScheduleState.DONE):
