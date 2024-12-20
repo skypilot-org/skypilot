@@ -275,7 +275,9 @@ class HeartbeatMessageToReport(MessageToReport):
         properties = super().get_properties()
         # The run id is set by the skylet, which will always be the same for
         # the entire lifetime of the run.
-        with open(constants.USAGE_RUN_ID_FILE, 'r', encoding='utf-8') as f:
+        with open(os.path.expanduser(constants.USAGE_RUN_ID_FILE),
+                  'r',
+                  encoding='utf-8') as f:
             properties['run_id'] = f.read().strip()
         return properties
 
@@ -333,6 +335,9 @@ def _send_to_loki(message_type: MessageType):
         'environment': environment,
     }
     if message_type == MessageType.USAGE:
+        prom_labels['new_cluster'] = (message.original_cluster_status !=
+                                      'UP' and message.final_cluster_status ==
+                                      'UP')
         prom_labels['entrypoint'] = message.entrypoint
 
     headers = {'Content-type': 'application/json'}
@@ -411,7 +416,7 @@ def prepare_json_from_yaml_config(
 def _send_local_messages():
     """Send all messages not been uploaded to Loki."""
     for msg_type, message in messages.items():
-        if not message.message_sent:
+        if not message.message_sent and msg_type != MessageType.HEARTBEAT:
             # Avoid the fallback entrypoint to send the message again
             # in normal case.
             try:
