@@ -828,7 +828,7 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
 def set_job_controller_pid(job_id: int, pid: int):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
-            'UPDATE job_info SET'
+            'UPDATE job_info SET '
             'pid = (?) '
             'WHERE spot_job_id = (?)', (pid, job_id)).rowcount
         assert updated_count == 1, (job_id, updated_count)
