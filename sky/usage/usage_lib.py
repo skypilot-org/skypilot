@@ -269,7 +269,7 @@ class HeartbeatMessageToReport(MessageToReport):
     """Message to be reported to Grafana Loki for heartbeat on a cluster."""
 
     def __init__(self):
-        super().__init__(constants.HEARTBEAT_MESSAGE_SCHEMA_VERSION)
+        super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
 
     def get_properties(self) -> Dict[str, Any]:
         properties = super().get_properties()
@@ -331,7 +331,7 @@ def _send_to_loki(message_type: MessageType):
     if env_options.Options.IS_DEVELOPER.get():
         environment = 'dev'
     prom_labels = {
-        'type': message_type.value,
+        'type': message_type.value + f'-v{message.schema_version}',
         'environment': environment,
     }
     if message_type == MessageType.USAGE:
