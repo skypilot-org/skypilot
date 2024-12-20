@@ -335,7 +335,7 @@ def _send_to_loki(message_type: MessageType):
         'environment': environment,
     }
     if message_type == MessageType.USAGE:
-        prom_labels['new_cluster'] = (message.original_cluster_status !=
+        prom_labels['new_cluster'] = str(message.original_cluster_status !=
                                       'UP' and message.final_cluster_status ==
                                       'UP')
         prom_labels['entrypoint'] = message.entrypoint
