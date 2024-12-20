@@ -1,6 +1,7 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
+import threading
 from typing import Any, Callable, Optional, Tuple
 
 
@@ -24,8 +25,12 @@ class LazyImport:
         self._module = None
         self._import_error_message = import_error_message
         self._set_loggers = set_loggers
+        self._lock = threading.RLock()
 
     def load_module(self):
+        # Avoid extra imports when multiple threads try to import the same
+        # module. The overhead is minor since import can only run in serial
+        # due to GIL even in multi-threaded environments.
         if self._module is None:
             try:
                 self._module = importlib.import_module(self._module_name)
