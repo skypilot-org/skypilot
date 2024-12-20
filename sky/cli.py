@@ -486,7 +486,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -539,7 +539,14 @@ def _parse_override_params(
         else:
             override_params['disk_tier'] = disk_tier
     if ports:
-        override_params['ports'] = ports
+        if any(p.lower() == 'none' for p in ports):
+            if len(ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify both "none" and other '
+                                     'ports.')
+            override_params['ports'] = None
+        else:
+            override_params['ports'] = ports
     return override_params
 
 
@@ -730,7 +737,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
-    ports: Optional[Tuple[str]] = None,
+    ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
@@ -1084,7 +1091,7 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: Tuple[str],
+    ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -3592,15 +3599,12 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(cooperc): remove this flag once --fast can robustly detect cluster
-# yaml config changes
+# TODO(cooperc): remove this flag before releasing 0.8.0
 @click.option('--fast',
               default=False,
               is_flag=True,
-              help='[Experimental] Launch the job faster by skipping '
-              'controller initialization steps. If you update SkyPilot or '
-              'your local cloud credentials, they will not be reflected until '
-              'you run `sky jobs launch` at least once without this flag.')
+              help=('[Deprecated] Does nothing. Previous flag behavior is now '
+                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3625,7 +3629,7 @@ def jobs_launch(
     disk_tier: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
-    retry_until_up: bool,
+    retry_until_up: Optional[bool],
     yes: bool,
     fast: bool,
 ):
@@ -3683,6 +3687,16 @@ def jobs_launch(
     else:
         retry_until_up = True
 
+    # Deprecation. The default behavior is fast, and the flag will be removed.
+    # The flag was not present in 0.7.x (only nightly), so we will remove before
+    # 0.8.0 so that it never enters a stable release.
+    if fast:
+        click.secho(
+            'Flag --fast is deprecated, as the behavior is now default. The '
+            'flag will be removed soon. Please do not use it, so that you '
+            'avoid "No such option" errors.',
+            fg='yellow')
+
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
         with sky.Dag() as dag:
@@ -3697,13 +3711,24 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='cyan')
     dag, _ = admin_policy_utils.apply(
         dag, use_mutated_config_in_current_request=False)
-    dag = sky.optimize(dag)
 
-    if not yes:
+    if yes:
+        # Skip resource preview if -y is set, since we are probably running in
+        # a script and the user won't have a chance to review it anyway.
+        # This can save a couple of seconds.
+        click.secho(
+            f'Resources for managed job {dag.name!r} will be computed on the '
+            'managed jobs controller, since --yes is set.',
+            fg='cyan')
+
+    else:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='cyan')
+        dag = sky.optimize(dag)
+
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
@@ -3713,8 +3738,7 @@ def jobs_launch(
     managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
-                        retry_until_up=retry_until_up,
-                        fast=fast)
+                        retry_until_up=retry_until_up)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -3894,16 +3918,25 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest job logs, restarting the jobs controller if stopped.'
+)
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+              controller: bool, refresh: bool):
     """Tail the log of a managed job."""
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
                                follow=follow,
-                               controller=controller)
+                               controller=controller,
+                               refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

@@ -64,7 +64,7 @@ FAMILY_NAME_TO_SKYPILOT_GPU_NAME = {
     'standardNVSv2Family': 'M60',
     'standardNVSv3Family': 'M60',
     'standardNVPromoFamily': 'M60',
-    'standardNVSv4Family': 'Radeon MI25',
+    'standardNVSv4Family': 'MI25',
     'standardNDSFamily': 'P40',
     'StandardNVADSA10v5Family': 'A10',
     'StandardNCadsH100v5Family': 'H100',
