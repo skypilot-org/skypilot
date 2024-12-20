@@ -4,6 +4,7 @@ import logging
 import os
 
 from sky.adaptors import common
+from sky.clouds.utils import oci_utils
 
 # Suppress OCI circuit breaker logging before lazy import, because
 # oci modules prints additional message during imports, i.e., the
@@ -30,10 +31,16 @@ def get_config_file() -> str:
 
 def get_oci_config(region=None, profile='DEFAULT'):
     conf_file_path = get_config_file()
+    if not profile or profile == 'DEFAULT':
+        config_profile = oci_utils.oci_config.get_profile()
+    else:
+        config_profile = profile
+
     oci_config = oci.config.from_file(file_location=conf_file_path,
-                                      profile_name=profile)
+                                      profile_name=config_profile)
     if region is not None:
         oci_config['region'] = region
+
     return oci_config
 
 
@@ -52,6 +59,11 @@ def get_search_client(region=None, profile='DEFAULT'):
 
 def get_identity_client(region=None, profile='DEFAULT'):
     return oci.identity.IdentityClient(get_oci_config(region, profile))
+
+
+def get_object_storage_client(region=None, profile='DEFAULT'):
+    return oci.object_storage.ObjectStorageClient(
+        get_oci_config(region, profile))
 
 
 def service_exception():

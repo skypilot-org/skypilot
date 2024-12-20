@@ -120,7 +120,7 @@ extras_require: Dict[str, List[str]] = {
     'lambda': local_ray,
     'cloudflare': aws_dependencies,
     'scp': local_ray,
-    'oci': ['oci'] + local_ray,
+    'oci': ['oci', 'oci-cli'] + local_ray,
     'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
     'runpod': ['runpod>=1.5.1'],

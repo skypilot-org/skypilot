@@ -1031,6 +1031,16 @@ class Task:
                             storage.name, data_utils.Rclone.RcloneClouds.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     self.update_file_mounts({mnt_path: blob_path})
+                elif store_type is storage_lib.StoreType.OCI:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('oci://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'oci://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '

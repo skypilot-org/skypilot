@@ -737,3 +737,28 @@ class Rclone():
                 lines_to_keep.append(line)
 
         return lines_to_keep
+
+
+def split_oci_path(oci_path: str) -> Tuple[str, str]:
+    """Splits OCI Path into Bucket name and Relative Path to Bucket
+    Args:
+      oci_path: str; OCI Path, e.g. oci://imagenet/train/
+    """
+    path_parts = oci_path.replace('oci://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def verify_oci_bucket(name: str) -> bool:
+    """Helper method that checks if the OCI bucket exists
+    This method is mainly used by other cloud stores to check the
+    existence of an OCI bucket when it is specified as source. However,
+    We don't verify the existence of OCI bucket because moving data
+    directly between other cloud buckets and OCI buckets is currently
+    not supported.
+    Args:
+      name: str; Name of OCI Bucket (without oci:// prefix)
+    """
+    logger.debug(f'verify_oci_bucket: {name}')
+    return True
