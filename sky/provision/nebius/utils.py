@@ -8,8 +8,10 @@ from nebius.aio.service_error import RequestError
 from nebius.api.nebius.vpc.v1 import SubnetServiceClient, ListSubnetsRequest
 from nebius.api.nebius.compute.v1 import ListInstancesRequest, CreateInstanceRequest, InstanceSpec, \
     NetworkInterfaceSpec, IPAddress, ResourcesSpec, AttachedDiskSpec, ExistingDisk, DiskServiceClient, \
-    CreateDiskRequest, DiskSpec, SourceImageFamily,InstanceServiceClient, InstanceStatus, DiskStatus, DeleteInstanceRequest, \
-    PublicIPAddress, StopInstanceRequest, StartInstanceRequest, DeleteDiskRequest, GetInstanceRequest
+    CreateDiskRequest, DiskSpec, SourceImageFamily, InstanceServiceClient, InstanceStatus, DiskStatus, \
+    DeleteInstanceRequest, \
+    PublicIPAddress, StopInstanceRequest, StartInstanceRequest, DeleteDiskRequest, GetInstanceRequest, \
+    GpuClusterServiceClient, CreateGpuClusterRequest, InstanceGpuClusterSpec, GpuClusterSpec, DeleteGpuClusterRequest
 
 from sky import sky_logging
 from sky.adaptors import nebius
@@ -49,6 +51,49 @@ def retry(func):
                 time.sleep(POLL_INTERVAL)
 
     return wrapper
+
+def get_or_creat_gpu_cluster(name: str, region: str,) -> str:
+    """Creates a GPU cluster."""
+    service = GpuClusterServiceClient(sdk)
+    try:
+        cluster = service.get_by_name(GetByNameRequest(
+            parent_id=NB_PROJECT_ID,
+            name=name,
+        )).wait()
+        cluster_id = cluster.metadata.id
+        print('cluster1', cluster)
+    except RequestError:
+        cluster = service.create(CreateGpuClusterRequest(
+            metadata=ResourceMetadata(
+                parent_id=NB_PROJECT_ID,
+                name=name,
+            ),
+            spec=GpuClusterSpec(
+                infiniband_fabric='fabric-4'
+            )
+        )).wait()
+        print(cluster)
+        cluster_id = cluster.resource_id
+    return cluster_id
+
+def delete_cluster(name: str) -> None:
+    """Creates a GPU cluster."""
+    service = GpuClusterServiceClient(sdk)
+    try:
+        cluster = service.get_by_name(GetByNameRequest(
+            parent_id=NB_PROJECT_ID,
+            name=name,
+        )).wait()
+        cluster_id = cluster.metadata.id
+        logger.debug(f'Found GPU Cluster : {cluster_id}.')
+        service.delete(DeleteGpuClusterRequest(
+            id=cluster_id
+        )).wait()
+        logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
+    except RequestError as e:
+        logger.debug(f'GPU Cluster dose not exist or can not deleted {e}.')
+        pass
+    return
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
@@ -100,6 +145,13 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
     else:
         raise RuntimeError(f"Unsupported platform: {platform}")
     disk_name = 'disk-'+name
+
+    cluster_id = None
+    cluster_name = '-'.join(name.split('-')[:4])
+    if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
+        if preset == '8gpu-128vcpu-1600gb':
+
+            cluster_id = get_or_creat_gpu_cluster(cluster_name, region)
     try:
         service = DiskServiceClient(sdk)
         disk = service.get_by_name(GetByNameRequest(
@@ -152,6 +204,9 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
                 name=name,
             ),
             spec=InstanceSpec(
+                gpu_cluster=InstanceGpuClusterSpec(
+                    id=cluster_id,
+                ) if cluster_id else None,
                 boot_disk=AttachedDiskSpec(
                     attach_mode=AttachedDiskSpec.AttachMode(2),
                     existing_disk = ExistingDisk(

@@ -8,7 +8,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.nebius import utils
-from sky.provision.nebius.utils import get_iam_token_project_id, POLL_INTERVAL
+from sky.provision.nebius.utils import delete_cluster
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -164,6 +164,7 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
+    delete_cluster(cluster_name_on_cloud)
 
 
 def get_cluster_info(
