@@ -4,11 +4,13 @@ import time
 from time import sleep
 from typing import Any, Dict, List, Optional
 
+from rich import region
+
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.nebius import utils
-from sky.provision.nebius.utils import delete_cluster
+from sky.provision.nebius.utils import delete_cluster, get_iam_token_project_id, POLL_INTERVAL, get_project_by_region
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -17,8 +19,9 @@ from nebius.sdk import SDK
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
-NEBIUS_IAM_TOKEN, NB_PROJECT_ID = get_iam_token_project_id()
-
+params = get_iam_token_project_id()
+NEBIUS_IAM_TOKEN = params['iam_token']
+NB_TENANT_ID = params['tenant_id']
 
 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
@@ -26,10 +29,12 @@ QUERY_PORTS_TIMEOUT_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
 
-def _filter_instances(cluster_name_on_cloud: str,
+
+def _filter_instances(project_id: str,
+                      cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
                       head_only: bool = False) -> Dict[str, Any]:
-    instances = utils.list_instances()
+    instances = utils.list_instances(project_id)
     possible_names = [f'{cluster_name_on_cloud}-head']
     if not head_only:
         possible_names.append(f'{cluster_name_on_cloud}-worker')
@@ -52,19 +57,22 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
             break
     return head_instance_id
 
-def _wait_all_pending(region: str, cluster_name_on_cloud: str) -> None:
+
+def _wait_all_pending(project_id: str, cluster_name_on_cloud: str) -> None:
     while True:
-        instances = _filter_instances(cluster_name_on_cloud, PENDING_STATUS)
+        instances = _filter_instances(project_id, cluster_name_on_cloud, PENDING_STATUS)
         if not instances:
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
         time.sleep(POLL_INTERVAL)
 
+
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
-    _wait_all_pending(region, cluster_name_on_cloud)
-    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    project_id = get_project_by_region(region)
+    _wait_all_pending(project_id, cluster_name_on_cloud)
+    running_instances = _filter_instances(project_id, cluster_name_on_cloud, ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
     to_start_count = config.count - len(running_instances)
     if to_start_count < 0:
@@ -87,13 +95,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     created_instance_ids = []
     resumed_instance_ids = []
-    stopped_instances = _filter_instances(cluster_name_on_cloud, ['STOPPED'])
+    stopped_instances = _filter_instances(project_id, cluster_name_on_cloud, ['STOPPED'])
     for stopped_instance in stopped_instances.keys():
         if to_start_count > 0:
             try:
                 utils.start(stopped_instance)
                 resumed_instance_ids.append(stopped_instance)
-                to_start_count-=1
+                to_start_count -= 1
                 if stopped_instances[stopped_instance]['name'].endswith('-head'):
                     head_instance_id = stopped_instance
             except Exception as e:  # pylint: disable=broad-except
@@ -131,7 +139,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
-    _wait_all_pending(region, cluster_name_on_cloud)
+    project_id = get_project_by_region(region)
+    _wait_all_pending(project_id, cluster_name_on_cloud)
 
 
 def stop_instances(
@@ -139,7 +148,8 @@ def stop_instances(
         provider_config: Optional[Dict[str, Any]] = None,
         worker_only: bool = False,
 ) -> None:
-    exist_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    project_id = get_project_by_region(provider_config['region'])
+    exist_instances = _filter_instances(project_id, cluster_name_on_cloud, ['RUNNING'])
     for instance in exist_instances:
         utils.stop(instance)
 
@@ -150,8 +160,8 @@ def terminate_instances(
         worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del provider_config  # unused
-    instances = _filter_instances(cluster_name_on_cloud, None)
+    project_id = get_project_by_region(provider_config['region'])
+    instances = _filter_instances(project_id, cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
@@ -171,9 +181,9 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-
-    _wait_all_pending(region, cluster_name_on_cloud)
-    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    project_id = get_project_by_region(region)
+    _wait_all_pending(project_id, cluster_name_on_cloud)
+    running_instances = _filter_instances(project_id, cluster_name_on_cloud, ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
@@ -203,7 +213,8 @@ def query_instances(
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
-    instances = _filter_instances(cluster_name_on_cloud, None)
+    project_id = get_project_by_region(provider_config['region'])
+    instances = _filter_instances(project_id, cluster_name_on_cloud, None)
 
     status_map = {
         'STARTING': status_lib.ClusterStatus.INIT,

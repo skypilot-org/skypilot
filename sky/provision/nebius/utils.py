@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 from nebius.api.nebius.common.v1 import ResourceMetadata, GetByNameRequest
 from nebius.aio.service_error import RequestError
+from nebius.api.nebius.iam.v1 import ProjectServiceClient, GetProjectByNameRequest, ListProjectsRequest
 from nebius.api.nebius.vpc.v1 import SubnetServiceClient, ListSubnetsRequest
 from nebius.api.nebius.compute.v1 import ListInstancesRequest, CreateInstanceRequest, InstanceSpec, \
     NetworkInterfaceSpec, IPAddress, ResourcesSpec, AttachedDiskSpec, ExistingDisk, DiskServiceClient, \
@@ -23,16 +24,23 @@ POLL_INTERVAL = 5
 
 logger = sky_logging.init_logger(__name__)
 
-def get_iam_token_project_id() -> (str, str):
+
+def get_iam_token_project_id() -> Dict[str, str]:
     with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
         iam_token = file.read().strip()
-    with open(os.path.expanduser('~/.nebius/NB_PROJECT_ID.txt'), 'r') as file:
-        project_id = file.read().strip()
-    return iam_token, project_id
+    with open(os.path.expanduser('~/.nebius/NB_TENANT_ID.txt'), 'r') as file:
+        tenant_id = file.read().strip()
+    return {
+        'iam_token': iam_token,
+        'tenant_id': tenant_id
+    }
 
+params = get_iam_token_project_id()
+NEBIUS_IAM_TOKEN = params['iam_token']
+NB_TENANT_ID = params['tenant_id']
 
-NEBIUS_IAM_TOKEN, NB_PROJECT_ID = get_iam_token_project_id()
 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
+
 
 def retry(func):
     """Decorator to retry a function."""
@@ -52,12 +60,24 @@ def retry(func):
 
     return wrapper
 
-def get_or_creat_gpu_cluster(name: str, region: str,) -> str:
+def get_project_by_region(region: str) -> str:
+    service = ProjectServiceClient(sdk)
+    projects = service.list(ListProjectsRequest(
+        parent_id=NB_TENANT_ID,
+    )).wait()
+    for project in projects.items:
+        if region == 'eu-north1' and project.metadata.id[8:11] == 'e00':
+            return project.metadata.id
+        if region == 'eu-west1' and project.metadata.id[8:11] == 'e01':
+            return project.metadata.id
+    raise Exception(f'No project found for region "{region}".')
+
+def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
     """Creates a GPU cluster."""
     service = GpuClusterServiceClient(sdk)
     try:
         cluster = service.get_by_name(GetByNameRequest(
-            parent_id=NB_PROJECT_ID,
+            parent_id=project_id,
             name=name,
         )).wait()
         cluster_id = cluster.metadata.id
@@ -65,7 +85,7 @@ def get_or_creat_gpu_cluster(name: str, region: str,) -> str:
     except RequestError:
         cluster = service.create(CreateGpuClusterRequest(
             metadata=ResourceMetadata(
-                parent_id=NB_PROJECT_ID,
+                parent_id=project_id,
                 name=name,
             ),
             spec=GpuClusterSpec(
@@ -76,12 +96,13 @@ def get_or_creat_gpu_cluster(name: str, region: str,) -> str:
         cluster_id = cluster.resource_id
     return cluster_id
 
+
 def delete_cluster(name: str) -> None:
     """Creates a GPU cluster."""
     service = GpuClusterServiceClient(sdk)
     try:
         cluster = service.get_by_name(GetByNameRequest(
-            parent_id=NB_PROJECT_ID,
+            parent_id='',
             name=name,
         )).wait()
         cluster_id = cluster.metadata.id
@@ -95,11 +116,12 @@ def delete_cluster(name: str) -> None:
         pass
     return
 
-def list_instances() -> Dict[str, Dict[str, Any]]:
+
+def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     service = InstanceServiceClient(sdk)
     result = service.list(ListInstancesRequest(
-        parent_id = "project-e00w18sheap5emdjx8"
+        parent_id=project_id
     )).wait()
 
     instances = result
@@ -118,17 +140,20 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
     return instance_dict
 
+
 def stop(instance_id: str) -> None:
     service = InstanceServiceClient(sdk)
     service.stop(StopInstanceRequest(
         id=instance_id
     )).wait()
 
+
 def start(instance_id: str) -> None:
     service = InstanceServiceClient(sdk)
     service.start(StartInstanceRequest(
         id=instance_id
     )).wait()
+
 
 def launch(name: str, instance_type: str, region: str, disk_size: int, user_data: str) -> str:
     logger.debug("Launching instance '%s'", name)
@@ -144,26 +169,25 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
         image_family = 'ubuntu22.04-cuda12'
     else:
         raise RuntimeError(f"Unsupported platform: {platform}")
-    disk_name = 'disk-'+name
-
+    disk_name = 'disk-' + name
+    project_id = get_project_by_region(region)
     cluster_id = None
     cluster_name = '-'.join(name.split('-')[:4])
     if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
         if preset == '8gpu-128vcpu-1600gb':
-
-            cluster_id = get_or_creat_gpu_cluster(cluster_name, region)
+            cluster_id = get_or_creat_gpu_cluster(cluster_name, project_id)
     try:
         service = DiskServiceClient(sdk)
         disk = service.get_by_name(GetByNameRequest(
-                parent_id=NB_PROJECT_ID,
-                name=disk_name,
+            parent_id=project_id,
+            name=disk_name,
         )).wait()
         disk_id = disk.metadata.id
     except RequestError:
         service = DiskServiceClient(sdk)
         disk = service.create(CreateDiskRequest(
             metadata=ResourceMetadata(
-                parent_id=NB_PROJECT_ID,
+                parent_id=project_id,
                 name=disk_name,
             ),
             spec=DiskSpec(
@@ -176,7 +200,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
         disk_id = disk.resource_id
         while True:
             disk = service.get_by_name(GetByNameRequest(
-                parent_id=NB_PROJECT_ID,
+                parent_id=project_id,
                 name=disk_name,
             )).wait()
             if DiskStatus.State(disk.status.state).name == "READY":
@@ -186,21 +210,21 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
     try:
         service = InstanceServiceClient(sdk)
         instance = service.get_by_name(GetByNameRequest(
-                parent_id=NB_PROJECT_ID,
-                name=name,
+            parent_id=project_id,
+            name=name,
         )).wait()
         start(instance.metadata.id)
         instance_id = instance.metadata.id
     except RequestError:
         service = SubnetServiceClient(sdk)
         sub_net = service.list(ListSubnetsRequest(
-            parent_id=NB_PROJECT_ID,
+            parent_id=project_id,
         )).wait()
 
         service = InstanceServiceClient(sdk)
         service.create(CreateInstanceRequest(
             metadata=ResourceMetadata(
-                parent_id=NB_PROJECT_ID,
+                parent_id=project_id,
                 name=name,
             ),
             spec=InstanceSpec(
@@ -209,7 +233,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
                 ) if cluster_id else None,
                 boot_disk=AttachedDiskSpec(
                     attach_mode=AttachedDiskSpec.AttachMode(2),
-                    existing_disk = ExistingDisk(
+                    existing_disk=ExistingDisk(
                         id=disk_id
                     )
 
@@ -220,8 +244,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
                     preset=preset
                 ),
                 network_interfaces=[NetworkInterfaceSpec(
-                    subnet_id = sub_net.items[0].metadata.id,
-                    ip_address = IPAddress(),
+                    subnet_id=sub_net.items[0].metadata.id,
+                    ip_address=IPAddress(),
                     name='network-interface-0',
                     public_ip_address=PublicIPAddress()
                 )]
@@ -230,7 +254,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
         while True:
             service = InstanceServiceClient(sdk)
             instance = service.get_by_name(GetByNameRequest(
-                parent_id=NB_PROJECT_ID,
+                parent_id=project_id,
                 name=name,
             )).wait()
             if instance.status.state.name == "STARTING":
@@ -245,8 +269,8 @@ def remove(instance_id: str) -> None:
     """Terminates the given instance."""
     service = InstanceServiceClient(sdk)
     result = service.get(GetInstanceRequest(
-            id=instance_id
-        )).wait()
+        id=instance_id
+    )).wait()
     disk_id = result.spec.boot_disk.existing_disk.id
     service.delete(DeleteInstanceRequest(
         id=instance_id

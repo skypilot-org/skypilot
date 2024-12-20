@@ -6,7 +6,7 @@ import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from nebius.api.nebius.iam.v1 import ProjectServiceClient, GetProjectRequest
+from nebius.api.nebius.iam.v1 import ProjectServiceClient, GetProjectRequest, ListProjectsRequest
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -19,7 +19,7 @@ _CREDENTIAL_FILES = [
     # credential files for Nebius,
     # TODO: Change this to the actual credential files
     'NEBIUS_IAM_TOKEN.txt',
-    'NB_PROJECT_ID.txt'
+    'NB_TENANT_ID.txt'
 ]
 
 
@@ -62,7 +62,6 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
-        logging.debug('Nebius cloud max cluster name length: %s', cls._REPR)
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -279,8 +278,8 @@ class Nebius(clouds.Cloud):
 
                 with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'), 'r') as file:
                     NEBIUS_IAM_TOKEN = file.read().strip()
-                with open(os.path.expanduser('~/.nebius/NB_PROJECT_ID.txt'), 'r') as file:
-                    NB_PROJECT_ID = file.read().strip()
+                with open(os.path.expanduser('~/.nebius/NB_TENANT_ID.txt'), 'r') as file:
+                    NB_TENANT_ID = file.read().strip()
                 sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
             except SDKError as e:
@@ -290,13 +289,14 @@ class Nebius(clouds.Cloud):
                     f'        $ pip install nebius \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
-                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NB_PROJECT_ID.txt \n'
+                    f'        $ echo $NB_TENANT_ID > ~/.nebius/NB_TENANT_ID.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
             try:
                 service = ProjectServiceClient(sdk)
-                get = service.get(GetProjectRequest(id=NB_PROJECT_ID)).wait()
-                logging.info(f'Project name: {get.metadata.name}')
+                projects = service.list(ListProjectsRequest(parent_id=NB_TENANT_ID)).wait()
+                for project in projects.items:
+                    logging.debug(f'Founded project name: {project.metadata.name}')
             except RequestError as e:
                 return False, (
                     f'{e.status} \n'  # First line is indented by 4 spaces
@@ -304,7 +304,7 @@ class Nebius(clouds.Cloud):
                     f'        $ pip install nebius \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
-                    f'        $ echo $NB_PROJECT_ID >> ~/.nebius/NB_PROJECT_ID.txt \n'
+                    f'        $ echo NB_TENANT_ID > ~/.nebius/NB_TENANT_ID.txt \n'
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
 
