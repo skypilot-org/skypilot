@@ -41,7 +41,6 @@ def launch(
         name: Optional[str] = None,
         stream_logs: bool = True,
         detach_run: bool = False,
-        retry_until_up: bool = False,
         # TODO(cooperc): remove fast arg before 0.8.0
         fast: bool = True,  # pylint: disable=unused-argument for compatibility
 ) -> None:
@@ -115,7 +114,6 @@ def launch(
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
-            'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
