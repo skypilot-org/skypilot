@@ -24,7 +24,7 @@ Generate a read-only access token on huggingface [here](https://huggingface.co/s
 ```bash
 pip install "skypilot-nightly[all]"
 ```
-For detailed installation instructions, please refer to the [installation guide](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
+For detailed installation instructions, please refer to the [installation guide](https://docs.skypilot.co/en/latest/getting-started/installation.html).
 
 ### Host on a Single Instance
 

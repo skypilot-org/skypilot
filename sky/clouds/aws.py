@@ -617,7 +617,7 @@ class AWS(clouds.Cloud):
                 'Failed to fetch the availability zones for the account '
                 f'{identity_str}. It is likely due to permission issues, please'
                 ' check the minimal permission required for AWS: '
-                'https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints

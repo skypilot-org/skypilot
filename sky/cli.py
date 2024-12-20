@@ -3589,15 +3589,12 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(cooperc): remove this flag once --fast can robustly detect cluster
-# yaml config changes
+# TODO(cooperc): remove this flag before releasing 0.8.0
 @click.option('--fast',
               default=False,
               is_flag=True,
-              help='[Experimental] Launch the job faster by skipping '
-              'controller initialization steps. If you update SkyPilot or '
-              'your local cloud credentials, they will not be reflected until '
-              'you run `sky jobs launch` at least once without this flag.')
+              help=('[Deprecated] Does nothing. Previous flag behavior is now '
+                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3666,6 +3663,16 @@ def jobs_launch(
         job_recovery=job_recovery,
     )
 
+    # Deprecation. The default behavior is fast, and the flag will be removed.
+    # The flag was not present in 0.7.x (only nightly), so we will remove before
+    # 0.8.0 so that it never enters a stable release.
+    if fast:
+        click.secho(
+            'Flag --fast is deprecated, as the behavior is now default. The '
+            'flag will be removed soon. Please do not use it, so that you '
+            'avoid "No such option" errors.',
+            fg='yellow')
+
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
         with sky.Dag() as dag:
@@ -3704,7 +3711,7 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    managed_jobs.launch(dag, name, detach_run=detach_run, fast=fast)
+    managed_jobs.launch(dag, name, detach_run=detach_run)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
