@@ -3526,7 +3526,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
         # Use '*' to get all storages.
-        names = global_user_state.get_glob_storage_name(cluster_name='*')
+        names = global_user_state.get_glob_storage_name(storage_name='*')
         if not names:
             click.echo('No storage(s) to delete.')
             return
@@ -3546,13 +3546,8 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     def delete_storage(name: str) -> None:
         try:
             sky.storage_delete(name)
-        except (exceptions.StorageBucketDeleteError, PermissionError) as e:
-            click.secho(f'Error deleting storage {name}: {e}', fg='red')
-        except ValueError as e:
-            click.secho(f'Error deleting storage {name}: {e}', fg='red')
         except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise e
+            click.secho(f'Error deleting storage {name}: {e}', fg='red')
 
     subprocess_utils.run_in_parallel(delete_storage, names)
 
