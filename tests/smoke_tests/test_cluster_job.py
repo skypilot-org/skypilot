@@ -1555,7 +1555,7 @@ def test_azure_disk_tier():
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.Azure.max_cluster_name_length())
-        region = 'westus2'
+        region = 'eastus2'
         test = smoke_tests_utils.Test(
             'azure-disk-tier-' + disk_tier.value,
             [
@@ -1577,7 +1577,7 @@ def test_azure_best_tier_failover():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Azure.max_cluster_name_length())
-    region = 'westus2'
+    region = 'eastus2'
     test = smoke_tests_utils.Test(
         'azure-best-tier-failover',
         [

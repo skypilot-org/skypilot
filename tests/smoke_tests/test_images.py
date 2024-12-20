@@ -19,6 +19,8 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
+import os
+
 import pytest
 from smoke_tests import smoke_tests_utils
 
@@ -345,6 +347,17 @@ def test_gcp_mig():
 @pytest.mark.gcp
 def test_gcp_force_enable_external_ips():
     name = smoke_tests_utils.get_cluster_name()
+
+    # Command to check if the instance is on GCP
+    is_gcp_command = (
+        'curl -s -H "Metadata-Flavor: Google" '
+        '"http://metadata.google.internal/computeMetadata/v1/instance/name"')
+
+    # Run the GCP check
+    is_gcp = os.popen(f'{is_gcp_command}').read().strip()
+    if not is_gcp:
+        pytest.skip('Not on GCP, skipping test')
+
     test_commands = [
         f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
