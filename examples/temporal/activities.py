@@ -40,8 +40,16 @@ async def run_subprocess_with_streams(command) -> tuple[int, str, str]:
 
     # Wait for the process to finish
     returncode = await proc.wait()
+    stdout = "\n".join(stdout_lines)
+    stderr = "\n".join(stderr_lines)
 
-    return returncode, "\n".join(stdout_lines), "\n".join(stderr_lines)
+    if returncode == 0:
+        activity.logger.info(f"{command} output: {stdout}")
+    else:
+        activity.logger.error(f"{command} failed with error: {stderr}")
+        raise Exception(f"{command} failed.\nStdout: {stdout}\nStderr:{stderr}")
+
+    return returncode, stdout, stderr
 
 
 @dataclass
@@ -73,13 +81,7 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
     # Run the provided SkyPilot command using subprocess
     command = f"sky launch -y -c {input.cluster_name} {input.flags} {input.entrypoint}"
     returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"Sky launch output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"Sky launch failed with error: {stderr}")
-        raise Exception(f"sky launch failed.\nStdout: {stdout}\nStderr:{stderr}")
+    return stdout
 
 
 @activity.defn
@@ -89,13 +91,7 @@ async def run_sky_down(input: SkyDownCommand) -> str:
     # Run the sky down command using subprocess
     command = f"sky down -y {input.cluster_name}"
     returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"Sky down output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"Sky down failed with error: {stderr}")
-        raise Exception(f"Sky down failed.\nStdout: {stdout}\nStderr:{stderr}")
+    return stdout
 
 
 @activity.defn
@@ -108,13 +104,7 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
     # Run the sky exec command using subprocess
     command = f"sky exec {input.cluster_name} {input.flags} {input.entrypoint}"
     returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"Sky exec output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"Sky exec failed with error: {stderr}")
-        raise Exception(f"sky exec failed.\nStdout: {stdout}\nStderr:{stderr}")
+    return stdout
 
 
 @dataclass
@@ -141,10 +131,4 @@ async def run_git_clone(input: GitCloneInput) -> str:
         command = f"git clone {input.repo_url} {input.clone_path}"
 
     returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"git clone output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"git clone failed with error: {stderr}")
-        raise Exception(f"git clone failed.\nStdout: {stdout}\nStderr:{stderr}")
+    return stdout

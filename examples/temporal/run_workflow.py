@@ -25,7 +25,7 @@ async def main():
                 data_bucket_url=os.getenv("SKYPILOT_BUCKET_URL", ""),
             ),  # repo url
             id="skypilot-workflow-id",
-            task_queue="skypilot-task-queue",
+            task_queue="skypilot-distribution-queue",
         )
         print(f"SkyPilot Workflow Result: {result}")
     except WorkflowFailureError:

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from textwrap import dedent
 
-from temporalio import workflow
+from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
@@ -26,6 +26,12 @@ class SkyPilotWorkflowInput:
     data_bucket_url: str | None = None
 
 
+@activity.defn
+async def get_available_task_queue() -> str:
+    """Just a stub for typedworkflow invocation."""
+    raise NotImplementedError
+
+
 @workflow.defn
 class SkyPilotWorkflow:
     @workflow.run
@@ -33,11 +39,21 @@ class SkyPilotWorkflow:
         cluster_prefix = input.cluster_prefix
         repo_url = input.repo_url
         data_bucket_url = input.data_bucket_url
+        data_bucket_flag = (
+            "--env DATA_BUCKET_URL=" + data_bucket_url if data_bucket_url else ""
+        )
 
         retry_policy = RetryPolicy(
             maximum_attempts=3,
             maximum_interval=timedelta(seconds=2),
         )
+
+        workflow.logger.info("Searching for available worker")
+        unique_worker_task_queue = await workflow.execute_activity(
+            activity=get_available_task_queue,
+            start_to_close_timeout=timedelta(seconds=10),
+        )
+        workflow.logger.info(f"Matching workflow to worker {unique_worker_task_queue}")
 
         workflow.logger.info(
             f"Running SkyPilot workflow with cluster prefix: {cluster_prefix} "
@@ -50,12 +66,9 @@ class SkyPilotWorkflow:
             GitCloneInput(repo_url, clone_path),
             start_to_close_timeout=timedelta(minutes=5),
             retry_policy=retry_policy,
+            task_queue=unique_worker_task_queue,
         )
         workflow.logger.info(f"Clone result: {clone_result}")
-
-        data_bucket_flag = (
-            "--env DATA_BUCKET_URL=" + data_bucket_url if data_bucket_url else ""
-        )
 
         # 2. Launch data preprocessing
         cluster_name = f"{cluster_prefix}-preprocess"
@@ -68,6 +81,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
+            task_queue=unique_worker_task_queue,
         )
         workflow.logger.info(f"Preprocessing result: {preprocess_result}")
 
@@ -77,6 +91,7 @@ class SkyPilotWorkflow:
             SkyDownCommand(cluster_name),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=retry_policy,
+            task_queue=unique_worker_task_queue,
         )
         workflow.logger.info(f"Down result: {down_result}")
 
@@ -91,6 +106,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=60),
             retry_policy=retry_policy,
+            task_queue=unique_worker_task_queue,
         )
         workflow.logger.info(f"Training result: {train_result}")
 
@@ -102,6 +118,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
+            task_queue=unique_worker_task_queue,
         )
         workflow.logger.info(f"Evaluation result: {eval_result}")
 
@@ -111,6 +128,7 @@ class SkyPilotWorkflow:
             SkyDownCommand(cluster_name),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=retry_policy,
+            task_queue=unique_worker_task_queue,
         )
         workflow.logger.info(f"Down result: {down_result}")
 
