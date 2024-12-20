@@ -10,7 +10,6 @@ import pathlib
 import shlex
 import signal
 import sqlite3
-import subprocess
 import time
 from typing import Any, Dict, List, Optional
 

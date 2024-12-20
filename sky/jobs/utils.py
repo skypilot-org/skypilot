@@ -27,6 +27,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -128,7 +129,8 @@ def update_managed_job_status(job_id: Optional[int] = None):
     for job_id_ in job_ids:
 
         tasks = managed_job_state.get_managed_jobs(job_id_)
-        if tasks[0]['dag_yaml_path'] is None:
+        schedule_state = tasks[0]['schedule_state']
+        if schedule_state is None:
             # Backwards compatibility: this job was submitted when ray was still
             # used for managing the parallelism of job controllers. This code
             # path can be removed before 0.11.0.
@@ -143,16 +145,17 @@ def update_managed_job_status(job_id: Optional[int] = None):
         else:
             pid = tasks[0]['pid']
             if pid is None:
-                first_task_status: managed_job_state.ManagedJobStatus = tasks[
-                    0]['status']
-                if first_task_status == managed_job_state.ManagedJobStatus.PENDING:
+                if schedule_state in (
+                        managed_job_state.ManagedJobScheduleState.INACTIVE,
+                        managed_job_state.ManagedJobScheduleState.WAITING):
                     # Job has not been scheduled yet.
                     continue
-                elif first_task_status == managed_job_state.ManagedJobStatus.SUBMITTED:
-                    # This should only be the case for a very short period of time
-                    # between marking the job as submitted and writing the launched
-                    # controller process pid back to the database (see
-                    # scheduler.schedule_step).
+                elif (schedule_state ==
+                      managed_job_state.ManagedJobScheduleState.LAUNCHING):
+                    # This should only be the case for a very short period of
+                    # time between marking the job as submitted and writing the
+                    # launched controller process pid back to the database (see
+                    # scheduler.maybe_start_waiting_jobs).
                     # TODO(cooperc): Find a way to detect if we get stuck in
                     # this state.
                     continue
@@ -200,6 +203,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
             failure_reason=
             'Controller process has exited abnormally. For more details, run: '
             f'sky jobs logs --controller {job_id_}')
+        scheduler.job_done(job_id_, idempotent=True)
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -587,7 +591,10 @@ def stream_logs(job_id: Optional[int],
             # We know that the job is present in the state table because of
             # earlier checks, so it should not be None.
             assert job_status is not None, (job_id, job_name)
-            if job_status.is_terminal():
+            # We shouldn't count CANCELLING as terminal here, the controller is
+            # still cleaning up.
+            if (job_status.is_terminal() and not job_status
+                    == managed_job_state.ManagedJobStatus.CANCELLING):
                 # Don't keep waiting. If the log file is not created by this
                 # point, it never will be. This job may have been submitted
                 # using an old version that did not create the log file, so this
@@ -661,6 +668,7 @@ def dump_managed_job_queue() -> str:
             job_duration = 0
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
+        job['schedule_state'] = job['schedule_state'].value
 
         cluster_name = generate_managed_job_cluster_name(
             job['task_name'], job['job_id'])
@@ -762,11 +770,18 @@ def format_job_table(
             status_counts[managed_job_status.value] += 1
 
     columns = [
-        'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
-        'JOB DURATION', '#RECOVERIES', 'STATUS'
+        'ID',
+        'TASK',
+        'NAME',
+        'RESOURCES',
+        'SUBMITTED',
+        'TOT. DURATION',
+        'JOB DURATION',
+        '#RECOVERIES',
+        'STATUS',
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE', 'SCHED. STATE']
     if tasks_have_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -834,11 +849,13 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
+                schedule_state = job_tasks[0]['schedule_state']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
                     failure_reason if failure_reason is not None else '-',
+                    schedule_state,
                 ])
             if tasks_have_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -866,6 +883,10 @@ def format_job_table(
                 task['status'].colored_str(),
             ]
             if show_all:
+                # schedule_state is only set at the job level, so if we have
+                # more than one task, only display on the aggregated row.
+                schedule_state = task['schedule_state'] if (len(job_tasks)
+                                                            == 1) else '-'
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
@@ -873,6 +894,7 @@ def format_job_table(
                     task['region'],
                     task['failure_reason']
                     if task['failure_reason'] is not None else '-',
+                    schedule_state,
                 ])
             if tasks_have_user:
                 values.insert(0, task.get('user', '-'))
@@ -979,20 +1001,18 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag',
-                    dag_yaml_path: str) -> str:
+    def set_pending(cls, job_id: int, managed_job_dag: 'dag_lib.Dag') -> str:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_name({job_id}, {dag_name!r})
+            managed_job_state.set_job_info({job_id}, {dag_name!r})
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
             code += textwrap.dedent(f"""\
                 managed_job_state.set_pending({job_id}, {task_id},
-                                  {task.name!r}, {resources_str!r},
-                                  {dag_yaml_path!r})
+                                  {task.name!r}, {resources_str!r})
                 """)
         return cls._build(code)
 

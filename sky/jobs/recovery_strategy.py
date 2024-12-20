@@ -17,6 +17,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
+from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -72,15 +73,14 @@ class StrategyExecutor:
     RETRY_INIT_GAP_SECONDS = 60
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool,
-                 max_restarts_on_errors: int) -> None:
+                 task: 'task_lib.Task', max_restarts_on_errors: int,
+                 job_id: int) -> None:
         """Initialize the strategy executor.
 
         Args:
             cluster_name: The name of the cluster.
             backend: The backend to use. Only CloudVMRayBackend is supported.
             task: The task to execute.
-            retry_until_up: Whether to retry until the cluster is up.
         """
         assert isinstance(backend, backends.CloudVmRayBackend), (
             'Only CloudVMRayBackend is supported.')
@@ -88,8 +88,8 @@ class StrategyExecutor:
         self.dag.add(task)
         self.cluster_name = cluster_name
         self.backend = backend
-        self.retry_until_up = retry_until_up
         self.max_restarts_on_errors = max_restarts_on_errors
+        self.job_id = job_id
         self.restart_cnt_on_failure = 0
 
     def __init_subclass__(cls, name: str, default: bool = False):
@@ -102,7 +102,7 @@ class StrategyExecutor:
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
-             task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
+             task: 'task_lib.Task', job_id: int) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
@@ -127,8 +127,9 @@ class StrategyExecutor:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
         return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
-                                                      task, retry_until_up,
-                                                      max_restarts_on_errors)
+                                                      task,
+                                                      max_restarts_on_errors,
+                                                      job_id)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -142,10 +143,7 @@ class StrategyExecutor:
         Raises: Please refer to the docstring of self._launch().
         """
 
-        if self.retry_until_up:
-            job_submit_at = self._launch(max_retry=None)
-        else:
-            job_submit_at = self._launch()
+        job_submit_at = self._launch(max_retry=None)
         assert job_submit_at is not None
         return job_submit_at
 
@@ -390,7 +388,11 @@ class StrategyExecutor:
             gap_seconds = backoff.current_backoff()
             logger.info('Retrying to launch the cluster in '
                         f'{gap_seconds:.1f} seconds.')
+            # Transition to ALIVE during the backoff so that other jobs can
+            # launch.
+            scheduler.launch_finished(self.job_id)
             time.sleep(gap_seconds)
+            scheduler.wait_until_launch_okay(self.job_id)
 
     def should_restart_on_failure(self) -> bool:
         """Increments counter & checks if job should be restarted on a failure.
@@ -411,10 +413,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool,
-                 max_restarts_on_errors: int) -> None:
-        super().__init__(cluster_name, backend, task, retry_until_up,
-                         max_restarts_on_errors)
+                 task: 'task_lib.Task', max_restarts_on_errors: int,
+                 job_id: int) -> None:
+        super().__init__(cluster_name, backend, task, max_restarts_on_errors,
+                         job_id)
         # Note down the cloud/region of the launched cluster, so that we can
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
@@ -478,16 +480,11 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                                             raise_on_failure=False)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
-                if self.retry_until_up:
-                    gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                    logger.info('Retrying to recover the cluster in '
-                                f'{gap_seconds:.1f} seconds.')
-                    time.sleep(gap_seconds)
-                    continue
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(
-                        f'Failed to recover the cluster after retrying '
-                        f'{self._MAX_RETRY_CNT} times.')
+                gap_seconds = self.RETRY_INIT_GAP_SECONDS
+                logger.info('Retrying to recover the cluster in '
+                            f'{gap_seconds:.1f} seconds.')
+                time.sleep(gap_seconds)
+                continue
 
             return job_submitted_at
 
@@ -566,15 +563,10 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                                             raise_on_failure=False)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
-                if self.retry_until_up:
-                    gap_seconds = self.RETRY_INIT_GAP_SECONDS
-                    logger.info('Retrying to recover the cluster in '
-                                f'{gap_seconds:.1f} seconds.')
-                    time.sleep(gap_seconds)
-                    continue
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(
-                        f'Failed to recover the cluster after retrying '
-                        f'{self._MAX_RETRY_CNT} times.')
+                gap_seconds = self.RETRY_INIT_GAP_SECONDS
+                logger.info('Retrying to recover the cluster in '
+                            f'{gap_seconds:.1f} seconds.')
+                time.sleep(gap_seconds)
+                continue
 
             return job_submitted_at

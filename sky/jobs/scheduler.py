@@ -1,13 +1,14 @@
 """Scheduler for managed jobs.
 
-Once managed jobs are added as PENDING to the `spot` table, the scheduler is
-responsible for the business logic of deciding when they are allowed to start,
-and choosing the right one to start.
+Once managed jobs are submitted via submit_job, the scheduler is responsible for
+the business logic of deciding when they are allowed to start, and choosing the
+right one to start.
 
-The scheduler is not its own process - instead, schedule_step() can be called
-from any code running on the managed jobs controller to trigger scheduling of
-new jobs if possible. This function should be called immediately after any state
-change that could result in new jobs being able to start.
+The scheduler is not its own process - instead, maybe_start_waiting_jobs() can
+be called from any code running on the managed jobs controller instance to
+trigger scheduling of new jobs if possible. This function should be called
+immediately after any state change that could result in new jobs being able to
+start.
 
 The scheduling logic limits the number of running jobs according to two limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
@@ -19,46 +20,52 @@ The scheduling logic limits the number of running jobs according to two limits:
    little once a job starts (just checking its status periodically), the most
    significant resource it consumes is memory.
 
-There are two ways to interact with the scheduler:
-- Any code that could result in new jobs being able to start (that is, it
-  reduces the number of jobs counting towards one of the above limits) should
-  call schedule_step(), which will best-effort attempt to schedule new jobs.
-- If a running job need to relaunch (recover), it should use schedule_recovery()
-  to obtain a "slot" in the number of allowed starting jobs.
+The state of the scheduler is entirely determined by the schedule_state column
+of all the jobs in the job_info table. This column should only be modified via
+the functions defined in this file. We will always hold the lock while modifying
+this state. See state.ManagedJobScheduleState.
 
-Since the scheduling state is determined by the state of jobs in the `spot`
-table, we must sychronize all scheduling logic with a global lock. A per-job
-lock would be insufficient, since schedule_step() could race with a job
-controller trying to start recovery, "double-spending" the open slot.
+Nomenclature:
+- job: same as managed job (may include multiple tasks)
+- launch/launching: launching a cluster (sky.launch) as part of a job
+- start/run/schedule: create the job controller process for a job
+- alive: a job controller exists
+
 """
 
-import contextlib
+from argparse import ArgumentParser
 import os
-import shlex
-import subprocess
 import time
-from typing import Optional, Tuple
 
 import filelock
 import psutil
 
-from sky.jobs import state, constants as managed_job_constants
+from sky import sky_logging
+from sky.jobs import constants as managed_job_constants
+from sky.jobs import state
 from sky.skylet import constants
 from sky.utils import subprocess_utils
 
-# The _MANAGED_JOB_SUBMISSION_LOCK should be held whenever a job transitions to
-# STARTING or RECOVERING, so that we can ensure correct parallelism control.
-_MANAGED_JOB_SUBMISSION_LOCK = '~/.sky/locks/managed_job_submission.lock'
-_ACTIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
+logger = sky_logging.init_logger('sky.jobs.controller')
+
+# The _MANAGED_JOB_SCHEDULER_LOCK should be held whenever we are checking the
+# parallelism control or updating the schedule_state of any job.
+_MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
+_ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
 
-def schedule_step() -> None:
-    """Determine if any jobs can be launched, and if so, launch them.
+def maybe_start_waiting_jobs() -> None:
+    """Determine if any managed jobs can be launched, and if so, launch them.
 
-    This function starts new job controllers for PENDING jobs on a best-effort
-    basis. That is, if we can start any jobs, we will, but if not, we will exit
-    (almost) immediately. It's expected that if some PENDING jobs cannot be
-    started now (either because the lock is held, or because there are not
+    For newly submitted jobs, this includes starting the job controller
+    process. For jobs that are already alive but are waiting to launch a new
+    task or recover, just update the state of the job to indicate that the
+    launch can proceed.
+
+    This function transitions jobs into LAUNCHING on a best-effort basis. That
+    is, if we can start any jobs, we will, but if not, we will exit (almost)
+    immediately. It's expected that if some WAITING or ALIVE_WAITING jobs cannot
+    be started now (either because the lock is held, or because there are not
     enough resources), another call to schedule_step() will be made whenever
     that situation is resolved. (If the lock is held, the lock holder should
     start the jobs. If there aren't enough resources, the next controller to
@@ -69,48 +76,67 @@ def schedule_step() -> None:
     the jobs controller. New job controller processes will be detached from the
     current process and there will not be a parent/child relationship - see
     launch_new_process_tree for more.
+
     """
     try:
         # We must use a global lock rather than a per-job lock to ensure correct
-        # parallelism control.
-        # The lock is not held while submitting jobs, so we use timeout=1 as a
-        # best-effort protection against the race between a previous
-        # schedule_step() releasing the lock and a job submission. Since we call
-        # schedule_step() after submitting the job this should capture
-        # essentially all cases.
-        # (In the worst case, the skylet event should schedule the job.)
-        with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SUBMISSION_LOCK),
-                               timeout=1):
-            while _can_schedule():
-                maybe_next_job = _get_next_job_to_start()
+        # parallelism control. If we cannot obtain the lock, exit immediately.
+        # The current lock holder is expected to launch any jobs it can before
+        # releasing the lock.
+        with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK),
+                               blocking=False):
+            while True:
+                maybe_next_job = state.get_waiting_job()
                 if maybe_next_job is None:
                     # Nothing left to schedule, break from scheduling loop
                     break
 
-                managed_job_id, dag_yaml_path = maybe_next_job
-                run_cmd = (
-                    f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
-                    f'python -u -m sky.jobs.controller {dag_yaml_path} --job-id {managed_job_id}'
-                )
+                current_state = maybe_next_job['schedule_state']
 
-                state.set_submitted(
-                    job_id=managed_job_id,
-                    # schedule_step() only looks at the first task of each job.
-                    task_id=0,
-                    # We must call set_submitted now so that this job is counted
-                    # as launching by future scheduler runs, but we don't have
-                    # the callback_func here. We will call set_submitted again
-                    # in the jobs controller, which will call the callback_func.
-                    callback_func=lambda _: None)
+                assert current_state in (
+                    state.ManagedJobScheduleState.ALIVE_WAITING,
+                    state.ManagedJobScheduleState.WAITING), maybe_next_job
 
-                logs_dir = os.path.expanduser(
-                    managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
-                os.makedirs(logs_dir, exist_ok=True)
-                log_path = os.path.join(logs_dir, f'{managed_job_id}.log')
+                # Note: we expect to get ALIVE_WAITING jobs before WAITING jobs,
+                # since they will have been submitted and therefore started
+                # first. The requirements to launch in an alive job are more
+                # lenient, so there is no way that we wouldn't be able to launch
+                # an ALIVE_WAITING job, but we would be able to launch a WAITING
+                # job.
+                if current_state == state.ManagedJobScheduleState.ALIVE_WAITING:
+                    if not _can_lauch_in_alive_job():
+                        # Can't schedule anything, break from scheduling loop.
+                        break
+                elif current_state == state.ManagedJobScheduleState.WAITING:
+                    if not _can_start_new_job():
+                        # Can't schedule anything, break from scheduling loop.
+                        break
 
-                pid = subprocess_utils.launch_new_process_tree(
-                    run_cmd, log_output=log_path)
-                state.set_job_controller_pid(managed_job_id, pid)
+                logger.info(f'Scheduling job {maybe_next_job["job_id"]}')
+                state.scheduler_set_launching(maybe_next_job['job_id'],
+                                              current_state)
+
+                if current_state == state.ManagedJobScheduleState.WAITING:
+                    # The job controller has not been started yet. We must start
+                    # it.
+
+                    job_id = maybe_next_job['job_id']
+                    dag_yaml_path = maybe_next_job['dag_yaml_path']
+
+                    run_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
+                               'python -u -m sky.jobs.controller '
+                               f'{dag_yaml_path} --job-id {job_id}')
+
+                    logs_dir = os.path.expanduser(
+                        managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
+                    os.makedirs(logs_dir, exist_ok=True)
+                    log_path = os.path.join(logs_dir, f'{job_id}.log')
+
+                    pid = subprocess_utils.launch_new_process_tree(
+                        run_cmd, log_output=log_path)
+                    state.set_job_controller_pid(job_id, pid)
+
+                    logger.info(f'Job {job_id} started with pid {pid}')
 
     except filelock.Timeout:
         # If we can't get the lock, just exit. The process holding the lock
@@ -118,65 +144,74 @@ def schedule_step() -> None:
         pass
 
 
-@contextlib.contextmanager
-def schedule_active_job_launch(is_running: bool):
-    """Block until we can trigger a launch as part of an ongoing job.
+def submit_job(job_id: int, dag_yaml_path: str) -> None:
+    """Submit an existing job to the scheduler.
 
-    schedule_step() will only schedule the first launch of a job. There are two
-    scenarios where we may need to call sky.launch again during the course of a
-    job controller:
+    This should be called after a job is created in the `spot` table as
+    PENDING. It will tell the scheduler to try and start the job controller, if
+    there are resources available. It may block to acquire the lock, so it
+    should not be on the critical path for `sky jobs launch -d`.
+    """
+    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+        state.scheduler_set_waiting(job_id, dag_yaml_path)
+    maybe_start_waiting_jobs()
+
+
+def launch_finished(job_id: int) -> None:
+    """Transition a job from LAUNCHING to ALIVE.
+
+    This should be called after sky.launch finishes, whether or not it was
+    successful. This may cause other jobs to begin launching.
+
+    To transition back to LAUNCHING, use wait_until_launch_okay.
+    """
+    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+        state.scheduler_set_alive(job_id)
+    maybe_start_waiting_jobs()
+
+
+def wait_until_launch_okay(job_id: int) -> None:
+    """Block until we can start a launch as part of an ongoing job.
+
+    If a job is ongoing (ALIVE schedule_state), there are two scenarios where we
+    may need to call sky.launch again during the course of a job controller:
     - for tasks after the first task
     - for recovery
 
-    We must hold the lock before transitioning to STARTING or RECOVERING, for
-    these cases, and we have to make sure there are actually available
-    resources. So, this context manager will block until we have the launch and
-    there are available resources to schedule.
-
-    The context manager should NOT be held for the actual sky.launch - we just
-    need to hold it while we transition the job state (to STARTING or
-    RECOVERING).
-
-    This function does NOT guarantee any kind of ordering if multiple processes
-    call it in parallel. This is why we do not use it for the first task on each
-    job.
+    This function will mark the job as ALIVE_WAITING, which indicates to the
+    scheduler that it wants to transition back to LAUNCHING. Then, it will wait
+    until the scheduler transitions the job state.
     """
+    if (state.get_job_schedule_state(job_id) ==
+            state.ManagedJobScheduleState.LAUNCHING):
+        # If we're already in LAUNCHING schedule_state, we don't need to wait.
+        # This may be the case for the first launch of a job.
+        return
 
-    def _ready_to_start():
-        # If this is being run as part of a job that is already RUNNING, ignore
-        # the job parallelism. Comparing to state.get_num_alive_jobs() - 1 is
-        # deadlock-prone if we somehow have more than the max number of jobs
-        # running (e.g. if 2 jobs are running and _get_job_parallelism() == 1).
-        if not is_running and state.get_num_alive_jobs(
-        ) >= _get_job_parallelism():
-            return False
-        if state.get_num_launching_jobs() >= _get_launch_parallelism():
-            return False
-        return True
+    _set_alive_waiting(job_id)
 
-    # Ideally, we should prioritize launches that are part of ongoing jobs over
-    # scheduling new jobs. Therefore we grab the lock and wait until a slot
-    # opens. There is only one lock, so there is no deadlock potential from that
-    # perspective. We could deadlock if this is called as part of a job that is
-    # currently STARTING, so don't do that. This could spin forever if jobs get
-    # stuck as STARTING or RECOVERING, but the same risk exists for the normal
-    # scheduler.
-    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SUBMISSION_LOCK)):
-        # Only check launch parallelism, since this should be called as part of
-        # a job that is already RUNNING.
-        while not _ready_to_start():
-            time.sleep(_ACTIVE_JOB_LAUNCH_WAIT_INTERVAL)
-        # We can launch now. yield to user code, which should update the state
-        # of the job. DON'T ACTUALLY LAUNCH HERE, WE'RE STILL HOLDING THE LOCK!
-        yield
+    while (state.get_job_schedule_state(job_id) !=
+           state.ManagedJobScheduleState.LAUNCHING):
+        time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
 
-    # Release the lock. Wait for more than the lock poll_interval (0.05) in case
-    # other jobs are waiting to recover - they should get the lock first.
-    time.sleep(0.1)
 
-    # Since we were holding the lock, other schedule_step() calls may have early
-    # exited. It's up to us to spawn those controllers.
-    schedule_step()
+def job_done(job_id: int, idempotent: bool = False) -> None:
+    """Transition a job to DONE.
+
+    If idempotent is True, this will not raise an error if the job is already
+    DONE.
+
+    The job could be in any terminal ManagedJobStatus. However, once DONE, it
+    should never transition back to another state.
+
+    """
+    if idempotent and (state.get_job_schedule_state(job_id)
+                       == state.ManagedJobScheduleState.DONE):
+        return
+
+    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+        state.scheduler_set_done(job_id, idempotent)
+    maybe_start_waiting_jobs()
 
 
 def _get_job_parallelism() -> int:
@@ -191,28 +226,34 @@ def _get_launch_parallelism() -> int:
     return cpus * 4 if cpus is not None else 1
 
 
-def _can_schedule() -> bool:
+def _can_start_new_job() -> bool:
     launching_jobs = state.get_num_launching_jobs()
     alive_jobs = state.get_num_alive_jobs()
-    print(launching_jobs, alive_jobs)
-    print(_get_launch_parallelism(), _get_job_parallelism())
     return launching_jobs < _get_launch_parallelism(
     ) and alive_jobs < _get_job_parallelism()
 
 
-def _get_next_job_to_start() -> Optional[Tuple[int, str]]:
-    """Returns tuple of job_id, yaml path"""
-    return state.get_first_pending_job_id_and_yaml()
+def _can_lauch_in_alive_job() -> bool:
+    launching_jobs = state.get_num_launching_jobs()
+    return launching_jobs < _get_launch_parallelism()
 
 
-#     def _get_pending_job_ids(self) -> List[int]:
-#         """Returns the job ids in the pending jobs table
+def _set_alive_waiting(job_id: int) -> None:
+    """Should use wait_until_launch_okay() to transition to this state."""
+    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+        state.scheduler_set_alive_waiting(job_id)
+    maybe_start_waiting_jobs()
 
-#         The information contains job_id, run command, submit time,
-#         creation time.
-#         """
-#         raise NotImplementedError
 
 if __name__ == '__main__':
-    print("main")
-    schedule_step()
+    parser = ArgumentParser()
+    parser.add_argument('--job-id',
+                        required=True,
+                        type=int,
+                        help='Job id for the controller job.')
+    parser.add_argument('dag_yaml',
+                        type=str,
+                        help='The path to the user job yaml file.')
+    args = parser.parse_args()
+    submit_job(args.job_id, args.dag_yaml)
+    maybe_start_waiting_jobs()

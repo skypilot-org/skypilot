@@ -3583,18 +3583,6 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@click.option(
-    '--retry-until-up/--no-retry-until-up',
-    '-r/-no-r',
-    default=None,
-    is_flag=True,
-    required=False,
-    help=(
-        '(Default: True; this flag is deprecated and will be removed in a '
-        'future release.) Whether to retry provisioning infinitely until the '
-        'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
-        'applies to launching all managed jobs (both the initial and '
-        'any recovery attempts), not the jobs controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3634,7 +3622,6 @@ def jobs_launch(
     disk_tier: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
-    retry_until_up: bool,
     yes: bool,
     fast: bool,
 ):
@@ -3678,19 +3665,6 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-    # Deprecation. We set the default behavior to be retry until up, and the
-    # flag `--retry-until-up` is deprecated. We can remove the flag in 0.8.0.
-    if retry_until_up is not None:
-        flag_str = '--retry-until-up'
-        if not retry_until_up:
-            flag_str = '--no-retry-until-up'
-        click.secho(
-            f'Flag {flag_str} is deprecated and will be removed in a '
-            'future release (managed jobs will always be retried). '
-            'Please file an issue if this does not work for you.',
-            fg='yellow')
-    else:
-        retry_until_up = True
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
@@ -3730,11 +3704,7 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    managed_jobs.launch(dag,
-                        name,
-                        detach_run=detach_run,
-                        retry_until_up=retry_until_up,
-                        fast=fast)
+    managed_jobs.launch(dag, name, detach_run=detach_run, fast=fast)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
