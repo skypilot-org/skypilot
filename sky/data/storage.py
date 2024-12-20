@@ -189,39 +189,6 @@ class StoreType(enum.Enum):
         return bucket_endpoint_url
 
     @classmethod
-    def from_store_url(
-        cls, store_url: str
-    ) -> Tuple['StoreType', str, str, Optional[str], Optional[str]]:
-        """Returns the store type, bucket name, and sub path from a store URL,
-        and the storage account name and region if applicable.
-
-        Args:
-            store_url: str; The store URL.
-        """
-        # The full path from the user config of IBM COS contains the region,
-        # and Azure Blob Storage contains the storage account name, we need to
-        # pass these information to the store constructor.
-        storage_account_name = None
-        region = None
-        for store_type in StoreType:
-            if store_url.startswith(store_type.store_prefix()):
-                if store_type == StoreType.AZURE:
-                    storage_account_name, bucket_name, sub_path = \
-                        data_utils.split_az_path(store_url)
-                elif store_type == StoreType.IBM:
-                    bucket_name, sub_path, region = data_utils.split_cos_path(
-                        store_url)
-                elif store_type == StoreType.R2:
-                    bucket_name, sub_path = data_utils.split_r2_path(store_url)
-                elif store_type == StoreType.GCS:
-                    bucket_name, sub_path = data_utils.split_gcs_path(store_url)
-                elif store_type == StoreType.S3:
-                    bucket_name, sub_path = data_utils.split_s3_path(store_url)
-                return store_type, bucket_name, \
-                    sub_path, storage_account_name, region
-        raise ValueError(f'Unknown store URL: {store_url}')
-
-    @classmethod
     def get_fields_from_store_url(
         cls, store_url: str
     ) -> Tuple['StoreType', Type['AbstractStore'], str, str, Optional[str],
@@ -302,15 +269,13 @@ class AbstractStore:
                     f'\n\tis_sky_managed={self.is_sky_managed},'
                     f'\n\t_bucket_sub_path={self._bucket_sub_path})')
 
-    def __init__(
-        self,
-        name: str,
-        source: Optional[SourceType],
-        region: Optional[str] = None,
-        is_sky_managed: Optional[bool] = None,
-        sync_on_reconstruction: Optional[bool] = True,
-        _bucket_sub_path: Optional[str] = None,  # pylint: disable=invalid-name
-        _allow_bucket_creation: bool = True):  # pylint: disable=invalid-name
+    def __init__(self,
+                 name: str,
+                 source: Optional[SourceType],
+                 region: Optional[str] = None,
+                 is_sky_managed: Optional[bool] = None,
+                 sync_on_reconstruction: Optional[bool] = True,
+                 _bucket_sub_path: Optional[str] = None):  # pylint: disable=invalid-name
         """Initialize AbstractStore
 
         Args:
@@ -329,8 +294,6 @@ class AbstractStore:
               will be uploaded to s3://<bucket>/my-dir/.
               This only works if source is a local directory.
               # TODO(zpoint): Add support for non-local source.
-            _allow_bucket_creation: bool; Whether to allow bucket creation
-              if the bucket does not exist.
         Raises:
             StorageBucketCreateError: If bucket creation fails
             StorageBucketGetError: If fetching existing bucket fails
@@ -346,7 +309,6 @@ class AbstractStore:
         self._bucket_sub_path: Optional[str] = None
         # Trigger the setter to strip any leading/trailing slashes.
         self.bucket_sub_path = _bucket_sub_path
-        self._allow_bucket_creation = _allow_bucket_creation
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -1240,8 +1202,7 @@ class S3Store(AbstractStore):
                  region: Optional[str] = _DEFAULT_REGION,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None,
-                 _allow_bucket_creation: bool = True):
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
         # TODO(romilb): This is purely a stopgap fix for
@@ -1254,8 +1215,7 @@ class S3Store(AbstractStore):
                            f'{self._DEFAULT_REGION} for bucket {name!r}.')
             region = self._DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path,
-                         _allow_bucket_creation)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1565,11 +1525,6 @@ class S3Store(AbstractStore):
                     f'{self.source}. Consider using `aws s3 ls '
                     f'{self.source}` to debug.')
 
-        if not self._allow_bucket_creation:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'Configured to use a non-existent bucket: {self.name}')
-
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
         # Store object is being reconstructed for deletion or re-mount with
@@ -1730,13 +1685,11 @@ class GcsStore(AbstractStore):
                  region: Optional[str] = 'us-central1',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
-                 _bucket_sub_path: Optional[str] = None,
-                 _allow_bucket_creation: bool = True):
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: StorageHandle
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path,
-                         _allow_bucket_creation)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2061,11 +2014,6 @@ class GcsStore(AbstractStore):
                         'Attempted to use a non-existent bucket as a source: '
                         f'{self.source}') from e
             else:
-                if not self._allow_bucket_creation:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageBucketCreateError(
-                            f'Configured to use a non-existent bucket: '
-                            f'{self.name}')
                 # If bucket cannot be found (i.e., does not exist), it is to be
                 # created by Sky. However, creation is skipped if Store object
                 # is being reconstructed for deletion or re-mount with
@@ -2257,8 +2205,7 @@ class AzureBlobStore(AbstractStore):
                  region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None,
-                 _allow_bucket_creation: bool = True):
+                 _bucket_sub_path: Optional[str] = None):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.container_name: str
@@ -2270,8 +2217,7 @@ class AzureBlobStore(AbstractStore):
         if region is None:
             region = 'eastus'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path,
-                         _allow_bucket_creation)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     @classmethod
     def from_metadata(cls, metadata: AbstractStore.StoreMetadata,
@@ -2919,11 +2865,6 @@ class AzureBlobStore(AbstractStore):
                         'Details: '
                         f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        if not self._allow_bucket_creation:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'Configured to use a non-existent container: '
-                    f'{self.name}')
         # If the container cannot be found in both private and public settings,
         # the container is to be created by Sky. However, creation is skipped
         # if Store object is being reconstructed for deletion or re-mount with
@@ -3055,13 +2996,11 @@ class R2Store(AbstractStore):
                  region: Optional[str] = 'auto',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
-                 _bucket_sub_path: Optional[str] = None,
-                 _allow_bucket_creation: bool = True):
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path,
-                         _allow_bucket_creation)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3330,11 +3269,6 @@ class R2Store(AbstractStore):
                     f'--profile={cloudflare.R2_PROFILE_NAME}\' '
                     'to debug.')
 
-        if not self._allow_bucket_creation:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'Configured to use a non-existent bucket: '
-                    f'{self.name}')
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
         # Store object is being reconstructed for deletion or re-mount with
@@ -3491,13 +3425,11 @@ class IBMCosStore(AbstractStore):
                  region: Optional[str] = 'us-east',
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
-                 _bucket_sub_path: Optional[str] = None,
-                 _allow_bucket_creation: bool = True):
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction, _bucket_sub_path,
-                         _allow_bucket_creation)
+                         sync_on_reconstruction, _bucket_sub_path)
         self.bucket_rclone_profile = \
           Rclone.generate_rclone_bucket_profile_name(
             self.name, Rclone.RcloneClouds.IBM)
@@ -3813,12 +3745,6 @@ class IBMCosStore(AbstractStore):
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
-
-        if not self._allow_bucket_creation:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'Configured to use a non-existent bucket: '
-                    f'{self.name}')
 
         if not bucket_region and self.sync_on_reconstruction:
             # bucket doesn't exist

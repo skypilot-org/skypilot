@@ -659,6 +659,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             return path
         return os.path.join(sub_path, path).strip('/')
 
+    def assert_no_bucket_creation(store: storage_lib.AbstractStore) -> None:
+        if store.is_sky_managed:
+            # Bucket was created, this should not happen since use configured
+            # the bucket and we assumed it already exists.
+            store.delete()
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Configured to use a non-existent bucket: {store.name}, '
+                    'please check the jobs->bucket in your sky config.')
+
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -688,7 +698,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Get the bucket name for the workdir and file mounts,
     # we store all these files in same bucket from config.
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
-    intermediate_bucket_is_sky_managed = True
     store_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
         store_type = store_cls = sub_path = None
@@ -699,9 +708,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         store_type, store_cls, bucket_name, sub_path, storage_account_name, \
             region = storage_lib.StoreType.get_fields_from_store_url(
                 bucket_wth_prefix)
-        intermediate_bucket_is_sky_managed = False
-        store_kwargs['is_sky_managed'] = intermediate_bucket_is_sky_managed
-        store_kwargs['_allow_bucket_creation'] = False
         if storage_account_name is not None:
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
@@ -729,14 +735,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                       _bucket_sub_path=bucket_sub_path,
                                       **store_kwargs)
             }
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=workdir,
-            persistent=False,
-            mode=storage_lib.StorageMode.COPY,
-            stores=stores,
-            is_sky_managed=intermediate_bucket_is_sky_managed,
-            _bucket_sub_path=bucket_sub_path)
+            assert_no_bucket_creation(stores[store_type])
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=workdir,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _bucket_sub_path=bucket_sub_path)
         new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -760,20 +765,19 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         stores = None
         if store_type is not None:
             assert store_cls is not None
-            stores = {
-                store_type: store_cls(name=bucket_name,
-                                      source=src,
-                                      _bucket_sub_path=bucket_sub_path,
-                                      **store_kwargs)
-            }
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=src,
-            persistent=False,
-            mode=storage_lib.StorageMode.COPY,
-            stores=stores,
-            is_sky_managed=intermediate_bucket_is_sky_managed,
-            _bucket_sub_path=bucket_sub_path)
+            store = store_cls(name=bucket_name,
+                              source=src,
+                              _bucket_sub_path=bucket_sub_path,
+                              **store_kwargs)
+
+            stores = {store_type: store}
+            assert_no_bucket_creation(stores[store_type])
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=src,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _bucket_sub_path=bucket_sub_path)
         new_storage_mounts[dst] = storage_obj
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
@@ -803,13 +807,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                       _bucket_sub_path=file_mounts_tmp_subpath,
                                       **store_kwargs)
             }
+            assert_no_bucket_creation(stores[store_type])
         storage_obj = storage_lib.Storage(
             name=bucket_name,
             source=local_fm_path,
             persistent=False,
             mode=storage_lib.StorageMode.MOUNT,
             stores=stores,
-            is_sky_managed=intermediate_bucket_is_sky_managed,
             _bucket_sub_path=file_mounts_tmp_subpath)
 
         new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj

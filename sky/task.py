@@ -954,6 +954,16 @@ class Task:
         After syncing up, COPY-mode storage mounts are translated into regular
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
+
+        Args:
+            force_sync: If True, forces the synchronization of storage mounts.
+                        If the store object is added via storage.add_store(),
+                        the sync will happen automatically via add_store.
+                        However, if it is passed via the construction function
+                        of storage, it is usually because the user passed an
+                        intermediate bucket name in the config and we need to
+                        construct from the user config. In this case, set
+                        force_sync to True.
         """
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
