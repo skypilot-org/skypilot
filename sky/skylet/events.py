@@ -18,6 +18,7 @@ from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.usage import usage_lib
 from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -85,6 +86,14 @@ class ServiceUpdateEvent(SkyletEvent):
 
     def _run(self):
         serve_utils.update_service_status()
+
+
+class UsageHeartbeatReportEvent(SkyletEvent):
+    """Skylet event for reporting usage."""
+    EVENT_INTERVAL_SECONDS = 600
+
+    def _run(self):
+        usage_lib.send_heartbeat()
 
 
 class AutostopEvent(SkyletEvent):

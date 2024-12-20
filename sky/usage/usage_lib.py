@@ -36,6 +36,7 @@ def _get_current_timestamp_ns() -> int:
 class MessageType(enum.Enum):
     """Types for messages to be sent to Loki."""
     USAGE = 'usage'
+    HEARTBEAT = 'heartbeat'
     # TODO(zhwu): Add more types, e.g., cluster_lifecycle.
 
 
@@ -59,8 +60,9 @@ class MessageToReport:
         properties = self.__dict__.copy()
         return {k: v for k, v in properties.items() if not k.startswith('_')}
 
-    def __repr__(self):
-        raise NotImplementedError
+    def __repr__(self) -> str:
+        d = self.get_properties()
+        return json.dumps(d)
 
 
 class UsageMessageToReport(MessageToReport):
@@ -151,10 +153,6 @@ class UsageMessageToReport(MessageToReport):
         self.runtimes: Dict[str, float] = {}  # update_runtime
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
-
-    def __repr__(self) -> str:
-        d = self.get_properties()
-        return json.dumps(d)
 
     def update_entrypoint(self, msg: str):
         self.entrypoint = msg
@@ -267,15 +265,37 @@ class UsageMessageToReport(MessageToReport):
                                            name_or_fn)
 
 
+class HeartbeatMessageToReport(MessageToReport):
+    """Message to be reported to Grafana Loki for heartbeat on a cluster."""
+
+    def __init__(self):
+        super().__init__(constants.HEARTBEAT_MESSAGE_SCHEMA_VERSION)
+
+    def get_properties(self) -> Dict[str, Any]:
+        properties = super().get_properties()
+        # The run id is set by the skylet, which will always be the same for
+        # the entire lifetime of the run.
+        with open(constants.USAGE_RUN_ID_FILE, 'r', encoding='utf-8') as f:
+            properties['run_id'] = f.read().strip()
+        return properties
+
+
 class MessageCollection:
     """A collection of messages."""
 
     def __init__(self):
-        self._messages = {MessageType.USAGE: UsageMessageToReport()}
+        self._messages = {
+            MessageType.USAGE: UsageMessageToReport(),
+            MessageType.HEARTBEAT: HeartbeatMessageToReport()
+        }
 
     @property
-    def usage(self):
+    def usage(self) -> UsageMessageToReport:
         return self._messages[MessageType.USAGE]
+
+    @property
+    def heartbeat(self) -> HeartbeatMessageToReport:
+        return self._messages[MessageType.HEARTBEAT]
 
     def reset(self, message_type: MessageType):
         self._messages[message_type] = self._messages[message_type].__class__()
@@ -300,13 +320,20 @@ def _send_to_loki(message_type: MessageType):
 
     message = messages[message_type]
 
+    # In case the message has no start time, set it to the current time.
+    message.start()
     message.send_time = _get_current_timestamp_ns()
     log_timestamp = message.start_time
 
     environment = 'prod'
     if env_options.Options.IS_DEVELOPER.get():
         environment = 'dev'
-    prom_labels = {'type': message_type.value, 'environment': environment}
+    prom_labels = {
+        'type': message_type.value,
+        'environment': environment,
+    }
+    if message_type == MessageType.USAGE:
+        prom_labels['entrypoint'] = message.entrypoint
 
     headers = {'Content-type': 'application/json'}
     payload = {
@@ -392,6 +419,10 @@ def _send_local_messages():
             except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
+
+
+def send_heartbeat():
+    _send_to_loki(MessageType.HEARTBEAT)
 
 
 @contextlib.contextmanager

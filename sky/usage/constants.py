@@ -3,7 +3,7 @@
 LOG_URL = 'http://usage.skypilot.co:9090/loki/api/v1/push'  # pylint: disable=line-too-long
 
 USAGE_MESSAGE_SCHEMA_VERSION = 1
-
+HEARTBEAT_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 
 USAGE_POLICY_MESSAGE = (
@@ -15,3 +15,6 @@ USAGE_POLICY_MESSAGE = (
 
 USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
 USAGE_MESSAGE_REDACT_TYPES = {str, dict}
+
+USAGE_RUN_ID_ENV_VAR = 'SKYPILOT_USAGE_RUN_ID'
+USAGE_RUN_ID_FILE = '~/.sky/usage_run_id'
