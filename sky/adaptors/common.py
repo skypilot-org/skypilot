@@ -31,15 +31,16 @@ class LazyImport:
         # Avoid extra imports when multiple threads try to import the same
         # module. The overhead is minor since import can only run in serial
         # due to GIL even in multi-threaded environments.
-        if self._module is None:
-            try:
-                self._module = importlib.import_module(self._module_name)
-                if self._set_loggers is not None:
-                    self._set_loggers()
-            except ImportError as e:
-                if self._import_error_message is not None:
-                    raise ImportError(self._import_error_message) from e
-                raise
+        with self._lock:
+            if self._module is None:
+                try:
+                    self._module = importlib.import_module(self._module_name)
+                    if self._set_loggers is not None:
+                        self._set_loggers()
+                except ImportError as e:
+                    if self._import_error_message is not None:
+                        raise ImportError(self._import_error_message) from e
+                    raise
         return self._module
 
     def __getattr__(self, name: str) -> Any:
