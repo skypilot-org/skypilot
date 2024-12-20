@@ -150,6 +150,36 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                     f'{role_name}{colorama.Style.RESET_ALL} from AWS.')
                 raise exc
 
+    def _create_instance_profile_if_not_exists(instance_profile_name: str):
+        try:
+            iam.meta.client.create_instance_profile(
+                InstanceProfileName=instance_profile_name)
+        except aws.botocore_exceptions().ClientError as exc:
+            if exc.response.get('Error',
+                                {}).get('Code') == 'EntityAlreadyExists':
+                return
+            else:
+                utils.handle_boto_error(
+                    exc,
+                    f'Failed to create instance profile {colorama.Style.BRIGHT}'
+                    f'{instance_profile_name}{colorama.Style.RESET_ALL} in AWS.'
+                )
+                raise exc
+
+    def _create_role_if_not_exists(role_name: str, policy_doc: Dict[str, Any]):
+        try:
+            iam.create_role(RoleName=role_name,
+                            AssumeRolePolicyDocument=json.dumps(policy_doc))
+        except aws.botocore_exceptions().ClientError as exc:
+            if exc.response.get('Error',
+                                {}).get('Code') == 'EntityAlreadyExists':
+                return
+            else:
+                utils.handle_boto_error(
+                    exc, f'Failed to create role {colorama.Style.BRIGHT}'
+                    f'{role_name}{colorama.Style.RESET_ALL} in AWS.')
+                raise exc
+
     instance_profile_name = DEFAULT_SKYPILOT_INSTANCE_PROFILE
     profile = _get_instance_profile(instance_profile_name)
 
@@ -158,8 +188,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             f'Creating new IAM instance profile {colorama.Style.BRIGHT}'
             f'{instance_profile_name}{colorama.Style.RESET_ALL} for use as the '
             'default.')
-        iam.meta.client.create_instance_profile(
-            InstanceProfileName=instance_profile_name)
+        _create_instance_profile_if_not_exists(instance_profile_name)
         profile = _get_instance_profile(instance_profile_name)
         time.sleep(15)  # wait for propagation
     assert profile is not None, 'Failed to create instance profile'
@@ -186,8 +215,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                 'arn:aws:iam::aws:policy/AmazonS3FullAccess',
             ]
 
-            iam.create_role(RoleName=role_name,
-                            AssumeRolePolicyDocument=json.dumps(policy_doc))
+            # TODO(aylei): need to check and reconcile the role permission
+            # in case of external modification.
+            _create_role_if_not_exists(role_name, policy_doc)
             role = _get_role(role_name)
             assert role is not None, 'Failed to create role'
 
