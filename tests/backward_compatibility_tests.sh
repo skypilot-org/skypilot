@@ -40,7 +40,6 @@ uv pip install --prerelease=allow "azure-cli>=2.65.0"
 uv pip install -e ".[all]"
 # In case there are some clusters left from previous tests
 sky down ${CLUSTER_NAME}* -y
-sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y
 cd -
 
 conda env list | grep sky-back-compat-current || conda create -n sky-back-compat-current -y python=3.9
