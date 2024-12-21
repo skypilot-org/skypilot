@@ -55,8 +55,6 @@ class SCP(clouds.Cloud):
             (f'Spot instances are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
-        clouds.CloudImplementationFeatures.OPEN_PORTS:
-            (f'Opening ports is currently not supported on {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
@@ -236,7 +234,7 @@ class SCP(clouds.Cloud):
         if acc is not None:
             assert len(acc) == 1, acc
             image_id = service_catalog.get_image_id_from_tag(
-                'skypilot:gpu-ubuntu-1804', region_name, clouds='scp')
+                'skypilot:gpu-ubuntu-2204', region_name, clouds='scp')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in

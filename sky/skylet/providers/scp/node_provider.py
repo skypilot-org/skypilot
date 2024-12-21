@@ -311,42 +311,109 @@ class SCPNodeProvider(NodeProvider):
             if len(vms) == 0:
                 break
 
-    def _del_firwall_rules(self, firewall_id, rule_ids):
-        if not isinstance(rule_ids, list):
-            rule_ids = [rule_ids]
-        self.scp_client.del_firwall_rules(firewall_id, rule_ids)
+    def _del_firewall_rules(self, firewall_id, rule_ids):
+
+        rule_info_list = []
+        for rule_id in rule_ids:
+            rule_info = self.scp_client.get_firewall_rule_info(
+                firewall_id, rule_id)
+            rule_info_list.append(rule_info)
+
+        in_rule_info_list = []
+        for rule_info in rule_info_list:
+            if rule_info['ruleDirection'] == 'IN':
+                in_rule_info_list.append(rule_info)
+        in_rule_info = in_rule_info_list[0]
+
+        out_rule_info_list = []
+        for rule_info in rule_info_list:
+            if rule_info['ruleDirection'] == 'OUT':
+                out_rule_info_list.append(rule_info)
+        out_rule_info = out_rule_info_list[0]
+
+        in_rule_source_ip = in_rule_info['sourceIpAddresses']
+        in_rule_destination_ip = in_rule_info['destinationIpAddresses']
+
+        out_rule_source_ip = out_rule_info['sourceIpAddresses']
+        out_rule_destination_ip = out_rule_info['destinationIpAddresses']
+
+        attempts = 0
+        max_attempts = 300
+        while attempts < max_attempts:
+            try:
+                rule_id_list = []
+                firewall_rule_list = self.scp_client.list_firewall_rules(
+                    firewall_id)
+                for firewall_rule in firewall_rule_list:
+                    source_ip = firewall_rule['sourceIpAddresses']
+                    destination_ip = firewall_rule['destinationIpAddresses']
+                    if in_rule_source_ip == source_ip and in_rule_destination_ip == destination_ip:
+                        rule_id = firewall_rule['ruleId']
+                        rule_id_list.append(rule_id)
+                    if out_rule_source_ip == source_ip and out_rule_destination_ip == destination_ip:
+                        rule_id = firewall_rule['ruleId']
+                        rule_id_list.append(rule_id)
+                if len(rule_id_list) == 0:
+                    break
+                self.scp_client.del_firewall_rules(firewall_id, rule_id_list)
+            except Exception:
+                attempts += 1
+                time.sleep(5)
+                continue
+
+        return
 
     @_retry_on_creation
     def _add_firewall_inbound(self, firewall_id, internal_ip):
 
-        rule_info = self.scp_client.add_firewall_inbound_rule(
-            firewall_id, internal_ip)
-        rule_id = rule_info['resourceId']
-        while True:
-            time.sleep(5)
-            rule_info = self.scp_client.get_firewal_rule_info(
-                firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE":
-                break
-        return rule_id
+        attempts = 0
+        max_attempts = 300
+
+        while attempts < max_attempts:
+            try:
+                rule_info = self.scp_client.add_firewall_inbound_rule(
+                    firewall_id, internal_ip)
+                rule_id = rule_info['resourceId']
+                while True:
+                    time.sleep(5)
+                    rule_info = self.scp_client.get_firewall_rule_info(
+                        firewall_id, rule_id)
+                    if rule_info['ruleState'] == "ACTIVE":
+                        break
+                return rule_id
+            except Exception:
+                attempts += 1
+                time.sleep(10)
+                continue
+        raise SCPError("Firewall Rule Error")
 
     @_retry_on_creation
     def _add_firewall_outbound(self, firewall_id, internal_ip):
 
-        rule_info = self.scp_client.add_firewall_outbound_rule(
-            firewall_id, internal_ip)
-        rule_id = rule_info['resourceId']
-        while True:
-            time.sleep(5)
-            rule_info = self.scp_client.get_firewal_rule_info(
-                firewall_id, rule_id)
-            if rule_info['ruleState'] == "ACTIVE":
-                break
-        return rule_id
+        attempts = 0
+        max_attempts = 300
+
+        while attempts < max_attempts:
+            try:
+                rule_info = self.scp_client.add_firewall_outbound_rule(
+                    firewall_id, internal_ip)
+                rule_id = rule_info['resourceId']
+                while True:
+                    time.sleep(5)
+                    rule_info = self.scp_client.get_firewall_rule_info(
+                        firewall_id, rule_id)
+                    if rule_info['ruleState'] == "ACTIVE":
+                        break
+                return rule_id
+            except Exception:
+                attempts += 1
+                time.sleep(10)
+                continue
+        raise SCPError("Firewall Rule Error")
 
     def _get_firewall_id(self, vpc_id):
 
-        firewall_contents = self.scp_client.list_firwalls()
+        firewall_contents = self.scp_client.list_firewalls()
         firewall_id = [
             firewall['firewallId']
             for firewall in firewall_contents
@@ -377,11 +444,11 @@ class SCPNodeProvider(NodeProvider):
 
             in_rule_id = self._add_firewall_inbound(firewall_id, vm_internal_ip)
             undo_func_stack.append(
-                lambda: self._del_firwall_rules(firewall_id, in_rule_id))
+                lambda: self._del_firewall_rules(firewall_id, in_rule_id))
             out_rule_id = self._add_firewall_outbound(firewall_id,
                                                       vm_internal_ip)
             undo_func_stack.append(
-                lambda: self._del_firwall_rules(firewall_id, in_rule_id))
+                lambda: self._del_firewall_rules(firewall_id, in_rule_id))
             firewall_rules = [in_rule_id, out_rule_id]
             return vm_id, vm_internal_ip, firewall_id, firewall_rules
 
@@ -396,7 +463,7 @@ class SCPNodeProvider(NodeProvider):
             func()
 
     def _try_vm_creation(self, vpc, sg_id, config_tags, instance_config):
-        vm_id, vm_internal_ip, firewall_id, firwall_rules = \
+        vm_id, vm_internal_ip, firewall_id, firewall_rules = \
             self._create_instance_sequence(vpc, instance_config)
         if vm_id is None:
             return False  # if creation success
@@ -407,7 +474,7 @@ class SCPNodeProvider(NodeProvider):
         creation_tags['virtualServerId'] = vm_id
         creation_tags['vmInternalIp'] = vm_internal_ip
         creation_tags['firewallId'] = firewall_id
-        creation_tags['firewallRuleIds'] = firwall_rules
+        creation_tags['firewallRuleIds'] = firewall_rules
         creation_tags['securityGroupId'] = sg_id
         creation_tags['vmExternalIp'] = vm_external_ip
         self.metadata[vm_id] = {'tags': config_tags, 'creation': creation_tags}
@@ -467,13 +534,57 @@ class SCPNodeProvider(NodeProvider):
                                 'this project.')
 
             zone_config = ZoneConfig(self.scp_client, node_config)
-            vpc_subnets = zone_config.get_vcp_subnets()
-            if (len(vpc_subnets) == 0):
-                raise SCPError("This region/zone does not have available VPCs.")
+            while len(zone_config.get_vcp_subnets()) == 0:
+                try:
+                    zone_id = zone_config.zone_id
+                    response = self.scp_client.create_vpc(zone_id)
+                    time.sleep(5)
+                    vpc_id = response['resourceId']
+                    while True:
+                        vpc_info = self.scp_client.get_vpc_info(vpc_id)
+                        if vpc_info['vpcState'] == 'ACTIVE':
+                            break
+                        else:
+                            time.sleep(5)
+
+                    response = self.scp_client.create_subnet(vpc_id, zone_id)
+                    time.sleep(5)
+                    subnet_id = response['resourceId']
+                    while True:
+                        subnet_info = self.scp_client.get_subnet_info(subnet_id)
+                        if subnet_info['subnetState'] == 'ACTIVE':
+                            break
+                        else:
+                            time.sleep(5)
+
+                    response = self.scp_client.create_internet_gateway(vpc_id)
+                    time.sleep(5)
+                    internet_gateway_id = response['resourceId']
+                    while True:
+                        internet_gateway_info = self.scp_client.get_internet_gateway_info(
+                            internet_gateway_id)
+                        if internet_gateway_info[
+                                'internetGatewayState'] == 'ATTACHED':
+                            break
+                        else:
+                            time.sleep(5)
+
+                    while True:
+                        vpc_info = self.scp_client.get_vpc_info(vpc_id)
+                        if vpc_info['vpcState'] == 'ACTIVE':
+                            break
+                        else:
+                            time.sleep(5)
+
+                    break
+                except Exception:
+                    time.sleep(10)
+                    continue
 
             instance_config = zone_config.bootstrap_instance_config(node_config)
             instance_config['virtualServerName'] = self.cluster_name
 
+            vpc_subnets = zone_config.get_vcp_subnets()
             for vpc, subnets in vpc_subnets.items():
                 sg_id = self._config_security_group(
                     zone_config.zone_id, vpc, self.cluster_name)  # sg_name
@@ -527,8 +638,8 @@ class SCPNodeProvider(NodeProvider):
         else:
             try:
                 creation_tags = self.metadata[node_id]['creation']
-                self._del_firwall_rules(creation_tags['firewallId'],
-                                        creation_tags['firewallRuleIds'])
+                self._del_firewall_rules(creation_tags['firewallId'],
+                                         creation_tags['firewallRuleIds'])
                 self._del_vm(creation_tags['virtualServerId'])
                 self._del_security_group(creation_tags['securityGroupId'])
                 self.metadata[node_id] = None
