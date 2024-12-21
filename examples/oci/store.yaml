@@ -3,21 +3,13 @@ name: cpu-task1
 resources:
   # Optional; if left out, automatically pick the cheapest cloud.
   cloud: oci
-
-  #region: ap-seoul-1
-  
+  region: us-sanjose-1
   #zone: AP-SEOUL-1-AD-1
-  
   #instance_type: VM.Standard.E4.Flex$_2_8
-
   cpus: 2
-
   #image_id: skypilot:cpu-ubuntu-2004
-
   disk_size: 256
-
   disk_tier: medium
-
   use_spot: False
 
 file_mounts:
@@ -26,7 +18,7 @@ file_mounts:
     source: ['~/Hysun/dataset']  # Source path, can be local or bucket URL. Optional, do not specify to create an empty bucket.
     store: oci  # E.g 'oci', 's3', 'gcs'...; default: None. Optional.
     persistent: True  # Defaults to True; can be set to false. Optional.
-    mode: COPY  # Either MOUNT or COPY. Optional.
+    mode: MOUNT  # Either MOUNT or COPY. Optional.
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.
