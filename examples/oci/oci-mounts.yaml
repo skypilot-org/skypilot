@@ -1,0 +1,26 @@
+resources:
+  cloud: oci
+
+file_mounts:
+  ~/tmpfile: ~/tmpfile
+  ~/a/b/c/tmpfile: ~/tmpfile
+  /tmp/workdir: ~/tmp-workdir
+
+  /mydir:
+    name: skybucket
+    source: ['~/tmp-workdir']
+    store: oci
+    mode: MOUNT
+
+setup: |
+  echo "*** Setup ***"
+
+run: |
+  echo "*** Run ***"
+
+  ls -lthr ~/tmpfile
+  ls -lthr ~/a/b/c
+  echo hi >> /tmp/workdir/new_file
+  ls -lthr /tmp/workdir
+
+  ls -lthr /mydir

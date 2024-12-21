@@ -7,6 +7,7 @@ TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
 """
+import os
 import shlex
 import subprocess
 import time
@@ -18,6 +19,7 @@ from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
+from sky.adaptors import oci
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data.data_utils import Rclone
@@ -470,6 +472,76 @@ class IBMCosCloudStorage(CloudStorage):
         return self.make_sync_dir_command(source, destination)
 
 
+class OciCloudStorage(CloudStorage):
+    """OCI Cloud Storage."""
+
+    # List of commands to install OCI CLI
+    _GET_OCICLI = [
+        'oci --version >/dev/null 2>&1 || pip3 install oci-cli',
+        'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether OCI 'url' is a directory.
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        bucket_name, path = data_utils.split_oci_path(url)
+
+        client = oci.get_object_storage_client()
+        namespace = client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
+        objects = client.list_objects(namespace_name=namespace,
+                                      bucket_name=bucket_name,
+                                      prefix=path).data.objects
+
+        if len(objects) == 0:
+            # A directory with few or no items
+            return True
+
+        if len(objects) > 1:
+            # A directory with more than 1 items
+            return True
+
+        object_name = objects[0].name
+        if path.endswith(object_name):
+            # An object path
+            return False
+
+        # A directory with only 1 item
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using OCI CLI."""
+        bucket_name, path = data_utils.split_oci_path(source)
+
+        download_via_ocicli = (f'oci os object sync --no-follow-symlinks '
+                               f'--bucket-name {bucket_name} '
+                               f'--prefix "{path}" --dest-dir "{destination}"')
+
+        all_commands = list(self._GET_OCICLI)
+        all_commands.append(download_via_ocicli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using OCI CLI."""
+        bucket_name, path = data_utils.split_oci_path(source)
+        filename = os.path.basename(path)
+
+        if destination.endswith('/'):
+            destination = f'{destination}{filename}'
+        else:
+            destination = f'{destination}/{filename}'
+
+        download_via_ocicli = (f'oci os object get --bucket-name {bucket_name} '
+                               f'--name "{path}" --file "{destination}"')
+
+        all_commands = list(self._GET_OCICLI)
+        all_commands.append(download_via_ocicli)
+        return ' && '.join(all_commands)
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -485,6 +557,7 @@ _REGISTRY = {
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
+    'oci': OciCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`
