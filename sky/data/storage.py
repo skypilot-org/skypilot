@@ -3615,7 +3615,7 @@ class OciStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    RCLONE_VERSION = 'v1.68.2'
+    RCLONE_VERSION = 'v1.61.1'
 
     def __init__(self,
                  name: str,
