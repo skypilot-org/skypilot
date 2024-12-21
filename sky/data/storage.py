@@ -3615,8 +3615,7 @@ class OciStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    RCLONE_VERSION = 'v1.61.1'
-    RCLONE_INSTALL_FILE = f'rclone-{RCLONE_VERSION}-linux-amd64.deb'
+    RCLONE_VERSION = 'v1.68.2'
 
     def __init__(self,
                  name: str,
@@ -3630,7 +3629,6 @@ class OciStore(AbstractStore):
         self.config_profile: str
         self.compartment: str
         self.namespace: str
-        self.mount_path: str
         # self.sema = Semaphore(5)
 
         try:
@@ -3638,7 +3636,7 @@ class OciStore(AbstractStore):
             region = oci.get_oci_config()['region']
         except (oci.oci.exceptions.ConfigFileNotFound,
                 oci.oci.exceptions.InvalidConfig, ImportError):
-            # In test env, the OCI config may not exist
+            # For test only: In test env, the OCI config may not exist
             region = 'us-sanjose-1'
 
         super().__init__(name, source, region, is_sky_managed,
@@ -3869,11 +3867,6 @@ class OciStore(AbstractStore):
             get_bucket_response = self.client.get_bucket(
                 namespace_name=self.namespace, bucket_name=self.name)
             bucket = get_bucket_response.data
-            bucket_compartment = bucket.compartment_id
-            if bucket_compartment != self.compartment:
-                raise exceptions.StorageBucketGetError(
-                    f'InvalidBucketLocation: Bucket {self.name} should be '
-                    f'in the same compartment with the sky compute instances.')
             return bucket, False
         except oci.service_exception() as e:
             if e.status == 404:  # Not Found
@@ -3906,12 +3899,10 @@ class OciStore(AbstractStore):
                 # Unknown / unexpected error happened. This might happen when
                 # Object storage service itself functions not normal (e.g.
                 # maintainance event causes internal server error or request
-                # timeout); or API call frequency exceeds limit (which would
-                # not be the case for SkyPilot calls to OCI because the No.
-                # of calls are not too many).
+                # timeout, etc).
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        'Failed to connect to OCI bucket {self.name}') from e
+                        f'Failed to connect to OCI bucket {self.name}') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
@@ -3921,30 +3912,34 @@ class OciStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        self.mount_path = mount_path
-
+        # pylint: disable=line-too-long
         install_cmd = (
-            f'which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.deb'  # pylint: disable=line-too-long
+            f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
             f' && sudo dpkg -i rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
-            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.deb)')
+            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.deb)))'
+            f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.rpm'
+            f' && sudo yum --nogpgcheck install rclone-{self.RCLONE_VERSION}-linux-amd64.rpm -y'
+            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.rpm))')
 
+        # pylint: disable=line-too-long
         mount_cmd = (
-            f'sudo chown -R `whoami`:`whoami` {mount_path}'
+            f'sudo chown -R `whoami` {mount_path}'
             f' && rclone config create oos_{self.name} oracleobjectstorage'
             f' provider user_principal_auth namespace {self.namespace}'
-            f' compartment {self.compartment} region {self.region}'
+            f' compartment {self.bucket.compartment_id} region {self.region}'
             f' oci-config-file {self.oci_config_file}'
             f' oci-config-profile {self.config_profile}'
             f' && sed -i "s/oci-config-file/config_file/g;'
-            f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'  # pylint: disable=line-too-long
-            f' && rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty'  # pylint: disable=line-too-long
+            f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
+            f' && rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty'
         )
 
         version_check_cmd = (
             f'rclone --version | grep -q {self.RCLONE_VERSION}')
 
-        return mounting_utils.get_mounting_command(self.mount_path, install_cmd,
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
