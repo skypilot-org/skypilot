@@ -21,6 +21,6 @@ run: |
   ls -lthr ~/tmpfile
   ls -lthr ~/a/b/c
   echo hi >> /tmp/workdir/new_file
-  tree /tmp/workdir
+  ls -lthr /tmp/workdir
 
   ls -lthr /mydir
