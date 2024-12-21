@@ -1,11 +1,11 @@
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  date = formatdate("YYMMDD", timestamp())
 }
 
 source "googlecompute" "cpu-ubuntu" {
   project_id          = "sky-dev-465"
-  image_name          = "skypilot-gcp-cpu-ubuntu-${local.timestamp}"
+  image_name          = "skypilot-gcp-cpu-ubuntu-${local.date}"
   source_image_family = "ubuntu-2204-lts"
   zone                = "us-west1-a"
   image_description   = "SkyPilot custom image for launching GCP CPU instances."
@@ -22,12 +22,12 @@ build {
     script = "./provisioners/docker.sh"
   }
   provisioner "shell" {
-    script = "./provisioners/skypilot.sh"
-  }
-  provisioner "shell" {
     environment_vars = [
       "CLOUD=gcp",
     ]
-    script = "./provisioners/cloud.sh"
+    script = "./provisioners/skypilot.sh"
+  }
+  provisioner "shell" {
+    script = "./provisioners/user-toolkit.sh"
   }
 }

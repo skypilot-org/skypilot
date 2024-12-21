@@ -31,13 +31,13 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 
     # Submit multiple tasks in parallel to trigger queueing behaviors.
     def _exec(i):
-        task = sky.Task(run=f'echo {i}; sleep 5')
-        resources = sky.Resources(accelerators={'T4': 0.5})
+        task = sky.Task(run=f'echo {i}; sleep 60')
+        resources = sky.Resources(accelerators={'T4': 0.05})
         task.set_resources(resources)
         sky.exec(task, cluster_name=cluster, detach_run=True)
 
     with pool.ThreadPool(8) as p:
-        list(p.imap(_exec, range(32)))
+        list(p.imap(_exec, range(150)))
 
 
 if __name__ == '__main__':

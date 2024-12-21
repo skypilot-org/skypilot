@@ -1,4 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import os
 import traceback
 from types import ModuleType
 from typing import Dict, Iterable, List, Optional, Tuple, Union
@@ -145,7 +146,7 @@ def check(
                 dim=True) + click.style(f'sky check{clouds_arg}', bold=True) +
             '\n' + click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
         if disallowed_clouds_hint:
@@ -194,19 +195,25 @@ def get_cached_enabled_clouds_or_refresh(
 def get_cloud_credential_file_mounts(
         excluded_clouds: Optional[Iterable[sky_clouds.Cloud]]
 ) -> Dict[str, str]:
-    """Returns the files necessary to access all enabled clouds.
+    """Returns the files necessary to access all clouds.
 
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """
-    enabled_clouds = get_cached_enabled_clouds_or_refresh()
+    # Uploading credentials for all clouds instead of only sky check
+    # enabled clouds because users may have partial credentials for some
+    # clouds to access their specific resources (e.g. cloud storage) but
+    # not have the complete credentials to pass sky check.
+    clouds = sky_clouds.CLOUD_REGISTRY.values()
     file_mounts = {}
-    for cloud in enabled_clouds:
+    for cloud in clouds:
         if (excluded_clouds is not None and
                 sky_clouds.cloud_in_iterable(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
-        file_mounts.update(cloud_file_mounts)
+        for remote_path, local_path in cloud_file_mounts.items():
+            if os.path.exists(os.path.expanduser(local_path)):
+                file_mounts[remote_path] = local_path
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.

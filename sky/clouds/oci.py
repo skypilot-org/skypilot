@@ -20,11 +20,10 @@ History:
  - Hysun He (hysun.he@oracle.com) @ Oct 13, 2024:
    Support more OS types additional to ubuntu for OCI resources.
 """
-import json
 import logging
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -32,6 +31,7 @@ from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
+from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -61,6 +61,9 @@ class OCI(clouds.Cloud):
                              {resources_utils.DiskTier.ULTRA})
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
@@ -72,8 +75,6 @@ class OCI(clouds.Cloud):
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -193,7 +194,7 @@ class OCI(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='oci')
 
@@ -207,16 +208,15 @@ class OCI(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         image_str = self._get_image_id(resources.image_id, region.name,
                                        resources.instance_type)
@@ -390,7 +390,7 @@ class OCI(clouds.Cloud):
         short_credential_help_str = (
             'For more details, refer to: '
             # pylint: disable=line-too-long
-            'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
+            'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
         credential_help_str = (
             'To configure credentials, go to: '
@@ -436,7 +436,7 @@ class OCI(clouds.Cloud):
             return True, None
         except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
                 oci_adaptor.oci.exceptions.InvalidConfig,
-                oci_adaptor.service_exception()) as e:
+                oci_adaptor.oci.exceptions.ServiceError) as e:
             return False, (
                 f'OCI credential is not correctly set. '
                 f'Check the credential file at {conf_file}\n'
@@ -468,7 +468,11 @@ class OCI(clouds.Cloud):
             api_key_file = oci_cfg[
                 'key_file'] if 'key_file' in oci_cfg else 'BadConf'
             sky_cfg_file = oci_utils.oci_config.get_sky_user_config_file()
+        # Must catch ImportError before any oci_adaptor.oci.exceptions
+        # because oci_adaptor.oci.exceptions can throw ImportError.
         except ImportError:
+            return {}
+        except oci_adaptor.oci.exceptions.ConfigFileNotFound:
             return {}
 
         # OCI config and API key file are mandatory
@@ -596,25 +600,11 @@ class OCI(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         del zone, kwargs  # Unused.
-        # Check the lifecycleState definition from the page
-        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
-        status_map = {
-            'PROVISIONING': status_lib.ClusterStatus.INIT,
-            'STARTING': status_lib.ClusterStatus.INIT,
-            'RUNNING': status_lib.ClusterStatus.UP,
-            'STOPPING': status_lib.ClusterStatus.STOPPED,
-            'STOPPED': status_lib.ClusterStatus.STOPPED,
-            'TERMINATED': None,
-            'TERMINATING': None,
-        }
-
-        # pylint: disable=import-outside-toplevel
-        from sky.skylet.providers.oci.query_helper import oci_query_helper
 
         status_list = []
         try:
-            vms = oci_query_helper.query_instances_by_tags(
-                tag_filters=tag_filters, region=region)
+            vms = query_helper.query_instances_by_tags(tag_filters=tag_filters,
+                                                       region=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
@@ -624,9 +614,9 @@ class OCI(clouds.Cloud):
 
         for node in vms:
             vm_status = node.lifecycle_state
-            if vm_status in status_map:
-                sky_status = status_map[vm_status]
-                if sky_status is not None:
-                    status_list.append(sky_status)
+            sky_status = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY.get(
+                vm_status, None)
+            if sky_status is not None:
+                status_list.append(sky_status)
 
         return status_list

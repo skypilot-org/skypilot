@@ -124,7 +124,9 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     _validate_service_task(task)
-
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
@@ -319,6 +321,14 @@ def update(
         service_name: Name of the service.
     """
     _validate_service_task(task)
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
+    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
+    # will not apply the config.
+    dag, _ = admin_policy_utils.apply(
+        task, use_mutated_config_in_current_request=False)
+    task = dag.tasks[0]
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -373,6 +383,17 @@ def update(
     if prompt is not None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
+
+    original_lb_policy = service_record['load_balancing_policy']
+    assert task.service is not None, 'Service section not found.'
+    if original_lb_policy != task.service.load_balancing_policy:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Current load balancing policy '
+            f'{original_lb_policy!r} is different from the new policy '
+            f'{task.service.load_balancing_policy!r}. Updating the load '
+            'balancing policy is not supported yet and it will be ignored. '
+            'The service will continue to use the current load balancing '
+            f'policy.{colorama.Style.RESET_ALL}')
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
@@ -571,11 +592,10 @@ def status(
             'status': (sky.ServiceStatus) service status,
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
-            'policy': (Optional[str]) load balancer policy description,
-            'requested_resources': (sky.Resources) requested resources
-              for replica (deprecated),
+            'policy': (Optional[str]) autoscaling policy description,
             'requested_resources_str': (str) str representation of
               requested resources,
+            'load_balancing_policy': (str) load balancing policy name,
             'replica_info': (List[Dict[str, Any]]) replica information,
         }
 
@@ -693,6 +713,7 @@ def tail_logs(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'`target` must be a string or '
                              f'sky.serve.ServiceComponent, got {type(target)}.')
+
     if target == serve_utils.ServiceComponent.REPLICA:
         if replica_id is None:
             with ux_utils.print_exception_no_traceback():

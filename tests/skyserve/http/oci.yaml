@@ -1,0 +1,10 @@
+service:
+  readiness_probe: /
+  replicas: 2
+
+resources:
+  cloud: oci
+  ports: 8080
+  cpus: 2+
+
+run: python -m http.server 8080

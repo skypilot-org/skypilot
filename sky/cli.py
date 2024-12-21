@@ -46,6 +46,7 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds as sky_clouds
@@ -67,6 +68,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -484,7 +486,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -537,7 +539,14 @@ def _parse_override_params(
         else:
             override_params['disk_tier'] = disk_tier
     if ports:
-        override_params['ports'] = ports
+        if any(p.lower() == 'none' for p in ports):
+            if len(ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify both "none" and other '
+                                     'ports.')
+            override_params['ports'] = None
+        else:
+            override_params['ports'] = ports
     return override_params
 
 
@@ -555,6 +564,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    fast: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -581,6 +591,15 @@ def _launch_with_confirm(
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
                                    f'{colorama.Style.RESET_ALL}') from e
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            ),
+        )
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -619,6 +638,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        fast=fast,
     )
 
 
@@ -717,7 +737,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
-    ports: Optional[Tuple[str]] = None,
+    ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
@@ -1040,6 +1060,13 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--fast',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('[Experimental] If the cluster is already up and available, skip '
+          'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1064,13 +1091,14 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: Tuple[str],
+    ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
+    fast: bool,
 ):
     """Launch a cluster or task.
 
@@ -1139,7 +1167,8 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         fast=fast)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2000,6 +2029,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2013,6 +2048,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -2079,7 +2115,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    core.tail_logs(cluster, job_id, follow, tail)
 
 
 @cli.command()
@@ -3025,9 +3061,9 @@ def show_gpus(
     and spot instances. There may be multiple regions with the same lowest
     price.
 
-    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
-    of the GPU available on a single node and the real-time availability of
-    the GPU across all nodes in the Kubernetes cluster.
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
 
     Definitions of certain fields:
 
@@ -3073,6 +3109,7 @@ def show_gpus(
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+    no_permissions_str = '<no permissions>'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -3113,13 +3150,16 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg +
+                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
+            available_qty = available[gpu] if available[gpu] != -1 else (
+                no_permissions_str)
             realtime_gpu_table.add_row([
                 gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available_qty
             ])
         return realtime_gpu_table
 
@@ -3129,10 +3169,12 @@ def show_gpus(
 
         node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
+            available = node_info.free[
+                'accelerators_available'] if node_info.free[
+                    'accelerators_available'] != -1 else no_permissions_str
             node_table.add_row([
-                node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                node_name, node_info.accelerator_type,
+                node_info.total['accelerator_count'], available
             ])
         return node_table
 
@@ -3187,8 +3229,18 @@ def show_gpus(
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
+                    # TODO(Doyoung): Update the message with the multi-host TPU
+                    # support.
+                    k8s_per_node_acc_message = (
+                        'Kubernetes per node accelerator availability ')
+                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
+                            context):
+                        k8s_per_node_acc_message += (
+                            '(Note: Multi-host TPUs are detected and excluded '
+                            'from the display as multi-host TPUs are not '
+                            'supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node GPU availability'
+                           f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
@@ -3519,7 +3571,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the spot job.'))
+              help=('Alias for --name, the name of the managed job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -3549,6 +3601,12 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(cooperc): remove this flag before releasing 0.8.0
+@click.option('--fast',
+              default=False,
+              is_flag=True,
+              help=('[Deprecated] Does nothing. Previous flag behavior is now '
+                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3573,8 +3631,9 @@ def jobs_launch(
     disk_tier: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
-    retry_until_up: bool,
+    retry_until_up: Optional[bool],
     yes: bool,
+    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3630,6 +3689,16 @@ def jobs_launch(
     else:
         retry_until_up = True
 
+    # Deprecation. The default behavior is fast, and the flag will be removed.
+    # The flag was not present in 0.7.x (only nightly), so we will remove before
+    # 0.8.0 so that it never enters a stable release.
+    if fast:
+        click.secho(
+            'Flag --fast is deprecated, as the behavior is now default. The '
+            'flag will be removed soon. Please do not use it, so that you '
+            'avoid "No such option" errors.',
+            fg='yellow')
+
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
         with sky.Dag() as dag:
@@ -3644,11 +3713,24 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='cyan')
-    dag = sky.optimize(dag)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
 
-    if not yes:
+    if yes:
+        # Skip resource preview if -y is set, since we are probably running in
+        # a script and the user won't have a chance to review it anyway.
+        # This can save a couple of seconds.
+        click.secho(
+            f'Resources for managed job {dag.name!r} will be computed on the '
+            'managed jobs controller, since --yes is set.',
+            fg='cyan')
+
+    else:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='cyan')
+        dag = sky.optimize(dag)
+
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
@@ -3838,16 +3920,25 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest job logs, restarting the jobs controller if stopped.'
+)
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
+              controller: bool, refresh: bool):
     """Tail the log of a managed job."""
     try:
         managed_jobs.tail_logs(name=name,
                                job_id=job_id,
                                follow=follow,
-                               controller=controller)
+                               controller=controller,
+                               refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
@@ -4123,6 +4214,8 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4239,6 +4332,8 @@ def serve_update(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:

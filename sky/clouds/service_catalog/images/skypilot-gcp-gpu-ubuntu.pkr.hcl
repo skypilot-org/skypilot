@@ -4,11 +4,11 @@ variable "zone" {
 }
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  date = formatdate("YYMMDD", timestamp())
 }
 
 source "googlecompute" "gpu-ubuntu" {
-  image_name          = "skypilot-gcp-gpu-ubuntu-${local.timestamp}"
+  image_name          = "skypilot-gcp-gpu-ubuntu-${local.date}"
   project_id          = "sky-dev-465"
   source_image_family = "ubuntu-2204-lts"
   zone                = var.zone
@@ -35,12 +35,12 @@ build {
     script = "./provisioners/nvidia-container-toolkit.sh"
   }
   provisioner "shell" {
-    script = "./provisioners/skypilot.sh"
-  }
-  provisioner "shell" {
     environment_vars = [
       "CLOUD=gcp",
     ]
-    script = "./provisioners/cloud.sh"
+    script = "./provisioners/skypilot.sh"
+  }
+  provisioner "shell" {
+    script = "./provisioners/user-toolkit.sh"
   }
 }

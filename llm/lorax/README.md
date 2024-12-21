@@ -40,7 +40,7 @@ sky launch -c lorax-cluster lorax.yaml
 
 By default, this config will deploy `Mistral-7B-Instruct`, but this can be overridden by running `sky launch` with the argument `--env MODEL_ID=<my_model>`.
 
-**NOTE:** This config will launch the instance on a public IP. It's highly recommended to secure the instance within a private subnet. See the [Advanced Configurations](https://skypilot.readthedocs.io/en/latest/reference/config.html#config-yaml) section of the SkyPilot docs for options to run within VPC and setup private IPs.
+**NOTE:** This config will launch the instance on a public IP. It's highly recommended to secure the instance within a private subnet. See the [Advanced Configurations](https://docs.skypilot.co/en/latest/reference/config.html#config-yaml) section of the SkyPilot docs for options to run within VPC and setup private IPs.
 
 ## Prompt LoRAX w/ base model
 
@@ -91,7 +91,7 @@ Here are some other interesting Mistral-7B fine-tuned models to test out:
 - [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
 - [Undi95/Mistral-7B-roleplay_alpaca-lora](https://huggingface.co/Undi95/Mistral-7B-roleplay_alpaca-lora): Fine-tuned using role-play prompts.
 
-You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=-lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
+You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
 
 ## Stop the deployment
 

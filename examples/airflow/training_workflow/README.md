@@ -7,7 +7,7 @@ In this guide, we show how a training workflow involving data preprocessing, tra
   <img src="https://i.imgur.com/mcMghXM.png" width="800">
 </p>
 
-**💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#job-pipelines) for more information. 
+**💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#job-pipelines) for more information. 
 
 ## Why use SkyPilot with Airflow?
 In AI workflows, **the transition from development to production is hard**. 
@@ -24,7 +24,7 @@ production Airflow cluster. Behind the scenes, SkyPilot handles environment setu
 
 Here's how you can use SkyPilot to take your dev workflows to production in Airflow:
 1. **Define and test your workflow as SkyPilot tasks**.
-    - Use `sky launch` and [Sky VSCode integration](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#dev-vscode) to run, debug and iterate on your code.
+    - Use `sky launch` and [Sky VSCode integration](https://docs.skypilot.co/en/latest/examples/interactive-development.html#dev-vscode) to run, debug and iterate on your code.
 2. **Orchestrate SkyPilot tasks in Airflow** by invoking `sky launch` on their YAMLs as a task in the Airflow DAG.
     - Airflow does the scheduling, logging, and monitoring, while SkyPilot handles the infra setup and task execution.
 
@@ -34,7 +34,7 @@ Here's how you can use SkyPilot to take your dev workflows to production in Airf
 * Airflow installed on a [Kubernetes cluster](https://airflow.apache.org/docs/helm-chart/stable/index.html) or [locally](https://airflow.apache.org/docs/apache-airflow/stable/start.html) (`SequentialExecutor`)
 * A Kubernetes cluster to run tasks on. We'll use GKE in this example.
 * A Google cloud account with GCS access to store the data for task.
-  * Follow [SkyPilot instructions](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp) to set up Google Cloud credentials.
+  * Follow [SkyPilot instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp) to set up Google Cloud credentials.
 
 ## Preparing the Kubernetes Cluster
 
@@ -60,7 +60,7 @@ Here's how you can use SkyPilot to take your dev workflows to production in Airf
       name: sky-airflow-sa
       namespace: default
     roleRef:
-      # For minimal permissions, refer to https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/kubernetes.html
+      # For minimal permissions, refer to https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/kubernetes.html
       kind: ClusterRole
       name: cluster-admin
       apiGroup: rbac.authorization.k8s.io
@@ -103,7 +103,7 @@ The train and eval step can be run in a similar way:
 sky launch -c train --env DATA_BUCKET_URL=gs://<bucket-name> train.yaml
 ```
 
-Hint: You can use `ssh` and VSCode to [interactively develop](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html) and debug the tasks.
+Hint: You can use `ssh` and VSCode to [interactively develop](https://docs.skypilot.co/en/latest/examples/interactive-development.html) and debug the tasks.
 
 Note: `eval` can be optionally run on the same cluster as `train` with `sky exec`. Refer to the `shared_state` airflow example on how to do this.
 

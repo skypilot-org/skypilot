@@ -1082,16 +1082,31 @@ class S3Store(AbstractStore):
     for S3 buckets.
     """
 
+    _DEFAULT_REGION = 'us-east-1'
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _CUSTOM_ENDPOINT_REGIONS = [
+        'ap-east-1', 'me-south-1', 'af-south-1', 'eu-south-1', 'eu-south-2',
+        'ap-south-2', 'ap-southeast-3', 'ap-southeast-4', 'me-central-1',
+        'il-central-1'
+    ]
 
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = 'us-east-2',
+                 region: Optional[str] = _DEFAULT_REGION,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
+        # TODO(romilb): This is purely a stopgap fix for
+        #  https://github.com/skypilot-org/skypilot/issues/3405
+        # We should eventually make all opt-in regions also work for S3 by
+        # passing the right endpoint flags.
+        if region in self._CUSTOM_ENDPOINT_REGIONS:
+            logger.warning('AWS opt-in regions are not supported for S3. '
+                           f'Falling back to default region '
+                           f'{self._DEFAULT_REGION} for bucket {name!r}.')
+            region = self._DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
@@ -1142,7 +1157,7 @@ class S3Store(AbstractStore):
                     'Storage \'store: s3\' specified, but ' \
                     'AWS access is disabled. To fix, enable '\
                     'AWS by running `sky check`. More info: '\
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
                     )
 
     @classmethod
@@ -1424,7 +1439,7 @@ class S3Store(AbstractStore):
 
     def _create_s3_bucket(self,
                           bucket_name: str,
-                          region='us-east-2') -> StorageHandle:
+                          region=_DEFAULT_REGION) -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -1573,7 +1588,7 @@ class GcsStore(AbstractStore):
                     'Storage \'store: gcs\' specified, but '
                     'GCP access is disabled. To fix, enable '
                     'GCP by running `sky check`. '
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -2095,7 +2110,7 @@ class AzureBlobStore(AbstractStore):
                     'Storage "store: azure" specified, but '
                     'Azure access is disabled. To fix, enable '
                     'Azure by running `sky check`. More info: '
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
                 )
 
     @classmethod
@@ -2798,7 +2813,7 @@ class R2Store(AbstractStore):
                     'Storage \'store: r2\' specified, but ' \
                     'Cloudflare R2 access is disabled. To fix, '\
                     'enable Cloudflare R2 by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
                     )
 
     def initialize(self):
