@@ -257,7 +257,7 @@ class VsphereClient:
         # hard code here. should support configure later.
         profile_name = 'skypilot_policy'
         storage_profile_id = None
-        if len(profile_ids) > 0:
+        if profile_ids:
             profiles = pm.PbmRetrieveContent(profileIds=profile_ids)
             for profile in profiles:
                 if profile_name in profile.name:

@@ -134,7 +134,7 @@ def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
         content_str = r.content.decode('ascii')
         content = json.loads(content_str)
         items = content.get('Items', [])
-        if len(items) == 0:
+        if not items:
             break
         all_items += items
         url = content.get('NextPageLink')

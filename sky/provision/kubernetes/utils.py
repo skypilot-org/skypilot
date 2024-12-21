@@ -583,7 +583,7 @@ def check_instance_fits(context: Optional[str],
             node for node in nodes if gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] == gpu_label_val
         ]
-        assert len(gpu_nodes) > 0, 'GPU nodes not found'
+        assert gpu_nodes, 'GPU nodes not found'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
@@ -1526,7 +1526,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, context: Optional[str],
     def find(l, predicate):
         """Utility function to find element in given list"""
         results = [x for x in l if predicate(x)]
-        return results[0] if len(results) > 0 else None
+        return results[0] if results else None
 
     # Get the SSH jump pod name from the head pod
     try:

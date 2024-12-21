@@ -259,7 +259,7 @@ class SCPNodeProvider(NodeProvider):
                     for sg in sg_contents
                     if sg["securityGroupId"] == sg_id
                 ]
-                if len(sg) != 0 and sg[0] == "ACTIVE":
+                if sg and sg[0] == "ACTIVE":
                     break
                 time.sleep(5)
 
@@ -282,16 +282,16 @@ class SCPNodeProvider(NodeProvider):
                 for sg in sg_contents
                 if sg["securityGroupId"] == sg_id
             ]
-            if len(sg) == 0:
+            if not sg:
                 break
 
     def _refresh_security_group(self, vms):
-        if len(vms) > 0:
+        if vms:
             return
         # remove security group if vm does not exist
         keys = self.metadata.keys()
         security_group_id = self.metadata[
-            keys[0]]['creation']['securityGroupId'] if len(keys) > 0 else None
+            keys[0]]['creation']['securityGroupId'] if keys else None
         if security_group_id:
             try:
                 self._del_security_group(security_group_id)
@@ -308,7 +308,7 @@ class SCPNodeProvider(NodeProvider):
                 for vm in vm_contents
                 if vm["virtualServerId"] == vm_id
             ]
-            if len(vms) == 0:
+            if not vms:
                 break
 
     def _del_firwall_rules(self, firewall_id, rule_ids):
@@ -391,7 +391,7 @@ class SCPNodeProvider(NodeProvider):
             return None, None, None, None
 
     def _undo_funcs(self, undo_func_list):
-        while len(undo_func_list) > 0:
+        while undo_func_list:
             func = undo_func_list.pop()
             func()
 
@@ -468,7 +468,7 @@ class SCPNodeProvider(NodeProvider):
 
             zone_config = ZoneConfig(self.scp_client, node_config)
             vpc_subnets = zone_config.get_vcp_subnets()
-            if (len(vpc_subnets) == 0):
+            if not vpc_subnets:
                 raise SCPError("This region/zone does not have available VPCs.")
 
             instance_config = zone_config.bootstrap_instance_config(node_config)
