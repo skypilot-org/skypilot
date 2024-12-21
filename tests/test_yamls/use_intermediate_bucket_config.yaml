@@ -1,0 +1,2 @@
+jobs:
+  bucket: "s3://bucket-jobs-s3"
