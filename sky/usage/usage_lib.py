@@ -339,7 +339,6 @@ def _send_to_loki(message_type: MessageType):
         prom_labels['new_cluster'] = (message.original_cluster_status !=
                                       'UP' and message.final_cluster_status ==
                                       'UP')
-        prom_labels['entrypoint'] = message.entrypoint
 
     headers = {'Content-type': 'application/json'}
     payload = {
