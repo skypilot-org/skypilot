@@ -383,7 +383,7 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    service_statuses: List[Dict[str, Any]] = []
+    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
