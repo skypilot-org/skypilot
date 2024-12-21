@@ -268,8 +268,9 @@ class UsageMessageToReport(MessageToReport):
 class HeartbeatMessageToReport(MessageToReport):
     """Message to be reported to Grafana Loki for heartbeat on a cluster."""
 
-    def __init__(self):
+    def __init__(self, interval_seconds: int = 600):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        self.interval_seconds = interval_seconds
 
     def get_properties(self) -> Dict[str, Any]:
         properties = super().get_properties()
@@ -426,7 +427,8 @@ def _send_local_messages():
                              f'exception caught: {type(e)}({e})')
 
 
-def send_heartbeat():
+def send_heartbeat(interval_seconds: int = 600):
+    messages.heartbeat.interval_seconds = interval_seconds
     _send_to_loki(MessageType.HEARTBEAT)
 
 

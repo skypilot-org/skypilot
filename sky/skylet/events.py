@@ -93,7 +93,7 @@ class UsageHeartbeatReportEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 600
 
     def _run(self):
-        usage_lib.send_heartbeat()
+        usage_lib.send_heartbeat(interval_seconds=self.EVENT_INTERVAL_SECONDS)
 
 
 class AutostopEvent(SkyletEvent):
