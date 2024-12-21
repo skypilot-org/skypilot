@@ -117,7 +117,7 @@ def run_in_parallel(func: Callable,
         return []
     # Short-circuit for single element
     if len(args) == 1:
-        return [func(next(iter(args)))]
+        return [func(args[0])]
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     processes = num_threads if num_threads is not None else get_parallel_threads(
     )
