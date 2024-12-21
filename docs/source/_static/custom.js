@@ -25,14 +25,9 @@ document.addEventListener('DOMContentLoaded', function () {
 document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
-        { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Pixtral (Mistral AI)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Reserved, Capacity Blocks, DWS' },
-        { selector: '.toctree-l1 > a', text: 'Llama 3.2 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
         { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
-        { selector: '.toctree-l1 > a', text: 'Concept: Sky Computing' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
