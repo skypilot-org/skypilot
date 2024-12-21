@@ -693,7 +693,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         output_check_cmd = f'{gcs_check_file_count} | grep 1'
     elif generic_cloud == 'azure':
-        region = 'westus2'
+        region = 'centralus'
         region_flag = f' --region {region}'
         storage_account_name = (
             storage_lib.AzureBlobStore.get_default_storage_account_name(region))
