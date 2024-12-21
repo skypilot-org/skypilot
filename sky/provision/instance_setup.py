@@ -15,6 +15,8 @@ from sky.provision import docker_utils
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
+from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -65,6 +67,20 @@ RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
 MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
                             f'{constants.SKY_PYTHON_CMD} -m '
                             'sky.skylet.attempt_skylet;')
+
+
+def _set_usage_run_id_cmd() -> str:
+    """Gets the command to set the usage run id.
+
+    The command saves the current usage run id to the file, so that the skylet
+    can use it to report the heartbeat.
+
+    We use a function instead of a constant so that the usage run id is the
+    latest one when the function is called.
+    """
+    return (f'cat {usage_constants.USAGE_RUN_ID_FILE} || '
+            f'echo "{usage_lib.messages.usage.run_id}" > '
+            f'{usage_constants.USAGE_RUN_ID_FILE}')
 
 
 def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
@@ -450,11 +466,13 @@ def start_skylet_on_head_node(cluster_name: str,
     logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
     # We need to source bashrc for skylet to make sure the autostop event can
     # access the path to the cloud CLIs.
-    returncode, stdout, stderr = head_runner.run(MAYBE_SKYLET_RESTART_CMD,
-                                                 stream_logs=False,
-                                                 require_outputs=True,
-                                                 log_path=log_path_abs,
-                                                 source_bashrc=True)
+    set_usage_run_id_cmd = _set_usage_run_id_cmd()
+    returncode, stdout, stderr = head_runner.run(
+        f'{set_usage_run_id_cmd}; {MAYBE_SKYLET_RESTART_CMD}',
+        stream_logs=False,
+        require_outputs=True,
+        log_path=log_path_abs,
+        source_bashrc=True)
     if returncode:
         raise RuntimeError('Failed to start skylet on the head node '
                            f'(exit code {returncode}). Error: '

@@ -25,6 +25,8 @@ EVENTS = [
     # unhealthy, this event will correctly update the controller
     # status to CONTROLLER_FAILED.
     events.ServiceUpdateEvent(),
+    # Report usage heartbeat every 10 minutes.
+    events.UsageHeartbeatReportEvent(),
 ]
 
 while True:
