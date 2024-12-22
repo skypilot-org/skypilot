@@ -24,6 +24,7 @@ class SkyServiceSpec:
         readiness_timeout_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
+        port: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
@@ -70,6 +71,7 @@ class SkyServiceSpec:
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
+        self._port: Optional[int] = port
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._readiness_headers: Optional[Dict[str, str]] = readiness_headers
@@ -132,6 +134,16 @@ class SkyServiceSpec:
                     ) from e
         service_config['post_data'] = post_data
         service_config['readiness_headers'] = readiness_headers
+
+        port = config.get('port', None)
+        if port is not None:
+            if not isinstance(port, int):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Port must be an integer.')
+            if not 1 <= port <= 65535:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Port must be between 1 and 65535.')
+        service_config['port'] = port
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
@@ -220,6 +232,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('port', None, self.port)
         return config
 
     def probe_str(self):
@@ -294,6 +307,10 @@ class SkyServiceSpec:
     def max_replicas(self) -> Optional[int]:
         # If None, treated as having the same value of min_replicas.
         return self._max_replicas
+
+    @property
+    def port(self) -> Optional[int]:
+        return self._port
 
     @property
     def target_qps_per_replica(self) -> Optional[float]:
