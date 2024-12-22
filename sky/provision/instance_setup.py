@@ -20,6 +20,7 @@ from sky.usage import usage_lib
 from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -81,6 +82,12 @@ def _set_usage_run_id_cmd() -> str:
     return (f'cat {usage_constants.USAGE_RUN_ID_FILE} || '
             f'echo "{usage_lib.messages.usage.run_id}" > '
             f'{usage_constants.USAGE_RUN_ID_FILE}')
+
+
+def _set_skypilot_env_var_cmd() -> str:
+    """Sets the skypilot environment variables on the remote machine."""
+    env_vars = env_options.Options.all_options()
+    return '; '.join([f'export {k}={v}' for k, v in env_vars.items()])
 
 
 def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
@@ -467,8 +474,12 @@ def start_skylet_on_head_node(cluster_name: str,
     # We need to source bashrc for skylet to make sure the autostop event can
     # access the path to the cloud CLIs.
     set_usage_run_id_cmd = _set_usage_run_id_cmd()
+    # Set the skypilot environment variables, including the usage type, debug
+    # info, and other options.
+    set_skypilot_env_var_cmd = _set_skypilot_env_var_cmd()
     returncode, stdout, stderr = head_runner.run(
-        f'{set_usage_run_id_cmd}; {MAYBE_SKYLET_RESTART_CMD}',
+        f'{set_usage_run_id_cmd}; {set_skypilot_env_var_cmd}; '
+        f'{MAYBE_SKYLET_RESTART_CMD}',
         stream_logs=False,
         require_outputs=True,
         log_path=log_path_abs,
