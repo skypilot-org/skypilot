@@ -3615,7 +3615,8 @@ class OciStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    RCLONE_VERSION = 'v1.61.1'
+    RCLONE_VERSION_DEB = 'v1.61.1'
+    RCLONE_VERSION_RPM = 'v1.68.2'
 
     def __init__(self,
                  name: str,
@@ -3809,7 +3810,12 @@ class OciStore(AbstractStore):
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--src-dir "{base_dir_path}" {includes}')
-            return sync_command
+
+            all_commands = oci.goto_oci_cli_venv()
+            all_commands.append(sync_command)
+            all_commands.append(oci.leave_oci_cli_venv())
+
+            return ' && '.join(all_commands)
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             if dest_dir_name and not str(dest_dir_name).endswith('/'):
@@ -3821,7 +3827,12 @@ class OciStore(AbstractStore):
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--object-prefix "{dest_dir_name}" --src-dir "{src_dir_path}" '
                 f'--exclude ".git/*" ')
-            return sync_command
+
+            all_commands = oci.goto_oci_cli_venv()
+            all_commands.append(sync_command)
+            all_commands.append(oci.leave_oci_cli_venv())
+
+            return ' && '.join(all_commands)
 
         # Generate message for upload
         if len(source_path_list) > 1:
@@ -3915,13 +3926,13 @@ class OciStore(AbstractStore):
         # pylint: disable=line-too-long
         install_cmd = (
             f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
-            f' && sudo dpkg -i rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
-            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.deb)))'
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION_DEB}/rclone-{self.RCLONE_VERSION_DEB}-linux-amd64.deb'
+            f' && sudo dpkg -i rclone-{self.RCLONE_VERSION_DEB}-linux-amd64.deb'
+            f' && rm -f rclone-{self.RCLONE_VERSION_DEB}-linux-amd64.deb)))'
             f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.rpm'
-            f' && sudo yum --nogpgcheck install rclone-{self.RCLONE_VERSION}-linux-amd64.rpm -y'
-            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.rpm))')
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION_RPM}/rclone-{self.RCLONE_VERSION_RPM}-linux-amd64.rpm'
+            f' && sudo yum --nogpgcheck install rclone-{self.RCLONE_VERSION_RPM}-linux-amd64.rpm -y'
+            f' && rm -f rclone-{self.RCLONE_VERSION_RPM}-linux-amd64.rpm))')
 
         # pylint: disable=line-too-long
         mount_cmd = (
@@ -3936,8 +3947,10 @@ class OciStore(AbstractStore):
             f' && rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty'
         )
 
+        # pylint: disable=line-too-long
         version_check_cmd = (
-            f'rclone --version | grep -q {self.RCLONE_VERSION}')
+            f'(which dpkg > /dev/null 2>&1 && (rclone --version | grep -q {self.RCLONE_VERSION_DEB}))'
+            f' || (rclone --version | grep -q {self.RCLONE_VERSION_RPM})')
 
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
@@ -3963,6 +3976,13 @@ class OciStore(AbstractStore):
         download_command = (f'oci os object get --bucket-name {self.name} '
                             f'--namespace-name {self.namespace} '
                             f'--name {remote_path} --file {local_path}')
+
+        all_commands = oci.goto_oci_cli_venv()
+        all_commands.append(download_command)
+        all_commands.append(oci.leave_oci_cli_venv())
+
+        download_command = ' && '.join(all_commands)
+
         try:
             with rich_utils.safe_status(
                     f'[bold cyan]Downloading: {remote_path} -> {local_path}[/]'
@@ -4012,6 +4032,13 @@ class OciStore(AbstractStore):
         logger.debug(f'_delete_oci_bucket: {bucket_name}')
         remove_command = (f'oci os bucket delete --bucket-name '
                           f'{bucket_name} --empty --force')
+
+        all_commands = oci.goto_oci_cli_venv()
+        all_commands.append(remove_command)
+        all_commands.append(oci.leave_oci_cli_venv())
+
+        remove_command = ' && '.join(all_commands)
+
         try:
             with rich_utils.safe_status(
                     f'[bold cyan]Deleting OCI bucket {bucket_name}[/]'):

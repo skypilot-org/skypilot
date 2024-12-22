@@ -475,12 +475,6 @@ class IBMCosCloudStorage(CloudStorage):
 class OciCloudStorage(CloudStorage):
     """OCI Cloud Storage."""
 
-    # List of commands to install OCI CLI
-    _GET_OCICLI = [
-        'oci --version >/dev/null 2>&1 || pip3 install oci-cli',
-        'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
-    ]
-
     def is_directory(self, url: str) -> bool:
         """Returns whether OCI 'url' is a directory.
         In cloud object stores, a "directory" refers to a regular object whose
@@ -520,8 +514,9 @@ class OciCloudStorage(CloudStorage):
                                f'--bucket-name {bucket_name} '
                                f'--prefix "{path}" --dest-dir "{destination}"')
 
-        all_commands = list(self._GET_OCICLI)
+        all_commands = oci.goto_oci_cli_venv()
         all_commands.append(download_via_ocicli)
+        all_commands.append(oci.leave_oci_cli_venv())
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
@@ -537,8 +532,9 @@ class OciCloudStorage(CloudStorage):
         download_via_ocicli = (f'oci os object get --bucket-name {bucket_name} '
                                f'--name "{path}" --file "{destination}"')
 
-        all_commands = list(self._GET_OCICLI)
+        all_commands = oci.goto_oci_cli_venv()
         all_commands.append(download_via_ocicli)
+        all_commands.append(oci.leave_oci_cli_venv())
         return ' && '.join(all_commands)
 
 
