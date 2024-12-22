@@ -73,7 +73,7 @@ def goto_oci_cli_venv() -> List:
     # pylint: disable=line-too-long
     cmds = [
         'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
-        '. $(conda init | grep conda.sh | awk \'{print $NF}\')',
+        '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',
         'conda activate sky-oci-cli-env', 'pip install oci-cli',
         'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
     ]
