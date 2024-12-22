@@ -3615,8 +3615,7 @@ class OciStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    RCLONE_VERSION_DEB = 'v1.61.1'
-    RCLONE_VERSION_RPM = 'v1.68.2'
+    RCLONE_VERSION = 'v1.68.2'
 
     def __init__(self,
                  name: str,
@@ -3926,13 +3925,13 @@ class OciStore(AbstractStore):
         # pylint: disable=line-too-long
         install_cmd = (
             f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION_DEB}/rclone-{self.RCLONE_VERSION_DEB}-linux-amd64.deb'
-            f' && sudo dpkg -i rclone-{self.RCLONE_VERSION_DEB}-linux-amd64.deb'
-            f' && rm -f rclone-{self.RCLONE_VERSION_DEB}-linux-amd64.deb)))'
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
+            f' && sudo dpkg -i rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
+            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.deb)))'
             f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION_RPM}/rclone-{self.RCLONE_VERSION_RPM}-linux-amd64.rpm'
-            f' && sudo yum --nogpgcheck install rclone-{self.RCLONE_VERSION_RPM}-linux-amd64.rpm -y'
-            f' && rm -f rclone-{self.RCLONE_VERSION_RPM}-linux-amd64.rpm))')
+            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.rpm'
+            f' && sudo yum --nogpgcheck install rclone-{self.RCLONE_VERSION}-linux-amd64.rpm -y'
+            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.rpm))')
 
         # pylint: disable=line-too-long
         mount_cmd = (
@@ -3944,13 +3943,12 @@ class OciStore(AbstractStore):
             f' oci-config-profile {self.config_profile}'
             f' && sed -i "s/oci-config-file/config_file/g;'
             f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
-            f' && rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty'
+            f' && ([ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true)'
+            f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty)'
         )
 
         # pylint: disable=line-too-long
-        version_check_cmd = (
-            f'(which dpkg > /dev/null 2>&1 && (rclone --version | grep -q {self.RCLONE_VERSION_DEB}))'
-            f' || (rclone --version | grep -q {self.RCLONE_VERSION_RPM})')
+        version_check_cmd = f'rclone --version | grep -q {self.RCLONE_VERSION}'
 
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
