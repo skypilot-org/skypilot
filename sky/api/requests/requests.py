@@ -10,6 +10,7 @@ import signal
 import sqlite3
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import colorama
 import filelock
 
 from sky import exceptions
@@ -49,6 +50,18 @@ class RequestStatus(enum.Enum):
         return (list(RequestStatus).index(self) >
                 list(RequestStatus).index(other))
 
+    def colored_str(self):
+        color = _STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_STATUS_TO_COLOR = {
+    RequestStatus.PENDING: colorama.Fore.BLUE,
+    RequestStatus.RUNNING: colorama.Fore.YELLOW,
+    RequestStatus.SUCCEEDED: colorama.Fore.GREEN,
+    RequestStatus.FAILED: colorama.Fore.RED,
+    RequestStatus.ABORTED: colorama.Fore.WHITE,
+}
 
 REQUEST_COLUMNS = [
     'request_id',

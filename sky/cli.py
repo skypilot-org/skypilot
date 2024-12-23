@@ -59,6 +59,7 @@ from sky.adaptors import common as adaptors_common
 from sky.api import common as api_common
 from sky.api import constants as api_constants
 from sky.api import sdk
+from sky.api.requests import requests
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -5709,9 +5710,11 @@ def api_ls(request_id: Optional[str], all_status: bool):
         r_id = request.request_id
         if not all_status:
             r_id = common_utils.truncate_long_string(r_id, 36)
+        req_status = requests.RequestStatus(request.status)
         table.add_row([
             r_id, request.user_name, request.name,
-            log_utils.readable_time_duration(request.created_at), request.status
+            log_utils.readable_time_duration(request.created_at),
+            req_status.colored_str()
         ])
     click.echo(table)
 
