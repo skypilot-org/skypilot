@@ -22,8 +22,7 @@ def dot_get(d: dict, key: str) -> Any:
 
 
 # InstanceType and gpuInfo are basically just stubs
-# so that the dictwriter is happy without weird
-# code.
+# so that the dictwriter is happy without weird code.
 mapped_keys = (('gpu_name', 'InstanceType'), ('gpu_name', 'AcceleratorName'),
                ('num_gpus', 'AcceleratorCount'), ('cpu_cores', 'vCPUs'),
                ('gpu_total_ram', 'MemoryGiB'), ('search.totalHour', 'Price'),
