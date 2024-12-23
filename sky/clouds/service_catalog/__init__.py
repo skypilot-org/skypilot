@@ -4,6 +4,7 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
+from sky import skypilot_config
 from sky.clouds.service_catalog.config import fallback_to_default_catalog
 from sky.clouds.service_catalog.constants import ALL_CLOUDS
 from sky.clouds.service_catalog.constants import CATALOG_DIR
@@ -20,7 +21,12 @@ CloudFilter = Optional[Union[List[str], str]]
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
-        clouds = list(ALL_CLOUDS)
+        # Honor the allowed_clouds config when clouds is not specified.
+        # Note: no op if disabled clouds are specified, since Optimizer will
+        # error out to user in the end.
+        clouds = typing.cast(
+            List[str],
+            skypilot_config.get_nested(('allowed_clouds',), list(ALL_CLOUDS)))
 
         # TODO(hemil): Remove this once the common service catalog
         # functions are refactored from clouds/kubernetes.py to
