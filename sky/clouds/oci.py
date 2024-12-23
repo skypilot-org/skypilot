@@ -390,7 +390,7 @@ class OCI(clouds.Cloud):
         short_credential_help_str = (
             'For more details, refer to: '
             # pylint: disable=line-too-long
-            'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
+            'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
         credential_help_str = (
             'To configure credentials, go to: '

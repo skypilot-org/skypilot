@@ -35,26 +35,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Install Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
         with:
+          version: "latest"
           python-version: ${{ matrix.python-version }}
-
-      - name: Cache dependencies
-        uses: actions/cache@v3
-        if: startsWith(runner.os, 'Linux')
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
-
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[all]"
-          pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
-
+          uv venv --seed ~/test-env
+          source ~/test-env/bin/activate
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
+          # Use -e to include examples and tests folder in the path for unit
+          # tests to access them.
+          uv pip install -e ".[all]"
+          uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
       - name: Run tests with pytest
-        run: SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+        run: |
+          source ~/test-env/bin/activate
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}

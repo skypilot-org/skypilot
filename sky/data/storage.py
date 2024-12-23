@@ -1069,7 +1069,7 @@ class Storage(object):
         add_if_not_none('source', self.source)
 
         stores = None
-        if len(self.stores) > 0:
+        if self.stores:
             stores = ','.join([store.value for store in self.stores])
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
@@ -1159,7 +1159,7 @@ class S3Store(AbstractStore):
                     'Storage \'store: s3\' specified, but ' \
                     'AWS access is disabled. To fix, enable '\
                     'AWS by running `sky check`. More info: '\
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
                     )
 
     @classmethod
@@ -1597,7 +1597,7 @@ class GcsStore(AbstractStore):
                     'Storage \'store: gcs\' specified, but '
                     'GCP access is disabled. To fix, enable '
                     'GCP by running `sky check`. '
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.')  # pylint: disable=line-too-long
 
     @classmethod
     def validate_name(cls, name: str) -> str:
@@ -2132,7 +2132,7 @@ class AzureBlobStore(AbstractStore):
                     'Storage "store: azure" specified, but '
                     'Azure access is disabled. To fix, enable '
                     'Azure by running `sky check`. More info: '
-                    'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
                 )
 
     @classmethod
@@ -2842,7 +2842,7 @@ class R2Store(AbstractStore):
                     'Storage \'store: r2\' specified, but ' \
                     'Cloudflare R2 access is disabled. To fix, '\
                     'enable Cloudflare R2 by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
                     )
 
     def initialize(self):

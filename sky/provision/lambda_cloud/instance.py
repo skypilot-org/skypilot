@@ -233,7 +233,7 @@ def query_instances(
         'booting': status_lib.ClusterStatus.INIT,
         'active': status_lib.ClusterStatus.UP,
         'unhealthy': status_lib.ClusterStatus.INIT,
-        'terminating': status_lib.ClusterStatus.INIT,
+        'terminating': None,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for instance_id, instance in instances.items():

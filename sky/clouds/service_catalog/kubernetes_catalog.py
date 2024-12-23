@@ -123,6 +123,10 @@ def _list_accelerators(
     # clusters defined by allowed_contexts.
     if region_filter is None:
         context = kubernetes_utils.get_current_kube_config_context_name()
+        if context is None and kubernetes_utils.is_incluster_config_available():
+            # If context is None and we are running in a kubernetes pod, use the
+            # in-cluster context as the current context.
+            context = kubernetes.in_cluster_context_name()
     else:
         context = region_filter
     if context is None:
@@ -239,13 +243,12 @@ def _list_accelerators(
 
                 accelerators_available = accelerator_count - allocated_qty
 
-                if accelerator_name not in total_accelerators_available:
-                    total_accelerators_available[accelerator_name] = 0
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
-                    total_accelerators_available[
-                        accelerator_name] += quantized_availability
+                    total_accelerators_available[accelerator_name] = (
+                        total_accelerators_available.get(accelerator_name, 0) +
+                        quantized_availability)
 
     result = []
 

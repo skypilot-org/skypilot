@@ -24,8 +24,6 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as runpod API does not implement spot.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
@@ -70,11 +68,8 @@ class RunPod(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'RunPod does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'runpod')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -176,11 +171,19 @@ class RunPod(clouds.Cloud):
         else:
             image_id = r.image_id[r.region]
 
+        instance_type = resources.instance_type
+        use_spot = resources.use_spot
+
+        hourly_cost = self.instance_type_to_hourly_cost(
+            instance_type=instance_type, use_spot=use_spot)
+
         return {
-            'instance_type': resources.instance_type,
+            'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'use_spot': use_spot,
+            'bid_per_gpu': str(hourly_cost),
         }
 
     def _get_feasible_launchable_resources(
@@ -250,7 +253,7 @@ class RunPod(clouds.Cloud):
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install runpod \n'
                     f'        $ runpod config\n'
-                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
                 )
 
             return True, None
