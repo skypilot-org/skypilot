@@ -49,7 +49,8 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         return method(*args, **kwargs)
 
     results = subprocess_utils.run_in_parallel(_execute_catalog_method,
-                                               list(clouds), len(clouds))
+                                               args=list(clouds),
+                                               num_threads=len(clouds))
     if single:
         return results[0]
     return results
