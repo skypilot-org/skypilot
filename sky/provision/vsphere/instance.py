@@ -162,7 +162,7 @@ def _create_instances(
     if not gpu_instance:
         # Find an image for CPU
         images_df = images_df[images_df['GpuTags'] == '\'[]\'']
-        if len(images_df) == 0:
+        if not images_df:
             logger.error(
                 f'Can not find an image for instance type: {instance_type}.')
             raise Exception(
@@ -185,7 +185,7 @@ def _create_instances(
         image_instance_mapping_df = image_instance_mapping_df[
             image_instance_mapping_df['InstanceType'] == instance_type]
 
-        if len(image_instance_mapping_df) == 0:
+        if not image_instance_mapping_df:
             raise Exception(f"""There is no image can match instance type named
                 {instance_type}
                 If you are using CPU-only instance, assign an image with tag
@@ -218,10 +218,9 @@ def _create_instances(
     hosts_df = hosts_df[(hosts_df['AvailableCPUs'] /
                          hosts_df['cpuMhz']) >= cpus_needed]
     hosts_df = hosts_df[hosts_df['AvailableMemory(MB)'] >= memory_needed]
-    assert len(hosts_df) > 0, (
-        f'There is no host available to create the instance '
-        f'{vms_item["InstanceType"]}, at least {cpus_needed} '
-        f'cpus and {memory_needed}MB memory are required.')
+    assert hosts_df, (f'There is no host available to create the instance '
+                      f'{vms_item["InstanceType"]}, at least {cpus_needed} '
+                      f'cpus and {memory_needed}MB memory are required.')
 
     # Sort the hosts df by AvailableCPUs to get the compatible host with the
     # least resource
@@ -365,7 +364,7 @@ def _choose_vsphere_cluster_name(config: common.ProvisionConfig, region: str,
     skypilot framework-optimized availability_zones"""
     vsphere_cluster_name = None
     vsphere_cluster_name_str = config.provider_config['availability_zone']
-    if len(vc_object.clusters) > 0:
+    if vc_object.clusters:
         for optimized_cluster_name in vsphere_cluster_name_str.split(','):
             if optimized_cluster_name in [
                     item['name'] for item in vc_object.clusters
