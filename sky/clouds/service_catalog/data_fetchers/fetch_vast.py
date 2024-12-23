@@ -61,6 +61,6 @@ for offer in offerList:
             }
         }],
         'TotalGpuMemoryInMiB': offer['gpu_total_ram']
-    }).replace('"', "'")  # pylint: disable=invalid-string-quote
+    }).replace('"', '\'')
 
     writer.writerow(entry)
