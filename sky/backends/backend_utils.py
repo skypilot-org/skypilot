@@ -1019,10 +1019,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     common_utils.dump_yaml(cluster_config_file, config)
 
 
-# Reuse the sky_logging for consistency and avoid circular import.
-get_run_timestamp = sky_logging.get_run_timestamp
-
-
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
     return datetime.strptime(
         run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
