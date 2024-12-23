@@ -65,9 +65,8 @@ class Vast(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'vast')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'vast')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
