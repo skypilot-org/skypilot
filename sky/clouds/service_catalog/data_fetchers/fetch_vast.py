@@ -15,7 +15,7 @@ def create_instance_type(obj):
                               obj['cpu_cores'])
 
 
-def dot_get(d, key):
+def dot_get(d: dict, key: str) -> Any:
     for k in key.split('.'):
         d = d[k]
     return d
