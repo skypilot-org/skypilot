@@ -1,6 +1,7 @@
 """Executor for the requests."""
 import concurrent.futures
 import contextlib
+import dataclasses
 import enum
 import functools
 import multiprocessing
@@ -75,6 +76,16 @@ _MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
 class QueueBackend(enum.Enum):
     REDIS = 'redis'
     MULTIPROCESSING = 'multiprocessing'
+
+
+@dataclasses.dataclass
+class RequestWorker:
+    id: int
+    # The type of queue this worker works on.
+    schedule_type: requests.ScheduleType
+
+    def __str__(self) -> str:
+        return f'Worker(id={self.id}, schedule_type={self.schedule_type.value})'
 
 
 def get_queue_backend() -> QueueBackend:
@@ -279,20 +290,15 @@ def schedule_request(
     _get_queue(schedule_type).put(input_tuple)
 
 
-def request_worker(worker_id: int, schedule_type: requests.ScheduleType,
-                   max_parallel_size: int):
+def request_worker(worker: RequestWorker, max_parallel_size: int):
     """Worker for the requests.
 
     Args:
-        worker_id: The ID of the worker.
-        schedule_type: determines the type of queue the worker will use to
-            retrieve jobs.
-        max_parallel_size: The maximum number of parallel jobs this worker can
-            run.
+        max_parallel_size: Maximum number of parallel jobs this worker can run.
     """
-    logger.info(f'Request worker {worker_id} -- started with pid '
+    logger.info(f'Starting {worker} with pid '
                 f'{multiprocessing.current_process().pid}')
-    queue = _get_queue(schedule_type)
+    queue = _get_queue(worker.schedule_type)
     # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
     # because the former is more efficient with the support of lazy creation of
     # worker processes.
@@ -310,9 +316,7 @@ def request_worker(worker_id: int, schedule_type: requests.ScheduleType,
             request = requests.get_request(request_id)
             if request.status == requests.RequestStatus.ABORTED:
                 continue
-            logger.info(
-                f'Request worker {worker_id} -- submitted request: {request_id}'
-            )
+            logger.info(f'[{worker}] Submitted request: {request_id}')
             # Start additional process to run the request, so that it can be
             # aborted when requested by a user.
             # TODO(zhwu): since the executor is reusing the request process,
@@ -321,22 +325,14 @@ def request_worker(worker_id: int, schedule_type: requests.ScheduleType,
             # the process, such as subprocess_daemon.py.
             future = executor.submit(_wrapper, request_id, ignore_return_value)
 
-            if schedule_type == requests.ScheduleType.BLOCKING:
-                # Wait for the request to finish.
+            if worker.schedule_type == requests.ScheduleType.BLOCKING:
                 try:
                     future.result(timeout=None)
                 except Exception as e:  # pylint: disable=broad-except
-                    logger.error(
-                        f'Request worker {worker_id} -- request {request_id} '
-                        f'failed: {e}')
-                logger.info(
-                    f'Request worker {worker_id} -- request {request_id} '
-                    'finished')
+                    logger.error(f'[{worker}] Request {request_id} failed: {e}')
+                logger.info(f'[{worker}] Request {request_id} finished')
             else:
-                # Non-blocking requests are handled by the non-blocking worker.
-                logger.info(
-                    f'Request worker {worker_id} -- request {request_id} '
-                    'submitted')
+                logger.info(f'[{worker}] Request {request_id} submitted')
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
@@ -372,25 +368,24 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     # workers to be refused by the connection to the queue.
     time.sleep(2)
 
-    workers = []
+    worker_procs = []
     for worker_id in range(parallel_for_blocking):
-        worker = multiprocessing.Process(target=request_worker,
-                                         args=(worker_id,
-                                               requests.ScheduleType.BLOCKING,
-                                               1))
-        logger.info(f'Starting request worker: {worker_id}')
-        worker.start()
-        workers.append(worker)
+        worker = RequestWorker(id=worker_id,
+                               schedule_type=requests.ScheduleType.BLOCKING)
+        worker_proc = multiprocessing.Process(target=request_worker,
+                                              args=(worker, 1))
+        worker_proc.start()
+        worker_procs.append(worker_proc)
 
     # Start a non-blocking worker.
-    worker = multiprocessing.Process(target=request_worker,
-                                     args=(-1,
-                                           requests.ScheduleType.NON_BLOCKING,
-                                           max_parallel_for_non_blocking))
-    logger.info('Starting non-blocking request worker')
-    worker.start()
-    workers.append(worker)
-    return workers
+    worker = RequestWorker(id=1,
+                           schedule_type=requests.ScheduleType.NON_BLOCKING)
+    worker_proc = multiprocessing.Process(target=request_worker,
+                                          args=(worker,
+                                                max_parallel_for_non_blocking))
+    worker_proc.start()
+    worker_procs.append(worker_proc)
+    return worker_procs
 
 
 @functools.lru_cache(maxsize=1)
