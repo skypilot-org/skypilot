@@ -65,7 +65,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     head_instance_id = _get_head_instance_id(running_instances)
     stopped_instances = status_filter(instances, ['EXITED', 'STOPPED'])
 
-    if config.resume_stopped_nodes and len(stopped_instances):
+    if config.resume_stopped_nodes and stopped_instances:
         for instance in stopped_instances.values():
             utils.start(instance['id'])
     else:
