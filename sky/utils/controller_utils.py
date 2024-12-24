@@ -667,7 +667,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Jobs bucket {store.name!r} does not exist.  '
-                    'Please check jobs.bucket configuration in your SkyPilot config.')
+                    'Please check jobs.bucket configuration in '
+                    'your SkyPilot config.')
 
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
@@ -729,13 +730,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         stores = None
         if store_type is not None:
             assert store_cls is not None
-            stores = {
-                store_type: store_cls(name=bucket_name,
-                                      source=workdir,
-                                      _bucket_sub_path=bucket_sub_path,
-                                      **store_kwargs)
-            }
-            assert_no_bucket_creation(stores[store_type])
+            with sky_logging.silent():
+                stores = {
+                    store_type: store_cls(name=bucket_name,
+                                          source=workdir,
+                                          _bucket_sub_path=bucket_sub_path,
+                                          **store_kwargs)
+                }
+                assert_no_bucket_creation(stores[store_type])
+
         storage_obj = storage_lib.Storage(name=bucket_name,
                                           source=workdir,
                                           persistent=False,
@@ -765,13 +768,14 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         stores = None
         if store_type is not None:
             assert store_cls is not None
-            store = store_cls(name=bucket_name,
-                              source=src,
-                              _bucket_sub_path=bucket_sub_path,
-                              **store_kwargs)
+            with sky_logging.silent():
+                store = store_cls(name=bucket_name,
+                                  source=src,
+                                  _bucket_sub_path=bucket_sub_path,
+                                  **store_kwargs)
 
-            stores = {store_type: store}
-            assert_no_bucket_creation(stores[store_type])
+                stores = {store_type: store}
+                assert_no_bucket_creation(stores[store_type])
         storage_obj = storage_lib.Storage(name=bucket_name,
                                           source=src,
                                           persistent=False,
@@ -801,13 +805,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         stores = None
         if store_type is not None:
             assert store_cls is not None
-            stores = {
-                store_type: store_cls(name=bucket_name,
-                                      source=local_fm_path,
-                                      _bucket_sub_path=file_mounts_tmp_subpath,
-                                      **store_kwargs)
-            }
-            assert_no_bucket_creation(stores[store_type])
+            with sky_logging.silent():
+                stores = {
+                    store_type: store_cls(
+                        name=bucket_name,
+                        source=local_fm_path,
+                        _bucket_sub_path=file_mounts_tmp_subpath,
+                        **store_kwargs)
+                }
+                assert_no_bucket_creation(stores[store_type])
         storage_obj = storage_lib.Storage(
             name=bucket_name,
             source=local_fm_path,
