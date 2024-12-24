@@ -966,7 +966,7 @@ class Task:
                         force_sync to True.
         """
         for storage in self.storage_mounts.values():
-            if len(storage.stores) == 0:
+            if not storage.stores:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)

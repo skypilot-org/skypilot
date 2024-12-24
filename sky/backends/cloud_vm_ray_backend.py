@@ -1092,7 +1092,7 @@ class FailoverCloudErrorHandlerV2:
                     'having the required permissions and the user '
                     'account does not have enough permission to '
                     'update it. Please contact your administrator and '
-                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
+                    'check out: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
                     f'Details: {message}')
                 _add_to_blocked_resources(
                     blocked_resources,
@@ -1389,8 +1389,7 @@ class RetryingVmProvisioner(object):
                 f'in {to_provision.cloud}. '
                 f'{colorama.Style.RESET_ALL}'
                 f'To request quotas, check the instruction: '
-                f'https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html.'  # pylint: disable=line-too-long
-            )
+                f'https://docs.skypilot.co/en/latest/cloud-setup/quota.html.')
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
                                        prev_cluster_status,
@@ -2600,7 +2599,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
 
     def __init__(self):
-        self.run_timestamp = backend_utils.get_run_timestamp()
+        self.run_timestamp = sky_logging.get_run_timestamp()
         # NOTE: do not expanduser() here, as this '~/...' path is used for
         # remote as well to be expanded on the remote side.
         self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
@@ -2627,7 +2626,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
-        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
+        assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
         self,

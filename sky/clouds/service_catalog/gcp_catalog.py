@@ -292,7 +292,9 @@ def get_instance_type_for_accelerator(
 
     if acc_name in _ACC_INSTANCE_TYPE_DICTS:
         df = _df[_df['InstanceType'].notna()]
-        instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        instance_types = _ACC_INSTANCE_TYPE_DICTS[acc_name].get(acc_count, None)
+        if instance_types is None:
+            return None, []
         df = df[df['InstanceType'].isin(instance_types)]
 
         # Check the cpus and memory specified by the user.

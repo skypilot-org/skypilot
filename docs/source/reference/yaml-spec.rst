@@ -23,7 +23,7 @@ Available fields:
     # which `sky` is called.
     #
     # To exclude files from syncing, see 
-    # https://skypilot.readthedocs.io/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
+    # https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
     workdir: ~/my-task-code
 
     # Number of nodes (optional; defaults to 1) to launch including the head node.
@@ -357,7 +357,7 @@ In additional to the above fields, SkyPilot also supports the following experime
     #
     # The following fields can be overridden. Please refer to docs of Advanced
     # Configuration for more details of those fields:
-    # https://skypilot.readthedocs.io/en/latest/reference/config.html
+    # https://docs.skypilot.co/en/latest/reference/config.html
     config_overrides:
         docker:
             run_options: ...
