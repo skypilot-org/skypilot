@@ -3796,13 +3796,14 @@ class OciStore(AbstractStore):
         with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]oci://{self.name}/[/]'):
-            data_utils.parallel_upload(source_path_list,
-                                       get_file_sync_command,
-                                       get_dir_sync_command,
-                                       self.name,
-                                       self._ACCESS_DENIED_MESSAGE,
-                                       create_dirs=create_dirs,
-                                       max_concurrent_uploads=1)
+            data_utils.parallel_upload(
+                source_path_list=source_path_list,
+                filesync_command_generator=get_file_sync_command,
+                dirsync_command_generator=get_dir_sync_command,
+                bucket_name=self.name,
+                access_denied_message=self._ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=1)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the OCI bucket.
