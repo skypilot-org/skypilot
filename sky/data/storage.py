@@ -539,7 +539,8 @@ class Storage(object):
         persistent: Optional[bool] = True,
         mode: StorageMode = StorageMode.MOUNT,
         sync_on_reconstruction: bool = True,
-        is_sky_managed: Optional[bool] = None,
+        # pylint: disable=invalid-name
+        _is_sky_managed: Optional[bool] = None,
         # pylint: disable=invalid-name
         _bucket_sub_path: Optional[str] = None
     ) -> None:
@@ -580,8 +581,16 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
-          is_sky_managed: Optional[bool]; Whether the storage
-            is managed by sky, Its used to construct the store object.
+          _is_sky_managed: Optional[bool]; Indicates if the storage is managed
+            by Sky. Without this argument, the controller's behavior differs
+            from the local machine. For example, if a bucket does not exist:
+            Local Machine (is_sky_managed=True) →
+            Controller (is_sky_managed=False).
+            With this argument, the controller aligns with the local machine,
+            ensuring it retains the is_sky_managed information from the YAML.
+            During teardown, if is_sky_managed is True, the controller should
+            delete the bucket. Otherwise, it might mistakenly delete only the
+            sub-path, assuming is_sky_managed is False.
           _bucket_sub_path: Optional[str]; The subdirectory to use for the
             storage object.
         """
@@ -591,7 +600,7 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
-        self.is_sky_managed = is_sky_managed
+        self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -995,7 +1004,7 @@ class Storage(object):
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
-                is_sky_managed=self.is_sky_managed,
+                is_sky_managed=self._is_sky_managed,
                 _bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1123,8 +1132,9 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
-        is_sky_managed = config.pop('is_sky_managed', None)
         force_delete = config.pop('_force_delete', None)
+        # pylint: disable=invalid-name
+        _is_sky_managed = config.pop('_is_sky_managed', None)
         # pylint: disable=invalid-name
         _bucket_sub_path = config.pop('_bucket_sub_path', None)
         if force_delete is None:
@@ -1147,7 +1157,7 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode,
-                          is_sky_managed=is_sky_managed,
+                          _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
@@ -1175,7 +1185,7 @@ class Storage(object):
         if self.stores:
             stores = ','.join([store.value for store in self.stores])
         add_if_not_none('store', stores)
-        add_if_not_none('is_sky_managed', self.is_sky_managed)
+        add_if_not_none('_is_sky_managed', self._is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
