@@ -61,6 +61,10 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          search for the machine again and potentially return a failure
          if there is no availability.
 
+      *  Vast instance types are an invention for skypilot. Refer to
+         service_catalog/vast_catalog.py for the current construction
+         of the type.
+
     """
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
