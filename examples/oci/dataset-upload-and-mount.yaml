@@ -10,7 +10,7 @@ resources:
 
 file_mounts:
   /datasets-storage:
-    name: skybucket5  # Name of storage, optional when source is bucket URI
+    name: skybucket  # Name of storage, optional when source is bucket URI
     source: ['./examples/oci']  # Source path, can be local or bucket URL. Optional, do not specify to create an empty bucket.
     store: oci  # E.g 'oci', 's3', 'gcs'...; default: None. Optional.
     persistent: True  # Defaults to True; can be set to false. Optional.
