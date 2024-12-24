@@ -666,8 +666,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store.delete()
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
-                    f'Configured to use a non-existent bucket: {store.name}, '
-                    'please check the jobs->bucket in your sky config.')
+                    f'Jobs bucket {store.name!r} does not exist.  '
+                    'Please check jobs.bucket configuration in your SkyPilot config.')
 
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
