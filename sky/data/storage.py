@@ -1660,7 +1660,7 @@ class S3Store(AbstractStore):
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         success = self._execute_s3_remove_command(
             remove_command, bucket_name,
-            f'Deleting S3 bucket [green]{bucket_name}',
+            f'Deleting S3 bucket [green]{bucket_name}[/]',
             f'Failed to delete S3 bucket {bucket_name}.')
         if not success:
             return False
@@ -1675,8 +1675,8 @@ class S3Store(AbstractStore):
         """Deletes the sub path from the bucket."""
         remove_command = f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive'
         return self._execute_s3_remove_command(
-            remove_command, bucket_name,
-            f'Removing objects from S3 bucket [green]{bucket_name}/{sub_path}',
+            remove_command, bucket_name, f'Removing objects from S3 bucket '
+            f'[green]{bucket_name}/{sub_path}[/]',
             f'Failed to remove objects from S3 bucket {bucket_name}/{sub_path}.'
         )
 
@@ -2144,7 +2144,7 @@ class GcsStore(AbstractStore):
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
                     f'Deleting {hint_text}GCS bucket '
-                    f'[green]{bucket_name}{command_suffix}')):
+                    f'[green]{bucket_name}{command_suffix}[/]')):
             try:
                 self.client.get_bucket(bucket_name)
             except gcp.forbidden_exception() as e:
