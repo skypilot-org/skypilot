@@ -506,6 +506,7 @@ class OciCloudStorage(CloudStorage):
         # A directory with only 1 item
         return True
 
+    @oci.with_oci_env
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using OCI CLI."""
         bucket_name, path = data_utils.split_oci_path(source)
@@ -514,28 +515,19 @@ class OciCloudStorage(CloudStorage):
                                f'--bucket-name {bucket_name} '
                                f'--prefix "{path}" --dest-dir "{destination}"')
 
-        all_commands = oci.goto_oci_cli_venv()
-        all_commands.append(download_via_ocicli)
-        all_commands.append(oci.leave_oci_cli_venv())
-        return ' && '.join(all_commands)
+        return download_via_ocicli
 
+    @oci.with_oci_env
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using OCI CLI."""
         bucket_name, path = data_utils.split_oci_path(source)
         filename = os.path.basename(path)
-
-        if destination.endswith('/'):
-            destination = f'{destination}{filename}'
-        else:
-            destination = f'{destination}/{filename}'
+        destination = os.path.join(destination, filename)
 
         download_via_ocicli = (f'oci os object get --bucket-name {bucket_name} '
                                f'--name "{path}" --file "{destination}"')
 
-        all_commands = oci.goto_oci_cli_venv()
-        all_commands.append(download_via_ocicli)
-        all_commands.append(oci.leave_oci_cli_venv())
-        return ' && '.join(all_commands)
+        return download_via_ocicli
 
 
 def get_storage_from_path(url: str) -> CloudStorage:

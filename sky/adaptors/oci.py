@@ -1,8 +1,8 @@
 """Oracle OCI cloud adaptor"""
 
+import functools
 import logging
 import os
-from typing import List
 
 from sky.adaptors import common
 from sky.clouds.utils import oci_utils
@@ -67,23 +67,24 @@ def get_object_storage_client(region=None, profile='DEFAULT'):
         get_oci_config(region, profile))
 
 
-def goto_oci_cli_venv() -> List:
-    # Create a specfic venv for oci-cli due to its dependancy conflict
-    # with runpod (on 'click' version)
-    # pylint: disable=line-too-long
-    cmds = [
-        'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
-        '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',
-        'conda activate sky-oci-cli-env', 'pip install oci-cli',
-        'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
-    ]
-    return cmds
-
-
-def leave_oci_cli_venv() -> str:
-    return 'conda deactivate'
-
-
 def service_exception():
     """OCI service exception."""
     return oci.exceptions.ServiceError
+
+
+def with_oci_env(f):
+
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        # pylint: disable=line-too-long
+        enter_env_cmds = [
+            'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
+            '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',
+            'conda activate sky-oci-cli-env', 'pip install oci-cli',
+            'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
+        ]
+        operation_cmd = [f(*args, **kwargs)]
+        leave_env_cmds = ['conda deactivate']
+        return ' && '.join(enter_env_cmds + operation_cmd + leave_env_cmds)
+
+    return wrapper

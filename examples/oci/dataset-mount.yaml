@@ -1,13 +1,9 @@
 name: cpu-task1
 
 resources:
-  # Optional; if left out, automatically pick the cheapest cloud.
   cloud: oci
   region: us-sanjose-1
-  #zone: AP-SEOUL-1-AD-1
-  #instance_type: VM.Standard.E4.Flex$_2_8
   cpus: 2
-  #image_id: skypilot:cpu-ubuntu-2004
   disk_size: 256
   disk_tier: medium
   use_spot: False
@@ -15,7 +11,7 @@ resources:
 file_mounts:
   # Mount an existing oci bucket
   /datasets-storage:
-    source: oci://skybucket5
+    source: oci://skybucket
     mode: MOUNT  # Either MOUNT or COPY. Optional.
 
 # Working directory (optional) containing the project codebase.
@@ -34,8 +30,6 @@ setup: |
 run: |
   echo "*** Running the task on OCI ***"
   timestamp=$(date +%s)
-  for i in {1..10}; do
-    echo "$timestamp $i"
-    sleep 1
-  done
-  echo "The task is completed."
+  ls -lthr /datasets-storage
+  echo "hi" >> /datasets-storage/foo.txt
+  ls -lthr /datasets-storage

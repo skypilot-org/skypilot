@@ -56,7 +56,8 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.GCP()),
     str(clouds.Azure()),
     str(clouds.IBM()),
-    str(clouds.OCI()), cloudflare.NAME
+    str(clouds.OCI()),
+    cloudflare.NAME,
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -1166,12 +1167,8 @@ class S3Store(AbstractStore):
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
             elif self.source.startswith('oci://'):
-                assert self.name == data_utils.split_oci_path(self.source)[0], (
-                    'OCI Bucket is specified as path, the name should be '
-                    'the same as OCI bucket.')
-                assert data_utils.verify_oci_bucket(self.name), (
-                    f'Source specified as {self.source}, a OCI bucket. ',
-                    'OCI Bucket should exist.')
+                raise NotImplementedError(
+                    'Moving data from OCI to S3 is currently not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
 
@@ -1376,8 +1373,6 @@ class S3Store(AbstractStore):
             data_transfer.gcs_to_s3(self.name, self.name)
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
-        elif self.source.startswith('oci://'):
-            data_transfer.oci_to_s3(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the S3 bucket.
@@ -1609,12 +1604,8 @@ class GcsStore(AbstractStore):
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
             elif self.source.startswith('oci://'):
-                assert self.name == data_utils.split_oci_path(self.source)[0], (
-                    'OCI Bucket is specified as path, the name should be '
-                    'the same as OCI bucket.')
-                assert data_utils.verify_oci_bucket(self.name), (
-                    f'Source specified as {self.source}, a OCI bucket. ',
-                    'OCI Bucket should exist.')
+                raise NotImplementedError(
+                    'Moving data from OCI to GCS is currently not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -1852,8 +1843,6 @@ class GcsStore(AbstractStore):
             data_transfer.s3_to_gcs(self.name, self.name)
         elif isinstance(self.source, str) and self.source.startswith('r2://'):
             data_transfer.r2_to_gcs(self.name, self.name)
-        elif isinstance(self.source, str) and self.source.startswith('oci://'):
-            data_transfer.oci_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket.
@@ -2141,12 +2130,8 @@ class AzureBlobStore(AbstractStore):
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
             elif self.source.startswith('oci://'):
-                assert self.name == data_utils.split_oci_path(self.source)[0], (
-                    'OCI Bucket is specified as path, the name should be '
-                    'the same as OCI bucket.')
-                assert data_utils.verify_oci_bucket(self.name), (
-                    f'Source specified as {self.source}, a OCI bucket. ',
-                    'OCI Bucket should exist.')
+                raise NotImplementedError(
+                    'Moving data from OCI to AZureBlob is not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
 
@@ -2854,12 +2839,9 @@ class R2Store(AbstractStore):
                     f'Source specified as {self.source}, a COS bucket. ',
                     'COS Bucket should exist.')
             elif self.source.startswith('oci://'):
-                assert self.name == data_utils.split_oci_path(self.source)[0], (
-                    'OCI Bucket is specified as path, the name should be '
-                    'the same as OCI bucket.')
-                assert data_utils.verify_oci_bucket(self.name), (
-                    f'Source specified as {self.source}, a OCI bucket. ',
-                    'OCI Bucket should exist.')
+                raise NotImplementedError(
+                    'Moving data from OCI to R2 is currently not supported.')
+
         # Validate name
         self.name = S3Store.validate_name(self.name)
         # Check if the storage is enabled
@@ -3014,8 +2996,6 @@ class R2Store(AbstractStore):
             data_transfer.gcs_to_r2(self.name, self.name)
         elif self.source.startswith('s3://'):
             data_transfer.s3_to_r2(self.name, self.name)
-        elif self.source.startswith('oci://'):
-            data_transfer.oci_to_r2(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the R2 bucket.
@@ -3615,7 +3595,6 @@ class OciStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    RCLONE_VERSION = 'v1.68.2'
 
     def __init__(self,
                  name: str,
@@ -3629,46 +3608,23 @@ class OciStore(AbstractStore):
         self.config_profile: str
         self.compartment: str
         self.namespace: str
-        # self.sema = Semaphore(5)
 
-        try:
-            # Bucket region should be consistence with the OCI config file
-            region = oci.get_oci_config()['region']
-        except (oci.oci.exceptions.ConfigFileNotFound,
-                oci.oci.exceptions.InvalidConfig, ImportError):
-            # For test only: In test env, the OCI config may not exist
-            region = 'us-sanjose-1'
+        # Bucket region should be consistence with the OCI config file
+        region = oci.get_oci_config()['region']
 
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
-            if self.source.startswith('s3://'):
-                assert self.name == data_utils.split_s3_path(self.source)[0], (
-                    'S3 Bucket is specified as path, the name should be the'
-                    ' same as S3 bucket.')
-                assert data_utils.verify_s3_bucket(self.name), (
-                    f'Source specified as {self.source}, an S3 bucket. ',
-                    'S3 Bucket should exist.')
-            elif self.source.startswith('gs://'):
-                assert self.name == data_utils.split_gcs_path(self.source)[0], (
-                    'GCS Bucket is specified as path, the name should be '
-                    'the same as GCS bucket.')
-                assert data_utils.verify_gcs_bucket(self.name), (
-                    f'Source specified as {self.source}, a GCS bucket. ',
-                    'GCS Bucket should exist.')
-            elif self.source.startswith('r2://'):
-                assert self.name == data_utils.split_r2_path(self.source)[0], (
-                    'R2 Bucket is specified as path, the name should be '
-                    'the same as R2 bucket.')
-                assert data_utils.verify_r2_bucket(self.name), (
-                    f'Source specified as {self.source}, a R2 bucket. ',
-                    'R2 Bucket should exist.')
-            elif self.source.startswith('oci://'):
+            if self.source.startswith('oci://'):
                 assert self.name == data_utils.split_oci_path(self.source)[0], (
                     'OCI Bucket is specified as path, the name should be '
                     'the same as OCI bucket.')
+            else:
+                raise NotImplementedError(
+                    f'Moving data from {self.source} to OCI is not supported.')
+
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -3729,6 +3685,9 @@ class OciStore(AbstractStore):
 
         self.oci_config_file = oci.get_config_file()
         self.config_profile = oci_utils.oci_config.get_profile()
+
+        ## pylint: disable=line-too-long
+        # What's compartment? See thttps://docs.oracle.com/en/cloud/foundation/cloud_architecture/governance/compartments.html
         self.compartment = query_helper.find_compartment(self.region)
         self.client = oci.get_object_storage_client(region=self.region,
                                                     profile=self.config_profile)
@@ -3756,13 +3715,7 @@ class OciStore(AbstractStore):
             if isinstance(self.source, list):
                 self.batch_oci_rsync(self.source, create_dirs=True)
             elif self.source is not None:
-                if self.source.startswith('s3://'):
-                    self._transfer_to_oci()
-                elif self.source.startswith('gs://'):
-                    self._transfer_to_oci()
-                elif self.source.startswith('r2://'):
-                    self._transfer_to_oci()
-                elif self.source.startswith('oci://'):
+                if self.source.startswith('oci://'):
                     pass
                 else:
                     self.batch_oci_rsync([self.source])
@@ -3777,8 +3730,8 @@ class OciStore(AbstractStore):
         if deleted_by_skypilot:
             msg_str = f'Deleted OCI bucket {self.name}.'
         else:
-            msg_str = f'OCI bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
+            msg_str = (f'OCI bucket {self.name} may have been deleted '
+                       f'externally. Removing from local state.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -3802,6 +3755,7 @@ class OciStore(AbstractStore):
                 contents are uploaded to it.
         """
 
+        @oci.with_oci_env
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
@@ -3810,28 +3764,28 @@ class OciStore(AbstractStore):
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--src-dir "{base_dir_path}" {includes}')
 
-            all_commands = oci.goto_oci_cli_venv()
-            all_commands.append(sync_command)
-            all_commands.append(oci.leave_oci_cli_venv())
+            return sync_command
 
-            return ' && '.join(all_commands)
-
+        @oci.with_oci_env
         def get_dir_sync_command(src_dir_path, dest_dir_name):
             if dest_dir_name and not str(dest_dir_name).endswith('/'):
                 dest_dir_name = f'{dest_dir_name}/'
+
+            excluded_list = storage_utils.get_excluded_files(src_dir_path)
+            excluded_list.append('.git/*')
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
 
             # we exclude .git directory from the sync
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--object-prefix "{dest_dir_name}" --src-dir "{src_dir_path}" '
-                f'--exclude ".git/*" ')
+                f'{excludes}" ')
 
-            all_commands = oci.goto_oci_cli_venv()
-            all_commands.append(sync_command)
-            all_commands.append(oci.leave_oci_cli_venv())
-
-            return ' && '.join(all_commands)
+            return sync_command
 
         # Generate message for upload
         if len(source_path_list) > 1:
@@ -3850,15 +3804,6 @@ class OciStore(AbstractStore):
                                        create_dirs=create_dirs,
                                        max_concurrent_uploads=1)
 
-    def _transfer_to_oci(self) -> None:
-        assert isinstance(self.source, str), self.source
-        if self.source.startswith('s3://'):
-            data_transfer.s3_to_oci(self.name, self.name)
-        elif self.source.startswith('gs://'):
-            data_transfer.gcs_to_oci(self.name, self.name)
-        elif self.source.startswith('r2://'):
-            data_transfer.r2_to_oci(self.name, self.name)
-
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the OCI bucket.
         If the bucket exists, this method will connect to the bucket.
@@ -3868,6 +3813,10 @@ class OciStore(AbstractStore):
           2) Return None if bucket has been externally deleted and
              sync_on_reconstruction is False
           3) Create and return a new bucket otherwise
+
+        Return tuple (Bucket, Boolean): The first item is the bucket
+        json payload from the OCI API call, the second item indicates
+        if this is a new created bucket(True) or an existing bucket(False).
 
         Raises:
             StorageBucketCreateError: If creating the bucket fails
@@ -3917,38 +3866,21 @@ class OciStore(AbstractStore):
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
 
-        Uses gcsfuse to mount the bucket.
+        Uses Rclone to mount the bucket.
 
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        # pylint: disable=line-too-long
-        install_cmd = (
-            f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
-            f' && sudo dpkg -i rclone-{self.RCLONE_VERSION}-linux-amd64.deb'
-            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.deb)))'
-            f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-            f' && curl -O https://downloads.rclone.org/{self.RCLONE_VERSION}/rclone-{self.RCLONE_VERSION}-linux-amd64.rpm'
-            f' && sudo yum --nogpgcheck install rclone-{self.RCLONE_VERSION}-linux-amd64.rpm -y'
-            f' && rm -f rclone-{self.RCLONE_VERSION}-linux-amd64.rpm))')
-
-        # pylint: disable=line-too-long
-        mount_cmd = (
-            f'sudo chown -R `whoami` {mount_path}'
-            f' && rclone config create oos_{self.name} oracleobjectstorage'
-            f' provider user_principal_auth namespace {self.namespace}'
-            f' compartment {self.bucket.compartment_id} region {self.region}'
-            f' oci-config-file {self.oci_config_file}'
-            f' oci-config-profile {self.config_profile}'
-            f' && sed -i "s/oci-config-file/config_file/g;'
-            f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
-            f' && ([ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true)'
-            f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{self.name}:{self.name} {mount_path} --daemon --allow-non-empty)'
-        )
-
-        # pylint: disable=line-too-long
-        version_check_cmd = f'rclone --version | grep -q {self.RCLONE_VERSION}'
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        mount_cmd = mounting_utils.get_oci_mount_cmd(
+            mount_path=mount_path,
+            store_name=self.name,
+            region=str(self.region),
+            namespace=self.namespace,
+            compartment=self.bucket.compartment_id,
+            config_file=self.oci_config_file,
+            config_profile=self.config_profile)
+        version_check_cmd = mounting_utils.get_rclone_version_check_cmd()
 
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
@@ -3961,25 +3893,23 @@ class OciStore(AbstractStore):
           local_path: str; Local path on user's device
         """
         if remote_path.startswith(f'/{self.name}'):
-            _, oos_path = data_utils.split_oci_path(remote_path)
-            remote_path = oos_path
+            # If the remote path is /bucket_name, we need to
+            # remove the leading /
+            remote_path = remote_path.lstrip()
 
         filename = os.path.basename(remote_path)
         if not local_path.endswith(filename):
-            if local_path.endswith('/'):
-                local_path = f'{local_path}{filename}'
-            else:
-                local_path = f'{local_path}/{filename}'
+            local_path = os.path.join(local_path, filename)
 
-        download_command = (f'oci os object get --bucket-name {self.name} '
-                            f'--namespace-name {self.namespace} '
-                            f'--name {remote_path} --file {local_path}')
+        @oci.with_oci_env
+        def get_file_download_command(remote_path, local_path):
+            download_command = (f'oci os object get --bucket-name {self.name} '
+                                f'--namespace-name {self.namespace} '
+                                f'--name {remote_path} --file {local_path}')
 
-        all_commands = oci.goto_oci_cli_venv()
-        all_commands.append(download_command)
-        all_commands.append(oci.leave_oci_cli_venv())
+            return download_command
 
-        download_command = ' && '.join(all_commands)
+        download_command = get_file_download_command(remote_path, local_path)
 
         try:
             with rich_utils.safe_status(
@@ -4028,14 +3958,15 @@ class OciStore(AbstractStore):
          bool; True if bucket was deleted, False if it was deleted externally.
         """
         logger.debug(f'_delete_oci_bucket: {bucket_name}')
-        remove_command = (f'oci os bucket delete --bucket-name '
-                          f'{bucket_name} --empty --force')
 
-        all_commands = oci.goto_oci_cli_venv()
-        all_commands.append(remove_command)
-        all_commands.append(oci.leave_oci_cli_venv())
+        @oci.with_oci_env
+        def get_bucket_delete_command(bucket_name):
+            remove_command = (f'oci os bucket delete --bucket-name '
+                              f'{bucket_name} --empty --force')
 
-        remove_command = ' && '.join(all_commands)
+            return remove_command
+
+        remove_command = get_bucket_delete_command(bucket_name)
 
         try:
             with rich_utils.safe_status(
