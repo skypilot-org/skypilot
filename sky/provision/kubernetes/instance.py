@@ -804,7 +804,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
 
     # Create pods in parallel
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
-                                            range(to_start_count), _NUM_THREADS)
+                                            list(range(to_start_count)),
+                                            _NUM_THREADS)
 
     # Process created pods
     for pod in pods:
