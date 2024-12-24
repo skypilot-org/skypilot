@@ -1,12 +1,15 @@
 """Logging utilities."""
 import builtins
 import contextlib
+from datetime import datetime
 import logging
+import os
 import sys
 import threading
 
 import colorama
 
+from sky.skylet import constants
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -113,7 +116,7 @@ def reload_logger():
 _setup_logger()
 
 
-def init_logger(name: str):
+def init_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
@@ -161,3 +164,16 @@ def is_silent():
         # threads.
         _logging_config.is_silent = False
     return _logging_config.is_silent
+
+
+def get_run_timestamp() -> str:
+    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+
+
+def generate_tmp_logging_file_path(file_name: str) -> str:
+    """Generate an absolute path of a tmp file for logging."""
+    run_timestamp = get_run_timestamp()
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+    log_path = os.path.expanduser(os.path.join(log_dir, file_name))
+
+    return log_path

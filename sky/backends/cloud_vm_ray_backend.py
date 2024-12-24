@@ -2599,7 +2599,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
 
     def __init__(self):
-        self.run_timestamp = backend_utils.get_run_timestamp()
+        self.run_timestamp = sky_logging.get_run_timestamp()
         # NOTE: do not expanduser() here, as this '~/...' path is used for
         # remote as well to be expanded on the remote side.
         self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
