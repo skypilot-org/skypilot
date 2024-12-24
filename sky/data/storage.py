@@ -1182,10 +1182,12 @@ class Storage(object):
         add_if_not_none('source', self.source)
 
         stores = None
+        is_sky_managed = self._is_sky_managed
         if self.stores:
             stores = ','.join([store.value for store in self.stores])
+            is_sky_managed = list(self.stores.values())[0].is_sky_managed
         add_if_not_none('store', stores)
-        add_if_not_none('_is_sky_managed', self._is_sky_managed)
+        add_if_not_none('_is_sky_managed', is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
