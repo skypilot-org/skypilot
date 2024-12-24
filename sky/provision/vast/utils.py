@@ -99,7 +99,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
 
 def start(instance_id: str) -> None:
-    """Stops the given instance."""
+    """Starts the given instance."""
     vast.vast().start_instance(id=instance_id)
 
 
