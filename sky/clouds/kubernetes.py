@@ -139,7 +139,7 @@ class Kubernetes(clouds.Cloud):
         use the service account mounted in the pod.
         """
         all_contexts = kubernetes_utils.get_all_kube_context_names()
-        if len(all_contexts) == 0:
+        if not all_contexts:
             return []
 
         all_contexts = set(all_contexts)
