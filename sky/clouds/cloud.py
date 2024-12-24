@@ -536,6 +536,10 @@ class Cloud:
         """
         raise NotImplementedError
 
+    def can_credential_expire(self) -> bool:
+        """Returns whether the cloud credential can expire."""
+        return False
+
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         """Check the image size from the cloud.
